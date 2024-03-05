@@ -23,7 +23,11 @@ defmodule Lua do
   Initializes a Lua VM sandbox. All library functions are stubbed out,
   so no access to the filesystem or the execution environment is exposed.
   """
-  def init(_opts \\ []) do
+  def new(_opts \\ []) do
+    %__MODULE__{state: :luerl.new()}
+  end
+
+  def sandbox(_opts \\ []) do
     # TODO create an options API for this
     sandboxed = [
       [:_G, :io],
@@ -44,8 +48,8 @@ defmodule Lua do
       [:_G, :loadstring]
     ]
 
-    %__MODULE__{state: :luerl_sandbox.init(sandboxed)}
-
+    # TODO let's implement sandbox ourselves
+    %__MODULE__{state: :luerl_sandbox.new(sandboxed)}
   end
 
   @doc """
@@ -60,16 +64,16 @@ defmodule Lua do
   Sets a table value in Lua. Nested keys will create
   intermediate tables
 
-      iex> set!(init(), [:hello], "World")
+      iex> Lua.set!(Lua.new(), [:hello], "World")
 
   It can also set nested values
 
-      iex> set!(init(), [:a, :b, :c], [])
+      iex> Lua.set!(Lua.new(), [:a, :b, :c], [])
 
   These table values are availble in lua scripts
 
-      iex> lua = set!(init(), [:a, :b, :c], "nested!")
-      iex> {result, _} = eval!(lua, "return a.b.c")
+      iex> lua = Lua.set!(Lua.new(), [:a, :b, :c], "nested!")
+      iex> {result, _} = Lua.eval!(lua, "return a.b.c")
       iex> result
       ["nested!"]
 
@@ -94,19 +98,19 @@ defmodule Lua do
   @doc """
   Gets a table value in Lua
 
-      iex> state = set!(init(), [:hello], "world")
-      iex> get!(state, [:hello])
+      iex> state = Lua.set!(Lua.new(), [:hello], "world")
+      iex> Lua.get!(state, [:hello])
       "world"
 
   When a value doesn't exist, it returns nil
 
-      iex> get!(init(), [:nope])
+      iex> Lua.get!(Lua.new(), [:nope])
       nil
 
   It can also get nested values
 
-      iex> state = set!(init(), [:a, :b, :c], "nested")
-      iex> get!(state, [:a, :b, :c])
+      iex> state = Lua.set!(Lua.new(), [:a, :b, :c], "nested")
+      iex> Lua.get!(state, [:a, :b, :c])
       "nested"
   """
   def get!(%__MODULE__{state: state}, keys), do: get!(state, keys)
@@ -120,7 +124,7 @@ defmodule Lua do
   Evalutes the script or chunk, returning the result and
   discarding side effects in the state
   """
-  def eval!(state \\ init(), script)
+  def eval!(state \\ new(), script)
 
   def eval!(%__MODULE__{state: state} = lua, script) when is_binary(script) do
     case Luerl.do_dec(state, script) do
@@ -193,6 +197,7 @@ defmodule Lua do
   Inject functions written with the `deflua` macro into the Lua
   runtime
   """
+  # TODO rename to load_api
   def inject_module(lua, module, scope \\ []) do
     funcs = :functions |> module.__info__() |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
 
@@ -265,5 +270,4 @@ defmodule Lua do
       {:error,
        "Value thrown during function '#{function_name}' execution: #{inspect(thrown_value)}"}
   end
-
 end

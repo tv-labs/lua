@@ -3,7 +3,7 @@ defmodule LuaTest do
 
   alias Lua
 
-  doctest Lua, import: true
+  doctest Lua
 
   require Lua.Util
 
@@ -11,7 +11,7 @@ defmodule LuaTest do
 
   describe "messing with Luerl functions" do
     test "it can access useful data" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       lua =
         Lua.set!(lua, [:foo], fn [value] ->
@@ -48,7 +48,7 @@ defmodule LuaTest do
 
   describe "inspect" do
     test "shows all functions in the lua state" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       lua =
         Lua.set!(lua, [:foo], fn [value] ->
@@ -65,7 +65,7 @@ defmodule LuaTest do
     test "loads the lua file into the state" do
       path = Path.join(["test", "fixtures", "test_api"])
 
-      assert lua = Lua.load_lua_file!(Lua.init(), path)
+      assert lua = Lua.load_lua_file!(Lua.new(), path)
 
       assert {["Hi ExUnit!"], _} =
                Lua.eval!(lua, """
@@ -75,14 +75,14 @@ defmodule LuaTest do
 
     test "non-existent files are not loaded" do
       assert_raise RuntimeError, "Cannot load lua file, \"bananas.lua\" does not exist", fn ->
-        Lua.load_lua_file!(Lua.init(), "bananas")
+        Lua.load_lua_file!(Lua.new(), "bananas")
       end
     end
   end
 
   describe "eval!/1" do
     test "it can register functions as table values and call them" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       lua =
         Lua.set!(lua, [:foo], fn [value] ->
@@ -94,7 +94,7 @@ defmodule LuaTest do
     end
 
     test "invalid functions raise" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       error = """
       Lua runtime error: undefined function
@@ -108,7 +108,7 @@ defmodule LuaTest do
     end
 
     test "parsing errors raise" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       assert_raise Lua.CompilerException, ~r/Failed to compile Lua script/, fn ->
         Lua.eval!(lua, """
@@ -121,7 +121,7 @@ defmodule LuaTest do
     end
 
     test "sandboxed functions show a nice error message" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       message = """
       Lua runtime error: sandboxed function
@@ -139,7 +139,7 @@ defmodule LuaTest do
 
   describe "error messages" do
     test "function doesn't exist" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       error = """
       Lua runtime error: undefined function
@@ -156,7 +156,7 @@ defmodule LuaTest do
     end
 
     test "missing quote" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       error = """
       Failed to compile Lua script
@@ -186,7 +186,7 @@ defmodule LuaTest do
     end
 
     test "method that references property" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       error = """
       Lua runtime error: undefined function "a"
@@ -221,7 +221,7 @@ defmodule LuaTest do
     end
 
     test "function doesn't exist in nested function" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       error = """
       Lua runtime error: undefined function
@@ -281,7 +281,7 @@ defmodule LuaTest do
         end
       end
 
-      lua = Lua.inject_module(Lua.init(), Test, Test.scope())
+      lua = Lua.inject_module(Lua.new(), Test, Test.scope())
 
       error = "Lua runtime error: test.foo() failed, expected 1 arguments, got 2"
 
@@ -303,7 +303,7 @@ defmodule LuaTest do
 
   describe "set!/2 and get!/2" do
     setup do
-      {:ok, lua: Lua.init()}
+      {:ok, lua: Lua.new()}
     end
 
     test "sets and gets a simple value", %{lua: lua} do
@@ -336,7 +336,7 @@ defmodule LuaTest do
     end
 
     setup do
-      {:ok, lua: Lua.init()}
+      {:ok, lua: Lua.new()}
     end
 
     test "injects a global Elixir module functions into the Lua runtime", %{lua: lua} do
@@ -412,7 +412,7 @@ defmodule LuaTest do
     end
 
     setup do
-      %{lua: Lua.init() |> Lua.inject_module(Examples, ["example"])}
+      %{lua: Lua.new() |> Lua.inject_module(Examples, ["example"])}
     end
 
     test "can work with numbers", %{lua: lua} do
@@ -444,7 +444,7 @@ defmodule LuaTest do
 
   describe "require" do
     test "it can find lua code when modifying package.path" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       assert {["required file successfully"], _} =
                Lua.eval!(lua, """
@@ -455,7 +455,7 @@ defmodule LuaTest do
     end
 
     test "we can use set_lua_paths/2 to add the paths" do
-      lua = Lua.init()
+      lua = Lua.new()
 
       lua = Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
 
@@ -466,4 +466,3 @@ defmodule LuaTest do
     end
   end
 end
-

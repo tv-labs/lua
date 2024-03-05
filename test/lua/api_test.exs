@@ -16,7 +16,7 @@ defmodule Lua.APITest do
                end
                """)
 
-      lua = Lua.inject_module(Lua.init(), module, module.scope())
+      lua = Lua.inject_module(Lua.new(), module, module.scope())
 
       assert {["Whoa, check this out!"], _} =
                Lua.eval!(lua, """
@@ -41,7 +41,7 @@ defmodule Lua.APITest do
                end
                """)
 
-      lua = Lua.inject_module(Lua.init(), module, module.scope())
+      lua = Lua.inject_module(Lua.new(), module, module.scope())
 
       assert {["starting value", 111], _} =
                Lua.eval!(lua, """
