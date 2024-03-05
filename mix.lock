@@ -1,0 +1,3 @@
+%{
+  "luerl": {:hex, :luerl, "1.1.1", "083518e437586f6631150d39c4bff242ed2ec80cb14a3299a0c2628f07a2ff7f", [:rebar3], [], "hexpm", "e17ef246a7ff876ec90e68792a39708979416004d4eacfe8a7643206b9470773"},
+}
