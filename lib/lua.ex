@@ -24,7 +24,7 @@ defmodule Lua do
   so no access to the filesystem or the execution environment is exposed.
   """
   def new(_opts \\ []) do
-    %__MODULE__{state: :luerl.new()}
+    %__MODULE__{state: :luerl.init()}
   end
 
   def sandbox(_opts \\ []) do
@@ -49,7 +49,7 @@ defmodule Lua do
     ]
 
     # TODO let's implement sandbox ourselves
-    %__MODULE__{state: :luerl_sandbox.new(sandboxed)}
+    %__MODULE__{state: :luerl_sandbox.init(sandboxed)}
   end
 
   @doc """
