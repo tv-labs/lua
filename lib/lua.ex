@@ -10,22 +10,22 @@ defmodule Lua do
   alias Lua.Util
 
   @default_sandbox [
-    [:_G, :io],
-    [:_G, :file],
-    [:_G, :os, :execute],
-    [:_G, :os, :exit],
-    [:_G, :os, :getenv],
-    [:_G, :os, :remove],
-    [:_G, :os, :rename],
-    [:_G, :os, :tmpname],
-    [:_G, :package],
-    [:_G, :load],
-    [:_G, :loadfile],
-    [:_G, :require],
-    [:_G, :dofile],
-    [:_G, :load],
-    [:_G, :loadfile],
-    [:_G, :loadstring]
+    [:io],
+    [:file],
+    [:os, :execute],
+    [:os, :exit],
+    [:os, :getenv],
+    [:os, :remove],
+    [:os, :rename],
+    [:os, :tmpname],
+    [:package],
+    [:load],
+    [:loadfile],
+    [:require],
+    [:dofile],
+    [:load],
+    [:loadfile],
+    [:loadstring]
   ]
 
   defimpl Inspect do
@@ -34,13 +34,16 @@ defmodule Lua do
     import Inspect.Algebra
 
     def inspect(lua, _opts) do
-      concat(["#Lua<functions:", "[", Enum.join(Util.user_functions(lua), ", "), "]>"])
+      concat(["#Lua<functions: ", "[", Enum.join(Util.user_functions(lua), ", "), "]", ">"])
     end
   end
 
   @doc """
   Initializes a Lua VM sandbox. All library functions are stubbed out,
   so no access to the filesystem or the execution environment is exposed.
+
+  ## Options
+  * `:sandboxed` - list of paths to be sandboxed, e.g. `sandboxed: [[:require], [:os, :exit]]`
   """
   def new(opts \\ []) do
     sandboxed = Keyword.get(opts, :sandboxed, @default_sandbox)
@@ -51,9 +54,13 @@ defmodule Lua do
   @doc """
   Sandboxes the given path, swapping out the implementation with
   a function that raises when called
+
+      iex> lua = Lua.new(sandboxed: [])
+      iex> Lua.sandbox(lua, [:os, :exit])
+
   """
   def sandbox(lua, path) do
-    set!(lua, path, fn args ->
+    set!(lua, [:_G | path], fn args ->
       raise Lua.RuntimeException,
             "#{Lua.Util.format_function(path, Enum.count(args))} is sandboxed"
     end)

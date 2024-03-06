@@ -18,7 +18,7 @@ defmodule LuaTest do
 
       lua = Lua.set!(lua, [:bar, :my_func], fn _, _ -> [] end)
 
-      assert inspect(lua) == "#Lua<functions:[bar.my_func(_, _), foo(_)]>"
+      assert inspect(lua) == "#Lua<functions: [bar.my_func(_, _), foo(_)]>"
     end
   end
 
