@@ -40,7 +40,10 @@ defmodule Lua.Util do
   @doc """
   Pretty prints a stack trace
   """
-  def format_stacktrace([_ | rest] = stacktrace, state, opts \\ []) do
+  def format_stacktrace(_stack, _state, _opts \\ [])
+  def format_stacktrace([], _state, _opts), do: ""
+
+  def format_stacktrace([_ | rest] = stacktrace, state, opts) do
     script_name = Keyword.get(opts, :script_name, "script")
 
     stacktrace
@@ -87,6 +90,11 @@ defmodule Lua.Util do
       iex> format_function(["foo"], [1, 2, 3])
       "foo(1, 2, 3)"
 
+  Internal Lua functions are formatted nicely
+
+      iex> format_function([:_G, :os, :exit], 1)
+      "os.exit(_)"
+
   References to tables are displayed as <ref>
 
       iex> format_function([tref: 1234], [1, 2, 3])
@@ -97,6 +105,8 @@ defmodule Lua.Util do
       iex> format_function(["namespace", "function"], 1)
       "namespace.function(_)"
   """
+  def format_function([:_G | list], args), do: format_function(list, args)
+
   def format_function(list, args) do
     list = List.wrap(list)
 

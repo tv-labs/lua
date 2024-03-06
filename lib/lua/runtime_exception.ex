@@ -22,7 +22,7 @@ defmodule Lua.RuntimeException do
         {:undefined_method, nil, name} ->
           "undefined method #{inspect(name)}"
 
-        {:illegal_index, nil, name} ->
+        {:illegal_index, _, name} ->
           "invalid index #{inspect(name)}"
       end
 
