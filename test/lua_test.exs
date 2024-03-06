@@ -7,45 +7,6 @@ defmodule LuaTest do
 
   require Lua.Util
 
-  alias Lua.Util
-
-  describe "messing with Luerl functions" do
-    test "it can access useful data" do
-      lua = Lua.new()
-
-      lua =
-        Lua.set!(lua, [:foo], fn [value] ->
-          [1 + value]
-        end)
-
-      global_table_data =
-        lua.state
-        |> Util.luerl(:g)
-        |> :luerl_heap.get_table(lua.state)
-        |> Util.table(:d)
-
-      user_functions =
-        :ttdict.filter(
-          fn
-            _key, {:erl_func, _} -> true
-            _, _ -> false
-          end,
-          global_table_data
-        )
-        |> :ttdict.fetch_keys()
-
-      assert user_functions == ["foo"]
-
-      assert {:erl_func, func} = :ttdict.fetch("foo", global_table_data)
-
-      assert is_function(func)
-
-      # These are the datastructures Luerl uses for managing tables
-      # :ttdict.from_list([{:a, 1}, {:b, 2}, {:c, 3}, {:d, 4}, {:e, 5}, {:f, 6}, {:g, 7}])
-      # :ttsets.from_list([{:a, 1}, {:b, 2}, {:c, 3}, {:d, 4}, {:e, 5}, {:f, 6}, {:g, 7}])
-    end
-  end
-
   describe "inspect" do
     test "shows all functions in the lua state" do
       lua = Lua.new()
@@ -123,11 +84,7 @@ defmodule LuaTest do
     test "sandboxed functions show a nice error message" do
       lua = Lua.new()
 
-      message = """
-      Lua runtime error: sandboxed function
-
-      script line 1: sandboxed(1)
-      """
+      message = "Lua runtime error: os.exit(_) is sandboxed"
 
       assert_raise Lua.RuntimeException, message, fn ->
         Lua.eval!(lua, """
@@ -444,7 +401,7 @@ defmodule LuaTest do
 
   describe "require" do
     test "it can find lua code when modifying package.path" do
-      lua = Lua.new()
+      lua = Lua.new(sandboxed: [])
 
       assert {["required file successfully"], _} =
                Lua.eval!(lua, """
@@ -455,7 +412,7 @@ defmodule LuaTest do
     end
 
     test "we can use set_lua_paths/2 to add the paths" do
-      lua = Lua.new()
+      lua = Lua.new(sandboxed: [])
 
       lua = Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
 
@@ -463,6 +420,20 @@ defmodule LuaTest do
                Lua.eval!(lua, """
                return require("test_require")
                """)
+    end
+
+    test "set_lua_paths/2 raises if package is sandboxed" do
+      lua = Lua.new()
+
+      message = """
+      Lua runtime error: invalid index "path"
+
+
+      """
+
+      assert_raise Lua.RuntimeException, message, fn ->
+        Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
+      end
     end
   end
 end

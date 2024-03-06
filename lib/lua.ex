@@ -9,6 +9,25 @@ defmodule Lua do
 
   alias Lua.Util
 
+  @default_sandbox [
+    [:_G, :io],
+    [:_G, :file],
+    [:_G, :os, :execute],
+    [:_G, :os, :exit],
+    [:_G, :os, :getenv],
+    [:_G, :os, :remove],
+    [:_G, :os, :rename],
+    [:_G, :os, :tmpname],
+    [:_G, :package],
+    [:_G, :load],
+    [:_G, :loadfile],
+    [:_G, :require],
+    [:_G, :dofile],
+    [:_G, :load],
+    [:_G, :loadfile],
+    [:_G, :loadstring]
+  ]
+
   defimpl Inspect do
     alias Lua.Util
 
@@ -23,40 +42,27 @@ defmodule Lua do
   Initializes a Lua VM sandbox. All library functions are stubbed out,
   so no access to the filesystem or the execution environment is exposed.
   """
-  def new(_opts \\ []) do
-    %__MODULE__{state: :luerl.init()}
+  def new(opts \\ []) do
+    sandboxed = Keyword.get(opts, :sandboxed, @default_sandbox)
+
+    Enum.reduce(sandboxed, %__MODULE__{state: :luerl.init()}, &sandbox(&2, &1))
   end
 
-  def sandbox(_opts \\ []) do
-    # TODO create an options API for this
-    sandboxed = [
-      [:_G, :io],
-      [:_G, :file],
-      [:_G, :os, :execute],
-      [:_G, :os, :exit],
-      [:_G, :os, :getenv],
-      [:_G, :os, :remove],
-      [:_G, :os, :rename],
-      [:_G, :os, :tmpname],
-      #       [:_G, :package],
-      [:_G, :load],
-      [:_G, :loadfile],
-      #       [:_G, :require],
-      [:_G, :dofile],
-      [:_G, :load],
-      [:_G, :loadfile],
-      [:_G, :loadstring]
-    ]
-
-    # TODO let's implement sandbox ourselves
-    %__MODULE__{state: :luerl_sandbox.init(sandboxed)}
+  @doc """
+  Sandboxes the given path, swapping out the implementation with
+  a function that raises when called
+  """
+  def sandbox(lua, path) do
+    set!(lua, path, fn args ->
+      raise Lua.RuntimeException,
+            "#{Lua.Util.format_function(path, Enum.count(args))} is sandboxed"
+    end)
   end
 
   @doc """
   Sets the path patterns that Lua will look in when requiring Lua scripts.
   """
-  def set_lua_paths(%__MODULE__{state: state} = lua, paths) when is_binary(paths) do
-    %{lua | state: state}
+  def set_lua_paths(%__MODULE__{} = lua, paths) when is_binary(paths) do
     set!(lua, ["package", "path"], paths)
   end
 
@@ -84,8 +90,14 @@ defmodule Lua do
       |> ensure_keys(keys)
       |> set_keys(keys, value)
 
+    global? =
+      case keys do
+        [:_G | _] -> true
+        _ -> false
+      end
+
     functions =
-      if is_function(value) do
+      if is_function(value) and not global? do
         info = Function.info(value)
         Map.put(lua.functions, keys, info[:arity])
       else
@@ -167,7 +179,9 @@ defmodule Lua do
 
         {:ok, _result, state} ->
           state
-          # TODO error?
+
+        {:lua_error, _error, _state} = error ->
+          raise Lua.RuntimeException, error
       end
 
     case rest do
