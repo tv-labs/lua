@@ -65,6 +65,7 @@ defmodule Lua.Util do
             nil -> " <unknown function>#{format_args(args)}"
             "-no-name-" -> ""
             {:luerl_lib_basic, :basic_error} -> format_error(func, args)
+            {:luerl_lib_basic, :basic_error, :undefined} -> format_error(func, args)
             func -> " #{format_function([func], args)}"
           end
 
@@ -124,6 +125,10 @@ defmodule Lua.Util do
   defp format_scope(scope), do: scope
 
   defp format_error({:luerl_lib_basic, :basic_error}, {:undefined, args}) do
+    format_function("error", args)
+  end
+
+  defp format_error({:luerl_lib_basic, :basic_error, :undefined}, args) do
     format_function("error", args)
   end
 

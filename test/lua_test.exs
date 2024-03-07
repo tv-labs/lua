@@ -256,6 +256,22 @@ defmodule LuaTest do
         """)
       end
     end
+
+    test "error/1 raises an exception" do
+      error = """
+      Lua runtime error: error("this is an error")
+
+      script line 1:error("this is an error")
+      """
+
+      assert_raise Lua.RuntimeException, error, fn ->
+        lua = Lua.new(sandboxed: [])
+
+        Lua.eval!(lua, """
+        error("this is an error")
+        """)
+      end
+    end
   end
 
   describe "set!/2 and get!/2" do
