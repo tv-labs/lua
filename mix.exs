@@ -1,14 +1,30 @@
 defmodule Lua.MixProject do
   use Mix.Project
 
+  @url "https://github.com/tv-labs/lua"
+  @version "0.0.1"
+
   def project do
     [
       app: :lua,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.16",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+
+      # Docs
+      name: "Lua",
+      description: "The most ergomonic interface to Luerl in Elixir",
+      source_url: @url,
+      homepage_url: @url,
+      docs: [
+        # The main page in the docs
+        main: "Lua",
+        source_url: @url,
+        source_ref: "v#{@version}",
+        extras: []
+      ]
     ]
   end
 
@@ -27,7 +43,8 @@ defmodule Lua.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:luerl, "~> 1.1"}
+      {:luerl, "~> 1.1"},
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
 end
