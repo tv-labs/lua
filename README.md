@@ -29,15 +29,18 @@ Lua can be run using the `eval!/2` function
 
 `Lua` provides the `deflua` macro for exposing Elixir functions to Lua
 
-    defmodule MyAPI do
-      use Lua.API
+``` elixir
+defmodule MyAPI do
+  use Lua.API
       
-      deflua double(v), do: 2 * v
-    end
+  deflua double(v), do: 2 * v
+end
     
-    lua = Lua.new() |> Lua.load_api(MyAPI) 
+lua = Lua.new() |> Lua.load_api(MyAPI)
 
-    {[10], _} = 
-      Lua.eval!(lua, """
-      return double(5)
-      """)
+{[10], _} =
+  Lua.eval!(lua, """
+  return double(5)
+  """)
+
+```
