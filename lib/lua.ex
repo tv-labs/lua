@@ -1,7 +1,9 @@
 defmodule Lua do
-  @moduledoc """
-  Lua aims to be the best way to integrate Luerl into an Elixir project.
-  """
+  @external_resource "README.md"
+  @moduledoc @external_resource
+             |> File.read!()
+             |> String.split("<!-- MDOC !-->")
+             |> Enum.fetch!(1)
 
   defstruct [:state, functions: %{}]
 
