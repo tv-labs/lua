@@ -18,6 +18,7 @@ defmodule Lua.MixProject do
       description: "The most ergomonic interface to Luerl in Elixir",
       source_url: @url,
       homepage_url: @url,
+      package: package(),
       docs: [
         # The main page in the docs
         main: "Lua",
@@ -37,6 +38,17 @@ defmodule Lua.MixProject do
   def application do
     [
       extra_applications: [:logger]
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["Apache-2.0"],
+      maintainers: ["davydog187"],
+      files: ["lib", "mix.exs", "README.md", "LICENSE"],
+      links: %{
+        "GitHub" => @url
+      }
     ]
   end
 
