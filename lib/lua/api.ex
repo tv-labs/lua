@@ -8,7 +8,7 @@ defmodule Lua.API do
         use Lua.API
 
         # Can be called via `print("hi")` in lua
-        def print(msg), do: IO.puts msg
+        deflua print(msg), do: IO.puts msg
       end
 
   Optionally, you can provide a scope
@@ -17,8 +17,31 @@ defmodule Lua.API do
         use Lua.API, scope: "namespace.domain"
 
         # Can be called via `namespace.domain.foo(5)` in lua
-        def foo(v), do: v
+        deflua foo(v), do: v
       end
+
+  You can access Lua state
+
+      defmodule State do
+        use Lua.API
+
+        deflua bar(name), state do
+          # Pull's the value of `number` out of state
+          val = Lua.get!(state, [:number])
+
+          2 * val
+        end
+      end
+
+  Regular functions are not exported
+
+      defmodule SpecificAPI do
+        use Lua.API
+
+        # Won't be exposed
+        def baz(v), do: v
+      end
+
   """
 
   defmacro __using__(opts) do
