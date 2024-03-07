@@ -35,7 +35,7 @@ Lua can be run using the `eval!/2` function
       deflua double(v), do: 2 * v
     end
     
-    lua = Lua.new() |> Lua.inject_module(MyAPI) 
+    lua = Lua.new() |> Lua.load_api(MyAPI) 
 
     {[10], _} = 
       Lua.eval!(lua, """

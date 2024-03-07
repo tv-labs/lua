@@ -220,9 +220,9 @@ defmodule Lua do
   Inject functions written with the `deflua` macro into the Lua
   runtime
   """
-  # TODO rename to load_api
-  def inject_module(lua, module, scope \\ []) do
+  def load_api(lua, module, scope \\ nil) do
     funcs = :functions |> module.__info__() |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    scope = scope || module.scope()
 
     module.__lua_functions__()
     |> Enum.reduce(lua, fn {name, with_state?, variadic?}, lua ->

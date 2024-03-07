@@ -238,7 +238,7 @@ defmodule LuaTest do
         end
       end
 
-      lua = Lua.inject_module(Lua.new(), Test, Test.scope())
+      lua = Lua.load_api(Lua.new(), Test)
 
       error = "Lua runtime error: test.foo() failed, expected 1 arguments, got 2"
 
@@ -278,7 +278,7 @@ defmodule LuaTest do
     end
   end
 
-  describe "inject_module/2 and inject_module/3" do
+  describe "load_api/2 and load_api/3" do
     defmodule TestModule do
       use Lua.API
 
@@ -297,22 +297,22 @@ defmodule LuaTest do
     end
 
     test "injects a global Elixir module functions into the Lua runtime", %{lua: lua} do
-      lua = Lua.inject_module(lua, TestModule)
+      lua = Lua.load_api(lua, TestModule)
       assert {["test"], _} = Lua.eval!(lua, "return foo('test')")
     end
 
     test "injects a scoped Elixir module functions into the Lua runtime", %{lua: lua} do
-      lua = Lua.inject_module(lua, TestModule, ["scope"])
+      lua = Lua.load_api(lua, TestModule, ["scope"])
       assert {["test"], _} = Lua.eval!(lua, "return scope.foo('test')")
     end
 
     test "inject a variadic function", %{lua: lua} do
-      lua = Lua.inject_module(lua, TestModule, ["scope"])
+      lua = Lua.load_api(lua, TestModule, ["scope"])
       assert {["a-b-c"], _} = Lua.eval!(lua, "return scope.bar('a', 'b', 'c')")
     end
 
     test "injects Elixir functions that have multiple arities", %{lua: lua} do
-      lua = Lua.inject_module(lua, TestModule, ["scope"])
+      lua = Lua.load_api(lua, TestModule, ["scope"])
 
       assert {["a default"], _} = Lua.eval!(lua, "return scope.test(\"a\")")
       assert {["a b"], _} = Lua.eval!(lua, "return scope.test(\"a\", \"b\")")
@@ -369,7 +369,7 @@ defmodule LuaTest do
     end
 
     setup do
-      %{lua: Lua.new() |> Lua.inject_module(Examples, ["example"])}
+      %{lua: Lua.new() |> Lua.load_api(Examples, ["example"])}
     end
 
     test "can work with numbers", %{lua: lua} do
