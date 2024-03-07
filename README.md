@@ -42,3 +42,7 @@ lua = Lua.new() |> Lua.load_api(MyAPI)
   """)
 
 ```
+
+## Credits
+
+Lua piggy-backs off of Robert Virding's Luerl project, which implements an Lua lexer, parser, and full-blown lua virtual machine that runs inside the BEAM.
