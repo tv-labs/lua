@@ -11,9 +11,7 @@ Lua is an ergonomic interface to [Luerl](https://github.com/rvirding/luerl), aim
 * Deep-setting variables and state
 * Excellent documentation and guides for working with Luerl
 
-## Usage
-
-### Executing Lua
+## Executing Lua
 
 Lua can be run using the `eval!/2` function
 
@@ -25,7 +23,7 @@ Lua can be run using the `eval!/2` function
 
 ```
 
-### Exposing Elixir functions to Lua
+## Exposing Elixir functions to Lua
 
 `Lua` provides the `deflua` macro for exposing Elixir functions to Lua
 

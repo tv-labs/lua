@@ -1,10 +1,8 @@
 defmodule Lua.Util do
-  @moduledoc """
-  Exposes functions for creating and accessing all of the
-  Erlang records defined in https://github.com/rvirding/luerl/blob/develop/include/luerl.hrl
-
-  These functions are primarily used for inspecting the state of Luerl
-  """
+  @moduledoc false
+  # Exposes functions for creating and accessing all of the
+  # Erlang records defined in https://github.com/rvirding/luerl/blob/develop/include/luerl.hrl
+  # These functions are primarily used for inspecting the state of Luerl
 
   require Record
 
