@@ -2,7 +2,7 @@ defmodule Lua.MixProject do
   use Mix.Project
 
   @url "https://github.com/tv-labs/lua"
-  @version "0.0.3"
+  @version "0.0.4"
 
   def project do
     [
@@ -55,7 +55,7 @@ defmodule Lua.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:luerl, "~> 1.1"},
+      {:luerl, "~> 1.2"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
