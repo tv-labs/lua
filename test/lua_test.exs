@@ -272,6 +272,16 @@ defmodule LuaTest do
         """)
       end
     end
+
+    test "arithmetic exceptions are handled" do
+      error = "Lua runtime error: bad argument in arithmetic expression"
+
+      assert_raise Lua.RuntimeException, error, fn ->
+        lua = Lua.new()
+
+        Lua.eval!(lua, "return 5 / 0")
+      end
+    end
   end
 
   describe "set!/2 and get!/2" do
@@ -404,7 +414,9 @@ defmodule LuaTest do
     end
 
     test "it cannot return tuples from Elixir", %{lua: lua} do
-      assert_raise ArgumentError, fn ->
+      error = "Lua runtime error: argument error"
+
+      assert_raise Lua.RuntimeException, error, fn ->
         Lua.eval!(lua, "return example.tuple()")
       end
     end
