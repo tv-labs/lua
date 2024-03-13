@@ -8,7 +8,7 @@ defmodule Lua.RuntimeException do
     message =
       case error do
         {:error_call, message} ->
-          "error(#{inspect(message)})"
+          Util.format_function("error", message)
 
         {:undefined_function, nil} ->
           "undefined function"
@@ -24,6 +24,14 @@ defmodule Lua.RuntimeException do
 
         {:illegal_index, _, name} ->
           "invalid index #{inspect(name)}"
+
+        {:badarith, operator, values} ->
+          expression = values |> Enum.map(&to_string/1) |> Enum.join(" #{operator} ")
+
+          "bad arithmetic #{expression}"
+
+        error ->
+          "unknown error #{inspect(error)}"
       end
 
     stacktrace = Luerl.New.get_stacktrace(state)

@@ -274,7 +274,11 @@ defmodule LuaTest do
     end
 
     test "arithmetic exceptions are handled" do
-      error = "Lua runtime error: bad argument in arithmetic expression"
+      error = """
+      Lua runtime error: bad arithmetic 5 / 0
+
+
+      """
 
       assert_raise Lua.RuntimeException, error, fn ->
         lua = Lua.new()
