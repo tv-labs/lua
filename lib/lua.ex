@@ -159,19 +159,16 @@ defmodule Lua do
         raise Lua.CompilerException, reason: reason
     end
   rescue
-    e in [ArgumentError, FunctionClauseError] ->
-      reraise e, __STACKTRACE__
-
-    e in [CaseClauseError, MatchError] ->
-      reraise Lua.RuntimeException, "Could not match #{inspect(e.term)}", __STACKTRACE__
-
     e in [UndefinedFunctionError] ->
       reraise Lua.RuntimeException,
               Util.format_function([e.module, e.function], e.arity),
               __STACKTRACE__
 
-    e in [ErlangError] ->
-      reraise Lua.RuntimeException, e.original, __STACKTRACE__
+    e in [Lua.RuntimeException, Lua.CompilerException] ->
+      reraise e, __STACKTRACE__
+
+    e ->
+      reraise Lua.RuntimeException, e, __STACKTRACE__
   end
 
   # Deep-set a value within a nested Lua table structure,

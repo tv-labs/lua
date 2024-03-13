@@ -1,5 +1,5 @@
 defmodule Lua.RuntimeException do
-  defexception [:message]
+  defexception [:message, :original, :state]
 
   alias Lua.Util
 
@@ -29,6 +29,8 @@ defmodule Lua.RuntimeException do
     stacktrace = Luerl.New.get_stacktrace(state)
 
     %__MODULE__{
+      original: error,
+      state: state,
       message: """
       Lua runtime error: #{message}
 
@@ -37,8 +39,8 @@ defmodule Lua.RuntimeException do
     }
   end
 
-  def exception({:api_error, details, _state}) do
-    %__MODULE__{message: "Lua API error: #{details}"}
+  def exception({:api_error, details, state}) do
+    %__MODULE__{original: details, state: state, message: "Lua API error: #{details}"}
   end
 
   def exception(list) when is_list(list) do
@@ -47,6 +49,8 @@ defmodule Lua.RuntimeException do
     message = Keyword.fetch!(list, :message)
 
     %__MODULE__{
+      original: list,
+      state: nil,
       message: "Lua runtime error: #{format_function(scope, function)} failed, #{message}"
     }
   end
@@ -56,7 +60,14 @@ defmodule Lua.RuntimeException do
   end
 
   def exception(error) do
-    %__MODULE__{message: "Lua runtime error: #{inspect(error)}"}
+    message =
+      if is_exception(error) do
+        Exception.message(error)
+      else
+        inspect(error)
+      end
+
+    %__MODULE__{original: error, message: "Lua runtime error: #{message}"}
   end
 
   defp format_function([], function), do: "#{function}()"
