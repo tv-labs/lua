@@ -55,6 +55,15 @@ defmodule Lua.Util do
       {:illegal_index, _, name} ->
         "invalid index #{inspect(name)}"
 
+      {line, type, {:illegal, value}} ->
+        type =
+          case type do
+            :luerl_parse -> "parse"
+            :luerl_scan -> "tokenize"
+          end
+
+        "Failed to #{type} illegal token on line #{line}: #{value}"
+
       {:badarith, operator, values} ->
         expression = values |> Enum.map(&to_string/1) |> Enum.join(" #{operator} ")
 

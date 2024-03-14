@@ -155,8 +155,8 @@ defmodule Lua do
       {:lua_error, _e, _state} = error ->
         raise Lua.RuntimeException, error
 
-      {:error, reason, _stuff} ->
-        raise Lua.CompilerException, reason: reason
+      {:error, [error | _], _} ->
+        raise Lua.CompilerException, error
     end
   rescue
     e in [UndefinedFunctionError] ->
@@ -204,15 +204,19 @@ defmodule Lua do
   end
 
   def load_lua_file!(%__MODULE__{state: state} = lua, path) when is_binary(path) do
-    case Luerl.dofile(state, String.to_charlist(path)) do
+    case Luerl.dofile(state, String.to_charlist(path), [:return]) do
       {:ok, [], state} ->
         %__MODULE__{lua | state: state}
 
       {:lua_error, _error, _lua} = error ->
         raise Lua.CompilerException, error
 
-      :error ->
+      {:error, [{:none, :file, :enoent} | _], _} ->
         raise "Cannot load lua file, #{inspect(path <> ".lua")} does not exist"
+
+      {:error, [error | _], _} ->
+        # We just take the first error
+        raise Lua.CompilerException, error
     end
   end
 
