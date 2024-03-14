@@ -37,24 +37,6 @@ defmodule Lua.Util do
 
   def format_error(error) do
     case error do
-      {:error_call, message} ->
-        format_function("error", message)
-
-      {:undefined_function, nil} ->
-        "undefined function"
-
-      {:undefined_function, "sandboxed"} ->
-        "sandboxed function"
-
-      {:undefined_function, ref} ->
-        "undefined function #{inspect(ref)}"
-
-      {:undefined_method, nil, name} ->
-        "undefined method #{inspect(name)}"
-
-      {:illegal_index, _, name} ->
-        "invalid index #{inspect(name)}"
-
       {line, type, {:illegal, value}} ->
         type =
           case type do
@@ -62,15 +44,24 @@ defmodule Lua.Util do
             :luerl_scan -> "tokenize"
           end
 
-        "Failed to #{type} illegal token on line #{line}: #{value}"
+        "Failed to #{type}: illegal token on line #{line}: #{value}"
 
       {:badarith, operator, values} ->
         expression = values |> Enum.map(&to_string/1) |> Enum.join(" #{operator} ")
 
         "bad arithmetic #{expression}"
 
+      {:illegal_index, _type, message} ->
+        # TODO we can try to get fancy here and
+        # print what the object was that they tried to access
+        "invalid index \"#{message}\""
+
+      {line, _type, message} ->
+        "Line #{line}: #{message}"
+
       error ->
-        "unknown error #{inspect(error)}"
+        :luerl_lib.format_error(error)
+        # "unknown error #{inspect(error)}"
     end
   end
 
