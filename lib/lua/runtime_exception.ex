@@ -5,35 +5,7 @@ defmodule Lua.RuntimeException do
 
   @impl true
   def exception({:lua_error, error, state}) do
-    message =
-      case error do
-        {:error_call, message} ->
-          Util.format_function("error", message)
-
-        {:undefined_function, nil} ->
-          "undefined function"
-
-        {:undefined_function, "sandboxed"} ->
-          "sandboxed function"
-
-        {:undefined_function, ref} ->
-          "undefined function #{inspect(ref)}"
-
-        {:undefined_method, nil, name} ->
-          "undefined method #{inspect(name)}"
-
-        {:illegal_index, _, name} ->
-          "invalid index #{inspect(name)}"
-
-        {:badarith, operator, values} ->
-          expression = values |> Enum.map(&to_string/1) |> Enum.join(" #{operator} ")
-
-          "bad arithmetic #{expression}"
-
-        error ->
-          "unknown error #{inspect(error)}"
-      end
-
+    message = Util.format_error(error)
     stacktrace = Luerl.New.get_stacktrace(state)
 
     %__MODULE__{

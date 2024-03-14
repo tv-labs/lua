@@ -35,6 +35,36 @@ defmodule Lua.Util do
     |> Enum.sort(:asc)
   end
 
+  def format_error(error) do
+    case error do
+      {:error_call, message} ->
+        format_function("error", message)
+
+      {:undefined_function, nil} ->
+        "undefined function"
+
+      {:undefined_function, "sandboxed"} ->
+        "sandboxed function"
+
+      {:undefined_function, ref} ->
+        "undefined function #{inspect(ref)}"
+
+      {:undefined_method, nil, name} ->
+        "undefined method #{inspect(name)}"
+
+      {:illegal_index, _, name} ->
+        "invalid index #{inspect(name)}"
+
+      {:badarith, operator, values} ->
+        expression = values |> Enum.map(&to_string/1) |> Enum.join(" #{operator} ")
+
+        "bad arithmetic #{expression}"
+
+      error ->
+        "unknown error #{inspect(error)}"
+    end
+  end
+
   @doc """
   Pretty prints a stack trace
   """
