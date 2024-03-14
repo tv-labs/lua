@@ -34,14 +34,28 @@ defmodule LuaTest do
                """)
     end
 
+    test "loading files with illegal tokens returns an error" do
+      path = test_file("illegal_token")
+
+      error = """
+      Failed to compile Lua script!
+
+      Failed to tokenize: illegal token on line 1: '
+
+      """
+
+      assert_raise Lua.CompilerException, error, fn ->
+        Lua.load_lua_file!(Lua.new(), path)
+      end
+    end
+
     test "loading files with syntax errors returns an error" do
       path = test_file("syntax_error")
 
       error = """
       Failed to compile Lua script!
 
-      Failed to tokenize illegal token on line 1: '
-
+      Line 1: syntax error before: ','
       """
 
       assert_raise Lua.CompilerException, error, fn ->
@@ -56,7 +70,7 @@ defmodule LuaTest do
         """
         Failed to compile Lua script!
 
-        undefined function
+        undefined function nil
 
         script line 1: <unknown function>()
         """
@@ -90,7 +104,7 @@ defmodule LuaTest do
       lua = Lua.new()
 
       error = """
-      Lua runtime error: undefined function
+      Lua runtime error: undefined function nil
 
       script line 1: <unknown function>()
       """
@@ -131,7 +145,7 @@ defmodule LuaTest do
       lua = Lua.new()
 
       error = """
-      Lua runtime error: undefined function
+      Lua runtime error: undefined function nil
 
       script line 2: <unknown function>("yuup")
       """
@@ -150,7 +164,7 @@ defmodule LuaTest do
       error = """
       Failed to compile Lua script!
 
-      Failed to tokenize illegal token on line 1: ")
+      Failed to tokenize: illegal token on line 1: ")
 
       """
 
@@ -163,7 +177,7 @@ defmodule LuaTest do
       error = """
       Failed to compile Lua script!
 
-      Failed to tokenize illegal token on line 1: "yuup)
+      Failed to tokenize: illegal token on line 1: "yuup)
 
       """
 
@@ -178,7 +192,7 @@ defmodule LuaTest do
       lua = Lua.new()
 
       error = """
-      Lua runtime error: undefined function "a"
+      Lua runtime error: undefined function 'a'
 
       "a" with arguments ("b")
       ^--- self is incorrect for object with keys "name"
@@ -213,7 +227,7 @@ defmodule LuaTest do
       lua = Lua.new()
 
       error = """
-      Lua runtime error: undefined function
+      Lua runtime error: undefined function nil
 
       script line 2: <unknown function>(\"dude\")
       script line 6: foo(2, \"dude\")
@@ -291,7 +305,7 @@ defmodule LuaTest do
 
     test "error/1 raises an exception" do
       error = """
-      Lua runtime error: error("this is an error")
+      Lua runtime error: this is an error
 
       script line 1:error("this is an error")
       """
