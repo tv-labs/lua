@@ -7,7 +7,9 @@ defmodule Lua.CompilerException do
     stacktrace = Luerl.New.get_stacktrace(state)
 
     message = """
-    Failed to compile Lua script: #{Util.format_error(error)}
+    Failed to compile Lua script!
+
+    #{Util.format_error(error)}
 
     #{Util.format_stacktrace(stacktrace, state)}
     """
@@ -15,23 +17,18 @@ defmodule Lua.CompilerException do
     %__MODULE__{message: message}
   end
 
-  def exception(data) when is_list(data) do
-    message =
-      data
-      |> Keyword.fetch!(:reason)
-      |> Enum.map_join("\n", fn {line, error, failure} ->
-        "Line #{line}: #{format_error(error)} due to #{format_error(failure)}"
-      end)
+  def exception({_line, _type, _failure} = error) do
+    message = """
+    Failed to compile Lua script!
 
-    %__MODULE__{message: "Failed to compile Lua script\n\n#{message}\n"}
+    #{Util.format_error(error)}
+    """
+
+    %__MODULE__{message: message}
   end
 
-  defp format_error(:luerl_parse), do: "failed to parse"
-  defp format_error(:luerl_scan), do: "failed to tokenize"
-
-  defp format_error({:illegal, value}) when is_list(value),
-    do: "illegal token: #{to_string(value)}"
-
-  defp format_error({:illegal, value}), do: "illegal token: #{inspect(value)}}"
-  defp format_error(value), do: inspect(value)
+  def exception(exception) do
+    dbg(exception)
+    %__MODULE__{message: ""}
+  end
 end

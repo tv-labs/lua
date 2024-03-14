@@ -34,11 +34,17 @@ defmodule LuaTest do
                """)
     end
 
-    @tag :skip
     test "loading files with syntax errors returns an error" do
       path = test_file("syntax_error")
 
-      assert_raise Lua.CompilerException, fn ->
+      error = """
+      Failed to compile Lua script!
+
+      Failed to tokenize illegal token on line 1: '
+
+      """
+
+      assert_raise Lua.CompilerException, error, fn ->
         Lua.load_lua_file!(Lua.new(), path)
       end
     end
@@ -46,11 +52,14 @@ defmodule LuaTest do
     test "loading files with undefined functions returns an error" do
       path = test_file("undefined_function")
 
-      error = """
-      Failed to compile Lua script: undefined function
+      error =
+        """
+        Failed to compile Lua script!
 
-      script line 1: <unknown function>()
-      """
+        undefined function
+
+        script line 1: <unknown function>()
+        """
 
       assert_raise Lua.CompilerException, error, fn ->
         Lua.load_lua_file!(Lua.new(), path)
@@ -139,9 +148,9 @@ defmodule LuaTest do
       lua = Lua.new()
 
       error = """
-      Failed to compile Lua script
+      Failed to compile Lua script!
 
-      Line 1: failed to tokenize due to illegal token: ")
+      Failed to tokenize illegal token on line 1: ")
 
       """
 
@@ -152,9 +161,9 @@ defmodule LuaTest do
       end
 
       error = """
-      Failed to compile Lua script
+      Failed to compile Lua script!
 
-      Line 1: failed to tokenize due to illegal token: "yuup)
+      Failed to tokenize illegal token on line 1: "yuup)
 
       """
 
