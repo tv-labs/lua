@@ -1,7 +1,21 @@
 defmodule Lua.CompilerException do
   defexception [:message]
 
-  def exception(data) do
+  alias Lua.Util
+
+  def exception({:lua_error, error, state}) do
+    stacktrace = Luerl.New.get_stacktrace(state)
+
+    message = """
+    Failed to compile Lua script: #{Util.format_error(error)}
+
+    #{Util.format_stacktrace(stacktrace, state)}
+    """
+
+    %__MODULE__{message: message}
+  end
+
+  def exception(data) when is_list(data) do
     message =
       data
       |> Keyword.fetch!(:reason)

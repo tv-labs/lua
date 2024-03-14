@@ -1,5 +1,5 @@
 defmodule LuaTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Lua
 
@@ -24,7 +24,7 @@ defmodule LuaTest do
 
   describe "load_lua_file/2" do
     test "loads the lua file into the state" do
-      path = Path.join(["test", "fixtures", "test_api"])
+      path = test_file("test_api")
 
       assert lua = Lua.load_lua_file!(Lua.new(), path)
 
@@ -32,6 +32,29 @@ defmodule LuaTest do
                Lua.eval!(lua, """
                return foo("ExUnit!")
                """)
+    end
+
+    @tag :skip
+    test "loading files with syntax errors returns an error" do
+      path = test_file("syntax_error")
+
+      assert_raise Lua.CompilerException, fn ->
+        Lua.load_lua_file!(Lua.new(), path)
+      end
+    end
+
+    test "loading files with undefined functions returns an error" do
+      path = test_file("undefined_function")
+
+      error = """
+      Failed to compile Lua script: undefined function
+
+      script line 1: <unknown function>()
+      """
+
+      assert_raise Lua.CompilerException, error, fn ->
+        Lua.load_lua_file!(Lua.new(), path)
+      end
     end
 
     test "non-existent files are not loaded" do
@@ -467,5 +490,9 @@ defmodule LuaTest do
         Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
       end
     end
+  end
+
+  defp test_file(name) do
+    Path.join(["test", "fixtures", name])
   end
 end

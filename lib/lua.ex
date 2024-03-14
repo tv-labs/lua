@@ -208,6 +208,9 @@ defmodule Lua do
       {:ok, [], state} ->
         %__MODULE__{lua | state: state}
 
+      {:lua_error, _error, _lua} = error ->
+        raise Lua.CompilerException, error
+
       :error ->
         raise "Cannot load lua file, #{inspect(path <> ".lua")} does not exist"
     end
