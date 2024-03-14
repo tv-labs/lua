@@ -35,12 +35,6 @@ defmodule Lua.Util do
     |> Enum.sort(:asc)
   end
 
-  def format_error({:lua_error, error, state}) do
-    dbg(error)
-    dbg(state)
-    inspect(error)
-  end
-
   def format_error(error) do
     case error do
       {:error_call, message} ->

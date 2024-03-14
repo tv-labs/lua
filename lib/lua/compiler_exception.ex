@@ -26,9 +26,4 @@ defmodule Lua.CompilerException do
 
     %__MODULE__{message: message}
   end
-
-  def exception(exception) do
-    dbg(exception)
-    %__MODULE__{message: ""}
-  end
 end
