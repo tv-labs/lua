@@ -22,9 +22,20 @@ defmodule LuaTest do
     end
   end
 
-  describe "load_file/2" do
+  describe "load_file!/2" do
     test "loads the lua file into the state" do
       path = test_file("test_api")
+
+      assert lua = Lua.load_file!(Lua.new(), path)
+
+      assert {["Hi ExUnit!"], _} =
+               Lua.eval!(lua, """
+               return foo("ExUnit!")
+               """)
+    end
+
+    test "it can load files with the .lua extension" do
+      path = test_file("test_api.lua")
 
       assert lua = Lua.load_file!(Lua.new(), path)
 
