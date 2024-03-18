@@ -43,6 +43,91 @@ lua = Lua.new() |> Lua.load_api(MyAPI)
 
 ```
 
+## Calling Lua functions from Elixir
+
+Lua can be used to expose complex functions written in Elixir. In some cases, you may want to call Lua functions from Elixir. This can
+be achieved with the `Lua.call_function!/3` function
+
+``` elixir
+defmodule MyAPI do
+  use Lua.API, scope: "example"
+
+  deflua foo(value), state do
+    Lua.call_function!(state, [:string, :lower], [value])
+  end
+end
+
+lua = Lua.new() |> Lua.load_api(MyAPI)
+
+{["wow"], _} = Lua.eval!(lua, "return example.foo(\"WOW\")")
+```
+
+## Modify Lua state from Elixir
+
+You can also use `Lua` to modify the state of the lua environment inside your Elixir code. Imagine you have a queue module that you
+want to implement in Elixir, with the queue stored in a global variable
+
+``` elixir
+defmodule Queue do
+  use Lua.API, scope: "q"
+  
+  deflua push(v), state do
+    # Pull out the global variable "my_queue" from lua
+    queue = Lua.get!(state, [:my_queue])
+    
+    {[], state} = Lua.call_function!(state, [:table, :insert], [queue, v])
+    
+    # Return the modified lua state with no return values
+    {[], state}
+  end
+end
+
+lua = Lua.new() |> Lua.load_api(Queue)
+
+{[queue], _} =
+  Lua.eval!(lua, """
+  my_queue = {}
+
+  q.push("first")
+  q.push("second")
+
+  return my_queue
+  """)
+  
+["first", "second"] = Lua.Table.as_list(queue)
+defmodule Queue do
+  use Lua.API, scope: "q"
+  
+  deflua push(v), state do
+    # Pull out the global variable "my_queue" from lua
+    queue = Lua.get!(state, [:my_queue])
+    
+    {[], state} = Lua.call_function!(state, [:table, :insert], [queue, callback])
+    
+    # Return the modified lua state with no return values
+    {[], state}
+  end
+end
+
+lua = Lua.new() |> Lua.load_api(Queue)
+
+{[queue], _} =
+  Lua.eval!(lua, """
+  my_queue = {}
+
+  q.push("first")
+  q.push("second")
+
+  return my_queue
+  """)
+  
+["first", "second"] = Lua.Table.as_list(queue)
+```
+
+
+
+
+
 ## Credits
 
 Lua piggy-backs off of Robert Virding's Luerl project, which implements an Lua lexer, parser, and full-blown lua virtual machine that runs inside the BEAM.
