@@ -34,9 +34,9 @@ defmodule Lua.APITest do
 
                  deflua foo(a, b), state do
                    value = Lua.get!(state, [:some_var])
-                   {:ok, _ , state} = Luerl.New.set_table_keys_dec(state, [:some_var], a + b)
+                   lua = Lua.set!(state, [:some_var], a + b)
 
-                   {[value], state}
+                   {[value], lua}
                  end
                end
                """)

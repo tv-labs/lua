@@ -118,8 +118,8 @@ defmodule LuaTest do
           [1 + value]
         end)
 
-      assert {[], _} = Lua.eval!(lua, "foo(5)")
-      assert {[2], _} = Lua.eval!(lua, "return foo(1)")
+      assert {[], %Lua{}} = Lua.eval!(lua, "foo(5)")
+      assert {[2], %Lua{}} = Lua.eval!(lua, "return foo(1)")
     end
 
     test "invalid functions raise" do
@@ -159,6 +159,52 @@ defmodule LuaTest do
         os.exit(1)
         """)
       end
+    end
+  end
+
+  describe "call_function/3" do
+    test "can call standard library functions" do
+      assert {["hello robert"], %Lua{}} = Lua.call_function!(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
+    end
+
+    test "can call user defined functions" do
+      {[], lua} = Lua.eval!("""
+      function double(val)
+        return 2 * val
+      end
+      """)
+
+      assert {[20], %Lua{}} = Lua.call_function!(lua, :double, [10])
+    end
+
+    test "can call references to functions" do
+      {[func], lua} = Lua.eval!("return string.lower")
+
+      assert {["it works"], %Lua{}} = Lua.call_function!(lua, func, ["IT WORKS"])
+
+    end
+
+    test "it plays nicely with elixir function callbacks" do
+      defmodule Callback do
+        use Lua.API, scope: "callback"
+
+        deflua callme(func), state do
+          Lua.call_function!(state, func, ["MAYBE"])
+        end
+      end
+
+      lua = Lua.new() |> Lua.load_api(Callback)
+
+      assert {["maybe"], %Lua{}} = Lua.eval!(lua, """
+      return callback.callme(function(value)
+        return string.lower(value)
+      end)
+      """)
+
+    end
+
+    test "calling non-functions raises" do
+
     end
   end
 
