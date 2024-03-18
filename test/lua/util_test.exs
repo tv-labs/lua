@@ -1,5 +1,5 @@
 defmodule Lua.UtilTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   doctest Lua.Util, import: true
 

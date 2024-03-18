@@ -1,5 +1,5 @@
 defmodule Lua.APITest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Lua
 
