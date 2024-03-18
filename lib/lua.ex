@@ -194,6 +194,68 @@ defmodule Lua do
   end
 
   @doc """
+  Calls a function in Lua's state
+
+      iex> {[ret], _lua} = Lua.call_function!(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
+      iex> ret
+      "hello robert"
+
+  References to functions can also be passed
+
+      iex> {[ref], lua} = Lua.eval!("return string.lower")
+      iex> {[ret], _lua} = Lua.call_function!(lua, ref, ["FUNCTION REF"])
+      iex> ret
+      "function ref"
+
+  This is also useful for executing Lua function's inside of Elixir APIs
+
+  ```elixir
+  defmodule MyAPI do
+    use Lua.API, scope: "example"
+
+    deflua foo(value), state do
+      Lua.call_function!(state, [:string, :lower], [value])
+    end
+  end
+
+  lua = Lua.new() |> Lua.load_api(MyAPI)
+
+  {["wow"], _} = Lua.eval!(lua, "return example.foo(\"WOW\")")
+  ```
+  """
+  def call_function!(%__MODULE__{} = lua, name, args)
+      when (is_list(args) and is_tuple(name)) or is_function(name) do
+    {ref, lua} = encode!(lua, name)
+
+    case :luerl_new.call(ref, args, lua.state) do
+      {:ok, value, state} -> {value, wrap(state)}
+      {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
+    end
+  end
+
+  def call_function!(%__MODULE__{} = lua, name, args) when is_list(args) do
+    keys = List.wrap(name)
+
+    func = get!(lua, keys)
+
+    case :luerl_new.call_function(func, args, lua.state) do
+      {:ok, ret, lua} -> {ret, wrap(lua)}
+      {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
+    end
+  end
+
+  @doc """
+  Encodes a Lua value into its internal form
+  """
+  def encode!(%__MODULE__{} = lua, value) do
+    {encoded, state} = :luerl_new.encode(value, lua.state)
+    {encoded, wrap(state)}
+  rescue
+    ArgumentError ->
+      reraise Lua.RuntimeException, "Failed to encode value", __STACKTRACE__
+  end
+
+  @doc """
   Loads a lua file into the environment. Any values returned in the globa
   scope are thrown away.
 
@@ -245,7 +307,7 @@ defmodule Lua do
 
     if with_state? do
       fn args, state ->
-        apply(module, function_name, [args] ++ [state])
+        execute_function(module, function_name, args ++ [wrap(state)])
       end
     else
       fn args ->
@@ -261,7 +323,7 @@ defmodule Lua do
     if with_state? do
       fn args, state ->
         if (length(args) + 1) in arities do
-          apply(module, function_name, args ++ [state])
+          execute_function(module, function_name, args ++ [wrap(state)])
         else
           arities = Enum.map(arities, &(&1 - 1))
 
@@ -287,7 +349,10 @@ defmodule Lua do
 
   defp execute_function(module, function_name, args) do
     # Luerl mandates lists as return values; this function ensures all results conform.
-    List.wrap(apply(module, function_name, args))
+    case apply(module, function_name, args) do
+      {ret, %Lua{state: state}} -> {ret, state}
+      other -> List.wrap(other)
+    end
   catch
     thrown_value ->
       {:error,

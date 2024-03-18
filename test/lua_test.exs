@@ -118,8 +118,8 @@ defmodule LuaTest do
           [1 + value]
         end)
 
-      assert {[], _} = Lua.eval!(lua, "foo(5)")
-      assert {[2], _} = Lua.eval!(lua, "return foo(1)")
+      assert {[], %Lua{}} = Lua.eval!(lua, "foo(5)")
+      assert {[2], %Lua{}} = Lua.eval!(lua, "return foo(1)")
     end
 
     test "invalid functions raise" do
@@ -158,6 +158,86 @@ defmodule LuaTest do
         Lua.eval!(lua, """
         os.exit(1)
         """)
+      end
+    end
+  end
+
+  describe "call_function/3" do
+    test "can call standard library functions" do
+      assert {["hello robert"], %Lua{}} =
+               Lua.call_function!(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
+    end
+
+    test "can call user defined functions" do
+      {[], lua} =
+        Lua.eval!("""
+        function double(val)
+          return 2 * val
+        end
+        """)
+
+      assert {[20], %Lua{}} = Lua.call_function!(lua, :double, [10])
+    end
+
+    test "can call references to functions" do
+      {[func], lua} = Lua.eval!("return string.lower")
+
+      assert {["it works"], %Lua{}} = Lua.call_function!(lua, func, ["IT WORKS"])
+    end
+
+    test "it plays nicely with elixir function callbacks" do
+      defmodule Callback do
+        use Lua.API, scope: "callback"
+
+        deflua callme(func), state do
+          Lua.call_function!(state, func, ["MAYBE"])
+        end
+      end
+
+      lua = Lua.new() |> Lua.load_api(Callback)
+
+      assert {["maybe"], %Lua{}} =
+               Lua.eval!(lua, """
+               return callback.callme(function(value)
+                 return string.lower(value)
+               end)
+               """)
+    end
+
+    test "calling non-functions raises" do
+      {_, lua} =
+        Lua.eval!("""
+        foo = "bar"
+        """)
+
+      error = """
+      Lua runtime error: undefined function 'bar'
+
+
+      """
+
+      assert_raise Lua.RuntimeException, error, fn ->
+        Lua.call_function!(lua, :foo, [])
+      end
+    end
+  end
+
+  describe "encode!/1" do
+    test "it can encode values into their internal representation" do
+      lua = Lua.new()
+
+      assert {"hello", lua} = Lua.encode!(lua, "hello")
+      assert {"hello", lua} = Lua.encode!(lua, :hello)
+      assert {5, lua} = Lua.encode!(lua, 5)
+      assert {{:tref, _}, lua} = Lua.encode!(lua, %{a: 1, b: 2})
+      assert {{:tref, _}, _lua} = Lua.encode!(lua, [1, 2, 3, 4])
+    end
+
+    test "it raises for values that cannot be encoded" do
+      error = "Lua runtime error: Failed to encode value"
+
+      assert_raise Lua.RuntimeException, error, fn ->
+        Lua.encode!(Lua.new(), {:foo, :bar})
       end
     end
   end
