@@ -248,10 +248,11 @@ defmodule Lua do
   Encodes a Lua value into its internal form
   """
   def encode!(%__MODULE__{} = lua, value) do
-    case :luerl_new.encode(value, lua.state) do
-      {encoded, state} -> {encoded, wrap(state)}
-      {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
-    end
+    {encoded, state} = :luerl_new.encode(value, lua.state)
+    {encoded, wrap(state)}
+  rescue
+    ArgumentError ->
+      reraise Lua.RuntimeException, "Failed to encode value", __STACKTRACE__
   end
 
   @doc """
