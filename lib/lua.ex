@@ -5,7 +5,7 @@ defmodule Lua do
              |> String.split("<!-- MDOC !-->")
              |> Enum.fetch!(1)
 
-  defstruct [:state, functions: %{}]
+  defstruct [:state]
 
   alias Luerl.New, as: Luerl
 
@@ -31,12 +31,8 @@ defmodule Lua do
   ]
 
   defimpl Inspect do
-    alias Lua.Util
-
-    import Inspect.Algebra
-
-    def inspect(lua, _opts) do
-      concat(["#Lua<functions: ", "[", Enum.join(Util.user_functions(lua), ", "), "]", ">"])
+    def inspect(_lua, _opts) do
+      "#Lua<>"
     end
   end
 
@@ -93,27 +89,46 @@ defmodule Lua do
       ["nested!"]
 
   """
-  def set!(%__MODULE__{state: state} = lua, keys, value) do
-    new_state =
-      state
-      |> ensure_keys(keys)
-      |> set_keys(keys, value)
+  def set!(%__MODULE__{state: state}, keys, value) do
+    {_keys, state} =
+      Enum.reduce_while(keys, {[], state}, fn key, {keys, state} ->
+        keys = keys ++ [key]
 
-    global? =
-      case keys do
-        [:_G | _] -> true
-        _ -> false
-      end
+        case :luerl_new.get_table_keys_dec(keys, state) do
+          {:ok, nil, state} ->
+            {:cont, set_keys!(state, keys)}
 
-    functions =
-      if is_function(value) and not global? do
-        info = Function.info(value)
-        Map.put(lua.functions, keys, info[:arity])
-      else
-        lua.functions
-      end
+          {:ok, _val, state} ->
+            {:halt, {keys, state}}
 
-    %__MODULE__{state: new_state, functions: functions}
+          {:lua_error, _err, state} ->
+            raise Lua.RuntimeException, {:lua_error, illegal_index(keys), state}
+        end
+      end)
+
+    case :luerl_new.set_table_keys_dec(keys, value, state) do
+      {:ok, _value, state} ->
+        wrap(state)
+
+      {:lua_error, _error, state} ->
+        raise Lua.RuntimeException, {:lua_error, illegal_index(keys), state}
+    end
+  end
+
+  defp set_keys!(state, keys) do
+    case :luerl_new.set_table_keys_dec(keys, [], state) do
+      {:ok, _, state} ->
+        {keys, state}
+
+      {:lua_error, _error, state} ->
+        raise Lua.RuntimeException, {:lua_error, illegal_index(keys), state}
+    end
+  end
+
+  defp illegal_index([:_G | keys]), do: illegal_index(keys)
+
+  defp illegal_index(keys) do
+    {:illegal_index, nil, Enum.join(keys, ".")}
   end
 
   @doc """
@@ -136,9 +151,16 @@ defmodule Lua do
   """
   def get!(%__MODULE__{state: state}, keys), do: get!(state, keys)
 
+  # TODO remove this version
   def get!(state, keys) when is_tuple(state) do
-    {:ok, value, _state} = Luerl.get_table_keys_dec(state, keys)
-    value
+    case :luerl_new.get_table_keys_dec(keys, state) do
+      {:ok, value, _state} ->
+        value
+
+      {:lua_error, _, state} ->
+        error = {:illegal_index, nil, Enum.join(keys, ".")}
+        raise Lua.RuntimeException, {:lua_error, error, state}
+    end
   end
 
   @doc """
@@ -171,41 +193,15 @@ defmodule Lua do
       reraise Lua.RuntimeException, e, __STACKTRACE__
   end
 
-  # Deep-set a value within a nested Lua table structure,
-  # ensuring the entire path of keys exists.
-  defp ensure_keys(state, [first | rest]) do
-    ensure_keys(state, [first], rest)
-  end
+  @doc """
+  Loads a lua file into the environment. Any values returned in the globa
+  scope are thrown away.
 
-  defp ensure_keys(state, keys, rest) do
-    state =
-      case Luerl.get_table_keys_dec(state, keys) do
-        {:ok, nil, state} ->
-          set_keys(state, keys)
-
-        {:ok, _result, state} ->
-          state
-
-        {:lua_error, _error, _state} = error ->
-          raise Lua.RuntimeException, error
-      end
-
-    case rest do
-      [] -> state
-      [next | rest] -> ensure_keys(state, keys ++ [next], rest)
-    end
-  end
-
-  defp set_keys(state, keys, value \\ []) do
-    case Luerl.set_table_keys_dec(state, keys, value) do
-      {:ok, [], state} -> state
-      {:lua_error, error, _state} -> raise Lua.RuntimeException, reason: error
-    end
-  end
-
-  def load_lua_file!(%__MODULE__{state: state} = lua, path) when is_binary(path) do
-    case Luerl.dofile(state, String.to_charlist(path), [:return]) do
-      {:ok, [], state} ->
+  Mimics the functionality of lua's [dofile](https://www.lua.org/manual/5.4/manual.html#pdf-dofile)
+  """
+  def load_file!(%__MODULE__{state: state} = lua, path) when is_binary(path) do
+    case :luerl_new.dofile(String.to_charlist(path), [:return], state) do
+      {:ok, _, state} ->
         %__MODULE__{lua | state: state}
 
       {:lua_error, _error, _lua} = error ->
@@ -297,4 +293,6 @@ defmodule Lua do
       {:error,
        "Value thrown during function '#{function_name}' execution: #{inspect(thrown_value)}"}
   end
+
+  defp wrap(state), do: %__MODULE__{state: state}
 end
