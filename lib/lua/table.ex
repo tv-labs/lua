@@ -14,7 +14,7 @@ defmodule Lua.Table do
       iex> Lua.Table.as_list([{1, "a"}, {2, "b"}, {3, "c"}])
       ["a", "b", "c"]
 
-  To ensure the list is ordered, you can pass the `:sort` options
+  To ensure the list is ordered, you can pass the `:sort` option
 
       iex> Lua.Table.as_list([{2, "b"}, {1, "a"}, {3, "c"}])
       ["b", "a", "c"]
@@ -28,7 +28,7 @@ defmodule Lua.Table do
 
     sorter =
       if Keyword.fetch!(opts, :sort) do
-        &Enum.sort/1
+        &List.keysort(&1, 0)
       else
         &Function.identity/1
       end
@@ -52,7 +52,7 @@ defmodule Lua.Table do
   Converts a Lua table into more "native" feeling lists and
   maps, deeply traversing any sub-tables.
 
-  It will use the heuristic that maps with integer keys starting
+  It uses the heuristic that maps with integer keys starting
   as 1 will be auto-cast into lists
 
       iex> Lua.Table.deep_cast([{"a", 1}, {"b", [{1, 3}, {2, 4}]}])
