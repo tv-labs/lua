@@ -95,38 +95,7 @@ lua = Lua.new() |> Lua.load_api(Queue)
   """)
   
 ["first", "second"] = Lua.Table.as_list(queue)
-defmodule Queue do
-  use Lua.API, scope: "q"
-  
-  deflua push(v), state do
-    # Pull out the global variable "my_queue" from lua
-    queue = Lua.get!(state, [:my_queue])
-    
-    {[], state} = Lua.call_function!(state, [:table, :insert], [queue, callback])
-    
-    # Return the modified lua state with no return values
-    {[], state}
-  end
-end
-
-lua = Lua.new() |> Lua.load_api(Queue)
-
-{[queue], _} =
-  Lua.eval!(lua, """
-  my_queue = {}
-
-  q.push("first")
-  q.push("second")
-
-  return my_queue
-  """)
-  
-["first", "second"] = Lua.Table.as_list(queue)
 ```
-
-
-
-
 
 ## Credits
 
