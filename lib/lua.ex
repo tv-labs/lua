@@ -206,8 +206,25 @@ defmodule Lua do
       iex> {[ret], _lua} = Lua.call_function!(lua, ref, ["FUNCTION REF"])
       iex> ret
       "function ref"
+
+  This is also useful for executing Lua function's inside of Elixir APIs
+
+  ```elixir
+  defmodule MyAPI do
+    use Lua.API, scope: "example"
+
+    deflua foo(value), state do
+      Lua.call_function!(state, [:string, :lower], [value])
+    end
+  end
+
+  lua = Lua.new() |> Lua.load_api(MyAPI)
+
+  {["wow"], _} = Lua.eval!(lua, "return example.foo(\"WOW\")")
+  ```
   """
-  def call_function!(%__MODULE__{} = lua, name, args) when is_list(args) and is_tuple(name) or is_function(name) do
+  def call_function!(%__MODULE__{} = lua, name, args)
+      when (is_list(args) and is_tuple(name)) or is_function(name) do
     {ref, lua} = encode!(lua, name)
 
     case :luerl_new.call(ref, args, lua.state) do
@@ -215,6 +232,7 @@ defmodule Lua do
       {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
     end
   end
+
   def call_function!(%__MODULE__{} = lua, name, args) when is_list(args) do
     keys = List.wrap(name)
 

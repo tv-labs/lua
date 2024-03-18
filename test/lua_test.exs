@@ -164,15 +164,17 @@ defmodule LuaTest do
 
   describe "call_function/3" do
     test "can call standard library functions" do
-      assert {["hello robert"], %Lua{}} = Lua.call_function!(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
+      assert {["hello robert"], %Lua{}} =
+               Lua.call_function!(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
     end
 
     test "can call user defined functions" do
-      {[], lua} = Lua.eval!("""
-      function double(val)
-        return 2 * val
-      end
-      """)
+      {[], lua} =
+        Lua.eval!("""
+        function double(val)
+          return 2 * val
+        end
+        """)
 
       assert {[20], %Lua{}} = Lua.call_function!(lua, :double, [10])
     end
@@ -181,7 +183,6 @@ defmodule LuaTest do
       {[func], lua} = Lua.eval!("return string.lower")
 
       assert {["it works"], %Lua{}} = Lua.call_function!(lua, func, ["IT WORKS"])
-
     end
 
     test "it plays nicely with elixir function callbacks" do
@@ -195,16 +196,29 @@ defmodule LuaTest do
 
       lua = Lua.new() |> Lua.load_api(Callback)
 
-      assert {["maybe"], %Lua{}} = Lua.eval!(lua, """
-      return callback.callme(function(value)
-        return string.lower(value)
-      end)
-      """)
-
+      assert {["maybe"], %Lua{}} =
+               Lua.eval!(lua, """
+               return callback.callme(function(value)
+                 return string.lower(value)
+               end)
+               """)
     end
 
     test "calling non-functions raises" do
+      {_, lua} =
+        Lua.eval!("""
+        foo = "bar"
+        """)
 
+      error = """
+      Lua runtime error: undefined function 'bar'
+
+
+      """
+
+      assert_raise Lua.RuntimeException, error, fn ->
+        Lua.call_function!(lua, :foo, [])
+      end
     end
   end
 
