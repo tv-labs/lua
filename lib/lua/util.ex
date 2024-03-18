@@ -10,31 +10,6 @@ defmodule Lua.Util do
     Record.defrecord(name, fields)
   end
 
-  @doc """
-  Lists all user-defined functions in the global Lua scope
-
-      iex> lua = Lua.set!(Lua.new(), [:my_func], fn value -> value end)
-      iex> user_functions(lua)
-      ["my_func(_)"]
-
-  Nested functions are nicely scoped
-
-      iex> lua = Lua.set!(Lua.new(), [:my_func], fn value -> value end)
-      iex> lua = Lua.set!(lua, [:foo, :bar], fn value, _ -> value end)
-      iex> user_functions(lua)
-      ["foo.bar(_, _)", "my_func(_)"]
-
-  ## Options
-  * :formatter - formats the function, defaults to &format_function/1
-  """
-  def user_functions(%Lua{functions: functions}, opts \\ []) do
-    formatter = Keyword.get(opts, :formatter, &format_function/2)
-
-    functions
-    |> Enum.map(fn {keys, arity} -> formatter.(keys, arity) end)
-    |> Enum.sort(:asc)
-  end
-
   def format_error(error) do
     case error do
       {line, type, {:illegal, value}} ->

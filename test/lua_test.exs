@@ -8,7 +8,7 @@ defmodule LuaTest do
   require Lua.Util
 
   describe "inspect" do
-    test "shows all functions in the lua state" do
+    test "shows nothing" do
       lua = Lua.new()
 
       lua =
@@ -18,15 +18,15 @@ defmodule LuaTest do
 
       lua = Lua.set!(lua, [:bar, :my_func], fn _, _ -> [] end)
 
-      assert inspect(lua) == "#Lua<functions: [bar.my_func(_, _), foo(_)]>"
+      assert inspect(lua) == "#Lua<>"
     end
   end
 
-  describe "load_lua_file/2" do
+  describe "load_file/2" do
     test "loads the lua file into the state" do
       path = test_file("test_api")
 
-      assert lua = Lua.load_lua_file!(Lua.new(), path)
+      assert lua = Lua.load_file!(Lua.new(), path)
 
       assert {["Hi ExUnit!"], _} =
                Lua.eval!(lua, """
@@ -45,8 +45,20 @@ defmodule LuaTest do
       """
 
       assert_raise Lua.CompilerException, error, fn ->
-        Lua.load_lua_file!(Lua.new(), path)
+        Lua.load_file!(Lua.new(), path)
       end
+    end
+
+    test "it can load files that return" do
+      path = test_file("returns_value")
+
+      assert lua = Lua.load_file!(Lua.new(), path)
+
+      assert {["returns value"], _} =
+               Lua.eval!(lua, """
+               return foo()
+               """)
+
     end
 
     test "loading files with syntax errors returns an error" do
@@ -59,7 +71,7 @@ defmodule LuaTest do
       """
 
       assert_raise Lua.CompilerException, error, fn ->
-        Lua.load_lua_file!(Lua.new(), path)
+        Lua.load_file!(Lua.new(), path)
       end
     end
 
@@ -76,13 +88,13 @@ defmodule LuaTest do
         """
 
       assert_raise Lua.CompilerException, error, fn ->
-        Lua.load_lua_file!(Lua.new(), path)
+        Lua.load_file!(Lua.new(), path)
       end
     end
 
     test "non-existent files are not loaded" do
       assert_raise RuntimeError, "Cannot load lua file, \"bananas.lua\" does not exist", fn ->
-        Lua.load_lua_file!(Lua.new(), "bananas")
+        Lua.load_file!(Lua.new(), "bananas")
       end
     end
   end
@@ -335,22 +347,40 @@ defmodule LuaTest do
   end
 
   describe "set!/2 and get!/2" do
-    setup do
-      {:ok, lua: Lua.new()}
-    end
-
-    test "sets and gets a simple value", %{lua: lua} do
-      lua = Lua.set!(lua, [:hello], "world")
+    test "sets and gets a simple value" do
+      lua = Lua.set!(Lua.new(), [:hello], "world")
       assert "world" == Lua.get!(lua, [:hello])
     end
 
-    test "sets and gets nested values", %{lua: lua} do
-      lua = Lua.set!(lua, [:a, :b, :c], "nested")
+    test "sets and gets nested values" do
+      lua = Lua.set!(Lua.new(), [:a, :b, :c], "nested")
       assert "nested" == Lua.get!(lua, [:a, :b, :c])
     end
 
-    test "returns nil for non-existent keys", %{lua: lua} do
-      assert nil == Lua.get!(lua, [:non_existent_key])
+    test "if the key already has a value, it raises" do
+      error = "Lua runtime error: invalid index \"one.two\"\n\n\n"
+      assert_raise Lua.RuntimeException, error, fn ->
+        Lua.set!(Lua.new(), [:_G, :print, :nope], "uh oh")
+      end
+
+    end
+
+    test "returns nil for non-existent keys" do
+      assert nil == Lua.get!(Lua.new(), [:non_existent_key])
+    end
+
+    test "if a path is nil, it raises a runtime error" do
+      error = "Lua runtime error: invalid index \"one.two\"\n\n\n"
+      assert_raise Lua.RuntimeException, error, fn ->
+        Lua.get!(Lua.new(), [:one, :two])
+      end
+    end
+
+    test "if the key is not a table, it raises" do
+      error = "Lua runtime error: invalid index \"print.nope\"\n\n\n"
+      assert_raise Lua.RuntimeException, error, fn ->
+        Lua.get!(Lua.new(), [:print, :nope])
+      end
     end
   end
 

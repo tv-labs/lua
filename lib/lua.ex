@@ -5,7 +5,7 @@ defmodule Lua do
              |> String.split("<!-- MDOC !-->")
              |> Enum.fetch!(1)
 
-  defstruct [:state, functions: %{}]
+  defstruct [:state]
 
   alias Luerl.New, as: Luerl
 
@@ -31,12 +31,8 @@ defmodule Lua do
   ]
 
   defimpl Inspect do
-    alias Lua.Util
-
-    import Inspect.Algebra
-
-    def inspect(lua, _opts) do
-      concat(["#Lua<functions: ", "[", Enum.join(Util.user_functions(lua), ", "), "]", ">"])
+    def inspect(_lua, _opts) do
+      "#Lua<>"
     end
   end
 
@@ -93,27 +89,11 @@ defmodule Lua do
       ["nested!"]
 
   """
-  def set!(%__MODULE__{state: state} = lua, keys, value) do
-    new_state =
+  def set!(%__MODULE__{state: state}, keys, value) do
       state
       |> ensure_keys(keys)
       |> set_keys(keys, value)
-
-    global? =
-      case keys do
-        [:_G | _] -> true
-        _ -> false
-      end
-
-    functions =
-      if is_function(value) and not global? do
-        info = Function.info(value)
-        Map.put(lua.functions, keys, info[:arity])
-      else
-        lua.functions
-      end
-
-    %__MODULE__{state: new_state, functions: functions}
+      |> wrap()
   end
 
   @doc """
@@ -136,9 +116,14 @@ defmodule Lua do
   """
   def get!(%__MODULE__{state: state}, keys), do: get!(state, keys)
 
+  # TODO remove this version
   def get!(state, keys) when is_tuple(state) do
-    {:ok, value, _state} = Luerl.get_table_keys_dec(state, keys)
-    value
+    case :luerl_new.get_table_keys_dec(keys, state) do
+      {:ok, value, _state} -> value
+      {:lua_error, _, state} ->
+        error = {:illegal_index, nil, Enum.join(keys, ".")}
+        raise Lua.RuntimeException, {:lua_error, error, state}
+    end
   end
 
   @doc """
@@ -203,9 +188,15 @@ defmodule Lua do
     end
   end
 
-  def load_lua_file!(%__MODULE__{state: state} = lua, path) when is_binary(path) do
-    case Luerl.dofile(state, String.to_charlist(path), [:return]) do
-      {:ok, [], state} ->
+  @doc """
+  Loads a lua file into the environment. Any values returned in the globa
+  scope are thrown away.
+
+  Mimics the functionality of lua's [dofile](https://www.lua.org/manual/5.4/manual.html#pdf-dofile)
+  """
+  def load_file!(%__MODULE__{state: state} = lua, path) when is_binary(path) do
+    case :luerl_new.dofile(String.to_charlist(path), [:return], state) do
+      {:ok, _, state} ->
         %__MODULE__{lua | state: state}
 
       {:lua_error, _error, _lua} = error ->
@@ -297,4 +288,6 @@ defmodule Lua do
       {:error,
        "Value thrown during function '#{function_name}' execution: #{inspect(thrown_value)}"}
   end
+
+  defp wrap(state), do: %__MODULE__{state: state}
 end
