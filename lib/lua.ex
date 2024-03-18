@@ -90,10 +90,45 @@ defmodule Lua do
 
   """
   def set!(%__MODULE__{state: state}, keys, value) do
-      state
-      |> ensure_keys(keys)
-      |> set_keys(keys, value)
-      |> wrap()
+    {_keys, state} =
+      Enum.reduce_while(keys, {[], state}, fn key, {keys, state} ->
+        keys = keys ++ [key]
+
+        case :luerl_new.get_table_keys_dec(keys, state) do
+          {:ok, nil, state} ->
+            {:cont, set_keys!(state, keys)}
+
+          {:ok, _val, state} ->
+            {:halt, {keys, state}}
+
+          {:lua_error, _err, state} ->
+            raise Lua.RuntimeException, {:lua_error, illegal_index(keys), state}
+        end
+      end)
+
+    case :luerl_new.set_table_keys_dec(keys, value, state) do
+      {:ok, _value, state} ->
+        wrap(state)
+
+      {:lua_error, _error, state} ->
+        raise Lua.RuntimeException, {:lua_error, illegal_index(keys), state}
+    end
+  end
+
+  defp set_keys!(state, keys) do
+    case :luerl_new.set_table_keys_dec(keys, [], state) do
+      {:ok, _, state} ->
+        {keys, state}
+
+      {:lua_error, _error, state} ->
+        raise Lua.RuntimeException, {:lua_error, illegal_index(keys), state}
+    end
+  end
+
+  defp illegal_index([:_G | keys]), do: illegal_index(keys)
+
+  defp illegal_index(keys) do
+    {:illegal_index, nil, Enum.join(keys, ".")}
   end
 
   @doc """
@@ -119,7 +154,9 @@ defmodule Lua do
   # TODO remove this version
   def get!(state, keys) when is_tuple(state) do
     case :luerl_new.get_table_keys_dec(keys, state) do
-      {:ok, value, _state} -> value
+      {:ok, value, _state} ->
+        value
+
       {:lua_error, _, state} ->
         error = {:illegal_index, nil, Enum.join(keys, ".")}
         raise Lua.RuntimeException, {:lua_error, error, state}
@@ -154,38 +191,6 @@ defmodule Lua do
 
     e ->
       reraise Lua.RuntimeException, e, __STACKTRACE__
-  end
-
-  # Deep-set a value within a nested Lua table structure,
-  # ensuring the entire path of keys exists.
-  defp ensure_keys(state, [first | rest]) do
-    ensure_keys(state, [first], rest)
-  end
-
-  defp ensure_keys(state, keys, rest) do
-    state =
-      case Luerl.get_table_keys_dec(state, keys) do
-        {:ok, nil, state} ->
-          set_keys(state, keys)
-
-        {:ok, _result, state} ->
-          state
-
-        {:lua_error, _error, _state} = error ->
-          raise Lua.RuntimeException, error
-      end
-
-    case rest do
-      [] -> state
-      [next | rest] -> ensure_keys(state, keys ++ [next], rest)
-    end
-  end
-
-  defp set_keys(state, keys, value \\ []) do
-    case Luerl.set_table_keys_dec(state, keys, value) do
-      {:ok, [], state} -> state
-      {:lua_error, error, _state} -> raise Lua.RuntimeException, reason: error
-    end
   end
 
   @doc """

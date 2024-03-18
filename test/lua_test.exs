@@ -58,7 +58,6 @@ defmodule LuaTest do
                Lua.eval!(lua, """
                return foo()
                """)
-
     end
 
     test "loading files with syntax errors returns an error" do
@@ -358,11 +357,11 @@ defmodule LuaTest do
     end
 
     test "if the key already has a value, it raises" do
-      error = "Lua runtime error: invalid index \"one.two\"\n\n\n"
+      error = "Lua runtime error: invalid index \"print.nope\"\n\n\n"
+
       assert_raise Lua.RuntimeException, error, fn ->
         Lua.set!(Lua.new(), [:_G, :print, :nope], "uh oh")
       end
-
     end
 
     test "returns nil for non-existent keys" do
@@ -371,6 +370,7 @@ defmodule LuaTest do
 
     test "if a path is nil, it raises a runtime error" do
       error = "Lua runtime error: invalid index \"one.two\"\n\n\n"
+
       assert_raise Lua.RuntimeException, error, fn ->
         Lua.get!(Lua.new(), [:one, :two])
       end
@@ -378,6 +378,7 @@ defmodule LuaTest do
 
     test "if the key is not a table, it raises" do
       error = "Lua runtime error: invalid index \"print.nope\"\n\n\n"
+
       assert_raise Lua.RuntimeException, error, fn ->
         Lua.get!(Lua.new(), [:print, :nope])
       end
@@ -534,7 +535,7 @@ defmodule LuaTest do
       lua = Lua.new()
 
       message = """
-      Lua runtime error: invalid index "path"
+      Lua runtime error: invalid index "package.path"
 
 
       """
