@@ -81,7 +81,7 @@ defmodule Lua do
   end
 
   @doc """
-  Sets the path patterns that Lua will look in when requiring Lua scripts. For example,
+  Sets the path patterns that Luerl will look in when requiring Lua scripts. For example,
   if you store Lua files in your application's priv directory:
 
       iex> lua = Lua.new(exclude: [[:package], [:require]])
@@ -309,10 +309,10 @@ defmodule Lua do
   end
 
   @doc """
-  Loads a lua file into the environment. Any values returned in the global
+  Loads a Lua file into the environment. Any values returned in the global
   scope are thrown away.
 
-  Mimics the functionality of lua's [dofile](https://www.lua.org/manual/5.4/manual.html#pdf-dofile)
+  Mimics the functionality of Lua's [dofile](https://www.lua.org/manual/5.4/manual.html#pdf-dofile)
   """
   def load_file!(%__MODULE__{state: state} = lua, path) when is_binary(path) do
     case :luerl_new.dofile(String.to_charlist(path), [:return], state) do
