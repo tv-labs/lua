@@ -2,7 +2,7 @@
 
 <!-- MDOC !-->
 
-Lua is an ergonomic interface to [Luerl](https://github.com/rvirding/luerl), aiming to be the best way to use Luerl from Elixir.
+`Lua` is an ergonomic interface to [Luerl](https://github.com/rvirding/luerl), aiming to be the best way to use Luerl from Elixir.
 
 ## Features
 
@@ -11,9 +11,14 @@ Lua is an ergonomic interface to [Luerl](https://github.com/rvirding/luerl), aim
 * Deep-setting variables and state
 * Excellent documentation and guides for working with Luerl
 
+> #### Lua the Elixir library vs Lua the language {: .info}
+> When referring to this library, `Lua` will be stylized as a link.
+> 
+> References to Lua the language will be in plaintext and not linked.
+
 ## Executing Lua
 
-Lua can be run using the `eval!/2` function
+`Lua` can be run using the `eval!/2` function
 
 ``` elixir
     iex> {[4], _} =
@@ -45,7 +50,7 @@ lua = Lua.new() |> Lua.load_api(MyAPI)
 
 ## Calling Lua functions from Elixir
 
-Lua can be used to expose complex functions written in Elixir. In some cases, you may want to call Lua functions from Elixir. This can
+`Lua` can be used to expose complex functions written in Elixir. In some cases, you may want to call Lua functions from Elixir. This can
 be achieved with the `Lua.call_function!/3` function
 
 ``` elixir
@@ -75,6 +80,7 @@ defmodule Queue do
     # Pull out the global variable "my_queue" from lua
     queue = Lua.get!(state, [:my_queue])
     
+    # Call the Lua function table.insert(table, value)
     {[], state} = Lua.call_function!(state, [:table, :insert], [queue, v])
     
     # Return the modified lua state with no return values
@@ -99,4 +105,4 @@ lua = Lua.new() |> Lua.load_api(Queue)
 
 ## Credits
 
-Lua piggy-backs off of Robert Virding's Luerl project, which implements an Lua lexer, parser, and full-blown lua virtual machine that runs inside the BEAM.
+`Lua` piggy-backs off of Robert Virding's [Luerl](https://github.com/rvirding/luerl) project, which implements a Lua lexer, parser, and full-blown Lua virtual machine that runs inside the BEAM.
