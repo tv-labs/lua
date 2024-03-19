@@ -296,9 +296,9 @@ defmodule Lua do
   @doc """
   Decodes a Lua value from its internal form
 
-    iex> {encoded, lua} = Lua.encode!(Lua.new(), %{a: 1})
-    iex> Lua.decode!(lua, encoded)
-    [{"a", 1}]
+      iex> {encoded, lua} = Lua.encode!(Lua.new(), %{a: 1})
+      iex> Lua.decode!(lua, encoded)
+      [{"a", 1}]
 
   """
   def decode!(%__MODULE__{} = lua, value) do
