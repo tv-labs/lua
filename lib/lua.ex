@@ -82,7 +82,7 @@ defmodule Lua do
 
   @doc """
   Sets the path patterns that Lua will look in when requiring Lua scripts. For example,
-  if you store Lua files in your application's path directory:
+  if you store Lua files in your application's priv directory:
 
       iex> lua = Lua.new(exclude: [[:package], [:require]])
       iex> Lua.set_lua_paths(lua, ["myapp/priv/lua/?.lua", "myapp/lua/?/init.lua"])
