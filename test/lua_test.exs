@@ -222,22 +222,34 @@ defmodule LuaTest do
     end
   end
 
-  describe "encode!/1" do
+  describe "encode!/1 and decode!/1" do
     test "it can encode values into their internal representation" do
       lua = Lua.new()
 
       assert {"hello", lua} = Lua.encode!(lua, "hello")
+      assert "hello" = Lua.decode!(lua, "hello")
       assert {"hello", lua} = Lua.encode!(lua, :hello)
       assert {5, lua} = Lua.encode!(lua, 5)
-      assert {{:tref, _}, lua} = Lua.encode!(lua, %{a: 1, b: 2})
-      assert {{:tref, _}, _lua} = Lua.encode!(lua, [1, 2, 3, 4])
+      assert 5 = Lua.decode!(lua, 5)
+      assert {{:tref, _} = ref, lua} = Lua.encode!(lua, %{a: 1, b: 2})
+      assert [{"a", 1}, {"b", 2}] = Lua.decode!(lua, ref)
+      assert {{:tref, _} = ref, lua} = Lua.encode!(lua, [1, 2])
+      assert [{1, 1}, {2, 2}] = Lua.decode!(lua, ref)
     end
 
     test "it raises for values that cannot be encoded" do
-      error = "Lua runtime error: Failed to encode value"
+      error = "Lua runtime error: Failed to encode {:foo, :bar}"
 
       assert_raise Lua.RuntimeException, error, fn ->
         Lua.encode!(Lua.new(), {:foo, :bar})
+      end
+    end
+
+    test "it raises for values that cannot be decoded" do
+      error = "Lua runtime error: Failed to decode :hello"
+
+      assert_raise Lua.RuntimeException, error, fn ->
+        Lua.decode!(Lua.new(), :hello)
       end
     end
   end

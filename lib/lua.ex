@@ -252,7 +252,17 @@ defmodule Lua do
     {encoded, wrap(state)}
   rescue
     ArgumentError ->
-      reraise Lua.RuntimeException, "Failed to encode value", __STACKTRACE__
+      reraise Lua.RuntimeException, "Failed to encode #{inspect(value)}", __STACKTRACE__
+  end
+
+  @doc """
+  Decodes a Lua value from its internal form
+  """
+  def decode!(%__MODULE__{} = lua, value) do
+    :luerl_new.decode(value, lua.state)
+  rescue
+    ArgumentError ->
+      reraise Lua.RuntimeException, "Failed to decode #{inspect(value)}", __STACKTRACE__
   end
 
   @doc """
