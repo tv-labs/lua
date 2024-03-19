@@ -75,6 +75,7 @@ defmodule Queue do
     # Pull out the global variable "my_queue" from lua
     queue = Lua.get!(state, [:my_queue])
     
+    # Call the Lua function table.insert(table, value)
     {[], state} = Lua.call_function!(state, [:table, :insert], [queue, v])
     
     # Return the modified lua state with no return values

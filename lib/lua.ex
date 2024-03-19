@@ -37,16 +37,32 @@ defmodule Lua do
   end
 
   @doc """
-  Initializes a Lua VM sandbox. All library functions are stubbed out,
-  so no access to the filesystem or the execution environment is exposed.
+  Initializes a Lua VM sandbox
+
+      iex> Lua.new()
+
+  By default, potentially dangerous functions are sandboxed. To disable, use the `sandboxed` option
+
+      iex> Lua.new(sandboxed: [])
+
+  Alternatively, you can pass your own list of functions to sandbox. This is equivalent to calling
+  `Lua.sandbox/2`.
+
+      iex> Lua.new(sandboxed: [[:os, :exit]])
+
 
   ## Options
   * `:sandboxed` - list of paths to be sandboxed, e.g. `sandboxed: [[:require], [:os, :exit]]`
+  * `:exclude` - list of paths to exclude from the sandbox, e.g. `exclude: [[:require], [:package]]`
   """
   def new(opts \\ []) do
-    sandboxed = Keyword.get(opts, :sandboxed, @default_sandbox)
+    opts = Keyword.validate!(opts, sandboxed: @default_sandbox, exclude: [])
+    exclude = Keyword.fetch!(opts, :exclude)
 
-    Enum.reduce(sandboxed, %__MODULE__{state: :luerl.init()}, &sandbox(&2, &1))
+    opts
+    |> Keyword.fetch!(:sandboxed)
+    |> Enum.reject(fn path -> path in exclude end)
+    |> Enum.reduce(%__MODULE__{state: :luerl.init()}, &sandbox(&2, &1))
   end
 
   @doc """
@@ -65,8 +81,26 @@ defmodule Lua do
   end
 
   @doc """
-  Sets the path patterns that Lua will look in when requiring Lua scripts.
+  Sets the path patterns that Lua will look in when requiring Lua scripts. For example,
+  if you store Lua files in your application's path directory:
+
+      iex> lua = Lua.new(exclude: [[:package], [:require]])
+      iex> Lua.set_lua_paths(lua, ["myapp/priv/lua/?.lua", "myapp/lua/?/init.lua"])
+
+  Now you can use the [Lua require](https://www.lua.org/pil/8.1.html) function to import
+  these scripts
+
+  > #### Warning {: .warning}
+  > In order to use `Lua.set_lua_paths/2`, the following functions cannot be sandboxed:
+  > * `[:package]`
+  > * `[:require]`
+  >
+  > By default these are sandboxed, see the `:exclude` option in `Lua.new/1` to allow them.
   """
+  def set_lua_paths(%__MODULE__{} = lua, paths) when is_list(paths) do
+    set_lua_paths(lua, Enum.join(paths, ";"))
+  end
+
   def set_lua_paths(%__MODULE__{} = lua, paths) when is_binary(paths) do
     set!(lua, ["package", "path"], paths)
   end
@@ -149,10 +183,7 @@ defmodule Lua do
       iex> Lua.get!(state, [:a, :b, :c])
       "nested"
   """
-  def get!(%__MODULE__{state: state}, keys), do: get!(state, keys)
-
-  # TODO remove this version
-  def get!(state, keys) when is_tuple(state) do
+  def get!(%__MODULE__{state: state}, keys) do
     case :luerl_new.get_table_keys_dec(keys, state) do
       {:ok, value, _state} ->
         value
@@ -164,8 +195,11 @@ defmodule Lua do
   end
 
   @doc """
-  Evalutes the script or chunk, returning the result and
-  discarding side effects in the state
+  Evaluates the Lua script, returning any returned values and the updated
+  Lua environment
+
+      iex> {[42], _} = Lua.eval!(Lua.new(), "return 42")
+
   """
   def eval!(state \\ new(), script)
 
@@ -246,6 +280,10 @@ defmodule Lua do
 
   @doc """
   Encodes a Lua value into its internal form
+
+      iex> {encoded, _} = Lua.encode!(Lua.new(), %{a: 1})
+      iex> encoded
+      {:tref, 14}
   """
   def encode!(%__MODULE__{} = lua, value) do
     {encoded, state} = :luerl_new.encode(value, lua.state)
@@ -257,6 +295,11 @@ defmodule Lua do
 
   @doc """
   Decodes a Lua value from its internal form
+
+    iex> {encoded, lua} = Lua.encode!(Lua.new(), %{a: 1})
+    iex> Lua.decode!(lua, encoded)
+    [{"a", 1}]
+
   """
   def decode!(%__MODULE__{} = lua, value) do
     :luerl_new.decode(value, lua.state)
@@ -266,7 +309,7 @@ defmodule Lua do
   end
 
   @doc """
-  Loads a lua file into the environment. Any values returned in the globa
+  Loads a lua file into the environment. Any values returned in the global
   scope are thrown away.
 
   Mimics the functionality of lua's [dofile](https://www.lua.org/manual/5.4/manual.html#pdf-dofile)
@@ -289,8 +332,9 @@ defmodule Lua do
   end
 
   @doc """
-  Inject functions written with the `deflua` macro into the Lua
-  runtime
+  Inject functions written with the `deflua` macro into the Lua runtime
+
+  Similar to `:luerl_new.load_module/3` but without the `install` callback
   """
   def load_api(lua, module, scope \\ nil) do
     funcs = :functions |> module.__info__() |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
