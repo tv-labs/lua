@@ -3,6 +3,23 @@ defmodule Lua.CompilerException do
 
   alias Lua.Util
 
+  def exception(errors) when is_list(errors) do
+    for error <- errors do
+      Util.format_error(error)
+    end
+
+    errors = Enum.map_join(errors, "\n", &Util.format_error/1)
+
+    message = """
+    Failed to compile Lua!
+
+    #{errors}
+
+    """
+
+    %__MODULE__{message: message}
+  end
+
   def exception({:lua_error, error, state}) do
     stacktrace = Luerl.New.get_stacktrace(state)
 

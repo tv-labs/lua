@@ -1,7 +1,8 @@
 defmodule LuaTest do
   use ExUnit.Case, async: true
 
-  alias Lua
+  # import Lua, only: [sigil_LUA: 1]
+  import Lua
 
   doctest Lua
 
@@ -19,6 +20,27 @@ defmodule LuaTest do
       lua = Lua.set!(lua, [:bar, :my_func], fn _, _ -> [] end)
 
       assert inspect(lua) == "#Lua<>"
+    end
+  end
+
+  describe "~LUA" do
+    test "it can validate code at compile time" do
+      message = """
+      Failed to compile Lua!
+
+      Failed to tokenize: illegal token on line 1: \"hi)
+
+      """
+
+      assert_raise Lua.CompilerException, message, fn ->
+        Code.compile_quoted(
+          quote do
+            import Lua
+
+            ~LUA[print("hi)]
+          end
+        )
+      end
     end
   end
 
