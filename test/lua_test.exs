@@ -1,7 +1,6 @@
 defmodule LuaTest do
   use ExUnit.Case, async: true
 
-  # import Lua, only: [sigil_LUA: 1]
   import Lua
 
   doctest Lua
@@ -38,6 +37,29 @@ defmodule LuaTest do
             import Lua
 
             ~LUA[print("hi)]
+          end
+        )
+      end
+    end
+
+    test "it can handle multi-line programs" do
+      message = """
+      Failed to compile Lua!
+
+      Line 3: syntax error before: '&'
+
+      """
+
+      assert_raise Lua.CompilerException, message, fn ->
+        Code.compile_quoted(
+          quote do
+            import Lua
+
+            ~LUA"""
+            print("hi")
+
+            &return 1
+            """
           end
         )
       end

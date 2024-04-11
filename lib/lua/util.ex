@@ -31,6 +31,9 @@ defmodule Lua.Util do
         # print what the object was that they tried to access
         "invalid index \"#{message}\""
 
+      {line, _type, {:user, message}} ->
+        "Line #{line}: #{message}"
+
       {line, _type, message} ->
         "Line #{line}: #{message}"
 
