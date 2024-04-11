@@ -66,14 +66,23 @@ defmodule Lua do
   end
 
   @doc """
-  Write Lua code that is parsed at compile-time. If the code cannot
-  be lexed and parsed, it raises a `Lua.CompilerException`
+  Write Lua code that is parsed at compile-time.
 
-      iex> ~LUA(return 2 + 2)
+
+      iex> ~LUA"return 2 + 2"
       "return 2 + 2"
+
+  If the code cannot be lexed and parsed, it raises a `Lua.CompilerException`
+
+      #iex> ~LUA":not_lua"
+      ** (Lua.CompilerException) Failed to compile Lua!
   """
   defmacro sigil_LUA(code, _opts) do
-    {code, []} = Code.eval_quoted(code)
+    code =
+      case code do
+        {:<<>>, _, [literal]} -> literal
+        _ -> raise "~Lua only accepts string literals, received:\n\n#{Macro.to_string(code)}"
+      end
 
     raise_on_invalid_lua!(code)
 
@@ -435,7 +444,6 @@ defmodule Lua do
   defp raise_on_invalid_lua!(code) when is_binary(code) do
     case :luerl_comp.string(code, [:return]) do
       {:ok, _chunk} -> :ok
-      :error -> raise Lua.CompilerException, {:lua_error, "shit", "fuck"}
       {:error, error, _warnings} -> raise Lua.CompilerException, error
     end
   end
