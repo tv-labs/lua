@@ -47,8 +47,8 @@ defmodule Lua.API do
   A `Lua.API` can provide an optional `install/1` callback, which
   can run arbitrary Lua code or change the `Lua` state in any way.
 
-  A `install/1` callback takes a t:Lua.t and should either return a
-  Lua script to be evaluated, or return a new t:Lua.t
+  An `install/1` callback takes a `t:Lua.t/0` and should either return a
+  Lua script to be evaluated, or return a new `t:Lua.t/0`
 
       defmodule WithInstall do
         use Lua.API, scope: "install"
