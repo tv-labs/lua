@@ -3,6 +3,58 @@ defmodule Lua.APITest do
 
   alias Lua
 
+  describe "install/1 callback" do
+    test "it can modify global lua state" do
+      assert [{module, _}] =
+               Code.compile_string("""
+               defmodule WithInstall do
+                 use Lua.API
+
+                 @impl Lua.API
+                 def install(lua) do
+                   {[ret], lua} = Lua.call_function!(lua, [:foo], [])
+
+                   Lua.set!(lua, [:from_install], ret)
+                 end
+
+                 deflua foo do
+                   "foo"
+                 end
+               end
+               """)
+
+      lua = Lua.load_api(Lua.new(), module)
+
+      assert {["foo"], _} =
+               Lua.eval!(lua, """
+               return from_install
+               """)
+    end
+
+    test "it can return lua code directly" do
+      assert [{module, _}] =
+               Code.compile_string("""
+               defmodule WithLua do
+                 use Lua.API
+
+                 import Lua
+
+                 @impl Lua.API
+                 def install(_lua) do
+                   ~LUA[whoa = "crazy"]
+                 end
+               end
+               """)
+
+      lua = Lua.load_api(Lua.new(), module)
+
+      assert {["crazy"], _} =
+               Lua.eval!(lua, """
+               return whoa
+               """)
+    end
+  end
+
   describe "deflua" do
     test "can access the current lua state" do
       assert [{module, _}] =

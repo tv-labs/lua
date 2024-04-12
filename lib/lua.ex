@@ -5,6 +5,8 @@ defmodule Lua do
              |> String.split("<!-- MDOC !-->")
              |> Enum.fetch!(1)
 
+  @type t :: %__MODULE__{}
+
   defstruct [:state]
 
   alias Luerl.New, as: Luerl
@@ -358,9 +360,9 @@ defmodule Lua do
   end
 
   @doc """
-  Inject functions written with the `deflua` macro into the Lua runtime
+  Inject functions written with the `deflua` macro into the Lua runtime.
 
-  Similar to `:luerl_new.load_module/3` but without the `install` callback
+  See `Lua.API` for more information on writing api modules
   """
   def load_api(lua, module, scope \\ nil) do
     funcs = :functions |> module.__info__() |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
@@ -380,6 +382,7 @@ defmodule Lua do
         end
       )
     end)
+    |> Lua.API.install(module)
   end
 
   defp wrap_variadic_function(module, function_name, with_state?) do

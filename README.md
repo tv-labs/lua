@@ -22,7 +22,7 @@
 
 ``` elixir
     iex> {[4], _} =
-    ...>   Lua.eval!("""
+    ...>   Lua.eval!(~LUA"""
     ...>   return 2 + 2
     ...>   """)
 
@@ -42,7 +42,7 @@ end
 lua = Lua.new() |> Lua.load_api(MyAPI)
 
 {[10], _} =
-  Lua.eval!(lua, """
+  Lua.eval!(lua, ~LUA"""
   return double(5)
   """)
 
@@ -64,7 +64,7 @@ end
 
 lua = Lua.new() |> Lua.load_api(MyAPI)
 
-{["wow"], _} = Lua.eval!(lua, "return example.foo(\"WOW\")")
+{["wow"], _} = Lua.eval!(lua, ~LUA"return example.foo(\"WOW\")")
 ```
 
 ## Modify Lua state from Elixir
