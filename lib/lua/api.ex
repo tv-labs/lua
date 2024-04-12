@@ -42,6 +42,37 @@ defmodule Lua.API do
         def baz(v), do: v
       end
 
+  ## Installing an APi
+
+  A `Lua.API` can provide an optional `install/1` callback, which
+  can run arbitrary Lua code or change the `Lua` state in any way.
+
+  A `install/1` callback takes a t:Lua.t and should either return a
+  Lua script to be evaluated, or return a new t:Lua.t
+
+      defmodule WithInstall do
+        use Lua.API, scope: "install"
+
+        @impl Lua.API
+        def install(lua) do
+          Lua.set!(lua, [:foo], "bar")
+        end
+      end
+
+  If you don't need to write Elixir, but want to execute some Lua
+  to setup global variables, modify state, or expose some additonal
+  APIs, you can simply return a Lua script directly
+
+      defmodule WithLua do
+        use Lua.API, scope: "whoa"
+
+        import Lua
+
+        @impl Lua.API
+        def install(_lua) do
+          ~LUA[print("Hello at install time!")]
+        end
+      end
   """
 
   defmacro __using__(opts) do
@@ -63,6 +94,8 @@ defmodule Lua.API do
   end
 
   @callback scope :: list(String.t())
+  @callback install(Lua.t()) :: Lua.t() | String.t()
+  @optional_callbacks [install: 1]
 
   @doc """
   Raises a runtime exception inside an API function, displaying contextual
@@ -117,6 +150,26 @@ defmodule Lua.API do
                       @lua_function
                     )
       def unquote(fa), do: unquote(block)
+    end
+  end
+
+  @doc false
+  def install(lua, module) do
+    if function_exported?(module, :install, 1) do
+      case module.install(lua) do
+        %Lua{} = lua ->
+          lua
+
+        code when is_binary(code) ->
+          {_, lua} = Lua.eval!(lua, code)
+          lua
+
+        other ->
+          raise Lua.RuntimeException,
+                "Lua.API.install/1 must return %Lua{} or a Lua literal, got #{inspect(other)}"
+      end
+    else
+      lua
     end
   end
 
