@@ -42,7 +42,7 @@ defmodule Lua.API do
         def baz(v), do: v
       end
 
-  ## Installing an APi
+  ## Installing an API
 
   A `Lua.API` can provide an optional `install/1` callback, which
   can run arbitrary Lua code or change the `Lua` state in any way.
