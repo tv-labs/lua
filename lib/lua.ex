@@ -88,9 +88,7 @@ defmodule Lua do
 
     raise_on_invalid_lua!(code)
 
-    quote do
-      unquote(code)
-    end
+    code
   end
 
   @doc """
