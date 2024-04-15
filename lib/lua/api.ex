@@ -119,7 +119,7 @@ defmodule Lua.API do
   @doc """
   Define a function that can be exposed in Lua
   """
-  defmacro deflua(fa, state, do: block) do
+  defmacro deflua(fa, state, rest) do
     {fa, _acc} =
       Macro.prewalk(fa, false, fn
         {name, context, args}, false -> {{name, context, args ++ List.wrap(state)}, true}
@@ -135,11 +135,11 @@ defmodule Lua.API do
                       __MODULE__,
                       @lua_function
                     )
-      def unquote(fa), do: unquote(block)
+      def unquote(fa), unquote(rest)
     end
   end
 
-  defmacro deflua(fa, do: block) do
+  defmacro deflua(fa, rest) do
     {name, _, _} = fa
 
     quote do
@@ -149,7 +149,7 @@ defmodule Lua.API do
                       __MODULE__,
                       @lua_function
                     )
-      def unquote(fa), do: unquote(block)
+      def unquote(fa), unquote(rest)
     end
   end
 
