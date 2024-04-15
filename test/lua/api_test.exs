@@ -238,5 +238,23 @@ defmodule Lua.APITest do
         """)
       end
     end
+
+    test "deflua functions can rescue" do
+      assert [{module, _}] =
+               Code.compile_string("""
+               defmodule Rescueable do
+                 use Lua.API
+
+                 deflua fail(a, b) do
+                   a + b
+                 rescue
+                   _ -> "rescued"
+                 end
+               end
+               """)
+
+      assert module.fail(1, 2) == 3
+      assert module.fail(1, "2") == "rescued"
+    end
   end
 end
