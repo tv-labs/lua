@@ -43,7 +43,11 @@ defmodule Lua do
 
       iex> Lua.new()
 
-  By default, potentially dangerous functions are sandboxed. To disable, use the `sandboxed` option
+  By default, the following Lua functions are sandboxed.
+
+  #{Enum.map_join(@default_sandbox, "\n", fn func -> "* `#{inspect(func)}`" end)}
+
+  To disable, use the `sandboxed` option, passing an empty list
 
       iex> Lua.new(sandboxed: [])
 

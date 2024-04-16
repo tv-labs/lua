@@ -6,9 +6,10 @@
 
 ## Features
 
-* Ergonomic API for Elixir <> Lua FFI
-* Improved error messages
-* Deep-setting variables and state
+* `~LUA` sigil for validating Lua code at compile-time
+* `deflua` macro for exposing Elixir functions to Lua
+* Improved error messages and sandboxing
+* Deep setting/getting variables and state
 * Excellent documentation and guides for working with Luerl
 
 > #### Lua the Elixir library vs Lua the language {: .info}
