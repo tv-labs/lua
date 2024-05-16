@@ -144,7 +144,7 @@ defmodule Lua.API do
 
   Technically, all Lua functions are variadic, which means they can receive
   a variable number of arguments. As a convenience, `Lua` applies your arguments to
-  `deflua` functions so that they can be written an idiomatic style.
+  `deflua` functions so that they can be written in idiomatic Elixir.
 
   If you need to handle variadic arguments, annotate the function with the `@variadic`
   module attribute.
