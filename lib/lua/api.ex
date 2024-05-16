@@ -149,7 +149,7 @@ defmodule Lua.API do
   If you need to handle variadic arguments, annotate the function with the `@variadic`
   module attribute.
 
-      @variadiac true
+      @variadic true
       deflua print(args) do
         IO.puts(Enum.join(args, " "))
       end
