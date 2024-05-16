@@ -551,6 +551,14 @@ defmodule LuaTest do
       end
     end
 
+    defmodule NoFuncsScope do
+      use Lua.API, scope: "scope"
+    end
+
+    defmodule NoFuncsGlobal do
+      use Lua.API
+    end
+
     setup do
       {:ok, lua: Lua.new()}
     end
@@ -580,6 +588,20 @@ defmodule LuaTest do
 
       assert {["a default"], _} = Lua.eval!(lua, "return scope.test(\"a\")")
       assert {["a b"], _} = Lua.eval!(lua, "return scope.test(\"a\", \"b\")")
+    end
+
+    test "if no functions are exposed, it still creates the scope", %{lua: lua} do
+      lua = Lua.load_api(lua, NoFuncsScope)
+
+      assert {["table"], _} = Lua.eval!(lua, "return type(scope)")
+    end
+
+    test "if the api has no scope defined, it doesnt break anything" do
+      {[], lua} = Lua.eval!("global_var = 22")
+
+      lua = Lua.load_api(lua, NoFuncsGlobal)
+
+      {[22], _} = Lua.eval!(lua, "return global_var")
     end
   end
 
