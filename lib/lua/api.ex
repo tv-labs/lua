@@ -117,7 +117,48 @@ defmodule Lua.API do
   end
 
   @doc """
-  Define a function that can be exposed in Lua
+  Defines a function that can be exposed in Lua through `Lua.load_api/3`
+
+      deflua add_two(number) do
+        number + 2
+      end
+
+  ## Accessing state
+
+  Sometimes, you may want to access or modify the Lua environment in a `deflua`. This
+  can be done by using the following syntax
+
+      deflua get_value(key), state do
+        # Access the Lua environment
+        Lua.get!(lua, [key])
+      end
+
+  To modify and return new state, return a tuple
+
+      deflua set_value(key, value), state do
+        # Return nothing but modify the state
+        {[], Lua.set!(lua, [key])}
+      end
+
+  ## Variadic functions
+
+  Technically, all Lua functions are variadic, which means they can receive
+  a variable number of arguments. As a convenience, `Lua` applies your arguments to
+  `deflua` functions so that they can be written an idiomatic style.
+
+  If you need to handle variadic arguments, annotate the function with the `@variadic`
+  module attribute.
+
+      @variadiac true
+      deflua print(args) do
+        IO.puts(Enum.join(args, " "))
+      end
+
+  > #### @variadic behavior {: .neutal}
+  > When using the `@variadic` attribute, note that it is per-function. `Lua` will
+  > reset this attribute after every function definition, so there is no need to
+  > manually reset it yourself
+
   """
   defmacro deflua(fa, state, rest) do
     {fa, _acc} =
@@ -139,6 +180,9 @@ defmodule Lua.API do
     end
   end
 
+  @doc """
+  See `deflua/3`
+  """
   defmacro deflua(fa, rest) do
     {name, _, _} = fa
 
