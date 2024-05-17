@@ -544,6 +544,11 @@ defmodule LuaTest do
       deflua test(a, b \\ "default") do
         "#{a} #{b}"
       end
+
+      @variadic true
+      deflua with_state(args), state do
+        {args, state}
+      end
     end
 
     setup do
@@ -563,6 +568,11 @@ defmodule LuaTest do
     test "inject a variadic function", %{lua: lua} do
       lua = Lua.load_api(lua, TestModule, ["scope"])
       assert {["a-b-c"], _} = Lua.eval!(lua, "return scope.bar('a', 'b', 'c')")
+    end
+
+    test "inject a variadic function with state", %{lua: lua} do
+      lua = Lua.load_api(lua, TestModule, ["scope"])
+      assert {["a", "b", "c"], _} = Lua.eval!(lua, "return scope.with_state('a', 'b', 'c')")
     end
 
     test "injects Elixir functions that have multiple arities", %{lua: lua} do
