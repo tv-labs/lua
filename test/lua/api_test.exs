@@ -219,6 +219,26 @@ defmodule Lua.APITest do
              ]
     end
 
+    test "variadic functions can have state" do
+      assert [{module, _}] =
+               Code.compile_string("""
+               defmodule VariadicWithState do
+                 use Lua.API
+
+                 @variadic true
+                 deflua foo(args), state do
+                   {args, state}
+                 end
+               end
+               """)
+
+      assert module.foo(["a", "b", "c"], :state) == {["a", "b", "c"], :state}
+
+      assert module.__lua_functions__() == [
+               {:foo, true, true}
+             ]
+    end
+
     test "if there is mixed usage of state for a function, it raises an error" do
       error = "Five.foo() is inconsistently using state. Please make all clauses consistent"
 
