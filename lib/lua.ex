@@ -392,7 +392,7 @@ defmodule Lua do
 
     if with_state? do
       fn args, state ->
-        execute_function(module, function_name, [args] ++ [wrap(state)])
+        execute_function(module, function_name, [args, wrap(state)])
       end
     else
       fn args ->
