@@ -42,6 +42,14 @@ defmodule LuaTest do
       end
     end
 
+    test "it returns the Lua string by default" do
+      assert ~LUA[print("hello")] == ~S[print("hello")]
+    end
+
+    test "it returns chunks with the ~LUA c option" do
+      assert %Lua.Chunk{} = ~LUA[print("hello")]c
+    end
+
     test "it can handle multi-line programs" do
       message = """
       Failed to compile Lua!
@@ -164,6 +172,15 @@ defmodule LuaTest do
 
       assert {[], %Lua{}} = Lua.eval!(lua, "foo(5)")
       assert {[2], %Lua{}} = Lua.eval!(lua, "return foo(1)")
+    end
+
+    test "it can evaluate chunks" do
+      assert %Lua.Chunk{} = chunk = ~LUA[return 2 + 2]c
+      lua = Lua.new()
+
+      assert {ref, lua} = :luerl_emul.load_chunk(chunk.instructions, lua.state)
+
+      assert {:ok, [4], _} = :luerl_new.call_chunk(ref, lua)
     end
 
     test "invalid functions raise" do

@@ -9,8 +9,6 @@ defmodule Lua do
 
   defstruct [:state]
 
-  alias Luerl.New, as: Luerl
-
   alias Lua.Util
 
   @default_sandbox [
@@ -74,7 +72,6 @@ defmodule Lua do
   @doc """
   Write Lua code that is parsed at compile-time.
 
-
       iex> ~LUA"return 2 + 2"
       "return 2 + 2"
 
@@ -82,17 +79,28 @@ defmodule Lua do
 
       #iex> ~LUA":not_lua"
       ** (Lua.CompilerException) Failed to compile Lua!
+
+  As an optimization, the `c` modifier can be used to return a pre-compiled Lua chunk
+
+      iex> ~LUA"return 2 + 2"c
   """
-  defmacro sigil_LUA(code, _opts) do
+  defmacro sigil_LUA(code, opts) do
     code =
       case code do
         {:<<>>, _, [literal]} -> literal
         _ -> raise "~Lua only accepts string literals, received:\n\n#{Macro.to_string(code)}"
       end
 
-    raise_on_invalid_lua!(code)
+    chunk =
+      case :luerl_comp.string(code, [:return]) do
+        {:ok, chunk} -> %Lua.Chunk{instructions: chunk}
+        {:error, error, _warnings} -> raise Lua.CompilerException, error
+      end
 
-    code
+    case opts do
+      [?c] -> Macro.escape(chunk)
+      _ -> code
+    end
   end
 
   @doc """
@@ -230,11 +238,18 @@ defmodule Lua do
 
       iex> {[42], _} = Lua.eval!(Lua.new(), "return 42")
 
+
+  `eval!/2` can also evaluate chunks by passing instead of a script. As a
+  peformance optimization, it is recommended to call `load_chunk/2` if you
+  will be executing a chunk many times, but it is not necessary.
+
+      iex> {[4], _} = Lua.eval!(~LUA[return 2 + 2]c)
+
   """
   def eval!(state \\ new(), script)
 
   def eval!(%__MODULE__{state: state} = lua, script) when is_binary(script) do
-    case Luerl.do_dec(state, script) do
+    case :luerl_new.do_dec(script, state) do
       {:ok, result, new_state} ->
         {result, %__MODULE__{lua | state: new_state}}
 
@@ -255,6 +270,48 @@ defmodule Lua do
 
     e ->
       reraise Lua.RuntimeException, e, __STACKTRACE__
+  end
+
+  def eval!(%__MODULE__{} = lua, %Lua.Chunk{} = chunk) do
+    {chunk, lua} = load_chunk(lua, chunk)
+
+    case :luerl_new.call_chunk(chunk.ref, lua.state) do
+      {:ok, result, new_state} ->
+        {result, %__MODULE__{lua | state: new_state}}
+
+      {:lua_error, _e, _state} = error ->
+        raise Lua.RuntimeException, error
+
+      {:error, [error | _], _} ->
+        raise Lua.CompilerException, error
+    end
+  rescue
+    e in [UndefinedFunctionError] ->
+      reraise Lua.RuntimeException,
+              Util.format_function([e.module, e.function], e.arity),
+              __STACKTRACE__
+
+    e in [Lua.RuntimeException, Lua.CompilerException] ->
+      reraise e, __STACKTRACE__
+
+    e ->
+      reraise Lua.RuntimeException, e, __STACKTRACE__
+  end
+
+  @doc """
+  Similar to `:luerl_new.load/3`, it takes a `t:Lua.Chunk.t`, and loads
+  it into state so that it can be evaluated via `eval!/2`
+
+      iex> {%Lua.Chunk{}, %Lua{}} = Lua.load_chunk(Lua.new(), ~LUA[return 2 + 2]c)
+  """
+  def load_chunk(%__MODULE__{state: state} = lua, %Lua.Chunk{ref: nil} = chunk) do
+    {ref, state} = :luerl_emul.load_chunk(chunk.instructions, state)
+
+    {%Lua.Chunk{chunk | ref: ref}, %__MODULE__{lua | state: state}}
+  end
+
+  def load_chunk(%__MODULE__{} = lua, %Lua.Chunk{} = chunk) do
+    {chunk, lua}
   end
 
   @doc """
@@ -455,11 +512,4 @@ defmodule Lua do
   end
 
   defp wrap(state), do: %__MODULE__{state: state}
-
-  defp raise_on_invalid_lua!(code) when is_binary(code) do
-    case :luerl_comp.string(code, [:return]) do
-      {:ok, _chunk} -> :ok
-      {:error, error, _warnings} -> raise Lua.CompilerException, error
-    end
-  end
 end
