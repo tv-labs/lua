@@ -370,6 +370,8 @@ defmodule Lua do
     funcs = :functions |> module.__info__() |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
     scope = scope || module.scope()
 
+    lua = ensure_scope!(lua, scope)
+
     module.__lua_functions__()
     |> Enum.reduce(lua, fn {name, with_state?, variadic?}, lua ->
       arities = Map.get(funcs, name)
@@ -442,6 +444,14 @@ defmodule Lua do
     thrown_value ->
       {:error,
        "Value thrown during function '#{function_name}' execution: #{inspect(thrown_value)}"}
+  end
+
+  defp ensure_scope!(lua, []) do
+    lua
+  end
+
+  defp ensure_scope!(lua, scope) do
+    set!(lua, scope, %{})
   end
 
   defp wrap(state), do: %__MODULE__{state: state}
