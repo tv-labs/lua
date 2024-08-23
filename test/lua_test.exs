@@ -176,11 +176,8 @@ defmodule LuaTest do
 
     test "it can evaluate chunks" do
       assert %Lua.Chunk{} = chunk = ~LUA[return 2 + 2]c
-      lua = Lua.new()
 
-      assert {ref, lua} = :luerl_emul.load_chunk(chunk.instructions, lua.state)
-
-      assert {:ok, [4], _} = :luerl_new.call_chunk(ref, lua)
+      assert {[4], _} = Lua.eval!(chunk)
     end
 
     test "invalid functions raise" do
@@ -220,6 +217,23 @@ defmodule LuaTest do
         os.exit(1)
         """)
       end
+    end
+  end
+
+  describe "load_chunk/2" do
+    test "loads a chunk into state" do
+      assert %Lua.Chunk{ref: nil} = chunk = ~LUA[print("hello")]c
+      assert {%Lua.Chunk{} = chunk, %Lua{}} = Lua.load_chunk(Lua.new(), chunk)
+      assert chunk.ref
+    end
+
+    test "chunks can be loaded multiple times" do
+      lua = Lua.new()
+      chunk = ~LUA[print("hello")]c
+
+      assert {chunk, lua} = Lua.load_chunk(lua, chunk)
+      assert {chunk, lua} = Lua.load_chunk(lua, chunk)
+      assert {_chunk, _lua} = Lua.load_chunk(lua, chunk)
     end
   end
 
