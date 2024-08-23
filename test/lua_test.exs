@@ -42,6 +42,14 @@ defmodule LuaTest do
       end
     end
 
+    test "it returns the Lua string by default" do
+      assert ~LUA[print("hello")] == ~S[print("hello")]
+    end
+
+    test "it returns chunks with the ~LUA c option" do
+      assert %Lua.Chunk{} = ~LUA[print("hello")]c
+    end
+
     test "it can handle multi-line programs" do
       message = """
       Failed to compile Lua!
@@ -166,6 +174,12 @@ defmodule LuaTest do
       assert {[2], %Lua{}} = Lua.eval!(lua, "return foo(1)")
     end
 
+    test "it can evaluate chunks" do
+      assert %Lua.Chunk{} = chunk = ~LUA[return 2 + 2]c
+
+      assert {[4], _} = Lua.eval!(chunk)
+    end
+
     test "invalid functions raise" do
       lua = Lua.new()
 
@@ -203,6 +217,23 @@ defmodule LuaTest do
         os.exit(1)
         """)
       end
+    end
+  end
+
+  describe "load_chunk/2" do
+    test "loads a chunk into state" do
+      assert %Lua.Chunk{ref: nil} = chunk = ~LUA[print("hello")]c
+      assert {%Lua.Chunk{} = chunk, %Lua{}} = Lua.load_chunk(Lua.new(), chunk)
+      assert chunk.ref
+    end
+
+    test "chunks can be loaded multiple times" do
+      lua = Lua.new()
+      chunk = ~LUA[print("hello")]c
+
+      assert {chunk, lua} = Lua.load_chunk(lua, chunk)
+      assert {chunk, lua} = Lua.load_chunk(lua, chunk)
+      assert {_chunk, _lua} = Lua.load_chunk(lua, chunk)
     end
   end
 
