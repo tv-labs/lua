@@ -1,0 +1,130 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# Working with Lua
+
+```elixir
+Mix.install([
+  {:lua, "~> 0.0.14"}
+])
+```
+
+## Setup
+
+```elixir
+import Lua, only: [sigil_LUA: 2]
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Lua
+```
+
+## Executing Lua
+
+```elixir
+code = ~LUA"""
+
+"""
+
+{value, %Lua{}} = Lua.eval!(code)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{[], #Lua<>}
+```
+
+## Getting and Setting values
+
+```elixir
+lua =
+  Lua.new()
+  |> Lua.set!([:dave], "Lucia")
+
+{["Grohl", "Lucia"], %Lua{} = lua} =
+  Lua.eval!(lua, ~LUA"""
+  local original = dave;
+
+  dave = "Grohl"
+
+  return dave, original
+  """)
+
+Lua.get!(lua, [:dave])
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+"Grohl"
+```
+
+## Exposing Elixir functions
+
+`Lua` provides a module-based abstraction for defining APIs that can be called from Lua functions. Using `use Lua.API` with `deflua` defines APIs that are then loaded into the environment with the `Lua.load_api/2` function.
+
+In the example below, we load the `my_print` variadic function (a function that can take a variable number of arguments), and then call it from Lua.
+
+```elixir
+defmodule Global do
+  use Lua.API
+
+  @variadic true
+  deflua my_print(args) do
+    IO.puts(Enum.join(args, " "))
+  end
+end
+
+Lua.new()
+|> Lua.load_api(Global)
+|> Lua.eval!(~LUA"""
+my_print("one", "two", "three")
+""")
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+one two three
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{[], #Lua<>}
+```
+
+There is quite a bit of flexibility for how functions can be defined. The module itself can define a scope under which all functions will be defined. In the previous example, no scope was defined, so functions were exposed in the globalscope.
+
+Here we'll define a scope, "my.foo", and expose functions "bar" and "baz" underneath it
+
+```elixir
+defmodule MyFooAPI do
+  use Lua.API, scope: "my.foo"
+
+  deflua bar(string) do
+    "bar " <> string
+  end
+
+  deflua baz(string) do
+    "baz " <> string
+  end
+end
+
+{vals, %Lua{}} =
+  Lua.new()
+  |> Lua.load_api(MyFooAPI)
+  |> Lua.eval!(~LUA"""
+   return my.foo.bar("hi"), my.foo.baz("hello")
+  """)
+
+vals
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+["bar hi", "baz hello"]
+```
