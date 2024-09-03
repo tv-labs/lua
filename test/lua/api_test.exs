@@ -53,6 +53,29 @@ defmodule Lua.APITest do
                return whoa
                """)
     end
+
+    test "it can return lua chunks directly" do
+      assert [{module, _}] =
+               Code.compile_string("""
+               defmodule WithLuaChunk do
+                 use Lua.API
+
+                 import Lua
+
+                 @impl Lua.API
+                 def install(_lua) do
+                   ~LUA[whoa = "crazy"]c
+                 end
+               end
+               """)
+
+      lua = Lua.load_api(Lua.new(), module)
+
+      assert {["crazy"], _} =
+               Lua.eval!(lua, """
+               return whoa
+               """)
+    end
   end
 
   describe "deflua" do
