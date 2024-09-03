@@ -48,7 +48,7 @@ defmodule Lua.API do
   can run arbitrary Lua code or change the `Lua` state in any way.
 
   An `install/1` callback takes a `t:Lua.t/0` and should either return a
-  Lua script to be evaluated, or return a new `t:Lua.t/0`
+  Lua script to be evaluated, a `t:Lua.Chunk.t/0`, or return a new `t:Lua.t/0`
 
       defmodule WithInstall do
         use Lua.API, scope: "install"
@@ -61,7 +61,8 @@ defmodule Lua.API do
 
   If you don't need to write Elixir, but want to execute some Lua
   to setup global variables, modify state, or expose some additonal
-  APIs, you can simply return a Lua script directly
+  APIs, you can simply return a Lua chunk directly using the `c` modifier
+  on `Lua.sigil_LUA/2`
 
       defmodule WithLua do
         use Lua.API, scope: "whoa"
@@ -70,7 +71,7 @@ defmodule Lua.API do
 
         @impl Lua.API
         def install(_lua) do
-          ~LUA[print("Hello at install time!")]
+          ~LUA[print("Hello at install time!")]c
         end
       end
   """
@@ -204,13 +205,13 @@ defmodule Lua.API do
         %Lua{} = lua ->
           lua
 
-        code when is_binary(code) ->
+        code when is_binary(code) or is_struct(code, Lua.Chunk) ->
           {_, lua} = Lua.eval!(lua, code)
           lua
 
         other ->
           raise Lua.RuntimeException,
-                "Lua.API.install/1 must return %Lua{} or a Lua literal, got #{inspect(other)}"
+                "Lua.API.install/1 must return %Lua{}, %Lua.Chunk{}, or Lua literal, got #{inspect(other)}"
       end
     else
       lua
