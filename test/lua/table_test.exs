@@ -8,7 +8,6 @@ defmodule Lua.TableTest do
   defmacro assert_table(table) do
     quote bind_quoted: [table: table] do
       assert output = Lua.Table.as_string(table)
-      dbg(output)
       assert {[ret], _lua} = Lua.eval!("return " <> output)
       assert ret == table
       output
@@ -40,7 +39,7 @@ defmodule Lua.TableTest do
 
       assert Lua.Table.as_string(table) == ~S[{a = 1, b = "<userdata>"}]
 
-      assert Lua.Table.as_string(table, userdata: &inspect/1) == ~S[{a = 1, b = "~D[2024-09-22]"}]
+      assert Lua.Table.as_string(table, userdata: &inspect/1) == ~S<{a = 1, b = "~D[2024-09-22]"}>
     end
 
     # We can't handle self-referential tables as
