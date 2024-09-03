@@ -58,26 +58,31 @@ defmodule Lua.Table do
       iex> Lua.Table.as_string([{1, "foo"}, {2, "bar"}])
       ~S[{"foo", "bar"}]
 
+  ### Options
+  * `:userdata` - A 1-arity function used to format userdata. Defaults to `fn _ -> "<userdata>"`
+
   """
-  def as_string(table) do
-    "{" <> print_table(table) <> "}"
+  def as_string(table, opts \\ []) do
+    opts = Keyword.put_new(opts, :userdata, fn _ -> "<userdata>" end)
+
+    "{" <> print_table(table, opts[:userdata]) <> "}"
   end
 
   # List
-  defp print_table([{1, _} | _] = list) do
+  defp print_table([{1, _} | _] = list, userdata_formatter) do
     list
     |> Enum.reduce([], fn {_, value}, acc ->
-      [acc, if(acc == [], do: "", else: ", "), format_value(value)]
+      [acc, if(acc == [], do: "", else: ", "), format_value(value, userdata_formatter)]
     end)
     |> IO.iodata_to_binary()
   end
 
   # Table
-  defp print_table(table) do
+  defp print_table(table, userdata_formatter) do
     table
     |> Enum.reduce([], fn {key, value}, acc ->
       key_str = format_key(key)
-      value_str = format_value(value)
+      value_str = format_value(value, userdata_formatter)
 
       entry = "#{key_str} = #{value_str}"
 
@@ -107,21 +112,25 @@ defmodule Lua.Table do
     end
   end
 
-  defp format_value(value) when is_number(value) do
+  defp format_value(value, _) when is_number(value) do
     to_string(value)
   end
 
-  defp format_value(true), do: "true"
-  defp format_value(false), do: "false"
-  defp format_value(nil), do: "nil"
+  defp format_value(true, _), do: "true"
+  defp format_value(false, _), do: "false"
+  defp format_value(nil, _), do: "nil"
 
-  defp format_value(value) when is_list(value) do
-    str = print_table(value)
+  defp format_value(value, formatter) when is_list(value) do
+    str = print_table(value, formatter)
 
     "{#{str}}"
   end
 
-  defp format_value(value) do
+  defp format_value({:userdata, value}, formatter) do
+    format_value(formatter.(value), formatter)
+  end
+
+  defp format_value(value, _formatter) do
     inspect(value)
   end
 
