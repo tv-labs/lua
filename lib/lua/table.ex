@@ -49,6 +49,92 @@ defmodule Lua.Table do
   end
 
   @doc """
+  Converts a Lua table into a string representing
+  a Lua table literal
+
+      iex> Lua.Table.as_string([{"a", 1}, {"b", 2}])
+      "{a = 1, b = 2}"
+
+      iex> Lua.Table.as_string([{1, "foo"}, {2, "bar"}])
+      ~S[{"foo", "bar"}]
+
+  ### Options
+  * `:userdata` - A 1-arity function used to format userdata. Defaults to `fn _ -> "<userdata>"`
+
+  """
+  def as_string(table, opts \\ []) do
+    opts = Keyword.put_new(opts, :userdata, fn _ -> "<userdata>" end)
+
+    "{" <> print_table(table, opts[:userdata]) <> "}"
+  end
+
+  # List
+  defp print_table([{1, _} | _] = list, userdata_formatter) do
+    list
+    |> Enum.reduce([], fn {_, value}, acc ->
+      [acc, if(acc == [], do: "", else: ", "), format_value(value, userdata_formatter)]
+    end)
+    |> IO.iodata_to_binary()
+  end
+
+  # Table
+  defp print_table(table, userdata_formatter) do
+    table
+    |> Enum.reduce([], fn {key, value}, acc ->
+      key_str = format_key(key)
+      value_str = format_value(value, userdata_formatter)
+
+      entry = "#{key_str} = #{value_str}"
+
+      [acc, if(acc == [], do: "", else: ", "), entry]
+    end)
+    |> then(fn parts ->
+      IO.iodata_to_binary(parts)
+    end)
+  end
+
+  defp valid_identifier?(identifier) do
+    regex = ~r/^[[:alpha:]_][[:alnum:]_]*$/u
+    Regex.match?(regex, identifier)
+  end
+
+  defp format_key(number) when is_number(number) do
+    ["[", to_string(number), "]"]
+  end
+
+  defp format_key(key) do
+    key = to_string(key)
+
+    if valid_identifier?(key) do
+      key
+    else
+      ["[\"", key, "\"]"]
+    end
+  end
+
+  defp format_value(value, _) when is_number(value) do
+    to_string(value)
+  end
+
+  defp format_value(true, _), do: "true"
+  defp format_value(false, _), do: "false"
+  defp format_value(nil, _), do: "nil"
+
+  defp format_value(value, formatter) when is_list(value) do
+    str = print_table(value, formatter)
+
+    "{#{str}}"
+  end
+
+  defp format_value({:userdata, value}, formatter) do
+    format_value(formatter.(value), formatter)
+  end
+
+  defp format_value(value, _formatter) do
+    inspect(value)
+  end
+
+  @doc """
   Converts a Lua table into more "native" feeling lists and
   maps, deeply traversing any sub-tables.
 
