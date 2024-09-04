@@ -306,8 +306,9 @@ defmodule Lua do
   erorrs and warnings at runtime. If you would like to just load a chunk,
   use `load_chunk!/1` instead.
 
-
       iex> {:ok, %Lua.Chunk{}} = Lua.parse_chunk("local foo = 1")
+
+  Errors found during parsing will be returned as a list of formatted strings
 
       iex> Lua.parse_chunk("local foo =;")
       {:error, ["Line 1: syntax error before: ';'"]}
