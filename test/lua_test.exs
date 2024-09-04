@@ -28,7 +28,6 @@ defmodule LuaTest do
       Failed to compile Lua!
 
       Failed to tokenize: illegal token on line 1: \"hi)
-
       """
 
       assert_raise Lua.CompilerException, message, fn ->
@@ -55,7 +54,6 @@ defmodule LuaTest do
       Failed to compile Lua!
 
       Line 3: syntax error before: '&'
-
       """
 
       assert_raise Lua.CompilerException, message, fn ->
@@ -101,7 +99,7 @@ defmodule LuaTest do
       path = test_file("illegal_token")
 
       error = """
-      Failed to compile Lua script!
+      Failed to compile Lua!
 
       Failed to tokenize: illegal token on line 1: '
 
@@ -127,7 +125,7 @@ defmodule LuaTest do
       path = test_file("syntax_error")
 
       error = """
-      Failed to compile Lua script!
+      Failed to compile Lua!
 
       Line 1: syntax error before: ','
       """
@@ -142,7 +140,7 @@ defmodule LuaTest do
 
       error =
         """
-        Failed to compile Lua script!
+        Failed to compile Lua!
 
         undefined function nil
 
@@ -197,7 +195,7 @@ defmodule LuaTest do
     test "parsing errors raise" do
       lua = Lua.new()
 
-      assert_raise Lua.CompilerException, ~r/Failed to compile Lua script/, fn ->
+      assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
         Lua.eval!(lua, """
         local map = {a="1", b="2"}
 
@@ -220,20 +218,37 @@ defmodule LuaTest do
     end
   end
 
-  describe "load_chunk/2" do
+  describe "load_chunk!/2" do
     test "loads a chunk into state" do
       assert %Lua.Chunk{ref: nil} = chunk = ~LUA[print("hello")]c
-      assert {%Lua.Chunk{} = chunk, %Lua{}} = Lua.load_chunk(Lua.new(), chunk)
+      assert {%Lua.Chunk{} = chunk, %Lua{}} = Lua.load_chunk!(Lua.new(), chunk)
       assert chunk.ref
+    end
+
+    test "can load strings as well" do
+      assert {%Lua.Chunk{} = chunk, %Lua{}} = Lua.load_chunk!(Lua.new(), ~S[print("hello")])
+      assert chunk.ref
+    end
+
+    test "invalid strings raise Lua.CompilerException" do
+      message = """
+      Failed to compile Lua!
+
+      Line 1: syntax error before: ';'
+      """
+
+      assert_raise Lua.CompilerException, message, fn ->
+        Lua.load_chunk!(Lua.new(), "local foo = ;")
+      end
     end
 
     test "chunks can be loaded multiple times" do
       lua = Lua.new()
       chunk = ~LUA[print("hello")]c
 
-      assert {chunk, lua} = Lua.load_chunk(lua, chunk)
-      assert {chunk, lua} = Lua.load_chunk(lua, chunk)
-      assert {_chunk, _lua} = Lua.load_chunk(lua, chunk)
+      assert {chunk, lua} = Lua.load_chunk!(lua, chunk)
+      assert {chunk, lua} = Lua.load_chunk!(lua, chunk)
+      assert {_chunk, _lua} = Lua.load_chunk!(lua, chunk)
     end
   end
 
@@ -351,7 +366,7 @@ defmodule LuaTest do
       lua = Lua.new()
 
       error = """
-      Failed to compile Lua script!
+      Failed to compile Lua!
 
       Failed to tokenize: illegal token on line 1: ")
 
@@ -364,7 +379,7 @@ defmodule LuaTest do
       end
 
       error = """
-      Failed to compile Lua script!
+      Failed to compile Lua!
 
       Failed to tokenize: illegal token on line 1: "yuup)
 

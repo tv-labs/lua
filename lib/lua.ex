@@ -240,7 +240,7 @@ defmodule Lua do
 
 
   `eval!/2` can also evaluate chunks by passing instead of a script. As a
-  peformance optimization, it is recommended to call `load_chunk/2` if you
+  performance optimization, it is recommended to call `load_chunk!/2` if you
   will be executing a chunk many times, but it is not necessary.
 
       iex> {[4], _} = Lua.eval!(~LUA[return 2 + 2]c)
@@ -273,7 +273,7 @@ defmodule Lua do
   end
 
   def eval!(%__MODULE__{} = lua, %Lua.Chunk{} = chunk) do
-    {chunk, lua} = load_chunk(lua, chunk)
+    {chunk, lua} = load_chunk!(lua, chunk)
 
     case :luerl_new.call_chunk(chunk.ref, lua.state) do
       {:ok, result, new_state} ->
@@ -299,18 +299,58 @@ defmodule Lua do
   end
 
   @doc """
-  Similar to `:luerl_new.load/3`, it takes a `t:Lua.Chunk.t`, and loads
-  it into state so that it can be evaluated via `eval!/2`
+  Parses a chunk of Lua code into a `t:Lua.Chunk.t/0`, which then can
+  be loaded via `load_chunk!/2` or run via `eval!`.
 
-      iex> {%Lua.Chunk{}, %Lua{}} = Lua.load_chunk(Lua.new(), ~LUA[return 2 + 2]c)
+  This function is particularly useful for checking Lua code for syntax
+  erorrs and warnings at runtime. If you would like to just load a chunk,
+  use `load_chunk!/1` instead.
+
+      iex> {:ok, %Lua.Chunk{}} = Lua.parse_chunk("local foo = 1")
+
+  Errors found during parsing will be returned as a list of formatted strings
+
+      iex> Lua.parse_chunk("local foo =;")
+      {:error, ["Line 1: syntax error before: ';'"]}
+
   """
-  def load_chunk(%__MODULE__{state: state} = lua, %Lua.Chunk{ref: nil} = chunk) do
+  def parse_chunk(code) do
+    case :luerl_comp.string(code, [:return]) do
+      {:ok, chunk} ->
+        {:ok, %Lua.Chunk{instructions: chunk}}
+
+      {:error, errors, _warnings} ->
+        {:error, Enum.map(errors, &Util.format_error/1)}
+    end
+  end
+
+  @doc """
+  Loads string or `t:Lua.Chunk.t/0` into state so that it can be
+  evaluated via `eval!/2`
+
+  Strings can be loaded as chunks, which are parsed and loaded
+
+      iex> {%Lua.Chunk{}, %Lua{}} = Lua.load_chunk!(Lua.new(), "return 2 + 2")
+
+  Or a pre-compiled chunk can be loaded as well. Loaded chunks will be marked as loaded,
+  otherwise they will be re-loaded everytime `eval!/2` is called
+
+      iex> {%Lua.Chunk{}, %Lua{}} = Lua.load_chunk!(Lua.new(), ~LUA[return 2 + 2]c)
+  """
+  def load_chunk!(%__MODULE__{} = lua, code) when is_binary(code) do
+    case parse_chunk(code) do
+      {:ok, chunk} -> load_chunk!(lua, chunk)
+      {:error, errors} -> raise Lua.CompilerException, formatted: errors
+    end
+  end
+
+  def load_chunk!(%__MODULE__{state: state} = lua, %Lua.Chunk{ref: nil} = chunk) do
     {ref, state} = :luerl_emul.load_chunk(chunk.instructions, state)
 
     {%Lua.Chunk{chunk | ref: ref}, %__MODULE__{lua | state: state}}
   end
 
-  def load_chunk(%__MODULE__{} = lua, %Lua.Chunk{} = chunk) do
+  def load_chunk!(%__MODULE__{} = lua, %Lua.Chunk{} = chunk) do
     {chunk, lua}
   end
 
