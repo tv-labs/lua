@@ -31,7 +31,18 @@
 
 ## Exposing Elixir functions to Lua
 
-`Lua` provides the `deflua` macro for exposing Elixir functions to Lua
+The simplest way to expose an Elixir function to in Lua is using the `Lua.set!/3` function
+
+``` elixir
+lua = 
+  Lua.set!(Lua.new(), [:sum], fn args ->
+    [Enum.sum(args)]
+  end)
+
+{[10], _} = Lua.eval!(lua, ~LUA"return sum(1, 2, 3, 4)"c)
+```
+
+For easily expressing APIs, `Lua` provides the `deflua` macro for exposing Elixir functions to Lua
 
 ``` elixir
 defmodule MyAPI do
@@ -46,7 +57,6 @@ lua = Lua.new() |> Lua.load_api(MyAPI)
   Lua.eval!(lua, ~LUA"""
   return double(5)
   """)
-
 ```
 
 ## Calling Lua functions from Elixir

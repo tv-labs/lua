@@ -462,10 +462,16 @@ defmodule Lua do
   Inject functions written with the `deflua` macro into the Lua runtime.
 
   See `Lua.API` for more information on writing api modules
+
+  ### Options
+  * `:scope` - (optional) scope, overriding whatever is provided in `use Lua.API, scope: ...`
+  * `:data` - (optional) - data to be passed to the Lua.API.install/3 callback
+
   """
-  def load_api(lua, module, scope \\ nil) do
+  def load_api(lua, module, opts \\ []) do
+    opts = Keyword.validate!(opts, [:scope, :data])
     funcs = :functions |> module.__info__() |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
-    scope = scope || module.scope()
+    scope = opts[:scope] || module.scope()
 
     lua = ensure_scope!(lua, scope)
 
@@ -483,7 +489,7 @@ defmodule Lua do
         end
       )
     end)
-    |> Lua.API.install(module)
+    |> Lua.API.install(module, scope, opts[:data])
   end
 
   defp wrap_variadic_function(module, function_name, with_state?) do
