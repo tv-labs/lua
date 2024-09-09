@@ -3,7 +3,7 @@ defmodule Lua.APITest do
 
   alias Lua
 
-  describe "install/1 callback" do
+  describe "install/3 callback" do
     test "it can modify global lua state" do
       assert [{module, _}] =
                Code.compile_string("""
@@ -11,7 +11,7 @@ defmodule Lua.APITest do
                  use Lua.API
 
                  @impl Lua.API
-                 def install(lua) do
+                 def install(lua, _scope, _data) do
                    {[ret], lua} = Lua.call_function!(lua, [:foo], [])
 
                    Lua.set!(lua, [:from_install], ret)
@@ -40,7 +40,7 @@ defmodule Lua.APITest do
                  import Lua
 
                  @impl Lua.API
-                 def install(_lua) do
+                 def install(_lua, _scope, _data) do
                    ~LUA[whoa = "crazy"]
                  end
                end
@@ -63,7 +63,7 @@ defmodule Lua.APITest do
                  import Lua
 
                  @impl Lua.API
-                 def install(_lua) do
+                 def install(_lua, _scope, _data) do
                    ~LUA[whoa = "crazy"]c
                  end
                end

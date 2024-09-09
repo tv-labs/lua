@@ -170,6 +170,13 @@ defmodule LuaTest do
 
       assert {[], %Lua{}} = Lua.eval!(lua, "foo(5)")
       assert {[2], %Lua{}} = Lua.eval!(lua, "return foo(1)")
+
+      lua =
+        Lua.set!(Lua.new(), [:sum], fn args ->
+          [Enum.sum(args)]
+        end)
+
+      assert {[10], _} = Lua.eval!(lua, ~LUA"return sum(1, 2, 3, 4)"c)
     end
 
     test "it can evaluate chunks" do
@@ -626,6 +633,19 @@ defmodule LuaTest do
       use Lua.API
     end
 
+    defmodule WithInstall do
+      use Lua.API
+
+      @impl Lua.API
+      def install(lua, scope, data) do
+        if data do
+          Lua.set!(lua, scope ++ [:foo], data)
+        else
+          ~LUA"foo = 42"c
+        end
+      end
+    end
+
     setup do
       {:ok, lua: Lua.new()}
     end
@@ -636,22 +656,22 @@ defmodule LuaTest do
     end
 
     test "injects a scoped Elixir module functions into the Lua runtime", %{lua: lua} do
-      lua = Lua.load_api(lua, TestModule, ["scope"])
+      lua = Lua.load_api(lua, TestModule, scope: ["scope"])
       assert {["test"], _} = Lua.eval!(lua, "return scope.foo('test')")
     end
 
     test "inject a variadic function", %{lua: lua} do
-      lua = Lua.load_api(lua, TestModule, ["scope"])
+      lua = Lua.load_api(lua, TestModule, scope: ["scope"])
       assert {["a-b-c"], _} = Lua.eval!(lua, "return scope.bar('a', 'b', 'c')")
     end
 
     test "inject a variadic function with state", %{lua: lua} do
-      lua = Lua.load_api(lua, TestModule, ["scope"])
+      lua = Lua.load_api(lua, TestModule, scope: ["scope"])
       assert {["a", "b", "c"], _} = Lua.eval!(lua, "return scope.with_state('a', 'b', 'c')")
     end
 
     test "injects Elixir functions that have multiple arities", %{lua: lua} do
-      lua = Lua.load_api(lua, TestModule, ["scope"])
+      lua = Lua.load_api(lua, TestModule, scope: ["scope"])
 
       assert {["a default"], _} = Lua.eval!(lua, "return scope.test(\"a\")")
       assert {["a b"], _} = Lua.eval!(lua, "return scope.test(\"a\", \"b\")")
@@ -669,6 +689,18 @@ defmodule LuaTest do
       lua = Lua.load_api(lua, NoFuncsGlobal)
 
       {[22], _} = Lua.eval!(lua, "return global_var")
+    end
+
+    test "it will call the install callback", %{lua: lua} do
+      lua = Lua.load_api(lua, WithInstall)
+
+      assert {[42], _lua} = Lua.eval!(lua, "return foo")
+    end
+
+    test "it can pass data to the install callback", %{lua: lua} do
+      lua = Lua.load_api(lua, WithInstall, data: "bananas")
+
+      assert {["bananas"], _lua} = Lua.eval!(lua, "return foo")
     end
   end
 
@@ -722,7 +754,7 @@ defmodule LuaTest do
     end
 
     setup do
-      %{lua: Lua.new() |> Lua.load_api(Examples, ["example"])}
+      %{lua: Lua.new() |> Lua.load_api(Examples, scope: ["example"])}
     end
 
     test "can work with numbers", %{lua: lua} do

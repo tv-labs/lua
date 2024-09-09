@@ -44,17 +44,17 @@ defmodule Lua.API do
 
   ## Installing an API
 
-  A `Lua.API` can provide an optional `install/1` callback, which
+  A `Lua.API` can provide an optional `install/3` callback, which
   can run arbitrary Lua code or change the `Lua` state in any way.
 
-  An `install/1` callback takes a `t:Lua.t/0` and should either return a
+  An `install/3` callback takes a `t:Lua.t/0` and should either return a
   Lua script to be evaluated, a `t:Lua.Chunk.t/0`, or return a new `t:Lua.t/0`
 
       defmodule WithInstall do
         use Lua.API, scope: "install"
 
         @impl Lua.API
-        def install(lua) do
+        def install(lua, _scope, _data) do
           Lua.set!(lua, [:foo], "bar")
         end
       end
@@ -70,7 +70,7 @@ defmodule Lua.API do
         import Lua
 
         @impl Lua.API
-        def install(_lua) do
+        def install(_lua, _scope, _data) do
           ~LUA[print("Hello at install time!")]c
         end
       end
@@ -94,9 +94,11 @@ defmodule Lua.API do
     end
   end
 
-  @callback scope :: list(String.t())
-  @callback install(Lua.t()) :: Lua.t() | String.t()
-  @optional_callbacks [install: 1]
+  @type scope_def :: list(String.t())
+
+  @callback scope :: scope_def()
+  @callback install(Lua.t(), scope_def(), any()) :: Lua.t() | String.t()
+  @optional_callbacks [install: 3]
 
   @doc """
   Raises a runtime exception inside an API function, displaying contextual
@@ -199,9 +201,9 @@ defmodule Lua.API do
   end
 
   @doc false
-  def install(lua, module) do
-    if function_exported?(module, :install, 1) do
-      case module.install(lua) do
+  def install(lua, module, scope, data) do
+    if function_exported?(module, :install, 3) do
+      case module.install(lua, scope, data) do
         %Lua{} = lua ->
           lua
 
