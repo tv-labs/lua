@@ -31,7 +31,7 @@
 
 ## Exposing Elixir functions to Lua
 
-The simplest way to expose an Elixir function to in Lua is using the `Lua.set!/3` function
+The simplest way to expose an Elixir function to Lua is using the `Lua.set!/3` function
 
 ``` elixir
 lua = 
