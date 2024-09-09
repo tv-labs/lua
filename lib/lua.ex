@@ -162,7 +162,7 @@ defmodule Lua do
 
   `Lua.set!/3` can also be used to expose Elixir functions
 
-      iex> lua = Lua.set!(Lua.new!(), [:sum], &Enum.sum/1)
+      iex> lua = Lua.set!(Lua.new(), [:sum], fn args -> [Enum.sum(args)] end)
       iex> {[10], _lua} = Lua.eval!(lua, "return sum(1, 2, 3, 4)")
 
   """
@@ -182,13 +182,6 @@ defmodule Lua do
             raise Lua.RuntimeException, {:lua_error, illegal_index(keys), state}
         end
       end)
-
-    value =
-      if is_function(value) do
-        wrap_anonymous_function(value)
-      else
-        value
-      end
 
     case :luerl_new.set_table_keys_dec(keys, value, state) do
       {:ok, _value, state} ->
@@ -502,24 +495,6 @@ defmodule Lua do
       )
     end)
     |> Lua.API.install(module, scope, opts[:data])
-  end
-
-  defp wrap_anonymous_function(func) when is_function(func, 1) do
-    fn args ->
-      case func.(args) do
-        {ret, %Lua{state: state}} -> {List.wrap(ret), state}
-        other -> List.wrap(other)
-      end
-    end
-  end
-
-  defp wrap_anonymous_function(func) when is_function(func, 2) do
-    fn args, state ->
-      case func.(args, state) do
-        {ret, %Lua{state: state}} -> {List.wrap(ret), state}
-        other -> List.wrap(other)
-      end
-    end
   end
 
   defp wrap_variadic_function(module, function_name, with_state?) do
