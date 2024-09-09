@@ -216,6 +216,27 @@ defmodule LuaTest do
         """)
       end
     end
+
+    test "it can make assertions" do
+      assert {[true], _} = Lua.eval!("return assert(true)")
+
+      message = """
+      Lua runtime error: assertion failed!
+
+      script line 1:assert(false)
+      """
+
+      assert_raise Lua.RuntimeException, message, fn ->
+        Lua.eval!("assert(false)")
+      end
+
+      assert {[false, "oh no!"], _lua} =
+               Lua.eval!(~LUA"""
+               return pcall(function()
+                 assert(false, "oh no")
+               end)
+               """)
+    end
   end
 
   describe "load_chunk!/2" do

@@ -75,6 +75,7 @@ defmodule Lua.Util do
             {:luerl_lib_basic, :basic_error} -> format_error(func, args)
             {:luerl_lib_basic, :basic_error, :undefined} -> format_error(func, args)
             {:luerl_lib_basic, :error_call, :undefined} -> format_error(func, args)
+            {:luerl_lib_basic, :assert, :undefined} -> format_error(func, args)
             func -> " #{format_function([func], args)}"
           end
 
@@ -143,6 +144,10 @@ defmodule Lua.Util do
 
   defp format_error({:luerl_lib_basic, :error_call, :undefined}, args) do
     format_function("error", args)
+  end
+
+  defp format_error({:luerl_lib_basic, :assert, :undefined}, args) do
+    format_function("assert", args)
   end
 
   defp format_error(_, {:undefined, args}) do
