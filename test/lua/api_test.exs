@@ -3,6 +3,8 @@ defmodule Lua.APITest do
 
   alias Lua
 
+  import Lua
+
   describe "install/3 callback" do
     test "it can modify global lua state" do
       assert [{module, _}] =
@@ -74,6 +76,93 @@ defmodule Lua.APITest do
       assert {["crazy"], _} =
                Lua.eval!(lua, """
                return whoa
+               """)
+    end
+
+    test "it can extend the API of some module" do
+      defmodule ExtendedAPI do
+        use Lua.API, scope: "extended"
+
+        import Lua
+
+        deflua identity(thing) do
+          thing
+        end
+
+        @impl Lua.API
+        def install(_, _, _) do
+          ~LUA"""
+          function extended.double(x)
+            return x * 2
+          end
+          """
+        end
+      end
+
+      lua = Lua.load_api(Lua.new(), ExtendedAPI)
+
+      assert {[22], _lua} = Lua.eval!(lua, "return extended.identity(22)")
+      assert {[44], _lua} = Lua.eval!(lua, "return extended.double(22)")
+    end
+
+    test "tables can be passed through API functions" do
+      defmodule Tables do
+        use Lua.API, scope: "tables"
+
+        deflua foo(table) do
+          [dbg(table)]
+        end
+      end
+
+      lua = Lua.new() |> Lua.load_api(Tables)
+
+      assert {[table], _lua} =
+               Lua.eval!(lua, ~LUA"""
+                 local x = { foo = "bar", baz = 10 }
+                 return tables.foo(x)
+               """)
+    end
+
+    test "it can work with setting metatables" do
+      defmodule Thing do
+        use Lua.API, scope: "thing"
+
+        import Lua
+
+        deflua create_a_thing(value), lua do
+          dbg(value)
+          {[thing], lua} = dbg(Lua.call_function!(lua, [:thing, :new], [value]))
+          dbg(thing)
+          {[thing], lua}
+        end
+
+        @impl Lua.API
+        def install(_, _, _) do
+          ~LUA"""
+          thing.__index = thing
+
+          function thing.new(value)
+            local self = setmetatable({}, thing)
+
+            self.value = value
+
+            return self
+          end
+
+          function thing:get_value()
+            return self.value
+          end
+          """
+        end
+      end
+
+      lua = Lua.load_api(Lua.new(), Thing)
+
+      assert {[5, 10], _} =
+               Lua.eval!(lua, ~LUA"""
+                   local x = thing.new(5)
+                   local y = thing.create_a_thing(10)
+                   return x:get_value(), y:get_value()
                """)
     end
   end
