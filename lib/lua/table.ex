@@ -55,34 +55,57 @@ defmodule Lua.Table do
       iex> Lua.Table.as_string([{"a", 1}, {"b", 2}])
       "{a = 1, b = 2}"
 
+  Lists that "look" like Lua tables are treated as lists
+
       iex> Lua.Table.as_string([{1, "foo"}, {2, "bar"}])
       ~S[{"foo", "bar"}]
 
-  ### Options
-  * `:userdata` - A 1-arity function used to format userdata. Defaults to `fn _ -> "<userdata>"`
+  Lists are treated as lists
 
+      iex> Lua.Table.as_string(["a", "b", "c"])
+      ~S[{"a", "b", "c"}]
+
+  Regular maps are always treated as tables
+
+      iex> Lua.Table.as_string(%{1 => "foo", "bar" => "baz"})
+      ~S<{[1] = "foo", bar = "baz"}>
+
+  ### Options
+  * `:formatter` - A 2-arity function used to format values before serialization. The key and value
+  are passed as arguments. If there is no key, it will default to `nil`.
   """
   def as_string(table, opts \\ []) do
-    opts = Keyword.put_new(opts, :userdata, fn _ -> "<userdata>" end)
+    opts = Keyword.validate!(opts, formatter: &default_formatter/2)
 
-    "{" <> print_table(table, opts[:userdata]) <> "}"
+    "{" <> print_table(table, opts[:formatter]) <> "}"
+  end
+
+  defp default_formatter(_key, value), do: value
+
+  # List
+  defp print_table([{1, _} | _] = list, formatter) do
+    list
+    |> Enum.reduce([], fn {key, value}, acc ->
+      [acc, if(acc == [], do: "", else: ", "), format_value(key, value, formatter)]
+    end)
+    |> IO.iodata_to_binary()
   end
 
   # List
-  defp print_table([{1, _} | _] = list, userdata_formatter) do
+  defp print_table([value | _] = list, formatter) when not is_tuple(value) do
     list
-    |> Enum.reduce([], fn {_, value}, acc ->
-      [acc, if(acc == [], do: "", else: ", "), format_value(value, userdata_formatter)]
+    |> Enum.reduce([], fn value, acc ->
+      [acc, if(acc == [], do: "", else: ", "), format_value(nil, value, formatter)]
     end)
     |> IO.iodata_to_binary()
   end
 
   # Table
-  defp print_table(table, userdata_formatter) do
+  defp print_table(table, formatter) do
     table
     |> Enum.reduce([], fn {key, value}, acc ->
       key_str = format_key(key)
-      value_str = format_value(value, userdata_formatter)
+      value_str = format_value(key, value, formatter)
 
       entry = "#{key_str} = #{value_str}"
 
@@ -112,26 +135,16 @@ defmodule Lua.Table do
     end
   end
 
-  defp format_value(value, _) when is_number(value) do
-    to_string(value)
-  end
-
-  defp format_value(true, _), do: "true"
-  defp format_value(false, _), do: "false"
-  defp format_value(nil, _), do: "nil"
-
-  defp format_value(value, formatter) when is_list(value) do
-    str = print_table(value, formatter)
-
-    "{#{str}}"
-  end
-
-  defp format_value({:userdata, value}, formatter) do
-    format_value(formatter.(value), formatter)
-  end
-
-  defp format_value(value, _formatter) do
-    inspect(value)
+  defp format_value(key, value, formatter) do
+    case formatter.(key, value) do
+      list when is_list(list) -> "{#{print_table(list, formatter)}}"
+      {:userdata, _value} -> inspect("<userdata>")
+      true -> "true"
+      false -> "false"
+      nil -> nil
+      number when is_number(number) -> to_string(number)
+      other -> inspect(other)
+    end
   end
 
   @doc """
