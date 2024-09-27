@@ -5,11 +5,16 @@ defmodule Lua.TableTest do
 
   doctest Lua.Table
 
-  defmacro assert_table(table) do
-    quote bind_quoted: [table: table] do
+  defmacro assert_table(table, expected \\ :reflect) do
+    quote bind_quoted: [table: table, expected: Macro.escape(expected)] do
       assert output = Lua.Table.as_string(table)
       assert {[ret], _lua} = Lua.eval!("return " <> output)
-      assert ret == table
+
+      case expected do
+        :reflect -> assert ret == table
+        expected -> assert ret == expected
+      end
+
       output
     end
   end
@@ -34,12 +39,23 @@ defmodule Lua.TableTest do
       assert_table(big_table)
     end
 
+    test "it can handle lists of values" do
+      list = ["a", "b", "c", "d"]
+      assert_table(list, [{1, "a"}, {2, "b"}, {3, "c"}, {4, "d"}])
+    end
+
     test "it can handle useradata" do
       table = [{"a", 1}, {"b", {:userdata, ~D[2024-09-22]}}]
 
       assert Lua.Table.as_string(table) == ~S[{a = 1, b = "<userdata>"}]
 
-      assert Lua.Table.as_string(table, userdata: &inspect/1) == ~S<{a = 1, b = "~D[2024-09-22]"}>
+      assert Lua.Table.as_string(table,
+               formatter: fn
+                 _, {:userdata, value} -> inspect(value)
+                 _, value -> value
+               end
+             ) ==
+               ~S<{a = 1, b = "~D[2024-09-22]"}>
     end
 
     # We can't handle self-referential tables as
