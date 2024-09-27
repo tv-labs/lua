@@ -21,25 +21,33 @@
 
 `Lua` can be run using the `eval!/2` function
 
-``` elixir
-    iex> {[4], _} =
-    ...>   Lua.eval!(~LUA"""
-    ...>   return 2 + 2
-    ...>   """)
+    iex> {[4], _} = Lua.eval!("return 2 + 2")
 
-```
+## Compile-time validation
+
+Use the `~LUA` sigil to parse and validate your Lua code at compile time
+
+    #iex> {[4], _} = Lua.eval!(~LUA[return 2 +])
+    ** (Lua.CompilerException) Failed to compile Lua!
+
+Using the `c` modifier transforms your Lua code into a `t:Lua.Chunk.t/0` at compile-time,
+which will speed up execution at runtime since the Lua no longer needs to be parsed
+
+    iex> {[4], _} = Lua.eval!(~LUA[return 2 + 2]c)
 
 ## Exposing Elixir functions to Lua
 
 The simplest way to expose an Elixir function to Lua is using the `Lua.set!/3` function
 
 ``` elixir
+import Lua, only: [sigil_LUA: 2]
+
 lua = 
   Lua.set!(Lua.new(), [:sum], fn args ->
     [Enum.sum(args)]
   end)
 
-{[10], _} = Lua.eval!(lua, ~LUA"return sum(1, 2, 3, 4)"c)
+{[10], _} = Lua.eval!(lua, ~LUA[return sum(1, 2, 3, 4)]c)
 ```
 
 For easily expressing APIs, `Lua` provides the `deflua` macro for exposing Elixir functions to Lua
@@ -50,13 +58,12 @@ defmodule MyAPI do
       
   deflua double(v), do: 2 * v
 end
+
+import Lua, only: [sigil_LUA: 2]
     
 lua = Lua.new() |> Lua.load_api(MyAPI)
 
-{[10], _} =
-  Lua.eval!(lua, ~LUA"""
-  return double(5)
-  """)
+{[10], _} = Lua.eval!(lua, ~LUA[return double(5)])
 ```
 
 ## Calling Lua functions from Elixir
@@ -73,9 +80,11 @@ defmodule MyAPI do
   end
 end
 
+import Lua, only: [sigil_LUA: 2]
+
 lua = Lua.new() |> Lua.load_api(MyAPI)
 
-{["wow"], _} = Lua.eval!(lua, ~LUA"return example.foo(\"WOW\")")
+{["wow"], _} = Lua.eval!(lua, ~LUA[return example.foo("WOW")])
 ```
 
 ## Modify Lua state from Elixir
@@ -98,6 +107,8 @@ defmodule Queue do
     {[], state}
   end
 end
+
+import Lua, only: [sigil_LUA: 2]
 
 lua = Lua.new() |> Lua.load_api(Queue)
 
