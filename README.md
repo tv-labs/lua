@@ -27,12 +27,15 @@
 
 Use the `~LUA` sigil to parse and validate your Lua code at compile time
 
+    iex> import Lua, only: [sigil_LUA: 2]
+
     #iex> {[4], _} = Lua.eval!(~LUA[return 2 +])
     ** (Lua.CompilerException) Failed to compile Lua!
 
 Using the `c` modifier transforms your Lua code into a `t:Lua.Chunk.t/0` at compile-time,
 which will speed up execution at runtime since the Lua no longer needs to be parsed
 
+    iex> import Lua, only: [sigil_LUA: 2]
     iex> {[4], _} = Lua.eval!(~LUA[return 2 + 2]c)
 
 ## Exposing Elixir functions to Lua
