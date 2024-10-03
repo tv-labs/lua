@@ -181,10 +181,12 @@ defmodule LuaTest do
 
     test "it can register functions with two arguments that receive state" do
       foo = 22
+      my_table = %{"a" => 1, "b" => 2}
 
       lua =
         Lua.new()
         |> Lua.set!([:foo], foo)
+        |> Lua.set!([:my_table], my_table)
         |> Lua.set!([:get_foo1], fn _args, state ->
           # Just the value
           Lua.get!(state, [:foo])
@@ -197,10 +199,24 @@ defmodule LuaTest do
           # Value and state, wrapped in a list
           {[Lua.get!(state, [:foo])], state}
         end)
+        |> Lua.set!([:get_my_table1], fn _args, state ->
+          {Lua.get!(state, [:my_table]), state}
+        end)
+        |> Lua.set!([:get_my_table2], fn _args, state ->
+          {[Lua.get!(state, [:my_table])], state}
+        end)
 
       assert {[^foo], %Lua{}} = Lua.call_function!(lua, [:get_foo1], [])
       assert {[^foo], %Lua{}} = Lua.call_function!(lua, [:get_foo2], [])
       assert {[^foo], %Lua{}} = Lua.call_function!(lua, [:get_foo3], [])
+
+      # Unwrapped table
+      assert {[table], %Lua{} = lua} = Lua.call_function!(lua, [:get_my_table1], [])
+      assert lua |> Lua.decode!(table) |> Lua.Table.as_map() == my_table
+
+      # Wrapped table
+      assert {[table], %Lua{} = lua} = Lua.call_function!(lua, [:get_my_table2], [])
+      assert lua |> Lua.decode!(table) |> Lua.Table.as_map() == my_table
     end
 
     test "it can evaluate chunks" do
