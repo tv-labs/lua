@@ -165,8 +165,40 @@ defmodule Lua do
       iex> lua = Lua.set!(Lua.new(), [:sum], fn args -> [Enum.sum(args)] end)
       iex> {[10], _lua} = Lua.eval!(lua, "return sum(1, 2, 3, 4)")
 
+
+  Functions can also take a second argument for the state of Lua
+
+      iex> lua =
+      ...>   Lua.set!(Lua.new(), [:set_count], fn args, state ->
+      ...>     {[], Lua.set!(state, :count, Enum.count(args))}
+      ...>   end)
+      iex> {[3], _} = Lua.eval!(lua, "set_count(1, 2, 3); return count")
+
   """
-  def set!(%__MODULE__{state: state}, keys, value) do
+  def set!(%__MODULE__{} = lua, keys, value) do
+    value =
+      case value do
+        func when is_function(func, 1) ->
+          func
+
+        func when is_function(func, 2) ->
+          fn args, state ->
+            case func.(args, wrap(state)) do
+              {value, %__MODULE__{} = lua} -> {List.wrap(value), lua.state}
+              value -> {List.wrap(value), state}
+            end
+          end
+
+        value ->
+          value
+      end
+
+    do_set(lua.state, keys, value)
+  end
+
+  defp do_set(state, keys, value) do
+    keys = List.wrap(keys)
+
     {_keys, state} =
       Enum.reduce_while(keys, {[], state}, fn key, {keys, state} ->
         keys = keys ++ [key]
@@ -484,8 +516,8 @@ defmodule Lua do
     |> Enum.reduce(lua, fn {name, with_state?, variadic?}, lua ->
       arities = Map.get(funcs, name)
 
-      Lua.set!(
-        lua,
+      do_set(
+        lua.state,
         List.wrap(scope) ++ [name],
         if variadic? do
           wrap_variadic_function(module, name, with_state?)
@@ -502,7 +534,7 @@ defmodule Lua do
 
     if with_state? do
       fn args, state ->
-        execute_function(module, function_name, [args, wrap(state)])
+        execute_function_with_state(module, function_name, [args, wrap(state)], wrap(state))
       end
     else
       fn args ->
@@ -518,7 +550,7 @@ defmodule Lua do
     if with_state? do
       fn args, state ->
         if (length(args) + 1) in arities do
-          execute_function(module, function_name, args ++ [wrap(state)])
+          execute_function_with_state(module, function_name, args ++ [wrap(state)], wrap(state))
         else
           arities = Enum.map(arities, &(&1 - 1))
 
@@ -546,7 +578,21 @@ defmodule Lua do
     # Luerl mandates lists as return values; this function ensures all results conform.
     case apply(module, function_name, args) do
       {ret, %Lua{state: state}} -> {ret, state}
+      [{_, _} | _rest] = table -> [table]
       other -> List.wrap(other)
+    end
+  catch
+    thrown_value ->
+      {:error,
+       "Value thrown during function '#{function_name}' execution: #{inspect(thrown_value)}"}
+  end
+
+  defp execute_function_with_state(module, function_name, args, lua) do
+    # Luerl mandates lists as return values; this function ensures all results conform.
+    case apply(module, function_name, args) do
+      {ret, %Lua{state: state}} -> {ret, state}
+      [{_, _} | _rest] = table -> {[table], lua.state}
+      other -> {List.wrap(other), lua.state}
     end
   catch
     thrown_value ->
