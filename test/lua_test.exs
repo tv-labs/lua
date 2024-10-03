@@ -355,6 +355,13 @@ defmodule LuaTest do
       assert [{1, 1}, {2, 2}] = Lua.decode!(lua, ref)
     end
 
+    test "it can re-encode table refs" do
+      lua = Lua.new()
+
+      assert {{:tref, _} = tref, lua} = Lua.encode!(lua, %{a: 1})
+      assert {^tref, _lua} = Lua.encode!(lua, tref)
+    end
+
     test "it raises for values that cannot be encoded" do
       error = "Lua runtime error: Failed to encode {:foo, :bar}"
 
@@ -646,6 +653,16 @@ defmodule LuaTest do
       end
     end
 
+    defmodule GlobalVar do
+      use Lua.API, scope: "gv"
+
+      deflua get(name), state do
+        table = Lua.get!(state, [name])
+
+        {[table], state}
+      end
+    end
+
     setup do
       {:ok, lua: Lua.new()}
     end
@@ -701,6 +718,16 @@ defmodule LuaTest do
       lua = Lua.load_api(lua, WithInstall, data: "bananas")
 
       assert {["bananas"], _lua} = Lua.eval!(lua, "return foo")
+    end
+
+    test "it can handle tref values", %{lua: lua} do
+      lua = Lua.load_api(lua, GlobalVar)
+
+      assert {[[{"a", 1}]], _lua} =
+               Lua.eval!(lua, """
+               foo = { a = 1 }
+               return gv.get("foo")
+               """)
     end
   end
 
