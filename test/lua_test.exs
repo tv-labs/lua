@@ -179,6 +179,30 @@ defmodule LuaTest do
       assert {[10], _} = Lua.eval!(lua, ~LUA"return sum(1, 2, 3, 4)"c)
     end
 
+    test "it can register functions with two arguments that receive state" do
+      foo = 22
+
+      lua =
+        Lua.new()
+        |> Lua.set!([:foo], foo)
+        |> Lua.set!([:get_foo1], fn _args, state ->
+          # Just the value
+          Lua.get!(state, [:foo])
+        end)
+        |> Lua.set!([:get_foo2], fn _args, state ->
+          # Value and state, not wrapped in a list
+          {Lua.get!(state, [:foo]), state}
+        end)
+        |> Lua.set!([:get_foo3], fn _args, state ->
+          # Value and state, wrapped in a list
+          {[Lua.get!(state, [:foo])], state}
+        end)
+
+      assert {[^foo], %Lua{}} = Lua.call_function!(lua, [:get_foo1], [])
+      assert {[^foo], %Lua{}} = Lua.call_function!(lua, [:get_foo2], [])
+      assert {[^foo], %Lua{}} = Lua.call_function!(lua, [:get_foo3], [])
+    end
+
     test "it can evaluate chunks" do
       assert %Lua.Chunk{} = chunk = ~LUA[return 2 + 2]c
 
@@ -320,6 +344,34 @@ defmodule LuaTest do
                  return string.lower(value)
                end)
                """)
+    end
+
+    test "you can return single values from the state variant of deflua" do
+      defmodule SingleValueState do
+        use Lua.API, scope: "single"
+
+        deflua foo(value), _state do
+          value
+        end
+
+        deflua bar(value) do
+          value
+        end
+      end
+
+      lua = Lua.load_api(Lua.new(), SingleValueState)
+      assert {[22], _lua} = Lua.eval!(lua, "return single.foo(22)")
+      assert {[], _lua} = Lua.eval!(lua, "return single.foo(nil)")
+
+      # There is ambiguity for empty tables, we treat as an empty return value
+      assert {[], _lua} = Lua.eval!(lua, "return single.foo({})")
+
+      assert {[[{"a", 1}]], _lua} = Lua.eval!(lua, "return single.foo({ a = 1 })")
+
+      assert {[22], _lua} = Lua.eval!(lua, "return single.bar(22)")
+      assert {[], _lua} = Lua.eval!(lua, "return single.bar(nil)")
+      assert {[], _lua} = Lua.eval!(lua, "return single.bar({})")
+      assert {[[{"a", 1}]], _lua} = Lua.eval!(lua, "return single.bar({ a = 1 })")
     end
 
     test "calling non-functions raises" do
@@ -653,16 +705,6 @@ defmodule LuaTest do
       end
     end
 
-    defmodule GlobalVar do
-      use Lua.API, scope: "gv"
-
-      deflua get(name), state do
-        table = Lua.get!(state, [name])
-
-        {[table], state}
-      end
-    end
-
     setup do
       {:ok, lua: Lua.new()}
     end
@@ -721,6 +763,16 @@ defmodule LuaTest do
     end
 
     test "it can handle tref values", %{lua: lua} do
+      defmodule GlobalVar do
+        use Lua.API, scope: "gv"
+
+        deflua get(name), state do
+          table = Lua.get!(state, [name])
+
+          {[table], state}
+        end
+      end
+
       lua = Lua.load_api(lua, GlobalVar)
 
       assert {[[{"a", 1}]], _lua} =
