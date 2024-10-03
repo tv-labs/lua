@@ -165,6 +165,15 @@ defmodule Lua do
       iex> lua = Lua.set!(Lua.new(), [:sum], fn args -> [Enum.sum(args)] end)
       iex> {[10], _lua} = Lua.eval!(lua, "return sum(1, 2, 3, 4)")
 
+
+  Functions can also take a second argument for the state of Lua
+
+      iex> lua =
+      ...>   Lua.set!(Lua.new(), [:set_count], fn args, state ->
+      ...>     {[], Lua.set!(state, :count, Enum.count(args))}
+      ...>   end)
+      iex> {[3], _} = Lua.eval!(lua, "set_count(1, 2, 3); return count")
+
   """
   def set!(%__MODULE__{} = lua, keys, value) do
     value =
@@ -188,6 +197,8 @@ defmodule Lua do
   end
 
   defp do_set(state, keys, value) do
+    keys = List.wrap(keys)
+
     {_keys, state} =
       Enum.reduce_while(keys, {[], state}, fn key, {keys, state} ->
         keys = keys ++ [key]
