@@ -219,6 +219,36 @@ defmodule LuaTest do
       assert lua |> Lua.decode!(table) |> Lua.Table.as_map() == my_table
     end
 
+    test "it can register functions that take callbacks that modify state" do
+      require Logger
+
+      lua = ~LUA"""
+      state = {}
+
+      function assignFoo()
+        state["foo"] = "bar"
+      end
+
+      function assignBar()
+        state["bar"] = "foo"
+      end
+
+      assignBar()
+      run(assignFoo)
+
+      return state
+      """
+
+      assert {[ret], _lua} =
+               Lua.new()
+               |> Lua.set!([:run], fn [callback], lua ->
+                 Lua.call_function!(lua, callback, [])
+               end)
+               |> Lua.eval!(lua)
+
+      assert Lua.Table.as_map(ret) == %{"foo" => "bar", "bar" => "foo"}
+    end
+
     test "it can evaluate chunks" do
       assert %Lua.Chunk{} = chunk = ~LUA[return 2 + 2]c
 
