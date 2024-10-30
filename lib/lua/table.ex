@@ -138,6 +138,7 @@ defmodule Lua.Table do
   defp format_value(key, value, formatter) do
     case formatter.(key, value) do
       list when is_list(list) -> "{#{print_table(list, formatter)}}"
+      map when is_map(map) -> "{#{print_table(map, formatter)}}"
       {:userdata, _value} -> inspect("<userdata>")
       true -> "true"
       false -> "false"

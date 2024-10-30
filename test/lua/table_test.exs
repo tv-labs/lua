@@ -58,6 +58,12 @@ defmodule Lua.TableTest do
                ~S<{a = 1, b = "~D[2024-09-22]"}>
     end
 
+    test "it can handle nested maps" do
+      table = [a: 1, b: 2, c: %{d: %{e: 5}}]
+
+      assert Lua.Table.as_string(table) == "{a = 1, b = 2, c = {d = {e = 5}}}"
+    end
+
     # We can't handle self-referential tables as
     # Luerl cannot decode them
     @tag :skip
