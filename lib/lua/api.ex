@@ -97,7 +97,7 @@ defmodule Lua.API do
   @type scope_def :: list(String.t())
 
   @callback scope :: scope_def()
-  @callback install(Lua.t(), scope_def(), any()) :: Lua.t() | String.t()
+  @callback install(Lua.t(), scope_def(), any()) :: Lua.t() | Lua.Chunk.t() | String.t()
   @optional_callbacks [install: 3]
 
   @doc """
