@@ -203,7 +203,7 @@ defmodule Lua do
       Enum.reduce_while(keys, {[], state}, fn key, {keys, state} ->
         keys = keys ++ [key]
 
-        case :luerl_new.get_table_keys_dec(keys, state) do
+        case :luerl.get_table_keys_dec(keys, state) do
           {:ok, nil, state} ->
             {:cont, set_keys!(state, keys)}
 
@@ -215,7 +215,7 @@ defmodule Lua do
         end
       end)
 
-    case :luerl_new.set_table_keys_dec(keys, value, state) do
+    case :luerl.set_table_keys_dec(keys, value, state) do
       {:ok, _value, state} ->
         wrap(state)
 
@@ -225,7 +225,7 @@ defmodule Lua do
   end
 
   defp set_keys!(state, keys) do
-    case :luerl_new.set_table_keys_dec(keys, [], state) do
+    case :luerl.set_table_keys_dec(keys, [], state) do
       {:ok, _, state} ->
         {keys, state}
 
@@ -259,7 +259,7 @@ defmodule Lua do
       "nested"
   """
   def get!(%__MODULE__{state: state}, keys) do
-    case :luerl_new.get_table_keys_dec(keys, state) do
+    case :luerl.get_table_keys_dec(keys, state) do
       {:ok, value, _state} ->
         value
 
@@ -286,7 +286,7 @@ defmodule Lua do
   def eval!(state \\ new(), script)
 
   def eval!(%__MODULE__{state: state} = lua, script) when is_binary(script) do
-    case :luerl_new.do_dec(script, state) do
+    case :luerl.do_dec(script, state) do
       {:ok, result, new_state} ->
         {result, %__MODULE__{lua | state: new_state}}
 
@@ -312,7 +312,7 @@ defmodule Lua do
   def eval!(%__MODULE__{} = lua, %Lua.Chunk{} = chunk) do
     {chunk, lua} = load_chunk!(lua, chunk)
 
-    case :luerl_new.call_chunk(chunk.ref, lua.state) do
+    case :luerl.call_chunk(chunk.ref, lua.state) do
       {:ok, result, new_state} ->
         {result, %__MODULE__{lua | state: new_state}}
 
@@ -425,7 +425,7 @@ defmodule Lua do
       when (is_list(args) and is_tuple(name)) or is_function(name) do
     {ref, lua} = encode!(lua, name)
 
-    case :luerl_new.call(ref, args, lua.state) do
+    case :luerl.call(ref, args, lua.state) do
       {:ok, value, state} -> {value, wrap(state)}
       {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
     end
@@ -436,7 +436,7 @@ defmodule Lua do
 
     func = get!(lua, keys)
 
-    case :luerl_new.call_function(func, args, lua.state) do
+    case :luerl.call_function(func, args, lua.state) do
       {:ok, ret, lua} -> {ret, wrap(lua)}
       {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
     end
@@ -450,7 +450,7 @@ defmodule Lua do
       {:tref, 14}
   """
   def encode!(%__MODULE__{} = lua, value) do
-    {encoded, state} = :luerl_new.encode(value, lua.state)
+    {encoded, state} = :luerl.encode(value, lua.state)
     {encoded, wrap(state)}
   rescue
     ArgumentError ->
@@ -466,7 +466,7 @@ defmodule Lua do
 
   """
   def decode!(%__MODULE__{} = lua, value) do
-    :luerl_new.decode(value, lua.state)
+    :luerl.decode(value, lua.state)
   rescue
     ArgumentError ->
       reraise Lua.RuntimeException, "Failed to decode #{inspect(value)}", __STACKTRACE__
@@ -479,7 +479,7 @@ defmodule Lua do
   Mimics the functionality of Lua's [dofile](https://www.lua.org/manual/5.4/manual.html#pdf-dofile)
   """
   def load_file!(%__MODULE__{state: state} = lua, path) when is_binary(path) do
-    case :luerl_new.dofile(String.to_charlist(path), [:return], state) do
+    case :luerl.dofile(String.to_charlist(path), [:return], state) do
       {:ok, _, state} ->
         %__MODULE__{lua | state: state}
 

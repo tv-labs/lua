@@ -55,7 +55,7 @@ defmodule Lua.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:luerl, path: "../../oss/luerl"},
+      {:luerl, github: "rvirding/luerl", branch: "develop-encode"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
