@@ -264,7 +264,7 @@ defmodule Lua do
   ### Options
   * `:decode` - (default `true`) - By default, values are decoded
   """
-  def get!(%__MODULE__{state: state}, keys, opts \\ []) do
+  def get!(%__MODULE__{state: state}, keys, opts \\ []) when is_list(keys) do
     opts = Keyword.validate!(opts, decode: true)
 
     {keys, state} = :luerl.encode_list(keys, state)
@@ -449,16 +449,47 @@ defmodule Lua do
   @doc """
   Calls a function in Lua's state
 
-      iex> {[ret], _lua} = Lua.call_function!(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
+      iex> {:ok, [ret], _lua} = Lua.call_function(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
       iex> ret
       "hello robert"
 
   References to functions can also be passed
 
       iex> {[ref], lua} = Lua.eval!("return string.lower", decode: false)
-      iex> {[ret], _lua} = Lua.call_function!(lua, ref, ["FUNCTION REF"])
+      iex> {:ok, [ret], _lua} = Lua.call_function!(lua, ref, ["FUNCTION REF"])
       iex> ret
       "function ref"
+
+  """
+  def call_function(%__MODULE__{} = lua, ref, args) when is_tuple(ref) do
+    case :luerl.call(ref, args, lua.state) do
+      {:ok, value, state} -> {value, wrap(state)}
+      {:lua_error, reason, state} -> {:error, reason, wrap(state)}
+    end
+  end
+
+  def call_function(%__MODULE__{} = lua, name, args) when is_function(name) do
+    {ref, lua} = encode!(lua, name)
+
+    case :luerl.call(ref, args, lua.state) do
+      {:ok, value, state} -> {value, wrap(state)}
+      {:lua_error, reason, state} -> {:error, reason, wrap(state)}
+    end
+  end
+
+  def call_function(%__MODULE__{} = lua, name, args) do
+    {keys, state} = List.wrap(name) |> :luerl.encode_list(lua.state)
+
+    func = get!(lua, keys, decode: false)
+
+    case :luerl.call_function(func, args, state) do
+      {:ok, ret, lua} -> {ret, wrap(lua)}
+      {:lua_error, reason, state} -> {:error, reason, wrap(state)}
+    end
+  end
+
+  @doc """
+  The raising variant of `call_function/3`
 
   This is also useful for executing Lua function's inside of Elixir APIs
 
@@ -476,30 +507,10 @@ defmodule Lua do
   {["wow"], _} = Lua.eval!(lua, "return example.foo(\"WOW\")")
   ```
   """
-  def call_function!(%__MODULE__{} = lua, ref, args) when is_tuple(ref) do
-    case :luerl.call(ref, args, lua.state) do
-      {:ok, value, state} -> {value, wrap(state)}
-      {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
-    end
-  end
-
-  def call_function!(%__MODULE__{} = lua, name, args) when is_function(name) do
-    {ref, lua} = encode!(lua, name)
-
-    case :luerl.call(ref, args, lua.state) do
-      {:ok, value, state} -> {value, wrap(state)}
-      {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
-    end
-  end
-
-  def call_function!(%__MODULE__{} = lua, name, args) do
-    {keys, state} = List.wrap(name) |> :luerl.encode_list(lua.state)
-
-    func = get!(lua, keys, decode: false)
-
-    case :luerl.call_function(func, args, state) do
-      {:ok, ret, lua} -> {ret, wrap(lua)}
-      {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
+  def call_function!(%__MODULE__{} = lua, func, args) do
+    case call_function(lua, func, args) do
+      {:ok, ret, lua} -> {ret, lua}
+      {:error, reason, lua} = error -> raise Lua.RuntimeException, {:lua_error, reason, lua.state}
     end
   end
 
