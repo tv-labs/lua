@@ -304,8 +304,6 @@ defmodule Lua do
   * `:decode` - (default `true`) By default, all values returned from Lua scripts are decoded.
                 This may not be desirable if you need to modify a table reference or access a function call.
                 Pass `decode: false` as an option to return encoded values
-
-
   """
   def eval!(script) do
     eval!(new(), script, [])
@@ -485,8 +483,7 @@ defmodule Lua do
   def call_function!(%__MODULE__{} = lua, name, args) do
     {keys, state} = List.wrap(name) |> :luerl.encode_list(lua.state)
 
-    # TODO can we still use get! ?
-    {:ok, func, state} = :luerl.get_table_keys(keys, state)
+    func = get!(lua, keys, decode: false)
 
     case :luerl.call_function(func, args, state) do
       {:ok, ret, lua} -> {ret, wrap(lua)}
@@ -629,10 +626,6 @@ defmodule Lua do
   defp execute_function(module, function_name, args) do
     # Luerl mandates lists as return values; this function ensures all results conform.
     case apply(module, function_name, args) do
-      # TODO i think this is impossible
-      {ret, %Lua{state: state}} ->
-        {ret, state}
-
       # Table-like keyword list
       [{_, _} | _rest] ->
         raise Lua.RuntimeException,
