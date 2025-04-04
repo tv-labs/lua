@@ -473,28 +473,28 @@ defmodule LuaTest do
       lua = Lua.load_api(Lua.new(), TableFunctions)
 
       message =
-        "Lua runtime error: tables.keyword_table() failed, keyword lists must be implicitly encoded to tables using Lua.encode!/2"
+        "Lua runtime error: tables.keyword_table() failed, keyword lists must be explicitly encoded to tables using Lua.encode!/2"
 
       assert_raise Lua.RuntimeException, message, fn ->
         Lua.eval!(lua, "return tables.keyword_table()")
       end
 
       message =
-        "Lua runtime error: tables.keyword_table_with_state() failed, keyword lists must be implicitly encoded to tables using Lua.encode!/2"
+        "Lua runtime error: tables.keyword_table_with_state() failed, keyword lists must be explicitly encoded to tables using Lua.encode!/2"
 
       assert_raise Lua.RuntimeException, message, fn ->
         Lua.eval!(lua, "return tables.keyword_table_with_state()")
       end
 
       message =
-        "Lua runtime error: tables.map_table() failed, maps must be implicitly encoded to tables using Lua.encode!/2"
+        "Lua runtime error: tables.map_table() failed, maps must be explicitly encoded to tables using Lua.encode!/2"
 
       assert_raise Lua.RuntimeException, message, fn ->
         Lua.eval!(lua, "return tables.map_table()")
       end
 
       message =
-        "Lua runtime error: tables.map_table_with_state() failed, maps must be implicitly encoded to tables using Lua.encode!/2"
+        "Lua runtime error: tables.map_table_with_state() failed, maps must be explicitly encoded to tables using Lua.encode!/2"
 
       assert_raise Lua.RuntimeException, message, fn ->
         Lua.eval!(lua, "return tables.map_table_with_state()")

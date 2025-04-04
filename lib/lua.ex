@@ -637,14 +637,14 @@ defmodule Lua do
         raise Lua.RuntimeException,
           function: function_name,
           scope: module.scope(),
-          message: "keyword lists must be implicitly encoded to tables using Lua.encode!/2"
+          message: "keyword lists must be explicitly encoded to tables using Lua.encode!/2"
 
       # Map
       map when is_map(map) ->
         raise Lua.RuntimeException,
           function: function_name,
           scope: module.scope(),
-          message: "maps must be implicitly encoded to tables using Lua.encode!/2"
+          message: "maps must be explicitly encoded to tables using Lua.encode!/2"
 
       other ->
         List.wrap(other)
@@ -666,14 +666,14 @@ defmodule Lua do
         raise Lua.RuntimeException,
           function: function_name,
           scope: module.scope(),
-          message: "keyword lists must be implicitly encoded to tables using Lua.encode!/2"
+          message: "keyword lists must be explicitly encoded to tables using Lua.encode!/2"
 
       # Map
       map when is_map(map) ->
         raise Lua.RuntimeException,
           function: function_name,
           scope: module.scope(),
-          message: "maps must be implicitly encoded to tables using Lua.encode!/2"
+          message: "maps must be explicitly encoded to tables using Lua.encode!/2"
 
       other ->
         {List.wrap(other), lua.state}
