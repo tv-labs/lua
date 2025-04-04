@@ -275,6 +275,14 @@ defmodule LuaTest do
       assert {[4], _} = Lua.eval!(chunk)
     end
 
+    test "chunks return values are conditionally decoded" do
+      assert %Lua.Chunk{} = chunk = ~LUA[return { a = 1, b = 2 }]c
+
+      assert {[[{"a", 1}, {"b", 2}]], _} = Lua.eval!(chunk)
+      assert {[[{"a", 1}, {"b", 2}]], _} = Lua.eval!(chunk, decode: true)
+      assert {[{:tref, _}], _} = Lua.eval!(chunk, decode: false)
+    end
+
     test "invalid functions raise" do
       lua = Lua.new()
 

@@ -350,14 +350,20 @@ defmodule Lua do
       reraise Lua.RuntimeException, e, __STACKTRACE__
   end
 
-  def eval!(%__MODULE__{} = lua, %Lua.Chunk{} = chunk, _opts) do
+  def eval!(%__MODULE__{} = lua, %Lua.Chunk{} = chunk, opts) do
+    opts = Keyword.validate!(opts, decode: true)
+
     {chunk, lua} = load_chunk!(lua, chunk)
 
     case :luerl.call_chunk(chunk.ref, lua.state) do
       {:ok, result, new_state} ->
-        # TODO conditionally decode the result
+        lua = %__MODULE__{lua | state: new_state}
 
-        {result, %__MODULE__{lua | state: new_state}}
+        if opts[:decode] do
+          {:luerl.decode_list(result, new_state), lua}
+        else
+          {result, lua}
+        end
 
       {:lua_error, _e, _state} = error ->
         raise Lua.RuntimeException, error
