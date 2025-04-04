@@ -342,6 +342,54 @@ defmodule LuaTest do
                end)
                """)
     end
+
+    test "functions that raise errors still update state" do
+      assert {[2], _} =
+               Lua.eval!("""
+               global = 1
+
+               pcall(function()
+                 global = 2
+                 error("bang")
+               end)
+
+               return global
+               """)
+    end
+
+    test "functions that raise errors from Elixir still update state" do
+      lua =
+        Lua.set!(Lua.new(), [:foo], fn [callback], lua ->
+          dbg(Lua.get!(lua, [:global]))
+
+          case Lua.call_function(lua, callback, []) do
+            {:ok, ret, lua} ->
+              {ret, lua}
+
+            {:error, reason, state} ->
+              dbg(reason)
+              {[], state}
+          end
+        end)
+
+      assert {[2], _lua} =
+               Lua.eval!(lua, """
+               global = 1
+
+               local success, message =
+               pcall(function()
+                foo(function()
+                  global = 2
+
+                  error("whoopsie")
+
+                  return "yay"
+                end)
+               end)
+
+               return global
+               """)
+    end
   end
 
   describe "load_chunk!/2" do
