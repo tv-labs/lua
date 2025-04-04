@@ -7,6 +7,26 @@ defmodule LuaTest do
 
   require Lua.Util
 
+  describe "basic tests" do
+    setup do
+      %{lua: Lua.new(sandboxed: [])}
+    end
+
+    test "it can return basic values", %{lua: lua} do
+      assert {[4], _lua} = Lua.eval!(lua, "return 2 + 2")
+      assert {["hello world"], _lua} = Lua.eval!(lua, ~S[return "hello" .. " " .. "world"])
+    end
+
+    test "it can set top-level keys", %{lua: lua} do
+      assert {[42], _lua} = lua |> Lua.set!([:foo], 42) |> Lua.eval!("return foo")
+    end
+
+    test "it can set nested keys", %{lua: lua} do
+      assert {["nested"], _lua} =
+               lua |> Lua.set!([:a, :b, :c], "nested") |> Lua.eval!("return a.b.c")
+    end
+  end
+
   describe "inspect" do
     test "shows nothing" do
       lua = Lua.new()
@@ -200,10 +220,10 @@ defmodule LuaTest do
           {[Lua.get!(state, [:foo])], state}
         end)
         |> Lua.set!([:get_my_table1], fn _args, state ->
-          {Lua.get!(state, [:my_table]), state}
+          {Lua.get!(state, [:my_table], decode: false), state}
         end)
         |> Lua.set!([:get_my_table2], fn _args, state ->
-          {[Lua.get!(state, [:my_table])], state}
+          {[Lua.get!(state, [:my_table], decode: false)], state}
         end)
 
       assert {[^foo], %Lua{}} = Lua.call_function!(lua, [:get_foo1], [])
@@ -219,10 +239,48 @@ defmodule LuaTest do
       assert lua |> Lua.decode!(table) |> Lua.Table.as_map() == my_table
     end
 
+    test "it can register functions that take callbacks that modify state" do
+      require Logger
+
+      lua = ~LUA"""
+      state = {}
+
+      function assignFoo()
+        state["foo"] = "bar"
+      end
+
+      function assignBar()
+        state["bar"] = "foo"
+      end
+
+      assignBar()
+      run(assignFoo)
+
+      return state
+      """
+
+      assert {[ret], _lua} =
+               Lua.new()
+               |> Lua.set!([:run], fn [callback], lua ->
+                 Lua.call_function!(lua, callback, [])
+               end)
+               |> Lua.eval!(lua)
+
+      assert Lua.Table.as_map(ret) == %{"foo" => "bar", "bar" => "foo"}
+    end
+
     test "it can evaluate chunks" do
       assert %Lua.Chunk{} = chunk = ~LUA[return 2 + 2]c
 
       assert {[4], _} = Lua.eval!(chunk)
+    end
+
+    test "chunks return values are conditionally decoded" do
+      assert %Lua.Chunk{} = chunk = ~LUA[return { a = 1, b = 2 }]c
+
+      assert {[[{"a", 1}, {"b", 2}]], _} = Lua.eval!(chunk)
+      assert {[[{"a", 1}, {"b", 2}]], _} = Lua.eval!(chunk, decode: true)
+      assert {[{:tref, _}], _} = Lua.eval!(chunk, decode: false)
     end
 
     test "invalid functions raise" do
@@ -327,18 +385,20 @@ defmodule LuaTest do
     end
 
     test "can call user defined functions" do
-      {[], lua} =
+      {[func], lua} =
         Lua.eval!("""
         function double(val)
           return 2 * val
         end
+        return double
         """)
 
       assert {[20], %Lua{}} = Lua.call_function!(lua, :double, [10])
+      assert {[20], %Lua{}} = Lua.call_function!(lua, func, [10])
     end
 
     test "can call references to functions" do
-      {[func], lua} = Lua.eval!("return string.lower")
+      {[func], lua} = Lua.eval!("return string.lower", decode: false)
 
       assert {["it works"], %Lua{}} = Lua.call_function!(lua, func, ["IT WORKS"])
     end
@@ -379,15 +439,66 @@ defmodule LuaTest do
       assert {[22], _lua} = Lua.eval!(lua, "return single.foo(22)")
       assert {[], _lua} = Lua.eval!(lua, "return single.foo(nil)")
 
-      # There is ambiguity for empty tables, we treat as an empty return value
-      assert {[], _lua} = Lua.eval!(lua, "return single.foo({})")
+      assert {[[]], _lua} = Lua.eval!(lua, "return single.foo({})")
 
       assert {[[{"a", 1}]], _lua} = Lua.eval!(lua, "return single.foo({ a = 1 })")
 
       assert {[22], _lua} = Lua.eval!(lua, "return single.bar(22)")
       assert {[], _lua} = Lua.eval!(lua, "return single.bar(nil)")
-      assert {[], _lua} = Lua.eval!(lua, "return single.bar({})")
+      assert {[[]], _lua} = Lua.eval!(lua, "return single.bar({})")
       assert {[[{"a", 1}]], _lua} = Lua.eval!(lua, "return single.bar({ a = 1 })")
+    end
+
+    test "table handling in function return values" do
+      defmodule TableFunctions do
+        use Lua.API, scope: "tables"
+
+        deflua keyword_table do
+          [{"a", 1}, {"b", 2}]
+        end
+
+        deflua keyword_table_with_state(), _state do
+          [{"a", 1}, {"b", 2}]
+        end
+
+        deflua map_table do
+          %{"a" => 1, "b" => 2}
+        end
+
+        deflua map_table_with_state(), _state do
+          %{"a" => 1, "b" => 2}
+        end
+      end
+
+      lua = Lua.load_api(Lua.new(), TableFunctions)
+
+      message =
+        "Lua runtime error: tables.keyword_table() failed, keyword lists must be explicitly encoded to tables using Lua.encode!/2"
+
+      assert_raise Lua.RuntimeException, message, fn ->
+        Lua.eval!(lua, "return tables.keyword_table()")
+      end
+
+      message =
+        "Lua runtime error: tables.keyword_table_with_state() failed, keyword lists must be explicitly encoded to tables using Lua.encode!/2"
+
+      assert_raise Lua.RuntimeException, message, fn ->
+        Lua.eval!(lua, "return tables.keyword_table_with_state()")
+      end
+
+      message =
+        "Lua runtime error: tables.map_table() failed, maps must be explicitly encoded to tables using Lua.encode!/2"
+
+      assert_raise Lua.RuntimeException, message, fn ->
+        Lua.eval!(lua, "return tables.map_table()")
+      end
+
+      message =
+        "Lua runtime error: tables.map_table_with_state() failed, maps must be explicitly encoded to tables using Lua.encode!/2"
+
+      assert_raise Lua.RuntimeException, message, fn ->
+        Lua.eval!(lua, "return tables.map_table_with_state()")
+      end
     end
 
     test "calling non-functions raises" do
@@ -421,13 +532,6 @@ defmodule LuaTest do
       assert [{"a", 1}, {"b", 2}] = Lua.decode!(lua, ref)
       assert {{:tref, _} = ref, lua} = Lua.encode!(lua, [1, 2])
       assert [{1, 1}, {2, 2}] = Lua.decode!(lua, ref)
-    end
-
-    test "it can re-encode table refs" do
-      lua = Lua.new()
-
-      assert {{:tref, _} = tref, lua} = Lua.encode!(lua, %{a: 1})
-      assert {^tref, _lua} = Lua.encode!(lua, tref)
     end
 
     test "it raises for values that cannot be encoded" do
@@ -783,7 +887,7 @@ defmodule LuaTest do
         use Lua.API, scope: "gv"
 
         deflua get(name), state do
-          table = Lua.get!(state, [name])
+          table = Lua.get!(state, [name], decode: false)
 
           {[table], state}
         end
@@ -833,6 +937,10 @@ defmodule LuaTest do
         [1, 2, 3, 5, 8, 13, 21, 34]
       end
 
+      deflua atom do
+        :atom
+      end
+
       # Tuples are NOT supported!
       deflua tuple do
         {:key, "value"}
@@ -858,8 +966,18 @@ defmodule LuaTest do
     end
 
     test "it can return multiple values", %{lua: lua} do
-      return = ["hello", "world", "atom", 42, true]
-      assert {^return, _} = Lua.eval!(lua, "return example.multiple_returns()")
+      return = ["hello", "world", :atom, 42, true]
+      assert {^return, _} = Lua.eval!(lua, "return example.multiple_returns()", decode: false)
+    end
+
+    test "it cannot return decode atom values", %{lua: lua} do
+      message = "Lua runtime error: argument error: :atom"
+
+      assert_raise Lua.RuntimeException, message, fn ->
+        Lua.eval!(lua, "return example.atom()")
+      end
+
+      assert {[:atom], _} = Lua.eval!(lua, "return example.atom()", decode: false)
     end
 
     test "it can return lists", %{lua: lua} do
@@ -868,7 +986,7 @@ defmodule LuaTest do
     end
 
     test "it cannot return tuples from Elixir", %{lua: lua} do
-      error = "Lua runtime error: argument error"
+      error = "Lua runtime error: argument error: {:key, \"value\"}"
 
       assert_raise Lua.RuntimeException, error, fn ->
         Lua.eval!(lua, "return example.tuple()")

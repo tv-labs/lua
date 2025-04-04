@@ -6,7 +6,7 @@ defmodule Lua.TableTest do
   doctest Lua.Table
 
   defmacro assert_table(table, expected \\ :reflect) do
-    quote bind_quoted: [table: table, expected: Macro.escape(expected)] do
+    quote generated: true, bind_quoted: [table: table, expected: Macro.escape(expected)] do
       assert output = Lua.Table.as_string(table)
       assert {[ret], _lua} = Lua.eval!("return " <> output)
 

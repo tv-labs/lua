@@ -55,7 +55,7 @@ defmodule Lua.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:luerl, "~> 1.2"},
+      {:luerl, "~> 1.3"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
