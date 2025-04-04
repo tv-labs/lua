@@ -18,10 +18,9 @@ defmodule LuerlTest do
   end
 
   test "it can create nested tables" do
-    # {t1, luerl} = :luerl_emul.alloc_table([{"c", 22}], :luerl.init())
-    # {t2, luerl} = :luerl_emul.alloc_table([{"b", t1}], luerl)
-    # {:ok, luerl} = :luerl.set_table_keys(["a"], t2, luerl)
-    {:ok, luerl} = :luerl.set_table_keys(["a", "b", "c"], 22, :luerl.init())
+    {t1, luerl} = :luerl_emul.alloc_table([{"c", 22}], :luerl.init())
+    {t2, luerl} = :luerl_emul.alloc_table([{"b", t1}], luerl)
+    {:ok, luerl} = :luerl.set_table_keys(["a"], t2, luerl)
 
     {:ok, [22], luerl} = :luerl.do("return a.b.c", luerl)
 
