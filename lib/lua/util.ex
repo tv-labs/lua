@@ -57,7 +57,7 @@ defmodule Lua.Util do
     |> Enum.map_join("\n", fn
       {{func, [{:tref, _} = tref | rest], _}, {_, _, context}} ->
         # Tried to call a method on something that wasn't setup correctly
-        keys = state |> Luerl.New.decode(tref) |> Enum.map_join(", ", fn {k, _} -> inspect(k) end)
+        keys = tref |> :luerl.decode(state) |> Enum.map_join(", ", fn {k, _} -> inspect(k) end)
 
         """
         #{inspect(func)} with arguments #{format_args(rest)}

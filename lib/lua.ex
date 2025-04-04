@@ -144,7 +144,7 @@ defmodule Lua do
   end
 
   @doc """
-  Sets a table value in Lua. Nested keys will create
+  Sets a table value in Lua. Nested keys will allocate
   intermediate tables
 
       iex> Lua.set!(Lua.new(), [:hello], "World")
@@ -197,13 +197,13 @@ defmodule Lua do
   end
 
   defp do_set(state, keys, value) do
-    keys = List.wrap(keys)
+    {keys, state} = keys |> List.wrap() |> :luerl.encode_list(state)
 
     {_keys, state} =
       Enum.reduce_while(keys, {[], state}, fn key, {keys, state} ->
         keys = keys ++ [key]
 
-        case :luerl.get_table_keys_dec(keys, state) do
+        case :luerl.get_table_keys(keys, state) do
           {:ok, nil, state} ->
             {:cont, set_keys!(state, keys)}
 
@@ -216,7 +216,7 @@ defmodule Lua do
       end)
 
     case :luerl.set_table_keys_dec(keys, value, state) do
-      {:ok, _value, state} ->
+      {:ok, state} ->
         wrap(state)
 
       {:lua_error, _error, state} ->
@@ -225,8 +225,10 @@ defmodule Lua do
   end
 
   defp set_keys!(state, keys) do
-    case :luerl.set_table_keys_dec(keys, [], state) do
-      {:ok, _, state} ->
+    {table, state} = :luerl_emul.alloc_table([], state)
+
+    case :luerl.set_table_keys(keys, table, state) do
+      {:ok, state} ->
         {keys, state}
 
       {:lua_error, _error, state} ->
@@ -235,6 +237,7 @@ defmodule Lua do
   end
 
   defp illegal_index([:_G | keys]), do: illegal_index(keys)
+  defp illegal_index(["_G" | keys]), do: illegal_index(keys)
 
   defp illegal_index(keys) do
     {:illegal_index, nil, Enum.join(keys, ".")}
@@ -257,9 +260,23 @@ defmodule Lua do
       iex> state = Lua.set!(Lua.new(), [:a, :b, :c], "nested")
       iex> Lua.get!(state, [:a, :b, :c])
       "nested"
+
+  ### Options
+  * `:decode` - (default `true`) - By default, values are decoded
   """
-  def get!(%__MODULE__{state: state}, keys) do
-    case :luerl.get_table_keys_dec(keys, state) do
+  def get!(%__MODULE__{state: state}, keys, opts \\ []) do
+    opts = Keyword.validate!(opts, decode: true)
+
+    {keys, state} = :luerl.encode_list(keys, state)
+
+    func =
+      if opts[:decode] do
+        &:luerl.get_table_keys_dec/2
+      else
+        &:luerl.get_table_keys/2
+      end
+
+    case func.(keys, state) do
       {:ok, value, _state} ->
         value
 
@@ -282,11 +299,37 @@ defmodule Lua do
 
       iex> {[4], _} = Lua.eval!(~LUA[return 2 + 2]c)
 
-  """
-  def eval!(state \\ new(), script)
 
-  def eval!(%__MODULE__{state: state} = lua, script) when is_binary(script) do
-    case :luerl.do_dec(script, state) do
+  ### Options
+  * `:decode` - (default `true`) By default, all values returned from Lua scripts are decoded.
+                This may not be desirable if you need to modify a table reference or access a function call.
+                Pass `decode: false` as an option to return encoded values
+
+
+  """
+  def eval!(script) do
+    eval!(new(), script, [])
+  end
+
+  def eval!(script, opts) when is_binary(script) or is_struct(script, Lua.Chunk) do
+    eval!(new(), script, opts)
+  end
+
+  def eval!(%__MODULE__{} = lua, script) do
+    eval!(lua, script, [])
+  end
+
+  def eval!(%__MODULE__{state: state} = lua, script, opts) when is_binary(script) do
+    opts = Keyword.validate!(opts, decode: true)
+
+    func =
+      if opts[:decode] do
+        &:luerl.do_dec/2
+      else
+        &:luerl.do/2
+      end
+
+    case func.(script, state) do
       {:ok, result, new_state} ->
         {result, %__MODULE__{lua | state: new_state}}
 
@@ -309,11 +352,13 @@ defmodule Lua do
       reraise Lua.RuntimeException, e, __STACKTRACE__
   end
 
-  def eval!(%__MODULE__{} = lua, %Lua.Chunk{} = chunk) do
+  def eval!(%__MODULE__{} = lua, %Lua.Chunk{} = chunk, _opts) do
     {chunk, lua} = load_chunk!(lua, chunk)
 
     case :luerl.call_chunk(chunk.ref, lua.state) do
       {:ok, result, new_state} ->
+        # TODO conditionally decode the result
+
         {result, %__MODULE__{lua | state: new_state}}
 
       {:lua_error, _e, _state} = error ->
@@ -400,7 +445,7 @@ defmodule Lua do
 
   References to functions can also be passed
 
-      iex> {[ref], lua} = Lua.eval!("return string.lower")
+      iex> {[ref], lua} = Lua.eval!("return string.lower", decode: false)
       iex> {[ret], _lua} = Lua.call_function!(lua, ref, ["FUNCTION REF"])
       iex> ret
       "function ref"
@@ -421,8 +466,14 @@ defmodule Lua do
   {["wow"], _} = Lua.eval!(lua, "return example.foo(\"WOW\")")
   ```
   """
-  def call_function!(%__MODULE__{} = lua, name, args)
-      when (is_list(args) and is_tuple(name)) or is_function(name) do
+  def call_function!(%__MODULE__{} = lua, ref, args) when is_tuple(ref) do
+    case :luerl.call(ref, args, lua.state) do
+      {:ok, value, state} -> {value, wrap(state)}
+      {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
+    end
+  end
+
+  def call_function!(%__MODULE__{} = lua, name, args) when is_function(name) do
     {ref, lua} = encode!(lua, name)
 
     case :luerl.call(ref, args, lua.state) do
@@ -431,12 +482,13 @@ defmodule Lua do
     end
   end
 
-  def call_function!(%__MODULE__{} = lua, name, args) when is_list(args) do
-    keys = List.wrap(name)
+  def call_function!(%__MODULE__{} = lua, name, args) do
+    {keys, state} = List.wrap(name) |> :luerl.encode_list(lua.state)
 
-    func = get!(lua, keys)
+    # TODO can we still use get! ?
+    {:ok, func, state} = :luerl.get_table_keys(keys, state)
 
-    case :luerl.call_function(func, args, lua.state) do
+    case :luerl.call_function(func, args, state) do
       {:ok, ret, lua} -> {ret, wrap(lua)}
       {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
     end
@@ -577,9 +629,26 @@ defmodule Lua do
   defp execute_function(module, function_name, args) do
     # Luerl mandates lists as return values; this function ensures all results conform.
     case apply(module, function_name, args) do
-      {ret, %Lua{state: state}} -> {ret, state}
-      [{_, _} | _rest] = table -> [table]
-      other -> List.wrap(other)
+      # TODO i think this is impossible
+      {ret, %Lua{state: state}} ->
+        {ret, state}
+
+      # Table-like keyword list
+      [{_, _} | _rest] ->
+        raise Lua.RuntimeException,
+          function: function_name,
+          scope: module.scope(),
+          message: "keyword lists must be implicitly encoded to tables using Lua.encode!/2"
+
+      # Map
+      map when is_map(map) ->
+        raise Lua.RuntimeException,
+          function: function_name,
+          scope: module.scope(),
+          message: "maps must be implicitly encoded to tables using Lua.encode!/2"
+
+      other ->
+        List.wrap(other)
     end
   catch
     thrown_value ->
@@ -590,9 +659,25 @@ defmodule Lua do
   defp execute_function_with_state(module, function_name, args, lua) do
     # Luerl mandates lists as return values; this function ensures all results conform.
     case apply(module, function_name, args) do
-      {ret, %Lua{state: state}} -> {ret, state}
-      [{_, _} | _rest] = table -> {[table], lua.state}
-      other -> {List.wrap(other), lua.state}
+      {ret, %Lua{state: state}} ->
+        {ret, state}
+
+      # Table-like keyword list
+      [{_, _} | _rest] ->
+        raise Lua.RuntimeException,
+          function: function_name,
+          scope: module.scope(),
+          message: "keyword lists must be implicitly encoded to tables using Lua.encode!/2"
+
+      # Map
+      map when is_map(map) ->
+        raise Lua.RuntimeException,
+          function: function_name,
+          scope: module.scope(),
+          message: "maps must be implicitly encoded to tables using Lua.encode!/2"
+
+      other ->
+        {List.wrap(other), lua.state}
     end
   catch
     thrown_value ->

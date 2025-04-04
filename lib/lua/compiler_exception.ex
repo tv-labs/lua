@@ -28,7 +28,7 @@ defmodule Lua.CompilerException do
   end
 
   def message(%__MODULE__{errors: errors, state: state}) do
-    stacktrace = Luerl.New.get_stacktrace(state)
+    stacktrace = :luerl.get_stacktrace(state)
 
     """
     Failed to compile Lua!
