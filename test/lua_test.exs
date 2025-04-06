@@ -384,15 +384,18 @@ defmodule LuaTest do
                Lua.eval!(lua, """
                global = 1
 
+               local success, message =
                pcall(function()
                 foo(function()
                   global = 2
 
                   error("whoopsie")
+
+                  return "yay"
                 end)
                end)
 
-               return global
+               return global, success, message
                """)
     end
   end
