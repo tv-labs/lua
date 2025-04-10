@@ -172,6 +172,14 @@ defmodule LuaTest do
       end
     end
 
+    test "it can load files with just comments" do
+      path = test_file("comments")
+
+      assert lua = Lua.load_file!(Lua.new(), path)
+
+      assert {[true], _} = Lua.eval!(lua, "return true")
+    end
+
     test "non-existent files are not loaded" do
       assert_raise RuntimeError, "Cannot load lua file, \"bananas.lua\" does not exist", fn ->
         Lua.load_file!(Lua.new(), "bananas")
