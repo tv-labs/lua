@@ -87,12 +87,12 @@ defmodule Lua do
   defmacro sigil_LUA(code, opts) do
     code =
       case code do
-        {:<<>>, _, [literal]} -> String.to_charlist(literal)
+        {:<<>>, _, [literal]} -> literal
         _ -> raise "~Lua only accepts string literals, received:\n\n#{Macro.to_string(code)}"
       end
 
     chunk =
-      case :luerl_comp.string(code, [:return]) do
+      case :luerl_comp.string(String.to_charlist(code), [:return]) do
         {:ok, chunk} -> %Lua.Chunk{instructions: chunk}
         {:error, error, _warnings} -> raise Lua.CompilerException, error
       end
