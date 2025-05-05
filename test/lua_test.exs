@@ -352,16 +352,17 @@ defmodule LuaTest do
     end
 
     test "functions that raise errors still update state" do
-      assert {[2], _} =
+      assert {[2, false, "bang"], _} =
                Lua.eval!("""
                global = 1
 
-               pcall(function()
-                 global = 2
-                 error("bang")
-               end)
+               local success, message =
+                 pcall(function()
+                   global = 2
+                   error("bang")
+                 end)
 
-               return global
+               return global, success, message
                """)
     end
 
@@ -377,20 +378,20 @@ defmodule LuaTest do
           end
         end)
 
-      assert {[2, true, nil], _lua} =
+      assert {[2, false, "whoopsie"], _lua} =
                Lua.eval!(lua, """
                global = 1
 
-               local success, message =
-               pcall(function()
-                foo(function()
-                  global = 2
+               success, message =
+                 pcall(function()
+                  return foo(function()
+                    global = 2
 
-                  error("whoopsie")
+                    error("whoopsie")
 
-                  return "yay"
-                end)
-               end)
+                    return "yay"
+                  end)
+                 end)
 
                return global, success, message
                """)
