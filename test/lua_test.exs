@@ -368,19 +368,16 @@ defmodule LuaTest do
     test "functions that raise errors from Elixir still update state" do
       lua =
         Lua.set!(Lua.new(), [:foo], fn [callback], lua ->
-          dbg(Lua.get!(lua, [:global]))
-
           case Lua.call_function(lua, callback, []) do
-            {:ok, ret, lua} ->
+            {ret, lua} ->
               {ret, lua}
 
-            {:error, reason, state} ->
-              dbg(reason)
+            {:error, _reason, state} ->
               {[], state}
           end
         end)
 
-      assert {[2], _lua} =
+      assert {[2, true, nil], _lua} =
                Lua.eval!(lua, """
                global = 1
 

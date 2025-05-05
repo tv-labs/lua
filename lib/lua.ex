@@ -449,14 +449,14 @@ defmodule Lua do
   @doc """
   Calls a function in Lua's state
 
-      iex> {:ok, [ret], _lua} = Lua.call_function(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
+      iex> {[ret], _lua} = Lua.call_function(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
       iex> ret
       "hello robert"
 
   References to functions can also be passed
 
       iex> {[ref], lua} = Lua.eval!("return string.lower", decode: false)
-      iex> {:ok, [ret], _lua} = Lua.call_function!(lua, ref, ["FUNCTION REF"])
+      iex> {[ret], _lua} = Lua.call_function!(lua, ref, ["FUNCTION REF"])
       iex> ret
       "function ref"
 
@@ -509,8 +509,8 @@ defmodule Lua do
   """
   def call_function!(%__MODULE__{} = lua, func, args) do
     case call_function(lua, func, args) do
-      {:ok, ret, lua} -> {ret, lua}
-      {:error, reason, lua} = error -> raise Lua.RuntimeException, {:lua_error, reason, lua.state}
+      {ret, lua} -> {ret, lua}
+      {:error, reason, lua} -> raise Lua.RuntimeException, {:lua_error, reason, lua.state}
     end
   end
 
