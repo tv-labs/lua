@@ -55,7 +55,7 @@ defmodule Lua.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:luerl, "~> 1.3"},
+      {:luerl, github: "rvirding/luerl", ref: "076510701bd0f1f1bde9c49f5ccde0701be88d49"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
