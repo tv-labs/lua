@@ -369,7 +369,7 @@ defmodule LuaTest do
       lua =
         Lua.set!(Lua.new(), [:foo], fn [callback], lua ->
           case Lua.call_function(lua, callback, []) do
-            {ret, lua} ->
+            {:ok, ret, lua} ->
               {ret, lua}
 
             {:error, _reason, state} ->

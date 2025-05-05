@@ -449,21 +449,21 @@ defmodule Lua do
   @doc """
   Calls a function in Lua's state
 
-      iex> {[ret], _lua} = Lua.call_function(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
+      iex> {:ok, [ret], _lua} = Lua.call_function(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
       iex> ret
       "hello robert"
 
   References to functions can also be passed
 
       iex> {[ref], lua} = Lua.eval!("return string.lower", decode: false)
-      iex> {[ret], _lua} = Lua.call_function!(lua, ref, ["FUNCTION REF"])
+      iex> {:ok, [ret], _lua} = Lua.call_function(lua, ref, ["FUNCTION REF"])
       iex> ret
       "function ref"
 
   """
   def call_function(%__MODULE__{} = lua, ref, args) when is_tuple(ref) do
     case :luerl.call(ref, args, lua.state) do
-      {:ok, value, state} -> {value, wrap(state)}
+      {:ok, value, state} -> {:ok, value, wrap(state)}
       {:lua_error, reason, state} -> {:error, reason, wrap(state)}
     end
   end
@@ -472,7 +472,7 @@ defmodule Lua do
     {ref, lua} = encode!(lua, name)
 
     case :luerl.call(ref, args, lua.state) do
-      {:ok, value, state} -> {value, wrap(state)}
+      {:ok, value, state} -> {:ok, value, wrap(state)}
       {:lua_error, reason, state} -> {:error, reason, wrap(state)}
     end
   end
@@ -483,7 +483,7 @@ defmodule Lua do
     func = get!(lua, keys, decode: false)
 
     case :luerl.call_function(func, args, state) do
-      {:ok, ret, lua} -> {ret, wrap(lua)}
+      {:ok, ret, lua} -> {:ok, ret, wrap(lua)}
       {:lua_error, reason, state} -> {:error, reason, wrap(state)}
     end
   end
@@ -509,7 +509,7 @@ defmodule Lua do
   """
   def call_function!(%__MODULE__{} = lua, func, args) do
     case call_function(lua, func, args) do
-      {ret, lua} -> {ret, lua}
+      {:ok, ret, lua} -> {ret, lua}
       {:error, reason, lua} -> raise Lua.RuntimeException, {:lua_error, reason, lua.state}
     end
   end
