@@ -551,10 +551,10 @@ defmodule LuaTest do
     end
 
     test "it raises for values that cannot be decoded" do
-      error = "Lua runtime error: Failed to decode :hello"
+      error = "Lua runtime error: Failed to decode {}"
 
       assert_raise Lua.RuntimeException, error, fn ->
-        Lua.decode!(Lua.new(), :hello)
+        Lua.decode!(Lua.new(), {})
       end
     end
   end
@@ -978,13 +978,8 @@ defmodule LuaTest do
       assert {^return, _} = Lua.eval!(lua, "return example.multiple_returns()", decode: false)
     end
 
-    test "it cannot return decode atom values", %{lua: lua} do
-      message = "Lua runtime error: argument error: :atom"
-
-      assert_raise Lua.RuntimeException, message, fn ->
-        Lua.eval!(lua, "return example.atom()")
-      end
-
+    test "it can return tom values", %{lua: lua} do
+      assert {["atom"], _} = Lua.eval!(lua, "return example.atom()", decode: true)
       assert {[:atom], _} = Lua.eval!(lua, "return example.atom()", decode: false)
     end
 
