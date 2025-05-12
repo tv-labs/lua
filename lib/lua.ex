@@ -377,9 +377,6 @@ defmodule Lua do
 
       {:lua_error, _e, _state} = error ->
         raise Lua.RuntimeException, error
-
-      {:error, [error | _], _} ->
-        raise Lua.CompilerException, error
     end
   rescue
     e in [UndefinedFunctionError] ->
