@@ -1,0 +1,24 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [v0.1.0] - 2025-05-12
+
+### Fixed
+
+- Errors now correctly propagate state updates
+- Fixed version requirements issues, causing references to undefined `luerl_new`
+- Allow Unicode characters to be used in Lua scripts
+- Files with only comments can be loaded
+
+### Changed
+
+- Upgrade to Luerl 1.4.1
+- Tables must now be explicitly decoded when receiving as arguments `deflua` and other Elixir callbacks
+
+
+[unreleased]: https://github.com/tv-labs/lua/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/tv-labs/lua/compare/v0.0.22...v0.1.0
