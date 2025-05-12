@@ -184,8 +184,14 @@ defmodule Lua do
         func when is_function(func, 2) ->
           fn args, state ->
             case func.(args, wrap(state)) do
-              {value, %__MODULE__{} = lua} -> {List.wrap(value), lua.state}
-              value -> {List.wrap(value), state}
+              {value, %__MODULE__{} = lua} ->
+                {List.wrap(value), lua.state}
+
+              {:error, reason, %__MODULE__{} = lua} ->
+                :luerl_lib.lua_error(reason, lua.state)
+
+              value ->
+                {List.wrap(value), state}
             end
           end
 
@@ -609,8 +615,8 @@ defmodule Lua do
         execute_function_with_state(module, function_name, [args, wrap(state)], wrap(state))
       end
     else
-      fn args ->
-        execute_function(module, function_name, [args])
+      fn args, state ->
+        execute_function(module, function_name, [args], state)
       end
     end
   end
@@ -633,9 +639,9 @@ defmodule Lua do
         end
       end
     else
-      fn args ->
+      fn args, state ->
         if length(args) in arities do
-          execute_function(module, function_name, args)
+          execute_function(module, function_name, args, state)
         else
           raise Lua.RuntimeException,
             function: function_name,
@@ -646,7 +652,7 @@ defmodule Lua do
     end
   end
 
-  defp execute_function(module, function_name, args) do
+  defp execute_function(module, function_name, args, state) do
     # Luerl mandates lists as return values; this function ensures all results conform.
     case apply(module, function_name, args) do
       # Table-like keyword list
@@ -663,8 +669,11 @@ defmodule Lua do
           scope: module.scope(),
           message: "maps must be explicitly encoded to tables using Lua.encode!/2"
 
+      {:error, reason} ->
+        :luerl_lib.lua_error(reason, state)
+
       other ->
-        List.wrap(other)
+        {List.wrap(other), state}
     end
   catch
     thrown_value ->
@@ -691,6 +700,9 @@ defmodule Lua do
           function: function_name,
           scope: module.scope(),
           message: "maps must be explicitly encoded to tables using Lua.encode!/2"
+
+      {:error, reason, %Lua{} = lua} ->
+        :luerl_lib.lua_error(reason, lua.state)
 
       other ->
         {List.wrap(other), lua.state}

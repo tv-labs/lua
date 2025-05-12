@@ -61,4 +61,34 @@ defmodule LuerlTest do
 
     assert is_function(func)
   end
+
+  test "functions can return error values" do
+    func = fn _args, state ->
+      :luerl_lib.lua_error("something bad happened", state)
+    end
+
+    assert {:ok, state} = :luerl.set_table_keys_dec(["foo"], func, :luerl.init())
+
+    assert {:lua_error, "something bad happened", _} =
+             :luerl.call_function_dec([:foo], [], state)
+
+    assert {:lua_error, "something bad happened", _} =
+             :luerl.do(
+               """
+               return foo()
+               """,
+               state
+             )
+
+    # This is inconsistent that this includes the "!"
+    assert {:ok, [false, "something bad happened!"], _state} =
+             :luerl.do(
+               """
+               return pcall(function()
+                 return foo()
+               end)
+               """,
+               state
+             )
+  end
 end

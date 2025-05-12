@@ -373,8 +373,8 @@ defmodule LuaTest do
             {:ok, ret, lua} ->
               {ret, lua}
 
-            {:error, _reason, state} ->
-              {[], state}
+            {:error, reason, state} ->
+              {:error, reason, state}
           end
         end)
 
@@ -384,15 +384,14 @@ defmodule LuaTest do
 
                success, message =
                  pcall(function()
-                  return foo(function()
-                    global = 2
+                   return foo(function()
+                     global = 2
 
-                    error("whoopsie")
+                     error("whoopsie")
 
-                    return "yay"
-                  end)
+                     return "yay"
+                   end)
                  end)
-
                return global, success, message
                """)
     end
@@ -501,6 +500,44 @@ defmodule LuaTest do
       assert {[], _lua} = Lua.eval!(lua, "return single.bar(nil)")
       assert {[[]], _lua} = Lua.eval!(lua, "return single.bar({})")
       assert {[[{"a", 1}]], _lua} = Lua.eval!(lua, "return single.bar({ a = 1 })")
+    end
+
+    test "api functions can return errors" do
+      defmodule APIErrors do
+        use Lua.API, scope: "bang"
+
+        deflua ohno(), state do
+          {:error, "oh no", state}
+        end
+
+        deflua whoops() do
+          {:error, "whoops"}
+        end
+      end
+
+      lua = Lua.load_api(Lua.new(), APIErrors)
+
+      assert {[2, false, "oh no!"], _lua} =
+               Lua.eval!(lua, """
+               global = 1
+               local success, message =
+                 pcall(function()
+                   global = 2
+                   return bang.ohno()
+                 end)
+               return global, success, message
+               """)
+
+      assert {[2, false, "whoops!"], _lua} =
+               Lua.eval!(lua, """
+               global = 1
+               local success, message =
+                 pcall(function()
+                   global = 2
+                   return bang.whoops()
+                 end)
+               return global, success, message
+               """)
     end
 
     test "table handling in function return values" do
