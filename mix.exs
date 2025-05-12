@@ -56,7 +56,8 @@ defmodule Lua.MixProject do
   defp deps do
     [
       {:luerl, "~> 1.4.1"},
-      {:ex_doc, "~> 0.31", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.38", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 end
