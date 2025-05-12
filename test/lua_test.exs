@@ -350,6 +350,51 @@ defmodule LuaTest do
                end)
                """)
     end
+
+    test "functions that raise errors still update state" do
+      assert {[2, false, "bang"], _} =
+               Lua.eval!("""
+               global = 1
+
+               local success, message =
+                 pcall(function()
+                   global = 2
+                   error("bang")
+                 end)
+
+               return global, success, message
+               """)
+    end
+
+    test "functions that raise errors from Elixir still update state" do
+      lua =
+        Lua.set!(Lua.new(), [:foo], fn [callback], lua ->
+          case Lua.call_function(lua, callback, []) do
+            {:ok, ret, lua} ->
+              {ret, lua}
+
+            {:error, reason, state} ->
+              {:error, reason, state}
+          end
+        end)
+
+      assert {[2, false, "whoopsie"], _lua} =
+               Lua.eval!(lua, """
+               global = 1
+
+               success, message =
+                 pcall(function()
+                   return foo(function()
+                     global = 2
+
+                     error("whoopsie")
+
+                     return "yay"
+                   end)
+                 end)
+               return global, success, message
+               """)
+    end
   end
 
   describe "load_chunk!/2" do
@@ -455,6 +500,44 @@ defmodule LuaTest do
       assert {[], _lua} = Lua.eval!(lua, "return single.bar(nil)")
       assert {[[]], _lua} = Lua.eval!(lua, "return single.bar({})")
       assert {[[{"a", 1}]], _lua} = Lua.eval!(lua, "return single.bar({ a = 1 })")
+    end
+
+    test "api functions can return errors" do
+      defmodule APIErrors do
+        use Lua.API, scope: "bang"
+
+        deflua ohno(), state do
+          {:error, "oh no", state}
+        end
+
+        deflua whoops() do
+          {:error, "whoops"}
+        end
+      end
+
+      lua = Lua.load_api(Lua.new(), APIErrors)
+
+      assert {[2, false, "oh no!"], _lua} =
+               Lua.eval!(lua, """
+               global = 1
+               local success, message =
+                 pcall(function()
+                   global = 2
+                   return bang.ohno()
+                 end)
+               return global, success, message
+               """)
+
+      assert {[2, false, "whoops!"], _lua} =
+               Lua.eval!(lua, """
+               global = 1
+               local success, message =
+                 pcall(function()
+                   global = 2
+                   return bang.whoops()
+                 end)
+               return global, success, message
+               """)
     end
 
     test "table handling in function return values" do

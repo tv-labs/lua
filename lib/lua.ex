@@ -184,8 +184,14 @@ defmodule Lua do
         func when is_function(func, 2) ->
           fn args, state ->
             case func.(args, wrap(state)) do
-              {value, %__MODULE__{} = lua} -> {List.wrap(value), lua.state}
-              value -> {List.wrap(value), state}
+              {value, %__MODULE__{} = lua} ->
+                {List.wrap(value), lua.state}
+
+              {:error, reason, %__MODULE__{} = lua} ->
+                :luerl_lib.lua_error(reason, lua.state)
+
+              value ->
+                {List.wrap(value), state}
             end
           end
 
@@ -264,7 +270,7 @@ defmodule Lua do
   ### Options
   * `:decode` - (default `true`) - By default, values are decoded
   """
-  def get!(%__MODULE__{state: state}, keys, opts \\ []) do
+  def get!(%__MODULE__{state: state}, keys, opts \\ []) when is_list(keys) do
     opts = Keyword.validate!(opts, decode: true)
 
     {keys, state} = :luerl.encode_list(keys, state)
@@ -449,16 +455,47 @@ defmodule Lua do
   @doc """
   Calls a function in Lua's state
 
-      iex> {[ret], _lua} = Lua.call_function!(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
+      iex> {:ok, [ret], _lua} = Lua.call_function(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
       iex> ret
       "hello robert"
 
   References to functions can also be passed
 
       iex> {[ref], lua} = Lua.eval!("return string.lower", decode: false)
-      iex> {[ret], _lua} = Lua.call_function!(lua, ref, ["FUNCTION REF"])
+      iex> {:ok, [ret], _lua} = Lua.call_function(lua, ref, ["FUNCTION REF"])
       iex> ret
       "function ref"
+
+  """
+  def call_function(%__MODULE__{} = lua, ref, args) when is_tuple(ref) do
+    case :luerl.call(ref, args, lua.state) do
+      {:ok, value, state} -> {:ok, value, wrap(state)}
+      {:lua_error, reason, state} -> {:error, reason, wrap(state)}
+    end
+  end
+
+  def call_function(%__MODULE__{} = lua, name, args) when is_function(name) do
+    {ref, lua} = encode!(lua, name)
+
+    case :luerl.call(ref, args, lua.state) do
+      {:ok, value, state} -> {:ok, value, wrap(state)}
+      {:lua_error, reason, state} -> {:error, reason, wrap(state)}
+    end
+  end
+
+  def call_function(%__MODULE__{} = lua, name, args) do
+    {keys, state} = List.wrap(name) |> :luerl.encode_list(lua.state)
+
+    func = get!(lua, keys, decode: false)
+
+    case :luerl.call_function(func, args, state) do
+      {:ok, ret, lua} -> {:ok, ret, wrap(lua)}
+      {:lua_error, reason, state} -> {:error, reason, wrap(state)}
+    end
+  end
+
+  @doc """
+  The raising variant of `call_function/3`
 
   This is also useful for executing Lua function's inside of Elixir APIs
 
@@ -476,30 +513,10 @@ defmodule Lua do
   {["wow"], _} = Lua.eval!(lua, "return example.foo(\"WOW\")")
   ```
   """
-  def call_function!(%__MODULE__{} = lua, ref, args) when is_tuple(ref) do
-    case :luerl.call(ref, args, lua.state) do
-      {:ok, value, state} -> {value, wrap(state)}
-      {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
-    end
-  end
-
-  def call_function!(%__MODULE__{} = lua, name, args) when is_function(name) do
-    {ref, lua} = encode!(lua, name)
-
-    case :luerl.call(ref, args, lua.state) do
-      {:ok, value, state} -> {value, wrap(state)}
-      {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
-    end
-  end
-
-  def call_function!(%__MODULE__{} = lua, name, args) do
-    {keys, state} = List.wrap(name) |> :luerl.encode_list(lua.state)
-
-    func = get!(lua, keys, decode: false)
-
-    case :luerl.call_function(func, args, state) do
-      {:ok, ret, lua} -> {ret, wrap(lua)}
-      {:lua_error, _, _} = error -> raise Lua.RuntimeException, error
+  def call_function!(%__MODULE__{} = lua, func, args) do
+    case call_function(lua, func, args) do
+      {:ok, ret, lua} -> {ret, lua}
+      {:error, reason, lua} -> raise Lua.RuntimeException, {:lua_error, reason, lua.state}
     end
   end
 
@@ -598,8 +615,8 @@ defmodule Lua do
         execute_function_with_state(module, function_name, [args, wrap(state)], wrap(state))
       end
     else
-      fn args ->
-        execute_function(module, function_name, [args])
+      fn args, state ->
+        execute_function(module, function_name, [args], state)
       end
     end
   end
@@ -622,9 +639,9 @@ defmodule Lua do
         end
       end
     else
-      fn args ->
+      fn args, state ->
         if length(args) in arities do
-          execute_function(module, function_name, args)
+          execute_function(module, function_name, args, state)
         else
           raise Lua.RuntimeException,
             function: function_name,
@@ -635,7 +652,7 @@ defmodule Lua do
     end
   end
 
-  defp execute_function(module, function_name, args) do
+  defp execute_function(module, function_name, args, state) do
     # Luerl mandates lists as return values; this function ensures all results conform.
     case apply(module, function_name, args) do
       # Table-like keyword list
@@ -652,8 +669,11 @@ defmodule Lua do
           scope: module.scope(),
           message: "maps must be explicitly encoded to tables using Lua.encode!/2"
 
+      {:error, reason} ->
+        :luerl_lib.lua_error(reason, state)
+
       other ->
-        List.wrap(other)
+        {List.wrap(other), state}
     end
   catch
     thrown_value ->
@@ -680,6 +700,9 @@ defmodule Lua do
           function: function_name,
           scope: module.scope(),
           message: "maps must be explicitly encoded to tables using Lua.encode!/2"
+
+      {:error, reason, %Lua{} = lua} ->
+        :luerl_lib.lua_error(reason, lua.state)
 
       other ->
         {List.wrap(other), lua.state}
