@@ -604,6 +604,54 @@ defmodule Lua do
     |> Lua.API.install(module, scope, opts[:data])
   end
 
+  @doc """
+  Puts a private value in storage for use in Elixir functions
+
+      iex> lua = Lua.new() |> Lua.put_private(:api_key, "1234")
+  """
+  def put_private(%__MODULE__{} = lua, key, value) do
+    update_in(lua.state, fn state -> :luerl.put_private(key, value, state) end)
+  end
+
+  @doc """
+  Gets a private value in storage for use in Elixir functions
+
+      iex> lua = Lua.new() |> Lua.put_private(:api_key, "1234")
+      iex> Lua.get_private(lua, :api_key)
+      {:ok, "1234"}
+  """
+  def get_private(%__MODULE__{state: state}, key) do
+    {:ok, :luerl.get_private(key, state)}
+  rescue
+    KeyError -> :error
+  end
+
+  @doc """
+  Gets a private value in storage for use in Elixir functions, raises if the key doesn't exist
+
+      iex> lua = Lua.new() |> Lua.put_private(:api_key, "1234")
+      iex> Lua.get_private!(lua, :api_key)
+      "1234"
+  """
+  def get_private!(%__MODULE__{} = lua, key) do
+    case get_private(lua, key) do
+      {:ok, value} -> value
+      :error -> raise "private key `#{inspect(key)}` does not exist"
+    end
+  end
+
+  @doc """
+  Deletes a key from private storage
+
+      iex> lua = Lua.new() |> Lua.put_private(:api_key, "1234")
+      iex> lua = Lua.delete_private(lua, :api_key)
+      iex> Lua.get_private(lua, :api_key)
+      :error
+  """
+  def delete_private(%__MODULE__{} = lua, key) do
+    update_in(lua.state, fn state -> :luerl.delete_private(key, state) end)
+  end
+
   defp wrap_variadic_function(module, function_name, with_state?) do
     # formatted = Util.format_function(module.scope() ++ [function_name], 0)
 

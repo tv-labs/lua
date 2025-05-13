@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [v0.1.1] - 2025-05-13
+
+### Added
+- `Lua.put_private/3`, `Lua.get_private/2`, `Lua.get_private!/2`, and `Lua.delete_private/2` for working with private state
+
 ## [v0.1.0] - 2025-05-12
 
 ### Fixed
@@ -20,5 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tables must now be explicitly decoded when receiving as arguments `deflua` and other Elixir callbacks
 
 
-[unreleased]: https://github.com/tv-labs/lua/compare/v0.1.0...HEAD
+[unreleased]: https://github.com/tv-labs/lua/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/tv-labs/lua/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tv-labs/lua/compare/v0.0.22...v0.1.0
