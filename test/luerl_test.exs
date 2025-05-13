@@ -91,4 +91,37 @@ defmodule LuerlTest do
                state
              )
   end
+
+  test "userdata can be returned from functions" do
+    random = Enum.random(1..100)
+
+    get_random = fn _args, state ->
+      {data, state} = :luerl.encode(%{random: {:userdata, random}}, state)
+
+      {[data, {:userdata, random}], state}
+    end
+
+    return_random = fn [data], state ->
+      case data do
+        {:userdata, value} ->
+          {[value], state}
+
+        table ->
+          [{"random", {:userdata, random}}] = :luerl.decode(table, state)
+          {[random], state}
+      end
+    end
+
+    assert {:ok, state} = :luerl.set_table_keys_dec(["get_random"], get_random, :luerl.init())
+    assert {:ok, state} = :luerl.set_table_keys_dec(["return_random"], return_random, state)
+
+    assert {:ok, [^random, ^random], _state} =
+             :luerl.do(
+               """
+               local table, userdata = get_random()
+               return return_random(table), return_random(userdata)
+               """,
+               state
+             )
+  end
 end
