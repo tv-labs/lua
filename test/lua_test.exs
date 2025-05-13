@@ -1123,6 +1123,28 @@ defmodule LuaTest do
     end
   end
 
+  describe "private data" do
+    test "it can get, set, and delete private data" do
+      lua = Lua.new()
+
+      assert :error = Lua.get_private(lua, :foo)
+      assert lua = Lua.put_private(lua, :foo, 1)
+      assert {:ok, 1} = Lua.get_private(lua, :foo)
+      assert lua = Lua.put_private(lua, :foo, 2)
+      assert 2 = Lua.get_private!(lua, :foo)
+
+      assert_raise RuntimeError, "private key `:bar` does not exist", fn ->
+        Lua.get_private!(lua, :bar)
+      end
+
+      assert lua = Lua.delete_private(lua, :foo)
+      assert :error = Lua.get_private(lua, :foo)
+
+      # Delete a key that doesn't exist
+      assert Lua.delete_private(lua, :nope)
+    end
+  end
+
   defp test_file(name) do
     Path.join(["test", "fixtures", name])
   end

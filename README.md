@@ -128,6 +128,38 @@ lua = Lua.new() |> Lua.load_api(Queue)
 ["first", "second"] = Lua.Table.as_list(queue)
 ```
 
+## Accessing private state from Elixir
+
+When building applications with `Lua`, you may find yourself in need of propagating extra context for use in your APIs. For instance, you may want to access information about the current user who executed the Lua script, an API key, or something else that is private and should not be available to the Lua code. For this, we have the `Lua.put_private/3`, `Lua.get_private/2`, and `Lua.delete_private/2` functions.
+
+For example, imagine you wanted to allow the user to access information about themselves
+
+``` elixir
+defmodule User do
+  defstruct [:name]
+end
+
+defmodule UserAPI do
+  use Lua.API, scope: "user"
+  
+  deflua name(), state do
+    user = Lua.get_private!(state, :user) 
+    
+    {[user.name], state}
+  end
+end
+
+user = %User{name: "Robert Virding"}
+
+lua = Lua.new() |> Lua.put_private(:user, user) |> Lua.load_api(UserAPI)
+
+{["Hello Robert Virding"], _lua} = Lua.eval!(lua, ~LUA"""
+  return "Hello " .. user.name()
+""")
+```
+
+This allows you to have simple, expressive APIs that access context that is unavailable to the Lua code.
+
 ## Credits
 
 `Lua` piggy-backs off of Robert Virding's [Luerl](https://github.com/rvirding/luerl) project, which implements a Lua lexer, parser, and full-blown Lua virtual machine that runs inside the BEAM.
