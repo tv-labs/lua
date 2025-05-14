@@ -164,19 +164,21 @@ This allows you to have simple, expressive APIs that access context that is unav
 
 When working with `Lua`, you may want inject data of various types into the runtime. Some values, such as integers, have the same representation inside of the runtime as they do in Elixir, they do not require encoding. Other values, such as maps, are represented inside of `Lua` as tables, and must be encoded first. Values not listed are not valid and cannot be encoded by `Lua` and Luerl, however, they can be passed using a `{:userdata, any()}` tuple and encoding them.
 
-  Elixir type             | Luerl type              | Requires encoding?
-  :---------------------- | :---------------------- | :---------------------
-  nil                       | nil                     | no
-  boolean()                 | boolean()               | no
-  number()                  | number()                | no
-  binary()                  | binary()                | no
-  atom()                    | binary()                | yes
-  map()                     | :luerl.tref()           | yes
-  {:userdata, any()}        | :luerl.usdref()         | yes
-  (any()) -> any()          | :luerl.erl_func()       | yes
-  (any(), Lua.t()) -> any() | :luerl.erl_func()       | yes
-  {module(), atom(), list() | :luerl.erl_mfa()        | yes
-  list(any())               | list(luerl type)        | maybe (if any of its values require encoding)
+Values may be encoded with `Lua.encode!/2`
+
+  Elixir type                 | Luerl type                | Requires encoding?
+  :-------------------------- | :------------------------ | :---------------------
+  `nil`                       | `nil`                     | no
+  `boolean()`                 | `boolean()`               | no
+  `number()`                  | `number()`                | no
+  `binary()`                  | `binary()`                | no
+  `atom()`                    | `binary()`                | yes
+  `map()`                     | `:luerl.tref()`           | yes
+  `{:userdata, any()}`        | `:luerl.usdref()`         | yes
+  `(any()) -> any()`          | `:luerl.erl_func()`       | yes
+  `(any(), Lua.t()) -> any()` | `:luerl.erl_func()`       | yes
+  `{module(), atom(), list()` | `:luerl.erl_mfa()`        | yes
+  `list(any())`               | `list(luerl type)`        | maybe (if any of its values require encoding)
   
 
 ## Userdata
