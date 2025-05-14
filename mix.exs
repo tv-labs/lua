@@ -24,7 +24,7 @@ defmodule Lua.MixProject do
         main: "Lua",
         source_url: @url,
         source_ref: "v#{@version}",
-        extras: ["guides/working-with-lua.livemd"]
+        extras: ["CHANGELOG.md", "guides/working-with-lua.livemd"]
       ]
     ]
   end
