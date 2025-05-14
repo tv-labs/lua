@@ -2,7 +2,7 @@ defmodule Lua.MixProject do
   use Mix.Project
 
   @url "https://github.com/tv-labs/lua"
-  @version "0.2.0"
+  @version "0.2.1"
 
   def project do
     [
