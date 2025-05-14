@@ -576,6 +576,17 @@ defmodule Lua do
   end
 
   @doc """
+  Encodes a list of values into a list of encoded value
+
+  Useful for encoding lists of return values
+
+      iex> {[1, {:tref, _}, true], _} = Lua.encode_list!(Lua.new(), [1, %{a: 1}, true])
+  """
+  def encode_list!(%__MODULE__{} = lua, list) when is_list(list) do
+    Enum.map_reduce(list, lua, &encode!(&2, &1))
+  end
+
+  @doc """
   Decodes a Lua value from its internal form
 
       iex> {encoded, lua} = Lua.encode!(Lua.new(), %{a: 1})
