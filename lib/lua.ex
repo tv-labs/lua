@@ -580,7 +580,7 @@ defmodule Lua do
 
   Useful for encoding lists of return values
 
-      iex> {[1, {:tref, _}, true], _} = Lua.encode_list!(Lua.new(), [1, %{a: 1}, true])
+      iex> {[1, {:tref, _}, true], _} = Lua.encode_list!(Lua.new(), [1, %{a: 2}, true])
   """
   def encode_list!(%__MODULE__{} = lua, list) when is_list(list) do
     Enum.map_reduce(list, lua, &encode!(&2, &1))
@@ -599,6 +599,19 @@ defmodule Lua do
   rescue
     ArgumentError ->
       reraise Lua.RuntimeException, "Failed to decode #{inspect(value)}", __STACKTRACE__
+  end
+
+  @doc """
+  Decodes a list of encoded values
+
+  Useful for decoding all function arguments in a `deflua`
+
+      iex> {encoded, lua} = Lua.encode_list!(Lua.new(), [1, %{a: 2}, true])
+      iex> Lua.decode_list!(lua, encoded)
+      [1, [{"a", 2}], true]
+  """
+  def decode_list!(%__MODULE__{} = lua, list) when is_list(list) do
+    Enum.map(list, &decode!(lua, &1))
   end
 
   @doc """
