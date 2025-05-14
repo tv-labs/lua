@@ -186,9 +186,9 @@ defmodule Lua do
       case func do
         func when is_function(func, 1) ->
           fn data ->
-            return = func.(data)
+            return = List.wrap(func.(data))
 
-            if not Lua.Util.encoded?(return) do
+            if not Lua.Util.list_encoded?(return) do
               raise Lua.RuntimeException,
                 function: function_name,
                 scope: scope,
@@ -205,24 +205,28 @@ defmodule Lua do
                 :luerl_lib.lua_error(reason, lua.state)
 
               {value, %__MODULE__{} = lua} ->
-                if not Lua.Util.encoded?(value) do
+                value = List.wrap(value)
+
+                if not Lua.Util.list_encoded?(value) do
                   raise Lua.RuntimeException,
                     function: function_name,
                     scope: scope,
                     message: "deflua functions must return encoded data, got #{inspect(value)}"
                 end
 
-                {List.wrap(value), lua.state}
+                {value, lua.state}
 
               value ->
-                if not Lua.Util.encoded?(value) do
+                value = List.wrap(value)
+
+                if not Lua.Util.list_encoded?(value) do
                   raise Lua.RuntimeException,
                     function: function_name,
                     scope: scope,
                     message: "deflua functions must return encoded data, got #{inspect(value)}"
                 end
 
-                {List.wrap(value), state}
+                {value, state}
             end
           end
       end
@@ -760,24 +764,28 @@ defmodule Lua do
         :luerl_lib.lua_error(reason, lua.state)
 
       {data, %Lua{} = lua} ->
-        if not Lua.Util.encoded?(data) do
+        data = List.wrap(data)
+
+        if not Lua.Util.list_encoded?(data) do
           raise Lua.RuntimeException,
             function: function_name,
             scope: module.scope(),
             message: "deflua functions must return encoded data, got #{inspect(data)}"
         end
 
-        {List.wrap(data), lua.state}
+        {data, lua.state}
 
       data ->
-        if not Lua.Util.encoded?(data) do
+        data = List.wrap(data)
+
+        if not Lua.Util.list_encoded?(data) do
           raise Lua.RuntimeException,
             function: function_name,
             scope: module.scope(),
             message: "deflua functions must return encoded data, got #{inspect(data)}"
         end
 
-        {List.wrap(data), lua.state}
+        {data, lua.state}
     end
   catch
     thrown_value ->

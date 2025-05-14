@@ -14,7 +14,6 @@ defmodule Lua.UtilTest do
       assert Lua.Util.encoded?(0)
       assert Lua.Util.encoded?(Enum.random(1..1000))
       assert Lua.Util.encoded?(:rand.uniform())
-      assert Lua.Util.encoded?(["a", "b", "c"])
 
       # tref
       {{:tref, _} = table, _lua} = Lua.encode!(Lua.new(), %{a: 1, b: 2})
@@ -51,13 +50,16 @@ defmodule Lua.UtilTest do
     test "returns false for non decoded values" do
       refute Lua.Util.encoded?(%{a: 1})
       refute Lua.Util.encoded?({:not, :valid, :lua})
+      refute Lua.Util.encoded?([])
       refute Lua.Util.encoded?([:a, :b, :c])
       refute Lua.Util.encoded?(["a", "b", :c])
+      refute Lua.Util.encoded?(["a", "b", "c"])
       refute Lua.Util.encoded?(self())
       refute Lua.Util.encoded?(&Enum.map/2)
       refute Lua.Util.encoded?(make_ref())
       refute Lua.Util.encoded?(fn a -> a end)
       refute Lua.Util.encoded?({:userdata, 1})
+      refute Lua.Util.encoded?([1, 2, [3]])
     end
   end
 

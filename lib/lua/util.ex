@@ -10,6 +10,12 @@ defmodule Lua.Util do
     Record.defrecord(name, fields)
   end
 
+  # Check if all members of the list are encoded
+  # useful for checking return values
+  def list_encoded?(list) when is_list(list) do
+    Enum.all?(list, &encoded?/1)
+  end
+
   # Returns true for identity values
   # or values that hold internal Luerl representations like tref
   def encoded?(nil), do: true
@@ -25,10 +31,6 @@ defmodule Lua.Util do
   def encoded?(record) when Record.is_record(record, :funref), do: true
   def encoded?(record) when Record.is_record(record, :erl_func), do: true
   def encoded?(record) when Record.is_record(record, :erl_mfa), do: true
-
-  def encoded?(list) when is_list(list) do
-    Enum.all?(list, &encoded?/1)
-  end
 
   def encoded?(_), do: false
 
