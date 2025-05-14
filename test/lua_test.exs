@@ -395,6 +395,38 @@ defmodule LuaTest do
                return global, success, message
                """)
     end
+
+    test "it can be given a max_reductions option" do
+      assert {:done, ["done"], _} =
+               Lua.eval!("return \"done\" ", max_reductions: :infinity)
+
+      assert {:max_reductions_hit, _} =
+               Lua.eval!(
+                 """
+                 local a = 1
+                 b = a + 1
+                 c = b + 1
+                 return "done"
+                 """,
+                 max_reductions: 1
+               )
+    end
+
+    test "it can be given a max_instructions option" do
+      assert {:done, ["done"], _} =
+               Lua.eval!("return \"done\" ", max_instructions: :infinity)
+
+      assert {:max_instructions_hit, _} =
+               Lua.eval!(
+                 """
+                 local a = 1
+                 b = a + 1
+                 c = b + 1
+                 return "done"
+                 """,
+                 max_instructions: 1
+               )
+    end
   end
 
   describe "load_chunk!/2" do

@@ -363,7 +363,12 @@ defmodule Lua do
   end
 
   def eval!(%__MODULE__{state: state} = lua, script, opts) when is_binary(script) do
-    opts = Keyword.validate!(opts, decode: true)
+    opts =
+      Keyword.validate!(opts,
+        decode: true,
+        max_instructions: :infinity,
+        max_reductions: :infinity
+      )
 
     # Luerl does some weird things with UTF8 encoding
     # when its a binary see https://github.com/rvirding/luerl/issues/197
