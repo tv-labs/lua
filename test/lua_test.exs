@@ -1074,7 +1074,7 @@ defmodule LuaTest do
 
     test "it cannot return atom values", %{lua: lua} do
       error_message =
-        "Lua runtime error: atom() failed, deflua functions must return encoded data, got :atom"
+        "Lua runtime error: atom() failed, deflua functions must return encoded data, got [:atom]"
 
       assert_raise Lua.RuntimeException, error_message, fn ->
         Lua.eval!(lua, "return example.atom()", decode: true)
@@ -1088,7 +1088,7 @@ defmodule LuaTest do
 
     test "it cannot return tuples from Elixir", %{lua: lua} do
       error =
-        "Lua runtime error: tuple() failed, deflua functions must return encoded data, got {:key, \"value\"}"
+        "Lua runtime error: tuple() failed, deflua functions must return encoded data, got [key: \"value\"]"
 
       assert_raise Lua.RuntimeException, error, fn ->
         Lua.eval!(lua, "return example.tuple()")
