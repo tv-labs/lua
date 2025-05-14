@@ -175,30 +175,62 @@ defmodule Lua do
       iex> {[3], _} = Lua.eval!(lua, "set_count(1, 2, 3); return count")
 
   """
-  def set!(%__MODULE__{} = lua, keys, value) do
-    value =
-      case value do
+  def set!(%__MODULE__{}, [], _) do
+    raise Lua.RuntimeException, "Lua.set!/3 cannot have empty keys"
+  end
+
+  def set!(%__MODULE__{} = lua, keys, func) when is_function(func, 1) or is_function(func, 2) do
+    {function_name, scope} = List.pop_at(keys, -1)
+
+    func =
+      case func do
         func when is_function(func, 1) ->
-          func
+          fn data ->
+            return = func.(data)
+
+            if not Lua.Util.encoded?(return) do
+              raise Lua.RuntimeException,
+                function: function_name,
+                scope: scope,
+                message: "deflua functions must return encoded data, got #{inspect(return)}"
+            end
+
+            return
+          end
 
         func when is_function(func, 2) ->
           fn args, state ->
             case func.(args, wrap(state)) do
-              {value, %__MODULE__{} = lua} ->
-                {List.wrap(value), lua.state}
-
               {:error, reason, %__MODULE__{} = lua} ->
                 :luerl_lib.lua_error(reason, lua.state)
 
+              {value, %__MODULE__{} = lua} ->
+                if not Lua.Util.encoded?(value) do
+                  raise Lua.RuntimeException,
+                    function: function_name,
+                    scope: scope,
+                    message: "deflua functions must return encoded data, got #{inspect(value)}"
+                end
+
+                {List.wrap(value), lua.state}
+
               value ->
+                if not Lua.Util.encoded?(value) do
+                  raise Lua.RuntimeException,
+                    function: function_name,
+                    scope: scope,
+                    message: "deflua functions must return encoded data, got #{inspect(value)}"
+                end
+
                 {List.wrap(value), state}
             end
           end
-
-        value ->
-          value
       end
 
+    do_set(lua.state, keys, func)
+  end
+
+  def set!(%__MODULE__{} = lua, keys, value) do
     do_set(lua.state, keys, value)
   end
 
@@ -221,7 +253,14 @@ defmodule Lua do
         end
       end)
 
-    case :luerl.set_table_keys_dec(keys, value, state) do
+    set_keys =
+      if Lua.Util.encoded?(value) do
+        &:luerl.set_table_keys/3
+      else
+        &:luerl.set_table_keys_dec/3
+      end
+
+    case set_keys.(keys, value, state) do
       {:ok, state} ->
         wrap(state)
 
@@ -607,7 +646,7 @@ defmodule Lua do
   @doc """
   Puts a private value in storage for use in Elixir functions
 
-      iex> lua = Lua.new() |> Lua.put_private(:api_key, "1234")
+      iex> Lua.new() |> Lua.put_private(:api_key, "1234")
   """
   def put_private(%__MODULE__{} = lua, key, value) do
     update_in(lua.state, fn state -> :luerl.put_private(key, value, state) end)
@@ -657,11 +696,11 @@ defmodule Lua do
 
     if with_state? do
       fn args, state ->
-        execute_function_with_state(module, function_name, [args, wrap(state)], wrap(state))
+        execute_function(module, function_name, [args, wrap(state)], wrap(state))
       end
     else
       fn args, state ->
-        execute_function(module, function_name, [args], state)
+        execute_function(module, function_name, [args], wrap(state))
       end
     end
   end
@@ -673,7 +712,7 @@ defmodule Lua do
     if with_state? do
       fn args, state ->
         if (length(args) + 1) in arities do
-          execute_function_with_state(module, function_name, args ++ [wrap(state)], wrap(state))
+          execute_function(module, function_name, args ++ [wrap(state)], wrap(state))
         else
           arities = Enum.map(arities, &(&1 - 1))
 
@@ -686,7 +725,7 @@ defmodule Lua do
     else
       fn args, state ->
         if length(args) in arities do
-          execute_function(module, function_name, args, state)
+          execute_function(module, function_name, args, wrap(state))
         else
           raise Lua.RuntimeException,
             function: function_name,
@@ -697,7 +736,7 @@ defmodule Lua do
     end
   end
 
-  defp execute_function(module, function_name, args, state) do
+  defp execute_function(module, function_name, args, lua) do
     # Luerl mandates lists as return values; this function ensures all results conform.
     case apply(module, function_name, args) do
       # Table-like keyword list
@@ -715,42 +754,30 @@ defmodule Lua do
           message: "maps must be explicitly encoded to tables using Lua.encode!/2"
 
       {:error, reason} ->
-        :luerl_lib.lua_error(reason, state)
-
-      other ->
-        {List.wrap(other), state}
-    end
-  catch
-    thrown_value ->
-      {:error,
-       "Value thrown during function '#{function_name}' execution: #{inspect(thrown_value)}"}
-  end
-
-  defp execute_function_with_state(module, function_name, args, lua) do
-    # Luerl mandates lists as return values; this function ensures all results conform.
-    case apply(module, function_name, args) do
-      {ret, %Lua{state: state}} ->
-        {ret, state}
-
-      # Table-like keyword list
-      [{_, _} | _rest] ->
-        raise Lua.RuntimeException,
-          function: function_name,
-          scope: module.scope(),
-          message: "keyword lists must be explicitly encoded to tables using Lua.encode!/2"
-
-      # Map
-      map when is_map(map) ->
-        raise Lua.RuntimeException,
-          function: function_name,
-          scope: module.scope(),
-          message: "maps must be explicitly encoded to tables using Lua.encode!/2"
+        :luerl_lib.lua_error(reason, lua.state)
 
       {:error, reason, %Lua{} = lua} ->
         :luerl_lib.lua_error(reason, lua.state)
 
-      other ->
-        {List.wrap(other), lua.state}
+      {data, %Lua{} = lua} ->
+        if not Lua.Util.encoded?(data) do
+          raise Lua.RuntimeException,
+            function: function_name,
+            scope: module.scope(),
+            message: "deflua functions must return encoded data, got #{inspect(data)}"
+        end
+
+        {List.wrap(data), lua.state}
+
+      data ->
+        if not Lua.Util.encoded?(data) do
+          raise Lua.RuntimeException,
+            function: function_name,
+            scope: module.scope(),
+            message: "deflua functions must return encoded data, got #{inspect(data)}"
+        end
+
+        {List.wrap(data), lua.state}
     end
   catch
     thrown_value ->

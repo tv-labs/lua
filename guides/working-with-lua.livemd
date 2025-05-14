@@ -4,7 +4,7 @@
 
 ```elixir
 Mix.install([
-  {:lua, "~> 0.1.1"}
+  {:lua, "~> 0.2.0"}
 ])
 ```
 
@@ -39,9 +39,7 @@ code = ~LUA"""
 ## Getting and Setting values
 
 ```elixir
-lua =
-  Lua.new()
-  |> Lua.set!([:dave], "Lucia")
+lua = Lua.set!(Lua.new(), [:dave], "Lucia")
 
 {["Grohl", "Lucia"], %Lua{} = lua} =
   Lua.eval!(lua, ~LUA"""
@@ -74,6 +72,9 @@ defmodule Global do
   @variadic true
   deflua my_print(args) do
     IO.puts(Enum.join(args, " "))
+
+    # Return nothing
+    []
   end
 end
 
