@@ -10,6 +10,28 @@ defmodule Lua.Util do
     Record.defrecord(name, fields)
   end
 
+  # Returns true for identity values
+  # or values that hold internal Luerl representations like tref
+  def encoded?(nil), do: true
+  def encoded?(false), do: true
+  def encoded?(true), do: true
+  def encoded?(binary) when is_binary(binary), do: true
+  # TODO Remove since this shouldn't be decoded
+  # take out when https://github.com/rvirding/luerl/pull/213
+  # is released
+  def encoded?(number) when is_number(number), do: true
+  def encoded?(table_ref) when Record.is_record(table_ref, :tref), do: true
+  def encoded?(record) when Record.is_record(record, :usdref), do: true
+  def encoded?(record) when Record.is_record(record, :funref), do: true
+  def encoded?(record) when Record.is_record(record, :erl_func), do: true
+  def encoded?(record) when Record.is_record(record, :erl_mfa), do: true
+
+  def encoded?(list) when is_list(list) do
+    Enum.all?(list, &encoded?/1)
+  end
+
+  def encoded?(_), do: false
+
   def format_error(error) do
     case error do
       {line, type, {:illegal, value}} ->

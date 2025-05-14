@@ -160,6 +160,44 @@ lua = Lua.new() |> Lua.put_private(:user, user) |> Lua.load_api(UserAPI)
 
 This allows you to have simple, expressive APIs that access context that is unavailable to the Lua code.
 
+## Encoding and Decoding data
+
+When working with `Lua`, you may want inject data of various types into the runtime. Some values, such as integers, have the same representation inside of the runtime as they do in Elixir, they do not require encoding. Other values, such as maps, are represented inside of `Lua` as tables, and must be encoded first. Values not listed are not valid and cannot be encoded by `Lua` and Luerl, however, they can be passed using a `{:userdata, any()}` tuple and encoding them.
+
+  Elixir type             | Luerl type              | Requires encoding?
+  :---------------------- | :---------------------- | :---------------------
+  nil                       | nil                     | no
+  boolean()                 | boolean()               | no
+  number()                  | number()                | no
+  binary()                  | binary()                | no
+  atom()                    | binary()                | yes
+  map()                     | :luerl.tref()           | yes
+  {:userdata, any()}        | :luerl.usdref()         | yes
+  (any()) -> any()          | :luerl.erl_func()       | yes
+  (any(), Lua.t()) -> any() | :luerl.erl_func()       | yes
+  {module(), atom(), list() | :luerl.erl_mfa()        | yes
+  list(any())               | list(luerl type)        | maybe (if any of its values require encoding)
+  
+
+## Userdata
+
+There are situations where you want to pass around a reference to some Elixir datastructure, such as a struct. In these situations, you can use a `{:userdata, any()}` tuple.
+
+``` elixir
+defstruct Thing do
+  defstruct [:value]
+end
+
+{encoded, lua} = Lua.encode!(Lua.new(), %Thing{value: "1234"})
+
+lua = Lua.set!(lua, [:foo], encoded)
+
+{[%Thing{value: "1234"}], _} = Lua.eval!(lua, "return foo")
+```
+
+Trying to deference userdata inside a Lua program will result in an exception.
+  
+  
 ## Credits
 
 `Lua` piggy-backs off of Robert Virding's [Luerl](https://github.com/rvirding/luerl) project, which implements a Lua lexer, parser, and full-blown Lua virtual machine that runs inside the BEAM.

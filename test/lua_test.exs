@@ -1021,7 +1021,8 @@ defmodule LuaTest do
       end
 
       deflua multiple_returns do
-        ["hello", "world", :atom, 42, true]
+        # These are all identity values, so no need to encode
+        ["hello", "world", 42, true]
       end
 
       deflua list do
@@ -1041,6 +1042,10 @@ defmodule LuaTest do
         IO.puts("Elixir: Got integer: #{inspect(x)}")
       end
 
+      deflua userdata(), lua do
+        Lua.encode!(lua, {:userdata, {:not, :valid, :lua}})
+      end
+
       deflua binary() do
         binary_data = <<0::size(1 * 1024 * 8)>>
         binary_data
@@ -1056,14 +1061,18 @@ defmodule LuaTest do
       assert {[3], _} = Lua.eval!(lua, "return example.add(2, 1)")
     end
 
-    test "it can return multiple values", %{lua: lua} do
-      return = ["hello", "world", :atom, 42, true]
+    test "it can return multiple identity values", %{lua: lua} do
+      return = ["hello", "world", 42, true]
       assert {^return, _} = Lua.eval!(lua, "return example.multiple_returns()", decode: false)
     end
 
-    test "it can return tom values", %{lua: lua} do
-      assert {["atom"], _} = Lua.eval!(lua, "return example.atom()", decode: true)
-      assert {[:atom], _} = Lua.eval!(lua, "return example.atom()", decode: false)
+    test "it cannot return atom values", %{lua: lua} do
+      error_message =
+        "Lua runtime error: atom() failed, deflua functions must return encoded data, got :atom"
+
+      assert_raise Lua.RuntimeException, error_message, fn ->
+        Lua.eval!(lua, "return example.atom()", decode: true)
+      end
     end
 
     test "it can return lists", %{lua: lua} do
@@ -1072,11 +1081,73 @@ defmodule LuaTest do
     end
 
     test "it cannot return tuples from Elixir", %{lua: lua} do
-      error = "Lua runtime error: argument error: {:key, \"value\"}"
+      error =
+        "Lua runtime error: tuple() failed, deflua functions must return encoded data, got {:key, \"value\"}"
 
       assert_raise Lua.RuntimeException, error, fn ->
         Lua.eval!(lua, "return example.tuple()")
       end
+    end
+
+    test "it can return userdata", %{lua: lua} do
+      assert {[{:userdata, {:not, :valid, :lua}}], _} =
+               Lua.eval!(lua, "return example.userdata()")
+    end
+
+    test "userdata must be encoded" do
+      get_random_no_encode = fn _args, lua ->
+        {[{:userdata, "private data"}], lua}
+      end
+
+      get_random = fn _args, lua ->
+        Lua.encode!(lua, {:userdata, "private data"})
+      end
+
+      return_random = fn [data], state ->
+        {[data], state}
+      end
+
+      lua =
+        Lua.new()
+        |> Lua.set!([:get_random], get_random)
+        |> Lua.set!([:get_random_no_encode], get_random_no_encode)
+        |> Lua.set!([:return_random], return_random)
+
+      error_message =
+        "Lua runtime error: get_random_no_encode() failed, deflua functions must return encoded data, got [userdata: \"private data\"]"
+
+      for decode? <- [true, false] do
+        assert_raise Lua.RuntimeException, error_message, fn ->
+          Lua.eval!(
+            lua,
+            """
+            local userdata = get_random_no_encode()
+            return return_random(userdata)
+            """,
+            decode: decode?
+          )
+        end
+      end
+
+      assert {[{:usdref, _}], _state} =
+               Lua.eval!(
+                 lua,
+                 """
+                 local userdata = get_random()
+                 return return_random(userdata)
+                 """,
+                 decode: false
+               )
+
+      assert {[{:userdata, "private data"}], _state} =
+               Lua.eval!(
+                 lua,
+                 """
+                 local userdata = get_random()
+                 return return_random(userdata)
+                 """,
+                 decode: true
+               )
     end
 
     test "it can return binary data from Elixir", %{lua: lua} do
