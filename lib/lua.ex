@@ -253,7 +253,14 @@ defmodule Lua do
         end
       end)
 
-    case :luerl.set_table_keys_dec(keys, value, state) do
+    set_keys =
+      if Lua.Util.encoded?(value) do
+        &:luerl.set_table_keys/3
+      else
+        &:luerl.set_table_keys_dec/3
+      end
+
+    case set_keys.(keys, value, state) do
       {:ok, state} ->
         wrap(state)
 

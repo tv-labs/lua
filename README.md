@@ -186,15 +186,15 @@ Values may be encoded with `Lua.encode!/2`
 There are situations where you want to pass around a reference to some Elixir datastructure, such as a struct. In these situations, you can use a `{:userdata, any()}` tuple.
 
 ``` elixir
-defstruct Thing do
+defmodule Thing do
   defstruct [:value]
 end
 
-{encoded, lua} = Lua.encode!(Lua.new(), %Thing{value: "1234"})
+{encoded, lua} = Lua.encode!(Lua.new(), {:userdata, %Thing{value: "1234"}})
 
 lua = Lua.set!(lua, [:foo], encoded)
 
-{[%Thing{value: "1234"}], _} = Lua.eval!(lua, "return foo")
+{[{:userdata, %Thing{value: "1234"}}], _} = Lua.eval!(lua, "return foo")
 ```
 
 Trying to deference userdata inside a Lua program will result in an exception.

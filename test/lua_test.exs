@@ -874,6 +874,12 @@ defmodule LuaTest do
         Lua.get!(Lua.new(), [:print, :nope])
       end
     end
+
+    test "can work with encoded values" do
+      {encoded, lua} = Lua.encode!(Lua.new(), {:userdata, "1234"})
+
+      assert Lua.set!(lua, [:foo], encoded)
+    end
   end
 
   describe "load_api/2 and load_api/3" do
