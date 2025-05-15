@@ -164,6 +164,8 @@ defmodule Lua.API do
 
   """
   defmacro deflua(fa, state, rest) do
+    dbg()
+
     {fa, _acc} =
       Macro.prewalk(fa, false, fn
         {name, context, args}, false -> {{name, context, args ++ List.wrap(state)}, true}
@@ -187,6 +189,7 @@ defmodule Lua.API do
   See `deflua/3`
   """
   defmacro deflua(fa, rest) do
+    dbg()
     {name, _, _} = fa
 
     quote do
