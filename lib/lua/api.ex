@@ -166,11 +166,20 @@ defmodule Lua.API do
   defmacro deflua(fa, state, rest) do
     {fa, _acc} =
       Macro.prewalk(fa, false, fn
-        {name, context, args}, false -> {{name, context, args ++ List.wrap(state)}, true}
-        ast, true -> {ast, true}
+        {name, context, args}, false ->
+          {{name, context, args ++ List.wrap(state)}, true}
+
+        ast, true ->
+          {ast, true}
       end)
 
-    {name, _, _} = fa
+    name =
+      case fa do
+        {:when, _, [{name, _, _} | _]} -> name
+        {name, _, _} -> name
+      end
+
+    dbg()
 
     quote do
       @lua_function validate_func!(
@@ -187,6 +196,7 @@ defmodule Lua.API do
   See `deflua/3`
   """
   defmacro deflua(fa, rest) do
+    dbg()
     {name, _, _} = fa
 
     quote do
