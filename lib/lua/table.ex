@@ -158,18 +158,20 @@ defmodule Lua.Table do
       iex> Lua.Table.deep_cast([{"a", 1}, {"b", [{1, 3}, {2, 4}]}])
       %{"a" => 1, "b" => [3, 4]}
 
-      iex> Lua.Table.deep_cast([{"a", []}], empty_as: :map)
-      %{"a" => %{}}
+      iex> Lua.Table.deep_cast([{"a", []}], empty_encoder: fn _ -> [] end)
+      %{"a" => []}
 
-      iex> Lua.Table.deep_cast([{"a", []}], empty_as: :list)
-      %{"a" => %{}}
+      iex> Lua.Table.deep_cast([{"a", []}, {"b", []}], empty_encoder: fn "a" -> []; "b" -> %{} end)
+      %{"a" => [], "b" => %{}}
 
   ## Opts
   * `:empty_encoder` - a function that receives a key and decides how it should be encoded. Top level
   keys are passed as nil. Defaults to a function that returns maps
   """
   def deep_cast(value, opts \\ []) do
-    do_deep_cast(value, Keyword.get(opts, :empty_encoder, fn _ -> %{} end))
+    opts = Keyword.validate!(opts, empty_encoder: fn _ -> %{} end)
+
+    do_deep_cast(value, Keyword.fetch!(opts, :empty_encoder))
   end
 
   defp do_deep_cast(value, empty_encoder) do
