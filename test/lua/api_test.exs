@@ -310,18 +310,26 @@ defmodule Lua.APITest do
                    a
                  end
 
-                 deflua has_a_guard(_) do
-                    "not a int"
-                 end
-
-                 deflua with_state(a) when is_integer(a), state do
+                 deflua has_a_guard(a) when is_binary(a) and not is_boolean(a) do
                    a
                  end
 
+                 deflua has_a_guard(_) do
+                   "not a int"
+                 end
+
+                 deflua with_state(a), state when is_integer(a) do
+                   a
+                 end
+               #
+               #  deflua with_state(_), state do
+               #     "not a int"
+               #  end
                end
                """)
 
       assert module.has_a_guard(1) == 1
+      assert module.has_a_guard("foo") == "foo"
       assert module.has_a_guard(true) == "not a int"
 
       assert module.with_state(1, Lua.new()) == 1
