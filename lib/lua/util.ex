@@ -26,7 +26,7 @@ defmodule Lua.Util do
   # take out when https://github.com/rvirding/luerl/pull/213
   # is released
   def encoded?(number) when is_number(number), do: true
-  def encoded?(table_ref) when Record.is_record(table_ref, :tref), do: true
+  def encoded?(record) when Record.is_record(record, :tref), do: true
   def encoded?(record) when Record.is_record(record, :usdref), do: true
   def encoded?(record) when Record.is_record(record, :funref), do: true
   def encoded?(record) when Record.is_record(record, :erl_func), do: true

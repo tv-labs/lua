@@ -74,7 +74,21 @@ defmodule Lua.API do
           ~LUA[print("Hello at install time!")]c
         end
       end
+
+  ## Guards
+
+  When doing `use Lua.API`, we also import the guards documented in this API.
+  This can be useful for having different function heads that match on encoded
+  values. E.g.
+
+      deflua say_type(value) when is_table(value), do: "table"
+      deflua say_type(value) when is_userdata(value), do: "table"
+
+  Keep in mind that if you want to work with values passed to `deflua` functions,
+  they still need to be decoded first.
   """
+
+  require Record
 
   defmacro __using__(opts) do
     scope = opts |> Keyword.get(:scope, "") |> String.split(".", trim: true)
@@ -85,7 +99,17 @@ defmodule Lua.API do
       @before_compile Lua.API
 
       import Lua.API,
-        only: [runtime_exception!: 1, deflua: 2, deflua: 3, validate_func!: 3]
+        only: [
+          runtime_exception!: 1,
+          deflua: 2,
+          deflua: 3,
+          validate_func!: 3,
+          is_table: 1,
+          is_userdata: 1,
+          is_lua_func: 1,
+          is_erl_func: 1,
+          is_mfa: 1
+        ]
 
       @impl Lua.API
       def scope do
@@ -99,6 +123,32 @@ defmodule Lua.API do
   @callback scope :: scope_def()
   @callback install(Lua.t(), scope_def(), any()) :: Lua.t() | Lua.Chunk.t() | String.t()
   @optional_callbacks [install: 3]
+
+  @doc """
+  Is the value a reference to a Lua table?
+
+  """
+  defguard is_table(record) when Record.is_record(record, :tref)
+
+  @doc """
+  Is the value a reference to userdata?
+  """
+  defguard is_userdata(record) when Record.is_record(record, :usdref)
+
+  @doc """
+  Is the value a reference to a Lua function?
+  """
+  defguard is_lua_func(record) when Record.is_record(record, :funref)
+
+  @doc """
+  Is the value a reference to an Erlang / Elixir function?
+  """
+  defguard is_erl_func(record) when Record.is_record(record, :erl_func)
+
+  @doc """
+  Is the value a reference to an Erlang / Elixir mfa?
+  """
+  defguard is_mfa(record) when Record.is_record(record, :erl_mfa)
 
   @doc """
   Raises a runtime exception inside an API function, displaying contextual
