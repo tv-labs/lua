@@ -318,13 +318,13 @@ defmodule Lua.APITest do
                    "not a int"
                  end
 
-                 deflua with_state(a), state when is_integer(a) do
-                   a
+                 deflua with_state(a) when is_integer(a), state do
+                   {a, state}
                  end
-               #
-               #  deflua with_state(_), state do
-               #     "not a int"
-               #  end
+
+                 deflua with_state(_), state do
+                   {"not a int", state}
+                 end
                end
                """)
 
@@ -332,8 +332,8 @@ defmodule Lua.APITest do
       assert module.has_a_guard("foo") == "foo"
       assert module.has_a_guard(true) == "not a int"
 
-      assert module.with_state(1, Lua.new()) == 1
-      assert module.with_state(true, Lua.new()) == "not a int"
+      assert {1, _} = module.with_state(1, Lua.new())
+      assert {"not a int", _} = module.with_state(true, Lua.new())
     end
   end
 end
