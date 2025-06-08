@@ -122,7 +122,7 @@ defmodule Lua.API do
   @doc """
   Defines a function that can be exposed in Lua through `Lua.load_api/3`
 
-      deflua add_two(number) do
+      deflua add_two(number) when is_number(number) do
         number + 2
       end
 
@@ -142,6 +142,18 @@ defmodule Lua.API do
         # Return nothing but modify the state
         {[], Lua.set!(lua, [key])}
       end
+
+  ## Using guards
+
+  Since `deflua` uses non-conventional syntax to receive the current state, make sure
+  you specifiy the `when` clause and guards first, e.g.
+
+      deflua set_int(key, value) when is_integer(value), state do
+        # Return nothing but modify the state
+        {[], Lua.set!(lua, [key])}
+      end
+
+  Specifyiing the `when` cluase and guards last will result in a confusing error message.
 
   ## Variadic functions
 
