@@ -26,7 +26,7 @@ defmodule Lua.API do
         use Lua.API
 
         deflua bar(name), state do
-          # Pull's the value of `number` out of state
+          # Pulls the value of `number` out of state
           val = Lua.get!(state, [:number])
 
           2 * val
@@ -203,7 +203,7 @@ defmodule Lua.API do
         {[], Lua.set!(lua, [key])}
       end
 
-  Specifyiing the `when` cluase and guards last will result in a confusing error message.
+  Specifyiing the `when` clause and guards last will result in a confusing error message.
 
   ## Variadic functions
 
