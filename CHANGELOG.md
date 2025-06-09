@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- Guards for encoded Lua values in `deflua` functions
+  - `is_table/1`
+  - `is_userdata/1`
+  - `is_lua_func/1`
+  - `is_erl_func/1`
+  - `is_mfa/1`
+
 ### Fixed
 - `deflua` function can now specify guards when using or not using state
 
