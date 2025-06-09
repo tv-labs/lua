@@ -299,5 +299,41 @@ defmodule Lua.APITest do
       assert module.fail(1, 2) == 3
       assert module.fail(1, "2") == "rescued"
     end
+
+    test "deflua functions can have guards" do
+      assert [{module, _}] =
+               Code.compile_string("""
+               defmodule WithGuards do
+                 use Lua.API
+
+                 deflua has_a_guard(a) when is_integer(a) do
+                   a
+                 end
+
+                 deflua has_a_guard(a) when is_binary(a) and not is_boolean(a) do
+                   a
+                 end
+
+                 deflua has_a_guard(_) do
+                   "not a int"
+                 end
+
+                 deflua with_state(a) when is_integer(a), state do
+                   {a, state}
+                 end
+
+                 deflua with_state(_), state do
+                   {"not a int", state}
+                 end
+               end
+               """)
+
+      assert module.has_a_guard(1) == 1
+      assert module.has_a_guard("foo") == "foo"
+      assert module.has_a_guard(true) == "not a int"
+
+      assert {1, _} = module.with_state(1, Lua.new())
+      assert {"not a int", _} = module.with_state(true, Lua.new())
+    end
   end
 end
