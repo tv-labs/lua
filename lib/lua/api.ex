@@ -82,7 +82,7 @@ defmodule Lua.API do
   values. E.g.
 
       deflua say_type(value) when is_table(value), do: "table"
-      deflua say_type(value) when is_userdata(value), do: "table"
+      deflua say_type(value) when is_userdata(value), do: "userdata"
 
   Keep in mind that if you want to work with values passed to `deflua` functions,
   they still need to be decoded first.
