@@ -285,11 +285,19 @@ defmodule Lua do
     end
   end
 
-  defp illegal_index([:_G | keys]), do: illegal_index(keys)
   defp illegal_index(["_G" | keys]), do: illegal_index(keys)
 
   defp illegal_index(keys) do
-    {:illegal_index, nil, Enum.join(keys, ".")}
+    {:illegal_index, nil,
+     keys
+     |> Enum.map(fn key ->
+       if(is_tuple(key)) do
+         inspect(key)
+       else
+         key
+       end
+     end)
+     |> Enum.join(".")}
   end
 
   @doc """
