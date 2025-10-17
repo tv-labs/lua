@@ -406,7 +406,7 @@ defmodule Lua do
   def eval!(%__MODULE__{} = lua, %Lua.Chunk{} = chunk, opts) do
     opts = Keyword.validate!(opts, decode: true)
 
-    {chunk, lua} = load_chunk!(lua, chunk)
+    {chunk, %__MODULE__{} = lua} = load_chunk!(lua, chunk)
 
     case :luerl.call_chunk(chunk.ref, lua.state) do
       {:ok, result, new_state} ->
