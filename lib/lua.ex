@@ -92,7 +92,7 @@ defmodule Lua do
       end
 
     chunk =
-      case :luerl_comp.string(String.to_charlist(code), [:return]) do
+      case :luerl_comp.string(code, [:return]) do
         {:ok, chunk} -> %Lua.Chunk{instructions: chunk}
         {:error, error, _warnings} -> raise Lua.CompilerException, error
       end
@@ -285,11 +285,19 @@ defmodule Lua do
     end
   end
 
-  defp illegal_index([:_G | keys]), do: illegal_index(keys)
   defp illegal_index(["_G" | keys]), do: illegal_index(keys)
 
   defp illegal_index(keys) do
-    {:illegal_index, nil, Enum.join(keys, ".")}
+    {:illegal_index, nil,
+     keys
+     |> Enum.map(fn key ->
+       if(is_tuple(key)) do
+         inspect(key)
+       else
+         key
+       end
+     end)
+     |> Enum.join(".")}
   end
 
   @doc """
@@ -369,10 +377,6 @@ defmodule Lua do
   def eval!(%__MODULE__{state: state} = lua, script, opts) when is_binary(script) do
     opts = Keyword.validate!(opts, decode: true)
 
-    # Luerl does some weird things with UTF8 encoding
-    # when its a binary see https://github.com/rvirding/luerl/issues/197
-    script = String.to_charlist(script)
-
     func =
       if opts[:decode] do
         &:luerl.do_dec/2
@@ -451,8 +455,6 @@ defmodule Lua do
 
   """
   def parse_chunk(code) do
-    code = String.to_charlist(code)
-
     case :luerl_comp.string(code, [:return]) do
       {:ok, chunk} ->
         {:ok, %Lua.Chunk{instructions: chunk}}
