@@ -25,8 +25,6 @@ defmodule Lua do
     [:loadfile],
     [:require],
     [:dofile],
-    [:load],
-    [:loadfile],
     [:loadstring]
   ]
 
