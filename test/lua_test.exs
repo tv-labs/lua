@@ -47,7 +47,7 @@ defmodule LuaTest do
       message = """
       Failed to compile Lua!
 
-      Failed to tokenize: illegal token on line 1: \"hi)
+      Line 1: syntax error near '<\\34>'
       """
 
       assert_raise Lua.CompilerException, message, fn ->
@@ -121,8 +121,7 @@ defmodule LuaTest do
       error = """
       Failed to compile Lua!
 
-      Failed to tokenize: illegal token on line 1: '
-
+      Line 1: syntax error near '<\\39>'
       """
 
       assert_raise Lua.CompilerException, error, fn ->
@@ -666,8 +665,7 @@ defmodule LuaTest do
       error = """
       Failed to compile Lua!
 
-      Failed to tokenize: illegal token on line 1: ")
-
+      Line 1: syntax error near '<\\34>'
       """
 
       assert_raise Lua.CompilerException, error, fn ->
@@ -679,8 +677,7 @@ defmodule LuaTest do
       error = """
       Failed to compile Lua!
 
-      Failed to tokenize: illegal token on line 1: "yuup)
-
+      Line 1: syntax error near '<\\34>'
       """
 
       assert_raise Lua.CompilerException, error, fn ->
