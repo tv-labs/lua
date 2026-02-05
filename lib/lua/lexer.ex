@@ -249,11 +249,6 @@ defmodule Lua.Lexer do
     scan_multiline_comment_content(rest, acc, advance_column(pos, 1), level)
   end
 
-  defp scan_multiline_comment(rest, acc, pos, _level) do
-    # Not a multi-line comment after all, treat as single-line
-    scan_single_line_comment(rest, acc, pos)
-  end
-
   defp scan_multiline_comment_content(<<"]", rest::binary>>, acc, pos, level) do
     case try_close_long_bracket(rest, level, 0) do
       {:ok, after_bracket} ->
@@ -409,7 +404,7 @@ defmodule Lua.Lexer do
 
   defp scan_number(<<?.>>, num_acc, acc, pos, start_pos) do
     # Trailing dot is not part of the number
-    finalize_number(num_acc, <<".">> , acc, pos, start_pos)
+    finalize_number(num_acc, <<".">>, acc, pos, start_pos)
   end
 
   defp scan_number(<<".", c, rest::binary>>, num_acc, acc, pos, start_pos)
@@ -508,10 +503,8 @@ defmodule Lua.Lexer do
         end
 
       true ->
-        case Integer.parse(num_str) do
-          {num, ""} -> {:ok, num}
-          _ -> {:error, :invalid_number}
-        end
+        {num, ""} = Integer.parse(num_str)
+        {:ok, num}
     end
   end
 

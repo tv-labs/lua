@@ -219,7 +219,16 @@ defmodule Lua.AST.PrettyPrinter do
     "#{indent(level, indent_size)}#{do_print(call, level, indent_size)}"
   end
 
-  defp do_print(%Stmt.If{condition: cond, then_block: then_block, elseifs: elseifs, else_block: else_block}, level, indent_size) do
+  defp do_print(
+         %Stmt.If{
+           condition: cond,
+           then_block: then_block,
+           elseifs: elseifs,
+           else_block: else_block
+         },
+         level,
+         indent_size
+       ) do
     cond_str = do_print(cond, level, indent_size)
     then_str = print_block_body(then_block, level + 1, indent_size)
 
@@ -264,7 +273,11 @@ defmodule Lua.AST.PrettyPrinter do
     "#{indent(level, indent_size)}repeat\n#{body_str}#{indent(level, indent_size)}until #{cond_str}"
   end
 
-  defp do_print(%Stmt.ForNum{var: var, start: start, limit: limit, step: step, body: body}, level, indent_size) do
+  defp do_print(
+         %Stmt.ForNum{var: var, start: start, limit: limit, step: step, body: body},
+         level,
+         indent_size
+       ) do
     start_str = do_print(start, level, indent_size)
     limit_str = do_print(limit, level, indent_size)
     body_str = print_block_body(body, level + 1, indent_size)
@@ -357,7 +370,8 @@ defmodule Lua.AST.PrettyPrinter do
       %Expr.UnOp{} ->
         # Unary ops have high precedence, rarely need parens
         case parent_op do
-          :pow -> true  # -2^3 should be -(2^3)
+          # -2^3 should be -(2^3)
+          :pow -> true
           _ -> false
         end
 

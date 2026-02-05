@@ -184,7 +184,8 @@ defmodule Lua.Parser.Error do
   @spec format_multiple([t()], String.t()) :: String.t()
   def format_multiple(errors, source_code) do
     header = [
-      IO.ANSI.red() <> IO.ANSI.bright() <>
+      IO.ANSI.red() <>
+        IO.ANSI.bright() <>
         "Found #{length(errors)} parse error#{if length(errors) == 1, do: "", else: "s"}" <>
         IO.ANSI.reset(),
       ""

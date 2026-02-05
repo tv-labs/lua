@@ -13,20 +13,20 @@ defmodule Lua.LexerTest do
         :else,
         :elseif,
         :end,
-        :false,
+        false,
         :for,
         :function,
         :goto,
         :if,
         :in,
         :local,
-        :nil,
+        nil,
         :not,
         :or,
         :repeat,
         :return,
         :then,
-        :true,
+        true,
         :until,
         :while
       ]
@@ -94,6 +94,36 @@ defmodule Lua.LexerTest do
       assert num == 3.0e2
     end
 
+    test "tokenizes floats with scientific notation" do
+      # Float with exponent
+      assert {:ok, [{:number, num, _}, {:eof, _}]} = Lexer.tokenize("2.5e3")
+      assert num == 2.5e3
+
+      # Float with uppercase E
+      assert {:ok, [{:number, num, _}, {:eof, _}]} = Lexer.tokenize("1.0E10")
+      assert num == 1.0e10
+
+      # Integer with exponent (becomes float)
+      assert {:ok, [{:number, num, _}, {:eof, _}]} = Lexer.tokenize("5e2")
+      assert num == 5.0e2
+
+      # Exponent without sign
+      assert {:ok, [{:number, num, _}, {:eof, _}]} = Lexer.tokenize("1e5")
+      assert num == 1.0e5
+    end
+
+    test "handles edge cases in scientific notation" do
+      # Exponent without digits - should result in error
+      assert {:error, {:invalid_number, _}} = Lexer.tokenize("1e")
+
+      # Exponent with sign but no digits - should result in error
+      assert {:error, {:invalid_number, _}} = Lexer.tokenize("1e+")
+      assert {:error, {:invalid_number, _}} = Lexer.tokenize("1e-")
+
+      # Float with exponent without digits
+      assert {:error, {:invalid_number, _}} = Lexer.tokenize("1.5e")
+    end
+
     test "handles trailing dot correctly" do
       # "42." should be tokenized as number 42 followed by dot operator
       # But in Lua, "42." is actually a valid number (42.0)
@@ -119,7 +149,9 @@ defmodule Lua.LexerTest do
     end
 
     test "handles escape sequences in strings" do
-      assert {:ok, [{:string, "hello\nworld", _}, {:eof, _}]} = Lexer.tokenize(~s("hello\\nworld"))
+      assert {:ok, [{:string, "hello\nworld", _}, {:eof, _}]} =
+               Lexer.tokenize(~s("hello\\nworld"))
+
       assert {:ok, [{:string, "tab\there", _}, {:eof, _}]} = Lexer.tokenize(~s("tab\\there"))
 
       assert {:ok, [{:string, "quote\"here", _}, {:eof, _}]} =
@@ -127,6 +159,25 @@ defmodule Lua.LexerTest do
 
       assert {:ok, [{:string, "backslash\\here", _}, {:eof, _}]} =
                Lexer.tokenize(~s("backslash\\\\here"))
+    end
+
+    test "handles all standard escape sequences" do
+      # Test \a (bell)
+      assert {:ok, [{:string, <<?\a>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\a"))
+      # Test \b (backspace)
+      assert {:ok, [{:string, <<?\b>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\b"))
+      # Test \f (form feed)
+      assert {:ok, [{:string, <<?\f>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\f"))
+      # Test \r (carriage return)
+      assert {:ok, [{:string, <<?\r>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\r"))
+      # Test \v (vertical tab)
+      assert {:ok, [{:string, <<?\v>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\v"))
+      # Test \' (single quote)
+      assert {:ok, [{:string, "'", _}, {:eof, _}]} = Lexer.tokenize(~s("\\'"))
+      # Test \" (double quote)
+      assert {:ok, [{:string, "\"", _}, {:eof, _}]} = Lexer.tokenize(~s("\\""))
+      # Test \\ (backslash)
+      assert {:ok, [{:string, "\\", _}, {:eof, _}]} = Lexer.tokenize(~s("\\\\"))
     end
 
     test "tokenizes long strings with [[...]]" do
@@ -141,6 +192,16 @@ defmodule Lua.LexerTest do
       assert {:ok, [{:string, "hello", _}, {:eof, _}]} = Lexer.tokenize("[=[hello]=]")
       assert {:ok, [{:string, "test", _}, {:eof, _}]} = Lexer.tokenize("[==[test]==]")
       assert {:ok, [{:string, "a]b", _}, {:eof, _}]} = Lexer.tokenize("[=[a]b]=]")
+    end
+
+    test "long strings with false closing brackets" do
+      # ] not followed by the right number of =
+      assert {:ok, [{:string, " test ] more ", _}, {:eof, _}]} =
+               Lexer.tokenize("[=[ test ] more ]=]")
+
+      # ] not followed by ]
+      assert {:ok, [{:string, " test ]= more ", _}, {:eof, _}]} =
+               Lexer.tokenize("[[ test ]= more ]]")
     end
 
     test "reports error for unclosed string" do
@@ -245,6 +306,24 @@ defmodule Lua.LexerTest do
     test "reports error for unclosed multi-line comment" do
       assert {:error, {:unclosed_comment, _}} = Lexer.tokenize("--[[ unclosed comment")
     end
+
+    test "handles false closing brackets in multi-line comments" do
+      # Test a ] that is not followed by the right number of =
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize("--[=[ test ] more ]=]")
+      # Test a ] that is not followed by ]
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize("--[[ test ]= more ]]")
+    end
+
+    test "multi-line comment with newlines" do
+      code = "--[[ line 1\nline 2\nline 3 ]]"
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize(code)
+    end
+
+    test "multi-line comment level 0" do
+      # Test the actual --[[ path
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize("--[[ comment ]]")
+      assert {:ok, [{:identifier, "x", _}, {:eof, _}]} = Lexer.tokenize("--[[ comment ]]x")
+    end
   end
 
   describe "whitespace" do
@@ -257,6 +336,26 @@ defmodule Lua.LexerTest do
       assert {:ok, [{:number, 1, _}, {:number, 2, _}, {:eof, _}]} = Lexer.tokenize("1\n2")
       assert {:ok, [{:number, 1, _}, {:number, 2, _}, {:eof, _}]} = Lexer.tokenize("1\r\n2")
       assert {:ok, [{:number, 1, _}, {:number, 2, _}, {:eof, _}]} = Lexer.tokenize("1\r2")
+    end
+
+    test "handles different newline styles in code" do
+      # CRLF newline
+      assert {:ok, tokens} = Lexer.tokenize("x\r\ny")
+
+      assert [
+               {:identifier, "x", _},
+               {:identifier, "y", _},
+               {:eof, _}
+             ] = tokens
+
+      # CR only newline
+      assert {:ok, tokens} = Lexer.tokenize("x\ry")
+
+      assert [
+               {:identifier, "x", _},
+               {:identifier, "y", _},
+               {:eof, _}
+             ] = tokens
     end
   end
 
@@ -408,6 +507,121 @@ defmodule Lua.LexerTest do
 
       assert {:ok, [{:operator, :gt, _}, {:operator, :assign, _}, {:eof, _}]} =
                Lexer.tokenize("> =")
+    end
+
+    test "handles invalid escape sequences in strings" do
+      # Invalid escape sequences should be included as-is
+      assert {:ok, [{:string, "\\x", _}, {:eof, _}]} = Lexer.tokenize(~s("\\x"))
+      assert {:ok, [{:string, "\\z", _}, {:eof, _}]} = Lexer.tokenize(~s("\\z"))
+      assert {:ok, [{:string, "\\1", _}, {:eof, _}]} = Lexer.tokenize(~s("\\1"))
+    end
+
+    test "reports error for string with unescaped newline" do
+      assert {:error, {:unclosed_string, _}} = Lexer.tokenize("\"hello\n")
+      assert {:error, {:unclosed_string, _}} = Lexer.tokenize("'hello\n")
+    end
+
+    test "handles trailing dot after number" do
+      # "42." should tokenize as number 42 followed by dot
+      assert {:ok, tokens} = Lexer.tokenize("42.")
+      assert [{:number, 42, _}, {:delimiter, :dot, _}, {:eof, _}] = tokens
+    end
+
+    test "handles decimal point without following digit" do
+      # "42.x" should be number 42 followed by dot and identifier x
+      assert {:ok, tokens} = Lexer.tokenize("42.x")
+      assert [{:number, 42, _}, {:delimiter, :dot, _}, {:identifier, "x", _}, {:eof, _}] = tokens
+    end
+
+    test "reports error for invalid hex number" do
+      assert {:error, {:invalid_hex_number, _}} = Lexer.tokenize("0x")
+      assert {:error, {:invalid_hex_number, _}} = Lexer.tokenize("0xg")
+    end
+
+    test "handles uppercase X in hex numbers" do
+      assert {:ok, [{:number, 255, _}, {:eof, _}]} = Lexer.tokenize("0XFF")
+      assert {:ok, [{:number, 10, _}, {:eof, _}]} = Lexer.tokenize("0Xa")
+    end
+
+    test "single-line comment ending with LF" do
+      assert {:ok, [{:identifier, "x", _}, {:eof, _}]} = Lexer.tokenize("-- comment\nx")
+    end
+
+    test "single-line comment ending with CR" do
+      assert {:ok, [{:identifier, "x", _}, {:eof, _}]} = Lexer.tokenize("-- comment\rx")
+    end
+
+    test "single-line comment ending with CRLF" do
+      assert {:ok, [{:identifier, "x", _}, {:eof, _}]} = Lexer.tokenize("-- comment\r\nx")
+    end
+
+    test "single-line comment at end of file" do
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize("-- comment at EOF")
+    end
+
+    test "comment starting with --[ but not --[[" do
+      # This should be treated as a single-line comment, not a multi-line comment
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize("--[ this is single line")
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize("--[= not multi-line")
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize("--[x not multi-line")
+    end
+
+    test "multi-line comment with mismatched bracket level" do
+      # The closing bracket doesn't match the opening level
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize("--[=[ comment ]]")
+      # This should continue scanning until EOF because ]] doesn't match the opening [=[
+    end
+
+    test "long string with mismatched closing bracket" do
+      # Opening [=[ but closing with ]]
+      assert {:error, {:unclosed_long_string, _}} = Lexer.tokenize("[=[ string ]]")
+    end
+
+    test "long bracket not actually a long bracket" do
+      # "[" followed by something other than "=" or "[" should be treated as delimiter
+      assert {:ok, [{:delimiter, :lbracket, _}, {:identifier, "x", _}, {:eof, _}]} =
+               Lexer.tokenize("[x")
+    end
+
+    test "right bracket delimiter" do
+      assert {:ok, [{:delimiter, :rbracket, _}, {:eof, _}]} = Lexer.tokenize("]")
+    end
+  end
+
+  describe "additional edge cases for coverage" do
+    test "whitespace at start with CRLF" do
+      # Test CRLF at very start of file
+      assert {:ok, [{:identifier, "x", _}, {:eof, _}]} = Lexer.tokenize("\r\nx")
+    end
+
+    test "whitespace at start with CR" do
+      # Test CR at very start of file
+      assert {:ok, [{:identifier, "x", _}, {:eof, _}]} = Lexer.tokenize("\rx")
+    end
+
+    test "single-line comment with --[ at start" do
+      # Ensure --[ path is taken
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize("--[not a multiline")
+    end
+
+    test "multiline comment with --[[ at start" do
+      # Ensure --[[ path is taken
+      assert {:ok, [{:eof, _}]} = Lexer.tokenize("--[[ multiline ]]")
+    end
+
+    test "long string starting at beginning" do
+      assert {:ok, [{:string, "test", _}, {:eof, _}]} = Lexer.tokenize("[[test]]")
+    end
+
+    test "number followed by concat operator" do
+      # Test the path where we have ".." after a number
+      assert {:ok, [{:number, 5, _}, {:operator, :concat, _}, {:eof, _}]} =
+               Lexer.tokenize("5..")
+    end
+
+    test "uppercase E in scientific notation for integer" do
+      assert {:ok, [{:number, num, _}, {:eof, _}]} = Lexer.tokenize("2E5")
+      assert num == 2.0e5
     end
   end
 

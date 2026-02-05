@@ -65,6 +65,18 @@ defmodule Lua.Parser.RecoveryTest do
       assert {:recovered, rest, [^error]} = Recovery.recover_at_statement(tokens, error)
       assert [{:eof, _}] = rest
     end
+
+    test "fails when no boundary found" do
+      tokens = [
+        {:identifier, "x", %{line: 1, column: 1}},
+        {:operator, :assign, %{line: 1, column: 3}},
+        {:number, 42, %{line: 1, column: 5}}
+      ]
+
+      error = Error.new(:unexpected_token, "Test", %{line: 1, column: 1})
+
+      assert {:failed, [^error]} = Recovery.recover_at_statement(tokens, error)
+    end
   end
 
   describe "recover_unclosed_delimiter/3" do
@@ -76,7 +88,9 @@ defmodule Lua.Parser.RecoveryTest do
 
       error = Error.new(:unclosed_delimiter, "Unclosed (", %{line: 1, column: 1})
 
-      assert {:recovered, rest, [^error]} = Recovery.recover_unclosed_delimiter(tokens, :lparen, error)
+      assert {:recovered, rest, [^error]} =
+               Recovery.recover_unclosed_delimiter(tokens, :lparen, error)
+
       assert [{:eof, _}] = rest
     end
 
@@ -88,7 +102,9 @@ defmodule Lua.Parser.RecoveryTest do
 
       error = Error.new(:unclosed_delimiter, "Unclosed [", %{line: 1, column: 1})
 
-      assert {:recovered, rest, [^error]} = Recovery.recover_unclosed_delimiter(tokens, :lbracket, error)
+      assert {:recovered, rest, [^error]} =
+               Recovery.recover_unclosed_delimiter(tokens, :lbracket, error)
+
       assert [{:eof, _}] = rest
     end
 
@@ -100,7 +116,9 @@ defmodule Lua.Parser.RecoveryTest do
 
       error = Error.new(:unclosed_delimiter, "Unclosed {", %{line: 1, column: 1})
 
-      assert {:recovered, rest, [^error]} = Recovery.recover_unclosed_delimiter(tokens, :lbrace, error)
+      assert {:recovered, rest, [^error]} =
+               Recovery.recover_unclosed_delimiter(tokens, :lbrace, error)
+
       assert [{:eof, _}] = rest
     end
 
@@ -114,7 +132,9 @@ defmodule Lua.Parser.RecoveryTest do
 
       error = Error.new(:unclosed_delimiter, "Test", %{line: 1, column: 1})
 
-      assert {:recovered, rest, [^error]} = Recovery.recover_unclosed_delimiter(tokens, :lparen, error)
+      assert {:recovered, rest, [^error]} =
+               Recovery.recover_unclosed_delimiter(tokens, :lparen, error)
+
       assert [{:eof, _}] = rest
     end
 
@@ -126,8 +146,81 @@ defmodule Lua.Parser.RecoveryTest do
 
       error = Error.new(:unclosed_delimiter, "Test", %{line: 1, column: 1})
 
-      assert {:recovered, rest, [^error]} = Recovery.recover_unclosed_delimiter(tokens, :lparen, error)
+      assert {:recovered, rest, [^error]} =
+               Recovery.recover_unclosed_delimiter(tokens, :lparen, error)
+
       assert [{:keyword, :end, _} | _] = rest
+    end
+
+    test "finds closing end keyword at depth 1" do
+      tokens = [
+        {:keyword, :end, %{line: 1, column: 10}},
+        {:eof, %{line: 1, column: 13}}
+      ]
+
+      error = Error.new(:unclosed_delimiter, "Unclosed function", %{line: 1, column: 1})
+
+      assert {:recovered, rest, [^error]} =
+               Recovery.recover_unclosed_delimiter(tokens, :function, error)
+
+      assert [{:eof, _}] = rest
+    end
+
+    test "handles nested keywords with end" do
+      # Simulating: function ... if ... end end
+      tokens = [
+        {:keyword, :if, %{line: 1, column: 2}},
+        {:keyword, :end, %{line: 1, column: 7}},
+        {:keyword, :end, %{line: 1, column: 11}},
+        {:eof, %{line: 1, column: 14}}
+      ]
+
+      error = Error.new(:unclosed_delimiter, "Unclosed function", %{line: 1, column: 1})
+
+      assert {:recovered, rest, [^error]} =
+               Recovery.recover_unclosed_delimiter(tokens, :function, error)
+
+      assert [{:eof, _}] = rest
+    end
+
+    test "skips non-delimiter tokens when searching" do
+      tokens = [
+        {:identifier, "x", %{line: 1, column: 2}},
+        {:operator, :add, %{line: 1, column: 4}},
+        {:number, 42, %{line: 1, column: 6}},
+        {:delimiter, :rparen, %{line: 1, column: 8}},
+        {:eof, %{line: 1, column: 9}}
+      ]
+
+      error = Error.new(:unclosed_delimiter, "Test", %{line: 1, column: 1})
+
+      assert {:recovered, rest, [^error]} =
+               Recovery.recover_unclosed_delimiter(tokens, :lparen, error)
+
+      assert [{:eof, _}] = rest
+    end
+
+    test "handles empty token list" do
+      tokens = []
+
+      error = Error.new(:unclosed_delimiter, "Test", %{line: 1, column: 1})
+
+      assert {:failed, [^error]} = Recovery.recover_unclosed_delimiter(tokens, :lparen, error)
+    end
+
+    test "uses closing_delimiter with catch-all for keywords" do
+      # Test that non-standard delimiters fall through to :end
+      tokens = [
+        {:keyword, :end, %{line: 1, column: 10}},
+        {:eof, %{line: 1, column: 13}}
+      ]
+
+      error = Error.new(:unclosed_delimiter, "Unclosed if", %{line: 1, column: 1})
+
+      assert {:recovered, rest, [^error]} =
+               Recovery.recover_unclosed_delimiter(tokens, :if, error)
+
+      assert [{:eof, _}] = rest
     end
   end
 
@@ -155,6 +248,24 @@ defmodule Lua.Parser.RecoveryTest do
 
       assert {:recovered, rest, [^error]} = Recovery.recover_missing_keyword(tokens, :then, error)
       assert [{:keyword, :end, _} | _] = rest
+    end
+
+    test "handles empty token list" do
+      tokens = []
+
+      error = Error.new(:expected_token, "Expected then", %{line: 1, column: 1})
+
+      assert {:failed, [^error]} = Recovery.recover_missing_keyword(tokens, :then, error)
+    end
+
+    test "handles EOF when searching for keyword" do
+      tokens = [{:eof, %{line: 1, column: 1}}]
+
+      error = Error.new(:expected_token, "Expected then", %{line: 1, column: 1})
+
+      # EOF is a statement boundary, so it should recover
+      assert {:recovered, rest, [^error]} = Recovery.recover_missing_keyword(tokens, :then, error)
+      assert [{:eof, _}] = rest
     end
   end
 

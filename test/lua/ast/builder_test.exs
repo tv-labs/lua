@@ -57,24 +57,44 @@ defmodule Lua.AST.BuilderTest do
 
     test "creates chained property access" do
       prop = property(property(var("a"), "b"), "c")
+
       assert %Expr.Property{
-        table: %Expr.Property{
-          table: %Expr.Var{name: "a"},
-          field: "b"
-        },
-        field: "c"
-      } = prop
+               table: %Expr.Property{
+                 table: %Expr.Var{name: "a"},
+                 field: "b"
+               },
+               field: "c"
+             } = prop
     end
   end
 
   describe "operators" do
     test "creates binary operation" do
       op = binop(:add, number(2), number(3))
-      assert %Expr.BinOp{op: :add, left: %Expr.Number{value: 2}, right: %Expr.Number{value: 3}} = op
+
+      assert %Expr.BinOp{op: :add, left: %Expr.Number{value: 2}, right: %Expr.Number{value: 3}} =
+               op
     end
 
     test "creates all binary operators" do
-      ops = [:add, :sub, :mul, :div, :floor_div, :mod, :pow, :concat, :eq, :ne, :lt, :gt, :le, :ge, :and, :or]
+      ops = [
+        :add,
+        :sub,
+        :mul,
+        :div,
+        :floor_div,
+        :mod,
+        :pow,
+        :concat,
+        :eq,
+        :ne,
+        :lt,
+        :gt,
+        :le,
+        :ge,
+        :and,
+        :or
+      ]
 
       for op <- ops do
         assert %Expr.BinOp{op: ^op} = binop(op, number(1), number(2))
@@ -95,11 +115,12 @@ defmodule Lua.AST.BuilderTest do
     test "creates nested operations" do
       # (2 + 3) * 4
       op = binop(:mul, binop(:add, number(2), number(3)), number(4))
+
       assert %Expr.BinOp{
-        op: :mul,
-        left: %Expr.BinOp{op: :add},
-        right: %Expr.Number{value: 4}
-      } = op
+               op: :mul,
+               left: %Expr.BinOp{op: :add},
+               right: %Expr.Number{value: 4}
+             } = op
     end
   end
 
@@ -110,27 +131,33 @@ defmodule Lua.AST.BuilderTest do
     end
 
     test "creates array-style table" do
-      tbl = table([
-        {:list, number(1)},
-        {:list, number(2)},
-        {:list, number(3)}
-      ])
+      tbl =
+        table([
+          {:list, number(1)},
+          {:list, number(2)},
+          {:list, number(3)}
+        ])
+
       assert %Expr.Table{fields: [{:list, _}, {:list, _}, {:list, _}]} = tbl
     end
 
     test "creates record-style table" do
-      tbl = table([
-        {:record, string("x"), number(10)},
-        {:record, string("y"), number(20)}
-      ])
+      tbl =
+        table([
+          {:record, string("x"), number(10)},
+          {:record, string("y"), number(20)}
+        ])
+
       assert %Expr.Table{fields: [{:record, _, _}, {:record, _, _}]} = tbl
     end
 
     test "creates mixed table" do
-      tbl = table([
-        {:list, number(1)},
-        {:record, string("x"), number(10)}
-      ])
+      tbl =
+        table([
+          {:list, number(1)},
+          {:record, string("x"), number(10)}
+        ])
+
       assert %Expr.Table{fields: [{:list, _}, {:record, _, _}]} = tbl
     end
   end
@@ -138,10 +165,11 @@ defmodule Lua.AST.BuilderTest do
   describe "function calls" do
     test "creates function call" do
       c = call(var("print"), [string("hello")])
+
       assert %Expr.Call{
-        func: %Expr.Var{name: "print"},
-        args: [%Expr.String{value: "hello"}]
-      } = c
+               func: %Expr.Var{name: "print"},
+               args: [%Expr.String{value: "hello"}]
+             } = c
     end
 
     test "creates function call with multiple arguments" do
@@ -151,21 +179,23 @@ defmodule Lua.AST.BuilderTest do
 
     test "creates method call" do
       mc = method_call(var("file"), "read", [string("*a")])
+
       assert %Expr.MethodCall{
-        object: %Expr.Var{name: "file"},
-        method: "read",
-        args: [%Expr.String{value: "*a"}]
-      } = mc
+               object: %Expr.Var{name: "file"},
+               method: "read",
+               args: [%Expr.String{value: "*a"}]
+             } = mc
     end
   end
 
   describe "function expressions" do
     test "creates simple function" do
       fn_expr = function_expr(["x"], [return_stmt([var("x")])])
+
       assert %Expr.Function{
-        params: ["x"],
-        body: %Block{stmts: [%Stmt.Return{}]}
-      } = fn_expr
+               params: ["x"],
+               body: %Block{stmts: [%Stmt.Return{}]}
+             } = fn_expr
     end
 
     test "creates function with multiple parameters" do
@@ -182,10 +212,11 @@ defmodule Lua.AST.BuilderTest do
   describe "statements" do
     test "creates assignment" do
       stmt = assign([var("x")], [number(42)])
+
       assert %Stmt.Assign{
-        targets: [%Expr.Var{name: "x"}],
-        values: [%Expr.Number{value: 42}]
-      } = stmt
+               targets: [%Expr.Var{name: "x"}],
+               values: [%Expr.Number{value: 42}]
+             } = stmt
     end
 
     test "creates multiple assignment" do
@@ -205,11 +236,12 @@ defmodule Lua.AST.BuilderTest do
 
     test "creates local function" do
       stmt = local_func("add", ["a", "b"], [return_stmt([binop(:add, var("a"), var("b"))])])
+
       assert %Stmt.LocalFunc{
-        name: "add",
-        params: ["a", "b"],
-        body: %Block{}
-      } = stmt
+               name: "add",
+               params: ["a", "b"],
+               body: %Block{}
+             } = stmt
     end
 
     test "creates function declaration with string name" do
@@ -218,7 +250,9 @@ defmodule Lua.AST.BuilderTest do
     end
 
     test "creates function declaration with path name" do
-      stmt = func_decl(["math", "add"], ["a", "b"], [return_stmt([binop(:add, var("a"), var("b"))])])
+      stmt =
+        func_decl(["math", "add"], ["a", "b"], [return_stmt([binop(:add, var("a"), var("b"))])])
+
       assert %Stmt.FuncDecl{name: ["math", "add"]} = stmt
     end
 
@@ -254,95 +288,116 @@ defmodule Lua.AST.BuilderTest do
   describe "control flow" do
     test "creates if statement" do
       stmt = if_stmt(var("x"), [return_stmt([number(1)])])
+
       assert %Stmt.If{
-        condition: %Expr.Var{name: "x"},
-        then_block: %Block{stmts: [%Stmt.Return{}]},
-        elseifs: [],
-        else_block: nil
-      } = stmt
+               condition: %Expr.Var{name: "x"},
+               then_block: %Block{stmts: [%Stmt.Return{}]},
+               elseifs: [],
+               else_block: nil
+             } = stmt
     end
 
     test "creates if-else statement" do
-      stmt = if_stmt(
-        var("x"),
-        [return_stmt([number(1)])],
-        else: [return_stmt([number(0)])]
-      )
+      stmt =
+        if_stmt(
+          var("x"),
+          [return_stmt([number(1)])],
+          else: [return_stmt([number(0)])]
+        )
+
       assert %Stmt.If{else_block: %Block{}} = stmt
     end
 
     test "creates if-elseif-else statement" do
-      stmt = if_stmt(
-        binop(:gt, var("x"), number(0)),
-        [return_stmt([number(1)])],
-        elseif: [{binop(:lt, var("x"), number(0)), [return_stmt([unop(:neg, number(1))])]}],
-        else: [return_stmt([number(0)])]
-      )
+      stmt =
+        if_stmt(
+          binop(:gt, var("x"), number(0)),
+          [return_stmt([number(1)])],
+          elseif: [{binop(:lt, var("x"), number(0)), [return_stmt([unop(:neg, number(1))])]}],
+          else: [return_stmt([number(0)])]
+        )
+
       assert %Stmt.If{
-        elseifs: [{_, %Block{}}],
-        else_block: %Block{}
-      } = stmt
+               elseifs: [{_, %Block{}}],
+               else_block: %Block{}
+             } = stmt
     end
 
     test "creates while loop" do
-      stmt = while_stmt(binop(:gt, var("x"), number(0)), [
-        assign([var("x")], [binop(:sub, var("x"), number(1))])
-      ])
+      stmt =
+        while_stmt(binop(:gt, var("x"), number(0)), [
+          assign([var("x")], [binop(:sub, var("x"), number(1))])
+        ])
+
       assert %Stmt.While{
-        condition: %Expr.BinOp{op: :gt},
-        body: %Block{}
-      } = stmt
+               condition: %Expr.BinOp{op: :gt},
+               body: %Block{}
+             } = stmt
     end
 
     test "creates repeat-until loop" do
-      stmt = repeat_stmt(
-        [assign([var("x")], [binop(:sub, var("x"), number(1))])],
-        binop(:le, var("x"), number(0))
-      )
+      stmt =
+        repeat_stmt(
+          [assign([var("x")], [binop(:sub, var("x"), number(1))])],
+          binop(:le, var("x"), number(0))
+        )
+
       assert %Stmt.Repeat{
-        body: %Block{},
-        condition: %Expr.BinOp{op: :le}
-      } = stmt
+               body: %Block{},
+               condition: %Expr.BinOp{op: :le}
+             } = stmt
     end
 
     test "creates numeric for loop" do
-      stmt = for_num("i", number(1), number(10), [
-        call_stmt(call(var("print"), [var("i")]))
-      ])
+      stmt =
+        for_num("i", number(1), number(10), [
+          call_stmt(call(var("print"), [var("i")]))
+        ])
+
       assert %Stmt.ForNum{
-        var: "i",
-        start: %Expr.Number{value: 1},
-        limit: %Expr.Number{value: 10},
-        step: nil,
-        body: %Block{}
-      } = stmt
+               var: "i",
+               start: %Expr.Number{value: 1},
+               limit: %Expr.Number{value: 10},
+               step: nil,
+               body: %Block{}
+             } = stmt
     end
 
     test "creates numeric for loop with step" do
-      stmt = for_num("i", number(1), number(10), [
-        call_stmt(call(var("print"), [var("i")]))
-      ], step: number(2))
+      stmt =
+        for_num(
+          "i",
+          number(1),
+          number(10),
+          [
+            call_stmt(call(var("print"), [var("i")]))
+          ], step: number(2))
+
       assert %Stmt.ForNum{step: %Expr.Number{value: 2}} = stmt
     end
 
     test "creates generic for loop" do
-      stmt = for_in(
-        ["k", "v"],
-        [call(var("pairs"), [var("t")])],
-        [call_stmt(call(var("print"), [var("k"), var("v")]))]
-      )
+      stmt =
+        for_in(
+          ["k", "v"],
+          [call(var("pairs"), [var("t")])],
+          [call_stmt(call(var("print"), [var("k"), var("v")]))]
+        )
+
       assert %Stmt.ForIn{
-        vars: ["k", "v"],
-        iterators: [%Expr.Call{}],
-        body: %Block{}
-      } = stmt
+               vars: ["k", "v"],
+               iterators: [%Expr.Call{}],
+               body: %Block{}
+             } = stmt
     end
 
     test "creates do block" do
-      stmt = do_block([
-        local(["x"], [number(10)]),
-        call_stmt(call(var("print"), [var("x")]))
-      ])
+      stmt =
+        do_block([
+          local(["x"], [number(10)]),
+          call_stmt(call(var("print"), [var("x")]))
+        ])
+
       assert %Stmt.Do{body: %Block{stmts: [_, _]}} = stmt
     end
   end
@@ -350,57 +405,59 @@ defmodule Lua.AST.BuilderTest do
   describe "complex structures" do
     test "builds nested function with closure" do
       # function outer(x) return function(y) return x + y end end
-      ast = chunk([
-        func_decl("outer", ["x"], [
-          return_stmt([
-            function_expr(["y"], [
-              return_stmt([binop(:add, var("x"), var("y"))])
+      ast =
+        chunk([
+          func_decl("outer", ["x"], [
+            return_stmt([
+              function_expr(["y"], [
+                return_stmt([binop(:add, var("x"), var("y"))])
+              ])
             ])
           ])
         ])
-      ])
 
       assert %Chunk{
-        block: %Block{
-          stmts: [
-            %Stmt.FuncDecl{
-              name: ["outer"],
-              body: %Block{
-                stmts: [
-                  %Stmt.Return{
-                    values: [%Expr.Function{}]
-                  }
-                ]
-              }
-            }
-          ]
-        }
-      } = ast
+               block: %Block{
+                 stmts: [
+                   %Stmt.FuncDecl{
+                     name: ["outer"],
+                     body: %Block{
+                       stmts: [
+                         %Stmt.Return{
+                           values: [%Expr.Function{}]
+                         }
+                       ]
+                     }
+                   }
+                 ]
+               }
+             } = ast
     end
 
     test "builds complex if-elseif-else chain" do
-      ast = chunk([
-        if_stmt(
-          binop(:gt, var("x"), number(0)),
-          [return_stmt([string("positive")])],
-          elseif: [
-            {binop(:lt, var("x"), number(0)), [return_stmt([string("negative")])]},
-            {binop(:eq, var("x"), number(0)), [return_stmt([string("zero")])]}
-          ],
-          else: [return_stmt([string("unknown")])]
-        )
-      ])
+      ast =
+        chunk([
+          if_stmt(
+            binop(:gt, var("x"), number(0)),
+            [return_stmt([string("positive")])],
+            elseif: [
+              {binop(:lt, var("x"), number(0)), [return_stmt([string("negative")])]},
+              {binop(:eq, var("x"), number(0)), [return_stmt([string("zero")])]}
+            ],
+            else: [return_stmt([string("unknown")])]
+          )
+        ])
 
       assert %Chunk{
-        block: %Block{
-          stmts: [
-            %Stmt.If{
-              elseifs: [{_, _}, {_, _}],
-              else_block: %Block{}
-            }
-          ]
-        }
-      } = ast
+               block: %Block{
+                 stmts: [
+                   %Stmt.If{
+                     elseifs: [{_, _}, {_, _}],
+                     else_block: %Block{}
+                   }
+                 ]
+               }
+             } = ast
     end
 
     test "builds nested loops" do
@@ -409,25 +466,26 @@ defmodule Lua.AST.BuilderTest do
       #     print(i * j)
       #   end
       # end
-      ast = chunk([
-        for_num("i", number(1), number(10), [
-          for_num("j", number(1), number(10), [
-            call_stmt(call(var("print"), [binop(:mul, var("i"), var("j"))]))
+      ast =
+        chunk([
+          for_num("i", number(1), number(10), [
+            for_num("j", number(1), number(10), [
+              call_stmt(call(var("print"), [binop(:mul, var("i"), var("j"))]))
+            ])
           ])
         ])
-      ])
 
       assert %Chunk{
-        block: %Block{
-          stmts: [
-            %Stmt.ForNum{
-              body: %Block{
-                stmts: [%Stmt.ForNum{}]
-              }
-            }
-          ]
-        }
-      } = ast
+               block: %Block{
+                 stmts: [
+                   %Stmt.ForNum{
+                     body: %Block{
+                       stmts: [%Stmt.ForNum{}]
+                     }
+                   }
+                 ]
+               }
+             } = ast
     end
 
     test "builds table with complex expressions" do
@@ -437,36 +495,39 @@ defmodule Lua.AST.BuilderTest do
       #   [key] = value,
       #   nested = {a = 1, b = 2}
       # }
-      tbl = table([
-        {:record, string("x"), binop(:add, number(1), number(2))},
-        {:record, string("y"), call(var("func"), [])},
-        {:record, var("key"), var("value")},
-        {:record, string("nested"), table([
-          {:record, string("a"), number(1)},
-          {:record, string("b"), number(2)}
-        ])}
-      ])
+      tbl =
+        table([
+          {:record, string("x"), binop(:add, number(1), number(2))},
+          {:record, string("y"), call(var("func"), [])},
+          {:record, var("key"), var("value")},
+          {:record, string("nested"),
+           table([
+             {:record, string("a"), number(1)},
+             {:record, string("b"), number(2)}
+           ])}
+        ])
 
       assert %Expr.Table{
-        fields: [
-          {:record, %Expr.String{value: "x"}, %Expr.BinOp{}},
-          {:record, %Expr.String{value: "y"}, %Expr.Call{}},
-          {:record, %Expr.Var{}, %Expr.Var{}},
-          {:record, %Expr.String{value: "nested"}, %Expr.Table{}}
-        ]
-      } = tbl
+               fields: [
+                 {:record, %Expr.String{value: "x"}, %Expr.BinOp{}},
+                 {:record, %Expr.String{value: "y"}, %Expr.Call{}},
+                 {:record, %Expr.Var{}, %Expr.Var{}},
+                 {:record, %Expr.String{value: "nested"}, %Expr.Table{}}
+               ]
+             } = tbl
     end
   end
 
   describe "integration with parser" do
     test "builder output can be printed and reparsed" do
       # Build an AST using builder
-      ast = chunk([
-        local(["x"], [number(10)]),
-        local(["y"], [number(20)]),
-        assign([var("z")], [binop(:add, var("x"), var("y"))]),
-        call_stmt(call(var("print"), [var("z")]))
-      ])
+      ast =
+        chunk([
+          local(["x"], [number(10)]),
+          local(["y"], [number(20)]),
+          assign([var("z")], [binop(:add, var("x"), var("y"))]),
+          call_stmt(call(var("print"), [var("z")]))
+        ])
 
       # Print it
       code = Lua.AST.PrettyPrinter.print(ast)

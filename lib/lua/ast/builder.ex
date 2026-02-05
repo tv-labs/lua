@@ -201,7 +201,8 @@ defmodule Lua.AST.Builder do
         {:record, string("y"), number(20)}
       ])
   """
-  @spec table([{:list, Expr.t()} | {:record, Expr.t(), Expr.t()}], Meta.t() | nil) :: Expr.Table.t()
+  @spec table([{:list, Expr.t()} | {:record, Expr.t(), Expr.t()}], Meta.t() | nil) ::
+          Expr.Table.t()
   def table(fields, meta \\ nil) do
     %Expr.Table{
       fields: fields,
@@ -361,7 +362,8 @@ defmodule Lua.AST.Builder do
       # function math.add(a, b) return a + b end
       func_decl(["math", "add"], ["a", "b"], [...])
   """
-  @spec func_decl(String.t() | [String.t()], [String.t()], [Stmt.t()], keyword()) :: Stmt.FuncDecl.t()
+  @spec func_decl(String.t() | [String.t()], [String.t()], [Stmt.t()], keyword()) ::
+          Stmt.FuncDecl.t()
   def func_decl(name, params, body_stmts, opts \\ []) do
     name_parts = if is_binary(name), do: [name], else: name
 

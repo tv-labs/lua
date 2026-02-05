@@ -309,7 +309,8 @@ defmodule Lua.Parser.PrecedenceTest do
     test "all operators with correct precedence" do
       # a or b and c < d .. e + f * g ^ h
       # Should parse as: a or (b and (c < (d .. (e + (f * (g ^ h))))))
-      assert {:ok, %{block: %{stmts: [stmt]}}} = Parser.parse("return a or b and c < d .. e + f * g ^ h")
+      assert {:ok, %{block: %{stmts: [stmt]}}} =
+               Parser.parse("return a or b and c < d .. e + f * g ^ h")
 
       assert %{
                values: [

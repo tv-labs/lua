@@ -77,7 +77,8 @@ defmodule Lua.Parser.Pratt do
   """
   @spec prefix_binding_power(atom()) :: non_neg_integer() | nil
   def prefix_binding_power(:not), do: 14
-  def prefix_binding_power(:sub), do: 13   # Between mult (11) and power (16)
+  # Between mult (11) and power (16)
+  def prefix_binding_power(:sub), do: 13
   def prefix_binding_power(:len), do: 14
   def prefix_binding_power(_), do: nil
 

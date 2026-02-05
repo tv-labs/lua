@@ -231,7 +231,8 @@ defmodule Lua.Parser do
         end
 
       _ ->
-        {:error, {:unexpected_token, peek(rest), "Expected identifier or 'function' after 'local'"}}
+        {:error,
+         {:unexpected_token, peek(rest), "Expected identifier or 'function' after 'local'"}}
     end
   end
 
@@ -509,8 +510,7 @@ defmodule Lua.Parser do
                 {:ok, %Stmt.CallStmt{call: call, meta: nil}, rest}
 
               _ ->
-                {:error,
-                 {:unexpected_expression, "Expression statement must be a function call"}}
+                {:error, {:unexpected_expression, "Expression statement must be a function call"}}
             end
         end
 
@@ -597,15 +597,15 @@ defmodule Lua.Parser do
   defp parse_prefix(tokens) do
     case peek(tokens) do
       # Literals
-      {:keyword, :nil, pos} ->
+      {:keyword, nil, pos} ->
         {_, rest} = consume(tokens)
         {:ok, %Expr.Nil{meta: Meta.new(pos)}, rest}
 
-      {:keyword, :true, pos} ->
+      {:keyword, true, pos} ->
         {_, rest} = consume(tokens)
         {:ok, %Expr.Bool{value: true, meta: Meta.new(pos)}, rest}
 
-      {:keyword, :false, pos} ->
+      {:keyword, false, pos} ->
         {_, rest} = consume(tokens)
         {:ok, %Expr.Bool{value: false, meta: Meta.new(pos)}, rest}
 
@@ -651,6 +651,9 @@ defmodule Lua.Parser do
       {:operator, :len, pos} ->
         {_, rest} = consume(tokens)
         parse_unary(:len, pos, rest)
+
+      {:eof, pos} ->
+        {:error, {:unexpected_token, :eof, pos, "Expected expression"}}
 
       {type, _, pos} ->
         {:error, {:unexpected_token, type, pos, "Expected expression"}}
@@ -1040,12 +1043,14 @@ defmodule Lua.Parser do
 
       {type, _, pos} when type != nil ->
         {:error,
-         {:unexpected_token, type, pos, "Expected #{inspect(expected_type)}, got #{inspect(type)}"}}
+         {:unexpected_token, type, pos,
+          "Expected #{inspect(expected_type)}, got #{inspect(type)}"}}
 
       {type, pos} when is_map(pos) ->
         # Token without value (like :eof)
         {:error,
-         {:unexpected_token, type, pos, "Expected #{inspect(expected_type)}, got #{inspect(type)}"}}
+         {:unexpected_token, type, pos,
+          "Expected #{inspect(expected_type)}, got #{inspect(type)}"}}
 
       nil ->
         {:error, {:unexpected_end, "Expected #{inspect(expected_type)}"}}
@@ -1071,16 +1076,15 @@ defmodule Lua.Parser do
           "Expected #{inspect(expected_type)}:#{inspect(expected_value)}, got #{inspect(type)}"}}
 
       nil ->
-        {:error, {:unexpected_end, "Expected #{inspect(expected_type)}:#{inspect(expected_value)}"}}
+        {:error,
+         {:unexpected_end, "Expected #{inspect(expected_type)}:#{inspect(expected_value)}"}}
     end
   end
 
   # Error conversion helpers
 
   defp convert_error({:unexpected_token, type, pos, message}, _code) do
-    Error.new(:unexpected_token, message, pos,
-      suggestion: suggest_for_token_error(type, message)
-    )
+    Error.new(:unexpected_token, message, pos, suggestion: suggest_for_token_error(type, message))
   end
 
   defp convert_error({:unexpected_end, message}, _code) do

@@ -168,7 +168,11 @@ defmodule Lua.AST.Walker do
 
         # Statements
         %Stmt.Assign{targets: targets, values: values} = stmt ->
-          %{stmt | targets: Enum.map(targets, &do_map(&1, mapper)), values: Enum.map(values, &do_map(&1, mapper))}
+          %{
+            stmt
+            | targets: Enum.map(targets, &do_map(&1, mapper)),
+              values: Enum.map(values, &do_map(&1, mapper))
+          }
 
         %Stmt.Local{values: values} = stmt when is_list(values) ->
           %{stmt | values: Enum.map(values, &do_map(&1, mapper))}
@@ -185,15 +189,23 @@ defmodule Lua.AST.Walker do
         %Stmt.CallStmt{call: call} = stmt ->
           %{stmt | call: do_map(call, mapper)}
 
-        %Stmt.If{condition: cond, then_block: then_block, elseifs: elseifs, else_block: else_block} = stmt ->
-          mapped_elseifs = Enum.map(elseifs, fn {c, b} -> {do_map(c, mapper), do_map(b, mapper)} end)
+        %Stmt.If{
+          condition: cond,
+          then_block: then_block,
+          elseifs: elseifs,
+          else_block: else_block
+        } = stmt ->
+          mapped_elseifs =
+            Enum.map(elseifs, fn {c, b} -> {do_map(c, mapper), do_map(b, mapper)} end)
+
           mapped_else = if else_block, do: do_map(else_block, mapper), else: nil
 
-          %{stmt |
-            condition: do_map(cond, mapper),
-            then_block: do_map(then_block, mapper),
-            elseifs: mapped_elseifs,
-            else_block: mapped_else
+          %{
+            stmt
+            | condition: do_map(cond, mapper),
+              then_block: do_map(then_block, mapper),
+              elseifs: mapped_elseifs,
+              else_block: mapped_else
           }
 
         %Stmt.While{condition: cond, body: body} = stmt ->
@@ -202,18 +214,23 @@ defmodule Lua.AST.Walker do
         %Stmt.Repeat{body: body, condition: cond} = stmt ->
           %{stmt | body: do_map(body, mapper), condition: do_map(cond, mapper)}
 
-        %Stmt.ForNum{var: var, start: start, limit: limit, step: step, body: body} = stmt ->
+        %Stmt.ForNum{var: _var, start: start, limit: limit, step: step, body: body} = stmt ->
           mapped_step = if step, do: do_map(step, mapper), else: nil
 
-          %{stmt |
-            start: do_map(start, mapper),
-            limit: do_map(limit, mapper),
-            step: mapped_step,
-            body: do_map(body, mapper)
+          %{
+            stmt
+            | start: do_map(start, mapper),
+              limit: do_map(limit, mapper),
+              step: mapped_step,
+              body: do_map(body, mapper)
           }
 
-        %Stmt.ForIn{vars: vars, iterators: iterators, body: body} = stmt ->
-          %{stmt | iterators: Enum.map(iterators, &do_map(&1, mapper)), body: do_map(body, mapper)}
+        %Stmt.ForIn{vars: _vars, iterators: iterators, body: body} = stmt ->
+          %{
+            stmt
+            | iterators: Enum.map(iterators, &do_map(&1, mapper)),
+              body: do_map(body, mapper)
+          }
 
         %Stmt.Do{body: body} = stmt ->
           %{stmt | body: do_map(body, mapper)}
@@ -241,40 +258,79 @@ defmodule Lua.AST.Walker do
   defp children(node) do
     case node do
       # Chunk
-      %Chunk{block: block} -> [block]
+      %Chunk{block: block} ->
+        [block]
 
       # Block
-      %Block{stmts: stmts} -> stmts
+      %Block{stmts: stmts} ->
+        stmts
 
       # Expressions with children
-      %Expr.BinOp{left: left, right: right} -> [left, right]
-      %Expr.UnOp{operand: operand} -> [operand]
-      %Expr.Table{fields: fields} -> extract_table_fields(fields)
-      %Expr.Call{func: func, args: args} -> [func | args]
-      %Expr.MethodCall{object: obj, args: args} -> [obj | args]
-      %Expr.Index{table: table, key: key} -> [table, key]
-      %Expr.Property{table: table} -> [table]
-      %Expr.Function{body: body} -> [body]
+      %Expr.BinOp{left: left, right: right} ->
+        [left, right]
+
+      %Expr.UnOp{operand: operand} ->
+        [operand]
+
+      %Expr.Table{fields: fields} ->
+        extract_table_fields(fields)
+
+      %Expr.Call{func: func, args: args} ->
+        [func | args]
+
+      %Expr.MethodCall{object: obj, args: args} ->
+        [obj | args]
+
+      %Expr.Index{table: table, key: key} ->
+        [table, key]
+
+      %Expr.Property{table: table} ->
+        [table]
+
+      %Expr.Function{body: body} ->
+        [body]
 
       # Statements with children
-      %Stmt.Assign{targets: targets, values: values} -> targets ++ values
-      %Stmt.Local{values: values} when is_list(values) -> values
-      %Stmt.LocalFunc{body: body} -> [body]
-      %Stmt.FuncDecl{body: body} -> [body]
-      %Stmt.CallStmt{call: call} -> [call]
+      %Stmt.Assign{targets: targets, values: values} ->
+        targets ++ values
+
+      %Stmt.Local{values: values} when is_list(values) ->
+        values
+
+      %Stmt.LocalFunc{body: body} ->
+        [body]
+
+      %Stmt.FuncDecl{body: body} ->
+        [body]
+
+      %Stmt.CallStmt{call: call} ->
+        [call]
+
       %Stmt.If{condition: cond, then_block: then_block, elseifs: elseifs, else_block: else_block} ->
         elseif_nodes = Enum.flat_map(elseifs, fn {c, b} -> [c, b] end)
         [cond, then_block | elseif_nodes] ++ if(else_block, do: [else_block], else: [])
-      %Stmt.While{condition: cond, body: body} -> [cond, body]
-      %Stmt.Repeat{body: body, condition: cond} -> [body, cond]
+
+      %Stmt.While{condition: cond, body: body} ->
+        [cond, body]
+
+      %Stmt.Repeat{body: body, condition: cond} ->
+        [body, cond]
+
       %Stmt.ForNum{start: start, limit: limit, step: step, body: body} ->
         [start, limit] ++ if(step, do: [step], else: []) ++ [body]
-      %Stmt.ForIn{iterators: iterators, body: body} -> iterators ++ [body]
-      %Stmt.Do{body: body} -> [body]
-      %Stmt.Return{values: values} -> values
+
+      %Stmt.ForIn{iterators: iterators, body: body} ->
+        iterators ++ [body]
+
+      %Stmt.Do{body: body} ->
+        [body]
+
+      %Stmt.Return{values: values} ->
+        values
 
       # Leaf nodes (no children)
-      _ -> []
+      _ ->
+        []
     end
   end
 
