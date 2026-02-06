@@ -6,7 +6,7 @@ defmodule Lua.Parser do
   """
 
   alias Lua.AST.{Meta, Expr, Statement, Block, Chunk}
-  alias Lua.Parser.Pratt
+  alias Lua.Parser.{Pratt, Comments}
   alias Lua.Lexer
 
   @type token :: Lexer.token()
@@ -101,6 +101,29 @@ defmodule Lua.Parser do
       {:eof, _} ->
         {:ok, Block.new(Enum.reverse(stmts)), tokens}
 
+      # Skip orphaned comments at end of block (before terminator)
+      {:comment, _, _, _} ->
+        # Check if comments are orphaned (followed only by terminator/EOF)
+        tokens_after_comments = skip_orphaned_comments(tokens)
+
+        case peek(tokens_after_comments) do
+          {:keyword, term, _} when term in [:end, :else, :elseif, :until] ->
+            {:ok, Block.new(Enum.reverse(stmts)), tokens_after_comments}
+
+          {:eof, _} ->
+            {:ok, Block.new(Enum.reverse(stmts)), tokens_after_comments}
+
+          _ ->
+            # Not orphaned, parse as normal statement (comments will be collected)
+            case parse_stmt(tokens) do
+              {:ok, stmt, rest} ->
+                parse_block_acc(rest, [stmt | stmts])
+
+              {:error, reason} ->
+                {:error, reason}
+            end
+        end
+
       _ ->
         case parse_stmt(tokens) do
           {:ok, stmt, rest} ->
@@ -112,8 +135,32 @@ defmodule Lua.Parser do
     end
   end
 
-  # Statement parsing (placeholder - will be implemented in Phase 3)
+  # Skip comment tokens that are orphaned (not followed by a statement)
+  defp skip_orphaned_comments([{:comment, _, _, _} | rest]), do: skip_orphaned_comments(rest)
+  defp skip_orphaned_comments(tokens), do: tokens
+
+  # Statement parsing with comment collection
   defp parse_stmt(tokens) do
+    # Collect leading comments
+    {leading_comments, tokens_after_comments} = Comments.collect_leading_comments(tokens)
+
+    # Parse the actual statement
+    case parse_stmt_inner(tokens_after_comments) do
+      {:ok, stmt, rest} ->
+        # Check for trailing comment on the same line
+        stmt_pos = get_statement_position(stmt)
+        {trailing_comment, final_rest} = Comments.check_trailing_comment(rest, stmt_pos)
+
+        # Attach comments to the statement
+        stmt_with_comments = attach_comments_to_stmt(stmt, leading_comments, trailing_comment)
+        {:ok, stmt_with_comments, final_rest}
+
+      error ->
+        error
+    end
+  end
+
+  defp parse_stmt_inner(tokens) do
     case peek(tokens) do
       {:keyword, :return, _} ->
         parse_return(tokens)
@@ -544,10 +591,18 @@ defmodule Lua.Parser do
     end
   end
 
-  defp parse_assignment(targets, [{:operator, :assign, _} | rest]) do
+  defp parse_assignment(targets, [{:operator, :assign, pos} | rest]) do
     case parse_expr_list(rest) do
       {:ok, values, rest2} ->
-        {:ok, %Statement.Assign{targets: targets, values: values, meta: nil}, rest2}
+        # Create meta from first target's position
+        meta =
+          if targets != [] and hd(targets).meta do
+            %{hd(targets).meta | start: hd(targets).meta.start || pos}
+          else
+            Meta.new(pos)
+          end
+
+        {:ok, %Statement.Assign{targets: targets, values: values, meta: meta}, rest2}
 
       {:error, reason} ->
         {:error, reason}
@@ -1168,5 +1223,20 @@ defmodule Lua.Parser do
       true ->
         nil
     end
+  end
+
+  # Helper functions for comment attachment
+
+  # Extract position from statement for trailing comment detection
+  defp get_statement_position(%{meta: meta}) when not is_nil(meta) do
+    meta.start
+  end
+
+  defp get_statement_position(_), do: nil
+
+  # Attach comments to a statement's meta
+  defp attach_comments_to_stmt(stmt, leading_comments, trailing_comment) do
+    updated_meta = Comments.attach_comments(stmt.meta, leading_comments, trailing_comment)
+    %{stmt | meta: updated_meta}
   end
 end
