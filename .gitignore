@@ -24,3 +24,6 @@ lua-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Vendored Lua dependencies (installed via mix lua.rocks.install)
+/priv/lua_deps/
