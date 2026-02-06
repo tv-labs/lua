@@ -2,17 +2,17 @@ defmodule Lua.AST.BuilderTest do
   use ExUnit.Case, async: true
 
   import Lua.AST.Builder
-  alias Lua.AST.{Chunk, Block, Expr, Stmt}
+  alias Lua.AST.{Chunk, Block, Expr, Statement}
 
   describe "chunk and block" do
     test "creates a chunk" do
       ast = chunk([local(["x"], [number(42)])])
-      assert %Chunk{block: %Block{stmts: [%Stmt.Local{}]}} = ast
+      assert %Chunk{block: %Block{stmts: [%Statement.Local{}]}} = ast
     end
 
     test "creates a block" do
       blk = block([local(["x"], [number(42)])])
-      assert %Block{stmts: [%Stmt.Local{}]} = blk
+      assert %Block{stmts: [%Statement.Local{}]} = blk
     end
   end
 
@@ -194,7 +194,7 @@ defmodule Lua.AST.BuilderTest do
 
       assert %Expr.Function{
                params: ["x"],
-               body: %Block{stmts: [%Stmt.Return{}]}
+               body: %Block{stmts: [%Statement.Return{}]}
              } = fn_expr
     end
 
@@ -213,7 +213,7 @@ defmodule Lua.AST.BuilderTest do
     test "creates assignment" do
       stmt = assign([var("x")], [number(42)])
 
-      assert %Stmt.Assign{
+      assert %Statement.Assign{
                targets: [%Expr.Var{name: "x"}],
                values: [%Expr.Number{value: 42}]
              } = stmt
@@ -221,23 +221,23 @@ defmodule Lua.AST.BuilderTest do
 
     test "creates multiple assignment" do
       stmt = assign([var("x"), var("y")], [number(1), number(2)])
-      assert %Stmt.Assign{targets: [_, _], values: [_, _]} = stmt
+      assert %Statement.Assign{targets: [_, _], values: [_, _]} = stmt
     end
 
     test "creates local declaration" do
       stmt = local(["x"], [number(42)])
-      assert %Stmt.Local{names: ["x"], values: [%Expr.Number{value: 42}]} = stmt
+      assert %Statement.Local{names: ["x"], values: [%Expr.Number{value: 42}]} = stmt
     end
 
     test "creates local declaration without value" do
       stmt = local(["x"], [])
-      assert %Stmt.Local{names: ["x"], values: []} = stmt
+      assert %Statement.Local{names: ["x"], values: []} = stmt
     end
 
     test "creates local function" do
       stmt = local_func("add", ["a", "b"], [return_stmt([binop(:add, var("a"), var("b"))])])
 
-      assert %Stmt.LocalFunc{
+      assert %Statement.LocalFunc{
                name: "add",
                params: ["a", "b"],
                body: %Block{}
@@ -246,42 +246,42 @@ defmodule Lua.AST.BuilderTest do
 
     test "creates function declaration with string name" do
       stmt = func_decl("add", ["a", "b"], [return_stmt([binop(:add, var("a"), var("b"))])])
-      assert %Stmt.FuncDecl{name: ["add"], params: ["a", "b"]} = stmt
+      assert %Statement.FuncDecl{name: ["add"], params: ["a", "b"]} = stmt
     end
 
     test "creates function declaration with path name" do
       stmt =
         func_decl(["math", "add"], ["a", "b"], [return_stmt([binop(:add, var("a"), var("b"))])])
 
-      assert %Stmt.FuncDecl{name: ["math", "add"]} = stmt
+      assert %Statement.FuncDecl{name: ["math", "add"]} = stmt
     end
 
     test "creates call statement" do
       stmt = call_stmt(call(var("print"), [string("hello")]))
-      assert %Stmt.CallStmt{call: %Expr.Call{}} = stmt
+      assert %Statement.CallStmt{call: %Expr.Call{}} = stmt
     end
 
     test "creates return statement" do
       stmt = return_stmt([])
-      assert %Stmt.Return{values: []} = stmt
+      assert %Statement.Return{values: []} = stmt
 
       stmt = return_stmt([number(42)])
-      assert %Stmt.Return{values: [%Expr.Number{value: 42}]} = stmt
+      assert %Statement.Return{values: [%Expr.Number{value: 42}]} = stmt
     end
 
     test "creates break statement" do
       stmt = break_stmt()
-      assert %Stmt.Break{} = stmt
+      assert %Statement.Break{} = stmt
     end
 
     test "creates goto statement" do
       stmt = goto_stmt("label")
-      assert %Stmt.Goto{label: "label"} = stmt
+      assert %Statement.Goto{label: "label"} = stmt
     end
 
     test "creates label" do
       stmt = label("label")
-      assert %Stmt.Label{name: "label"} = stmt
+      assert %Statement.Label{name: "label"} = stmt
     end
   end
 
@@ -289,9 +289,9 @@ defmodule Lua.AST.BuilderTest do
     test "creates if statement" do
       stmt = if_stmt(var("x"), [return_stmt([number(1)])])
 
-      assert %Stmt.If{
+      assert %Statement.If{
                condition: %Expr.Var{name: "x"},
-               then_block: %Block{stmts: [%Stmt.Return{}]},
+               then_block: %Block{stmts: [%Statement.Return{}]},
                elseifs: [],
                else_block: nil
              } = stmt
@@ -305,7 +305,7 @@ defmodule Lua.AST.BuilderTest do
           else: [return_stmt([number(0)])]
         )
 
-      assert %Stmt.If{else_block: %Block{}} = stmt
+      assert %Statement.If{else_block: %Block{}} = stmt
     end
 
     test "creates if-elseif-else statement" do
@@ -317,7 +317,7 @@ defmodule Lua.AST.BuilderTest do
           else: [return_stmt([number(0)])]
         )
 
-      assert %Stmt.If{
+      assert %Statement.If{
                elseifs: [{_, %Block{}}],
                else_block: %Block{}
              } = stmt
@@ -329,7 +329,7 @@ defmodule Lua.AST.BuilderTest do
           assign([var("x")], [binop(:sub, var("x"), number(1))])
         ])
 
-      assert %Stmt.While{
+      assert %Statement.While{
                condition: %Expr.BinOp{op: :gt},
                body: %Block{}
              } = stmt
@@ -342,7 +342,7 @@ defmodule Lua.AST.BuilderTest do
           binop(:le, var("x"), number(0))
         )
 
-      assert %Stmt.Repeat{
+      assert %Statement.Repeat{
                body: %Block{},
                condition: %Expr.BinOp{op: :le}
              } = stmt
@@ -354,7 +354,7 @@ defmodule Lua.AST.BuilderTest do
           call_stmt(call(var("print"), [var("i")]))
         ])
 
-      assert %Stmt.ForNum{
+      assert %Statement.ForNum{
                var: "i",
                start: %Expr.Number{value: 1},
                limit: %Expr.Number{value: 10},
@@ -371,9 +371,11 @@ defmodule Lua.AST.BuilderTest do
           number(10),
           [
             call_stmt(call(var("print"), [var("i")]))
-          ], step: number(2))
+          ],
+          step: number(2)
+        )
 
-      assert %Stmt.ForNum{step: %Expr.Number{value: 2}} = stmt
+      assert %Statement.ForNum{step: %Expr.Number{value: 2}} = stmt
     end
 
     test "creates generic for loop" do
@@ -384,7 +386,7 @@ defmodule Lua.AST.BuilderTest do
           [call_stmt(call(var("print"), [var("k"), var("v")]))]
         )
 
-      assert %Stmt.ForIn{
+      assert %Statement.ForIn{
                vars: ["k", "v"],
                iterators: [%Expr.Call{}],
                body: %Block{}
@@ -398,7 +400,7 @@ defmodule Lua.AST.BuilderTest do
           call_stmt(call(var("print"), [var("x")]))
         ])
 
-      assert %Stmt.Do{body: %Block{stmts: [_, _]}} = stmt
+      assert %Statement.Do{body: %Block{stmts: [_, _]}} = stmt
     end
   end
 
@@ -419,11 +421,11 @@ defmodule Lua.AST.BuilderTest do
       assert %Chunk{
                block: %Block{
                  stmts: [
-                   %Stmt.FuncDecl{
+                   %Statement.FuncDecl{
                      name: ["outer"],
                      body: %Block{
                        stmts: [
-                         %Stmt.Return{
+                         %Statement.Return{
                            values: [%Expr.Function{}]
                          }
                        ]
@@ -451,7 +453,7 @@ defmodule Lua.AST.BuilderTest do
       assert %Chunk{
                block: %Block{
                  stmts: [
-                   %Stmt.If{
+                   %Statement.If{
                      elseifs: [{_, _}, {_, _}],
                      else_block: %Block{}
                    }
@@ -478,9 +480,9 @@ defmodule Lua.AST.BuilderTest do
       assert %Chunk{
                block: %Block{
                  stmts: [
-                   %Stmt.ForNum{
+                   %Statement.ForNum{
                      body: %Block{
-                       stmts: [%Stmt.ForNum{}]
+                       stmts: [%Statement.ForNum{}]
                      }
                    }
                  ]

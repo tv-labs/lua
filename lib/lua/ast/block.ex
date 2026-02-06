@@ -6,10 +6,10 @@ defmodule Lua.AST.Block do
   Blocks create a new scope for local variables.
   """
 
-  alias Lua.AST.{Meta, Stmt}
+  alias Lua.AST.{Meta, Statement}
 
   @type t :: %__MODULE__{
-          stmts: [Stmt.t()],
+          stmts: [Statement.t()],
           meta: Meta.t() | nil
         }
 
@@ -26,7 +26,7 @@ defmodule Lua.AST.Block do
       iex> Lua.AST.Block.new([], %Lua.AST.Meta{})
       %Lua.AST.Block{stmts: [], meta: %Lua.AST.Meta{start: nil, end: nil, metadata: %{}}}
   """
-  @spec new([Stmt.t()], Meta.t() | nil) :: t()
+  @spec new([Statement.t()], Meta.t() | nil) :: t()
   def new(stmts \\ [], meta \\ nil) do
     %__MODULE__{stmts: stmts, meta: meta}
   end

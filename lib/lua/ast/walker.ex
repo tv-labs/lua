@@ -27,13 +27,13 @@ defmodule Lua.AST.Walker do
       Walker.walk(ast, fn node -> ... end, order: :post)
   """
 
-  alias Lua.AST.{Chunk, Block, Expr, Stmt}
+  alias Lua.AST.{Chunk, Block, Expr, Statement}
 
   @type ast_node ::
           Chunk.t()
           | Block.t()
           | Expr.t()
-          | Stmt.t()
+          | Statement.t()
 
   @type visitor :: (ast_node -> any())
   @type mapper :: (ast_node -> ast_node)
@@ -167,29 +167,29 @@ defmodule Lua.AST.Walker do
           %{expr | body: do_map(body, mapper)}
 
         # Statements
-        %Stmt.Assign{targets: targets, values: values} = stmt ->
+        %Statement.Assign{targets: targets, values: values} = stmt ->
           %{
             stmt
             | targets: Enum.map(targets, &do_map(&1, mapper)),
               values: Enum.map(values, &do_map(&1, mapper))
           }
 
-        %Stmt.Local{values: values} = stmt when is_list(values) ->
+        %Statement.Local{values: values} = stmt when is_list(values) ->
           %{stmt | values: Enum.map(values, &do_map(&1, mapper))}
 
-        %Stmt.Local{} = stmt ->
+        %Statement.Local{} = stmt ->
           stmt
 
-        %Stmt.LocalFunc{body: body} = stmt ->
+        %Statement.LocalFunc{body: body} = stmt ->
           %{stmt | body: do_map(body, mapper)}
 
-        %Stmt.FuncDecl{body: body} = stmt ->
+        %Statement.FuncDecl{body: body} = stmt ->
           %{stmt | body: do_map(body, mapper)}
 
-        %Stmt.CallStmt{call: call} = stmt ->
+        %Statement.CallStmt{call: call} = stmt ->
           %{stmt | call: do_map(call, mapper)}
 
-        %Stmt.If{
+        %Statement.If{
           condition: cond,
           then_block: then_block,
           elseifs: elseifs,
@@ -208,13 +208,13 @@ defmodule Lua.AST.Walker do
               else_block: mapped_else
           }
 
-        %Stmt.While{condition: cond, body: body} = stmt ->
+        %Statement.While{condition: cond, body: body} = stmt ->
           %{stmt | condition: do_map(cond, mapper), body: do_map(body, mapper)}
 
-        %Stmt.Repeat{body: body, condition: cond} = stmt ->
+        %Statement.Repeat{body: body, condition: cond} = stmt ->
           %{stmt | body: do_map(body, mapper), condition: do_map(cond, mapper)}
 
-        %Stmt.ForNum{var: _var, start: start, limit: limit, step: step, body: body} = stmt ->
+        %Statement.ForNum{var: _var, start: start, limit: limit, step: step, body: body} = stmt ->
           mapped_step = if step, do: do_map(step, mapper), else: nil
 
           %{
@@ -225,17 +225,17 @@ defmodule Lua.AST.Walker do
               body: do_map(body, mapper)
           }
 
-        %Stmt.ForIn{vars: _vars, iterators: iterators, body: body} = stmt ->
+        %Statement.ForIn{vars: _vars, iterators: iterators, body: body} = stmt ->
           %{
             stmt
             | iterators: Enum.map(iterators, &do_map(&1, mapper)),
               body: do_map(body, mapper)
           }
 
-        %Stmt.Do{body: body} = stmt ->
+        %Statement.Do{body: body} = stmt ->
           %{stmt | body: do_map(body, mapper)}
 
-        %Stmt.Return{values: values} = stmt ->
+        %Statement.Return{values: values} = stmt ->
           %{stmt | values: Enum.map(values, &do_map(&1, mapper))}
 
         # Leaf nodes (no children)
@@ -291,41 +291,46 @@ defmodule Lua.AST.Walker do
         [body]
 
       # Statements with children
-      %Stmt.Assign{targets: targets, values: values} ->
+      %Statement.Assign{targets: targets, values: values} ->
         targets ++ values
 
-      %Stmt.Local{values: values} when is_list(values) ->
+      %Statement.Local{values: values} when is_list(values) ->
         values
 
-      %Stmt.LocalFunc{body: body} ->
+      %Statement.LocalFunc{body: body} ->
         [body]
 
-      %Stmt.FuncDecl{body: body} ->
+      %Statement.FuncDecl{body: body} ->
         [body]
 
-      %Stmt.CallStmt{call: call} ->
+      %Statement.CallStmt{call: call} ->
         [call]
 
-      %Stmt.If{condition: cond, then_block: then_block, elseifs: elseifs, else_block: else_block} ->
+      %Statement.If{
+        condition: cond,
+        then_block: then_block,
+        elseifs: elseifs,
+        else_block: else_block
+      } ->
         elseif_nodes = Enum.flat_map(elseifs, fn {c, b} -> [c, b] end)
         [cond, then_block | elseif_nodes] ++ if(else_block, do: [else_block], else: [])
 
-      %Stmt.While{condition: cond, body: body} ->
+      %Statement.While{condition: cond, body: body} ->
         [cond, body]
 
-      %Stmt.Repeat{body: body, condition: cond} ->
+      %Statement.Repeat{body: body, condition: cond} ->
         [body, cond]
 
-      %Stmt.ForNum{start: start, limit: limit, step: step, body: body} ->
+      %Statement.ForNum{start: start, limit: limit, step: step, body: body} ->
         [start, limit] ++ if(step, do: [step], else: []) ++ [body]
 
-      %Stmt.ForIn{iterators: iterators, body: body} ->
+      %Statement.ForIn{iterators: iterators, body: body} ->
         iterators ++ [body]
 
-      %Stmt.Do{body: body} ->
+      %Statement.Do{body: body} ->
         [body]
 
-      %Stmt.Return{values: values} ->
+      %Statement.Return{values: values} ->
         values
 
       # Leaf nodes (no children)

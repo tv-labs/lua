@@ -25,7 +25,7 @@ defmodule Lua.AST.Builder do
       ])
   """
 
-  alias Lua.AST.{Chunk, Block, Meta, Expr, Stmt}
+  alias Lua.AST.{Chunk, Block, Meta, Expr, Statement}
 
   # Chunk and Block
 
@@ -36,7 +36,7 @@ defmodule Lua.AST.Builder do
 
       chunk([local(["x"], [number(42)])])
   """
-  @spec chunk([Stmt.t()], Meta.t() | nil) :: Chunk.t()
+  @spec chunk([Statement.t()], Meta.t() | nil) :: Chunk.t()
   def chunk(stmts, meta \\ nil) do
     %Chunk{
       block: block(stmts, meta),
@@ -54,7 +54,7 @@ defmodule Lua.AST.Builder do
         assign([var("x")], [number(20)])
       ])
   """
-  @spec block([Stmt.t()], Meta.t() | nil) :: Block.t()
+  @spec block([Statement.t()], Meta.t() | nil) :: Block.t()
   def block(stmts, meta \\ nil) do
     %Block{
       stmts: stmts,
@@ -261,7 +261,7 @@ defmodule Lua.AST.Builder do
       # function(...) return ... end
       function_expr([], [return_stmt([vararg()])], vararg: true)
   """
-  @spec function_expr([String.t()], [Stmt.t()], keyword()) :: Expr.Function.t()
+  @spec function_expr([String.t()], [Statement.t()], keyword()) :: Expr.Function.t()
   def function_expr(params, body_stmts, opts \\ []) do
     params_with_vararg =
       if Keyword.get(opts, :vararg, false) do
@@ -290,9 +290,9 @@ defmodule Lua.AST.Builder do
       # x, y = 1, 2
       assign([var("x"), var("y")], [number(1), number(2)])
   """
-  @spec assign([Expr.t()], [Expr.t()], Meta.t() | nil) :: Stmt.Assign.t()
+  @spec assign([Expr.t()], [Expr.t()], Meta.t() | nil) :: Statement.Assign.t()
   def assign(targets, values, meta \\ nil) do
-    %Stmt.Assign{
+    %Statement.Assign{
       targets: targets,
       values: values,
       meta: meta
@@ -313,9 +313,9 @@ defmodule Lua.AST.Builder do
       # local x, y = 1, 2
       local(["x", "y"], [number(1), number(2)])
   """
-  @spec local([String.t()], [Expr.t()], Meta.t() | nil) :: Stmt.Local.t()
+  @spec local([String.t()], [Expr.t()], Meta.t() | nil) :: Statement.Local.t()
   def local(names, values \\ [], meta \\ nil) do
-    %Stmt.Local{
+    %Statement.Local{
       names: names,
       values: values,
       meta: meta
@@ -332,7 +332,8 @@ defmodule Lua.AST.Builder do
         return_stmt([binop(:add, var("a"), var("b"))])
       ])
   """
-  @spec local_func(String.t(), [String.t()], [Stmt.t()], keyword()) :: Stmt.LocalFunc.t()
+  @spec local_func(String.t(), [String.t()], [Statement.t()], keyword()) ::
+          Statement.LocalFunc.t()
   def local_func(name, params, body_stmts, opts \\ []) do
     params_with_vararg =
       if Keyword.get(opts, :vararg, false) do
@@ -341,7 +342,7 @@ defmodule Lua.AST.Builder do
         params
       end
 
-    %Stmt.LocalFunc{
+    %Statement.LocalFunc{
       name: name,
       params: params_with_vararg,
       body: block(body_stmts),
@@ -362,8 +363,8 @@ defmodule Lua.AST.Builder do
       # function math.add(a, b) return a + b end
       func_decl(["math", "add"], ["a", "b"], [...])
   """
-  @spec func_decl(String.t() | [String.t()], [String.t()], [Stmt.t()], keyword()) ::
-          Stmt.FuncDecl.t()
+  @spec func_decl(String.t() | [String.t()], [String.t()], [Statement.t()], keyword()) ::
+          Statement.FuncDecl.t()
   def func_decl(name, params, body_stmts, opts \\ []) do
     name_parts = if is_binary(name), do: [name], else: name
 
@@ -376,7 +377,7 @@ defmodule Lua.AST.Builder do
 
     is_method = Keyword.get(opts, :is_method, false)
 
-    %Stmt.FuncDecl{
+    %Statement.FuncDecl{
       name: name_parts,
       params: params_with_vararg,
       body: block(body_stmts),
@@ -392,9 +393,9 @@ defmodule Lua.AST.Builder do
 
       call_stmt(call(var("print"), [string("hello")]))
   """
-  @spec call_stmt(Expr.Call.t() | Expr.MethodCall.t(), Meta.t() | nil) :: Stmt.CallStmt.t()
+  @spec call_stmt(Expr.Call.t() | Expr.MethodCall.t(), Meta.t() | nil) :: Statement.CallStmt.t()
   def call_stmt(call_expr, meta \\ nil) do
-    %Stmt.CallStmt{
+    %Statement.CallStmt{
       call: call_expr,
       meta: meta
     }
@@ -419,9 +420,9 @@ defmodule Lua.AST.Builder do
         else: [call_stmt(...)]
       )
   """
-  @spec if_stmt(Expr.t(), [Stmt.t()], keyword()) :: Stmt.If.t()
+  @spec if_stmt(Expr.t(), [Statement.t()], keyword()) :: Statement.If.t()
   def if_stmt(condition, then_stmts, opts \\ []) do
-    %Stmt.If{
+    %Statement.If{
       condition: condition,
       then_block: block(then_stmts),
       elseifs: Keyword.get(opts, :elseif, []) |> Enum.map(fn {c, s} -> {c, block(s)} end),
@@ -441,9 +442,9 @@ defmodule Lua.AST.Builder do
         [assign([var("x")], [binop(:sub, var("x"), number(1))])]
       )
   """
-  @spec while_stmt(Expr.t(), [Stmt.t()], Meta.t() | nil) :: Stmt.While.t()
+  @spec while_stmt(Expr.t(), [Statement.t()], Meta.t() | nil) :: Statement.While.t()
   def while_stmt(condition, body_stmts, meta \\ nil) do
-    %Stmt.While{
+    %Statement.While{
       condition: condition,
       body: block(body_stmts),
       meta: meta
@@ -461,9 +462,9 @@ defmodule Lua.AST.Builder do
         binop(:le, var("x"), number(0))
       )
   """
-  @spec repeat_stmt([Stmt.t()], Expr.t(), Meta.t() | nil) :: Stmt.Repeat.t()
+  @spec repeat_stmt([Statement.t()], Expr.t(), Meta.t() | nil) :: Statement.Repeat.t()
   def repeat_stmt(body_stmts, condition, meta \\ nil) do
-    %Stmt.Repeat{
+    %Statement.Repeat{
       body: block(body_stmts),
       condition: condition,
       meta: meta
@@ -483,9 +484,10 @@ defmodule Lua.AST.Builder do
       # for i = 1, 10, 2 do print(i) end
       for_num("i", number(1), number(10), [...], step: number(2))
   """
-  @spec for_num(String.t(), Expr.t(), Expr.t(), [Stmt.t()], keyword()) :: Stmt.ForNum.t()
+  @spec for_num(String.t(), Expr.t(), Expr.t(), [Statement.t()], keyword()) ::
+          Statement.ForNum.t()
   def for_num(var_name, start, limit, body_stmts, opts \\ []) do
-    %Stmt.ForNum{
+    %Statement.ForNum{
       var: var_name,
       start: start,
       limit: limit,
@@ -507,9 +509,9 @@ defmodule Lua.AST.Builder do
         [call_stmt(call(var("print"), [var("k"), var("v")]))]
       )
   """
-  @spec for_in([String.t()], [Expr.t()], [Stmt.t()], Meta.t() | nil) :: Stmt.ForIn.t()
+  @spec for_in([String.t()], [Expr.t()], [Statement.t()], Meta.t() | nil) :: Statement.ForIn.t()
   def for_in(vars, iterators, body_stmts, meta \\ nil) do
-    %Stmt.ForIn{
+    %Statement.ForIn{
       vars: vars,
       iterators: iterators,
       body: block(body_stmts),
@@ -528,9 +530,9 @@ defmodule Lua.AST.Builder do
         call_stmt(call(var("print"), [var("x")]))
       ])
   """
-  @spec do_block([Stmt.t()], Meta.t() | nil) :: Stmt.Do.t()
+  @spec do_block([Statement.t()], Meta.t() | nil) :: Statement.Do.t()
   def do_block(body_stmts, meta \\ nil) do
-    %Stmt.Do{
+    %Statement.Do{
       body: block(body_stmts),
       meta: meta
     }
@@ -550,23 +552,23 @@ defmodule Lua.AST.Builder do
       # return x, y
       return_stmt([var("x"), var("y")])
   """
-  @spec return_stmt([Expr.t()], Meta.t() | nil) :: Stmt.Return.t()
+  @spec return_stmt([Expr.t()], Meta.t() | nil) :: Statement.Return.t()
   def return_stmt(values, meta \\ nil) do
-    %Stmt.Return{
+    %Statement.Return{
       values: values,
       meta: meta
     }
   end
 
   @doc "Creates a break statement"
-  @spec break_stmt(Meta.t() | nil) :: Stmt.Break.t()
-  def break_stmt(meta \\ nil), do: %Stmt.Break{meta: meta}
+  @spec break_stmt(Meta.t() | nil) :: Statement.Break.t()
+  def break_stmt(meta \\ nil), do: %Statement.Break{meta: meta}
 
   @doc "Creates a goto statement"
-  @spec goto_stmt(String.t(), Meta.t() | nil) :: Stmt.Goto.t()
-  def goto_stmt(label, meta \\ nil), do: %Stmt.Goto{label: label, meta: meta}
+  @spec goto_stmt(String.t(), Meta.t() | nil) :: Statement.Goto.t()
+  def goto_stmt(label, meta \\ nil), do: %Statement.Goto{label: label, meta: meta}
 
   @doc "Creates a label"
-  @spec label(String.t(), Meta.t() | nil) :: Stmt.Label.t()
-  def label(name, meta \\ nil), do: %Stmt.Label{name: name, meta: meta}
+  @spec label(String.t(), Meta.t() | nil) :: Statement.Label.t()
+  def label(name, meta \\ nil), do: %Statement.Label{name: name, meta: meta}
 end

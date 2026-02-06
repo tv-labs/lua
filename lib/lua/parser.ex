@@ -5,7 +5,7 @@ defmodule Lua.Parser do
   Uses Pratt parsing for operator precedence in expressions.
   """
 
-  alias Lua.AST.{Meta, Expr, Stmt, Block, Chunk}
+  alias Lua.AST.{Meta, Expr, Statement, Block, Chunk}
   alias Lua.Parser.Pratt
   alias Lua.Lexer
 
@@ -164,19 +164,19 @@ defmodule Lua.Parser do
     case peek(rest) do
       # End of block or statement
       {:keyword, terminator, _} when terminator in [:end, :else, :elseif, :until] ->
-        {:ok, %Stmt.Return{values: [], meta: Meta.new(pos)}, rest}
+        {:ok, %Statement.Return{values: [], meta: Meta.new(pos)}, rest}
 
       {:eof, _} ->
-        {:ok, %Stmt.Return{values: [], meta: Meta.new(pos)}, rest}
+        {:ok, %Statement.Return{values: [], meta: Meta.new(pos)}, rest}
 
       {:delimiter, :semicolon, _} ->
         {_, rest2} = consume(rest)
-        {:ok, %Stmt.Return{values: [], meta: Meta.new(pos)}, rest2}
+        {:ok, %Statement.Return{values: [], meta: Meta.new(pos)}, rest2}
 
       _ ->
         case parse_expr_list(rest) do
           {:ok, exprs, rest2} ->
-            {:ok, %Stmt.Return{values: exprs, meta: Meta.new(pos)}, rest2}
+            {:ok, %Statement.Return{values: exprs, meta: Meta.new(pos)}, rest2}
 
           {:error, reason} ->
             {:error, reason}
@@ -197,7 +197,8 @@ defmodule Lua.Parser do
                  {:ok, _, rest6} <- expect(rest5, :delimiter, :rparen),
                  {:ok, body, rest7} <- parse_block(rest6),
                  {:ok, _, rest8} <- expect(rest7, :keyword, :end) do
-              {:ok, %Stmt.LocalFunc{name: name, params: params, body: body, meta: Meta.new(pos)},
+              {:ok,
+               %Statement.LocalFunc{name: name, params: params, body: body, meta: Meta.new(pos)},
                rest8}
             end
 
@@ -215,7 +216,8 @@ defmodule Lua.Parser do
 
                 case parse_expr_list(rest3) do
                   {:ok, values, rest4} ->
-                    {:ok, %Stmt.Local{names: names, values: values, meta: Meta.new(pos)}, rest4}
+                    {:ok, %Statement.Local{names: names, values: values, meta: Meta.new(pos)},
+                     rest4}
 
                   {:error, reason} ->
                     {:error, reason}
@@ -223,7 +225,7 @@ defmodule Lua.Parser do
 
               _ ->
                 # Local without initialization
-                {:ok, %Stmt.Local{names: names, values: [], meta: Meta.new(pos)}, rest2}
+                {:ok, %Statement.Local{names: names, values: [], meta: Meta.new(pos)}, rest2}
             end
 
           {:error, reason} ->
@@ -244,7 +246,7 @@ defmodule Lua.Parser do
       case expect(rest5, :keyword, :end) do
         {:ok, _, rest6} ->
           {:ok,
-           %Stmt.If{
+           %Statement.If{
              condition: condition,
              then_block: then_block,
              elseifs: elseifs,
@@ -291,7 +293,7 @@ defmodule Lua.Parser do
          {:ok, _, rest3} <- expect(rest2, :keyword, :do),
          {:ok, body, rest4} <- parse_block(rest3),
          {:ok, _, rest5} <- expect(rest4, :keyword, :end) do
-      {:ok, %Stmt.While{condition: condition, body: body, meta: Meta.new(pos)}, rest5}
+      {:ok, %Statement.While{condition: condition, body: body, meta: Meta.new(pos)}, rest5}
     end
   end
 
@@ -299,7 +301,7 @@ defmodule Lua.Parser do
     with {:ok, body, rest2} <- parse_block(rest),
          {:ok, _, rest3} <- expect(rest2, :keyword, :until),
          {:ok, condition, rest4} <- parse_expr(rest3) do
-      {:ok, %Stmt.Repeat{body: body, condition: condition, meta: Meta.new(pos)}, rest4}
+      {:ok, %Statement.Repeat{body: body, condition: condition, meta: Meta.new(pos)}, rest4}
     end
   end
 
@@ -319,7 +321,7 @@ defmodule Lua.Parser do
                  {:ok, body, rest9} <- parse_block(rest8),
                  {:ok, _, rest10} <- expect(rest9, :keyword, :end) do
               {:ok,
-               %Stmt.ForNum{
+               %Statement.ForNum{
                  var: var,
                  start: start,
                  limit: limit,
@@ -378,8 +380,12 @@ defmodule Lua.Parser do
              {:ok, body, rest4} <- parse_block(rest3),
              {:ok, _, rest5} <- expect(rest4, :keyword, :end) do
           {:ok,
-           %Stmt.ForIn{vars: vars, iterators: iterators, body: body, meta: Meta.new(start_pos)},
-           rest5}
+           %Statement.ForIn{
+             vars: vars,
+             iterators: iterators,
+             body: body,
+             meta: Meta.new(start_pos)
+           }, rest5}
         end
 
       _ ->
@@ -396,7 +402,7 @@ defmodule Lua.Parser do
              {:ok, body, rest6} <- parse_block(rest5),
              {:ok, _, rest7} <- expect(rest6, :keyword, :end) do
           {:ok,
-           %Stmt.FuncDecl{
+           %Statement.FuncDecl{
              name: name_parts,
              params: params,
              body: body,
@@ -452,18 +458,18 @@ defmodule Lua.Parser do
   defp parse_do([{:keyword, :do, pos} | rest]) do
     with {:ok, body, rest2} <- parse_block(rest),
          {:ok, _, rest3} <- expect(rest2, :keyword, :end) do
-      {:ok, %Stmt.Do{body: body, meta: Meta.new(pos)}, rest3}
+      {:ok, %Statement.Do{body: body, meta: Meta.new(pos)}, rest3}
     end
   end
 
   defp parse_break([{:keyword, :break, pos} | rest]) do
-    {:ok, %Stmt.Break{meta: Meta.new(pos)}, rest}
+    {:ok, %Statement.Break{meta: Meta.new(pos)}, rest}
   end
 
   defp parse_goto([{:keyword, :goto, pos} | rest]) do
     case expect(rest, :identifier) do
       {:ok, {_, label, _}, rest2} ->
-        {:ok, %Stmt.Goto{label: label, meta: Meta.new(pos)}, rest2}
+        {:ok, %Statement.Goto{label: label, meta: Meta.new(pos)}, rest2}
 
       {:error, reason} ->
         {:error, reason}
@@ -475,7 +481,7 @@ defmodule Lua.Parser do
       {:ok, {_, name, _}, rest2} ->
         case expect(rest2, :delimiter, :double_colon) do
           {:ok, _, rest3} ->
-            {:ok, %Stmt.Label{name: name, meta: Meta.new(pos)}, rest3}
+            {:ok, %Statement.Label{name: name, meta: Meta.new(pos)}, rest3}
 
           {:error, reason} ->
             {:error, reason}
@@ -504,10 +510,10 @@ defmodule Lua.Parser do
             # It's a call statement (or error if not a call)
             case expr do
               %Expr.Call{} = call ->
-                {:ok, %Stmt.CallStmt{call: call, meta: nil}, rest}
+                {:ok, %Statement.CallStmt{call: call, meta: nil}, rest}
 
               %Expr.MethodCall{} = call ->
-                {:ok, %Stmt.CallStmt{call: call, meta: nil}, rest}
+                {:ok, %Statement.CallStmt{call: call, meta: nil}, rest}
 
               _ ->
                 {:error, {:unexpected_expression, "Expression statement must be a function call"}}
@@ -541,7 +547,7 @@ defmodule Lua.Parser do
   defp parse_assignment(targets, [{:operator, :assign, _} | rest]) do
     case parse_expr_list(rest) do
       {:ok, values, rest2} ->
-        {:ok, %Stmt.Assign{targets: targets, values: values, meta: nil}, rest2}
+        {:ok, %Statement.Assign{targets: targets, values: values, meta: nil}, rest2}
 
       {:error, reason} ->
         {:error, reason}
@@ -1096,12 +1102,8 @@ defmodule Lua.Parser do
     )
   end
 
-  defp convert_error({:lexer_error, reason}, code) do
-    convert_lexer_error(reason, code)
-  end
-
-  defp convert_error({:not_implemented, feature}, _code) do
-    Error.new(:invalid_syntax, "Feature not yet implemented: #{feature}", nil)
+  defp convert_error({:unexpected_expression, message}, _code) do
+    Error.new(:invalid_syntax, message, nil)
   end
 
   defp convert_error(other, _code) do

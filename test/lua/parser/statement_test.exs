@@ -1,12 +1,12 @@
-defmodule Lua.Parser.StmtTest do
+defmodule Lua.Parser.StatementTest do
   use ExUnit.Case, async: true
   alias Lua.Parser
-  alias Lua.AST.{Stmt, Expr}
+  alias Lua.AST.{Statement, Expr}
 
   describe "local variable declarations" do
     test "parses local without initialization" do
       assert {:ok, chunk} = Parser.parse("local x")
-      assert %{block: %{stmts: [%Stmt.Local{names: ["x"], values: []}]}} = chunk
+      assert %{block: %{stmts: [%Statement.Local{names: ["x"], values: []}]}} = chunk
     end
 
     test "parses local with single initialization" do
@@ -14,7 +14,7 @@ defmodule Lua.Parser.StmtTest do
 
       assert %{
                block: %{
-                 stmts: [%Stmt.Local{names: ["x"], values: [%Expr.Number{value: 42}]}]
+                 stmts: [%Statement.Local{names: ["x"], values: [%Expr.Number{value: 42}]}]
                }
              } = chunk
     end
@@ -25,7 +25,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.Local{
+                   %Statement.Local{
                      names: ["x", "y", "z"],
                      values: [
                        %Expr.Number{value: 1},
@@ -46,7 +46,7 @@ defmodule Lua.Parser.StmtTest do
                end
                """)
 
-      assert %{block: %{stmts: [%Stmt.LocalFunc{name: "add", params: ["a", "b"]}]}} = chunk
+      assert %{block: %{stmts: [%Statement.LocalFunc{name: "add", params: ["a", "b"]}]}} = chunk
     end
   end
 
@@ -57,7 +57,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.Assign{
+                   %Statement.Assign{
                      targets: [%Expr.Var{name: "x"}],
                      values: [%Expr.Number{value: 42}]
                    }
@@ -72,7 +72,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.Assign{
+                   %Statement.Assign{
                      targets: [%Expr.Var{name: "x"}, %Expr.Var{name: "y"}],
                      values: [%Expr.Number{value: 1}, %Expr.Number{value: 2}]
                    }
@@ -87,7 +87,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.Assign{
+                   %Statement.Assign{
                      targets: [%Expr.Property{}],
                      values: [%Expr.Number{value: 42}]
                    }
@@ -102,7 +102,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.Assign{
+                   %Statement.Assign{
                      targets: [%Expr.Index{}],
                      values: [%Expr.Number{value: 42}]
                    }
@@ -118,7 +118,7 @@ defmodule Lua.Parser.StmtTest do
 
       assert %{
                block: %{
-                 stmts: [%Stmt.CallStmt{call: %Expr.Call{func: %Expr.Var{name: "print"}}}]
+                 stmts: [%Statement.CallStmt{call: %Expr.Call{func: %Expr.Var{name: "print"}}}]
                }
              } = chunk
     end
@@ -127,7 +127,7 @@ defmodule Lua.Parser.StmtTest do
       assert {:ok, chunk} = Parser.parse("obj:method()")
 
       assert %{
-               block: %{stmts: [%Stmt.CallStmt{call: %Expr.MethodCall{method: "method"}}]}
+               block: %{stmts: [%Statement.CallStmt{call: %Expr.MethodCall{method: "method"}}]}
              } = chunk
     end
   end
@@ -144,9 +144,9 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.If{
+                   %Statement.If{
                      condition: %Expr.BinOp{op: :gt},
-                     then_block: %{stmts: [%Stmt.Return{}]},
+                     then_block: %{stmts: [%Statement.Return{}]},
                      elseifs: [],
                      else_block: nil
                    }
@@ -168,11 +168,11 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.If{
+                   %Statement.If{
                      condition: %Expr.BinOp{op: :gt},
-                     then_block: %{stmts: [%Stmt.Return{}]},
+                     then_block: %{stmts: [%Statement.Return{}]},
                      elseifs: [],
-                     else_block: %{stmts: [%Stmt.Return{}]}
+                     else_block: %{stmts: [%Statement.Return{}]}
                    }
                  ]
                }
@@ -194,11 +194,11 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.If{
+                   %Statement.If{
                      condition: %Expr.BinOp{op: :gt},
-                     then_block: %{stmts: [%Stmt.Return{}]},
-                     elseifs: [{%Expr.BinOp{op: :lt}, %{stmts: [%Stmt.Return{}]}}],
-                     else_block: %{stmts: [%Stmt.Return{}]}
+                     then_block: %{stmts: [%Statement.Return{}]},
+                     elseifs: [{%Expr.BinOp{op: :lt}, %{stmts: [%Statement.Return{}]}}],
+                     else_block: %{stmts: [%Statement.Return{}]}
                    }
                  ]
                }
@@ -220,7 +220,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.If{
+                   %Statement.If{
                      elseifs: [_, _]
                    }
                  ]
@@ -241,9 +241,9 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.While{
+                   %Statement.While{
                      condition: %Expr.BinOp{op: :gt},
-                     body: %{stmts: [%Stmt.Assign{}]}
+                     body: %{stmts: [%Statement.Assign{}]}
                    }
                  ]
                }
@@ -263,8 +263,8 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.Repeat{
-                     body: %{stmts: [%Stmt.Assign{}]},
+                   %Statement.Repeat{
+                     body: %{stmts: [%Statement.Assign{}]},
                      condition: %Expr.BinOp{op: :eq}
                    }
                  ]
@@ -285,12 +285,12 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.ForNum{
+                   %Statement.ForNum{
                      var: "i",
                      start: %Expr.Number{value: 1},
                      limit: %Expr.Number{value: 10},
                      step: nil,
-                     body: %{stmts: [%Stmt.CallStmt{}]}
+                     body: %{stmts: [%Statement.CallStmt{}]}
                    }
                  ]
                }
@@ -308,7 +308,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.ForNum{
+                   %Statement.ForNum{
                      var: "i",
                      start: %Expr.Number{value: 1},
                      limit: %Expr.Number{value: 10},
@@ -330,10 +330,10 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.ForIn{
+                   %Statement.ForIn{
                      vars: ["k", "v"],
                      iterators: [%Expr.Call{}],
-                     body: %{stmts: [%Stmt.CallStmt{}]}
+                     body: %{stmts: [%Statement.CallStmt{}]}
                    }
                  ]
                }
@@ -351,7 +351,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.ForIn{
+                   %Statement.ForIn{
                      vars: ["line"],
                      iterators: [%Expr.Call{func: %Expr.Property{}}]
                    }
@@ -373,11 +373,11 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.FuncDecl{
+                   %Statement.FuncDecl{
                      name: ["add"],
                      params: ["a", "b"],
                      is_method: false,
-                     body: %{stmts: [%Stmt.Return{}]}
+                     body: %{stmts: [%Statement.Return{}]}
                    }
                  ]
                }
@@ -395,7 +395,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.FuncDecl{
+                   %Statement.FuncDecl{
                      name: ["math", "abs"],
                      is_method: false
                    }
@@ -415,7 +415,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.FuncDecl{
+                   %Statement.FuncDecl{
                      name: ["obj", "method"],
                      is_method: true,
                      params: ["x"]
@@ -435,7 +435,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.FuncDecl{
+                   %Statement.FuncDecl{
                      name: ["a", "b", "c", "d"],
                      is_method: false
                    }
@@ -458,8 +458,8 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.Do{
-                     body: %{stmts: [%Stmt.Local{}, %Stmt.CallStmt{}]}
+                   %Statement.Do{
+                     body: %{stmts: [%Statement.Local{}, %Statement.CallStmt{}]}
                    }
                  ]
                }
@@ -470,17 +470,17 @@ defmodule Lua.Parser.StmtTest do
   describe "break and goto" do
     test "parses break" do
       assert {:ok, chunk} = Parser.parse("break")
-      assert %{block: %{stmts: [%Stmt.Break{}]}} = chunk
+      assert %{block: %{stmts: [%Statement.Break{}]}} = chunk
     end
 
     test "parses goto" do
       assert {:ok, chunk} = Parser.parse("goto finish")
-      assert %{block: %{stmts: [%Stmt.Goto{label: "finish"}]}} = chunk
+      assert %{block: %{stmts: [%Statement.Goto{label: "finish"}]}} = chunk
     end
 
     test "parses label" do
       assert {:ok, chunk} = Parser.parse("::finish::")
-      assert %{block: %{stmts: [%Stmt.Label{name: "finish"}]}} = chunk
+      assert %{block: %{stmts: [%Statement.Label{name: "finish"}]}} = chunk
     end
 
     test "parses goto and label together" do
@@ -495,10 +495,10 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.Goto{label: "skip"},
-                   %Stmt.CallStmt{},
-                   %Stmt.Label{name: "skip"},
-                   %Stmt.CallStmt{}
+                   %Statement.Goto{label: "skip"},
+                   %Statement.CallStmt{},
+                   %Statement.Label{name: "skip"},
+                   %Statement.CallStmt{}
                  ]
                }
              } = chunk
@@ -508,14 +508,14 @@ defmodule Lua.Parser.StmtTest do
   describe "return statements" do
     test "parses return with no values" do
       assert {:ok, chunk} = Parser.parse("return")
-      assert %{block: %{stmts: [%Stmt.Return{values: []}]}} = chunk
+      assert %{block: %{stmts: [%Statement.Return{values: []}]}} = chunk
     end
 
     test "parses return with single value" do
       assert {:ok, chunk} = Parser.parse("return 42")
 
       assert %{
-               block: %{stmts: [%Stmt.Return{values: [%Expr.Number{value: 42}]}]}
+               block: %{stmts: [%Statement.Return{values: [%Expr.Number{value: 42}]}]}
              } = chunk
     end
 
@@ -525,7 +525,7 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.Return{
+                   %Statement.Return{
                      values: [
                        %Expr.Number{value: 1},
                        %Expr.Number{value: 2},
@@ -551,7 +551,7 @@ defmodule Lua.Parser.StmtTest do
                end
                """)
 
-      assert %{block: %{stmts: [%Stmt.FuncDecl{name: ["factorial"]}]}} = chunk
+      assert %{block: %{stmts: [%Statement.FuncDecl{name: ["factorial"]}]}} = chunk
     end
 
     test "parses multiple statements" do
@@ -566,10 +566,10 @@ defmodule Lua.Parser.StmtTest do
       assert %{
                block: %{
                  stmts: [
-                   %Stmt.Local{names: ["x"]},
-                   %Stmt.Local{names: ["y"]},
-                   %Stmt.Local{names: ["sum"]},
-                   %Stmt.CallStmt{}
+                   %Statement.Local{names: ["x"]},
+                   %Statement.Local{names: ["y"]},
+                   %Statement.Local{names: ["sum"]},
+                   %Statement.CallStmt{}
                  ]
                }
              } = chunk

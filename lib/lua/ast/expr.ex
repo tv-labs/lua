@@ -7,22 +7,6 @@ defmodule Lua.AST.Expr do
 
   alias Lua.AST.Meta
 
-  @type t ::
-          Nil.t()
-          | Bool.t()
-          | Number.t()
-          | String.t()
-          | Var.t()
-          | BinOp.t()
-          | UnOp.t()
-          | Table.t()
-          | Call.t()
-          | MethodCall.t()
-          | Index.t()
-          | Property.t()
-          | Function.t()
-          | Vararg.t()
-
   defmodule Nil do
     @moduledoc "Represents the `nil` literal"
     defstruct [:meta]
@@ -213,4 +197,20 @@ defmodule Lua.AST.Expr do
     defstruct [:meta]
     @type t :: %__MODULE__{meta: Meta.t() | nil}
   end
+
+  @type t ::
+          Nil.t()
+          | Bool.t()
+          | Number.t()
+          | String.t()
+          | Var.t()
+          | BinOp.t()
+          | UnOp.t()
+          | Table.t()
+          | Call.t()
+          | MethodCall.t()
+          | Index.t()
+          | Property.t()
+          | Function.t()
+          | Vararg.t()
 end

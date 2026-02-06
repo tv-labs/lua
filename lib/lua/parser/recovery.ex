@@ -8,6 +8,7 @@ defmodule Lua.Parser.Recovery do
 
   alias Lua.Parser.Error
   alias Lua.Lexer
+  alias Lua.AST.Meta
 
   @type token :: Lexer.token()
   @type recovery_result :: {:recovered, [token()], [Error.t()]} | {:failed, [Error.t()]}

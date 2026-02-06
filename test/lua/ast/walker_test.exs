@@ -2,7 +2,7 @@ defmodule Lua.AST.WalkerTest do
   use ExUnit.Case, async: true
 
   import Lua.AST.Builder
-  alias Lua.AST.{Walker, Expr, Stmt}
+  alias Lua.AST.{Walker, Expr, Statement}
 
   describe "walk/2" do
     test "visits all nodes in pre-order" do
@@ -158,7 +158,7 @@ defmodule Lua.AST.WalkerTest do
         end)
 
       # Extract the if statement
-      [%Stmt.If{condition: %Expr.Bool{value: true}}] = transformed.block.stmts
+      [%Statement.If{condition: %Expr.Bool{value: true}}] = transformed.block.stmts
 
       # Number should be transformed
       numbers =
@@ -227,7 +227,7 @@ defmodule Lua.AST.WalkerTest do
       # Build map of local declarations: name -> value
       locals =
         Walker.reduce(ast, %{}, fn
-          %Stmt.Local{names: [name], values: [%Expr.Number{value: n}]}, acc ->
+          %Statement.Local{names: [name], values: [%Expr.Number{value: n}]}, acc ->
             Map.put(acc, name, n)
 
           _, acc ->
@@ -525,7 +525,7 @@ defmodule Lua.AST.WalkerTest do
       # Count local statements
       local_count =
         Walker.reduce(ast, 0, fn
-          %Stmt.Local{}, acc -> acc + 1
+          %Statement.Local{}, acc -> acc + 1
           _, acc -> acc
         end)
 
@@ -548,14 +548,14 @@ defmodule Lua.AST.WalkerTest do
       # Transform should preserve empty values list
       transformed =
         Walker.map(ast, fn
-          %Stmt.Local{values: []} = node -> node
+          %Statement.Local{values: []} = node -> node
           node -> node
         end)
 
       # Extract local statement
       locals =
         Walker.reduce(transformed, [], fn
-          %Stmt.Local{names: names, values: values}, acc -> [{names, values} | acc]
+          %Statement.Local{names: names, values: values}, acc -> [{names, values} | acc]
           _, acc -> acc
         end)
 
@@ -688,7 +688,7 @@ defmodule Lua.AST.WalkerTest do
       # Verify step is nil
       step_is_nil =
         Walker.reduce(ast, false, fn
-          %Stmt.ForNum{step: nil}, _acc -> true
+          %Statement.ForNum{step: nil}, _acc -> true
           _, acc -> acc
         end)
 
@@ -813,7 +813,7 @@ defmodule Lua.AST.WalkerTest do
       # Count do statements
       do_count =
         Walker.reduce(ast, 0, fn
-          %Stmt.Do{}, acc -> acc + 1
+          %Statement.Do{}, acc -> acc + 1
           _, acc -> acc
         end)
 
@@ -847,7 +847,7 @@ defmodule Lua.AST.WalkerTest do
       # Count break statements
       break_count =
         Walker.reduce(ast, 0, fn
-          %Stmt.Break{}, acc -> acc + 1
+          %Statement.Break{}, acc -> acc + 1
           _, acc -> acc
         end)
 
@@ -866,7 +866,7 @@ defmodule Lua.AST.WalkerTest do
 
       break_count =
         Walker.reduce(transformed, 0, fn
-          %Stmt.Break{}, acc -> acc + 1
+          %Statement.Break{}, acc -> acc + 1
           _, acc -> acc
         end)
 
@@ -880,7 +880,7 @@ defmodule Lua.AST.WalkerTest do
       # Count goto statements
       goto_labels =
         Walker.reduce(ast, [], fn
-          %Stmt.Goto{label: label}, acc -> [label | acc]
+          %Statement.Goto{label: label}, acc -> [label | acc]
           _, acc -> acc
         end)
 
@@ -899,7 +899,7 @@ defmodule Lua.AST.WalkerTest do
 
       labels =
         Walker.reduce(transformed, [], fn
-          %Stmt.Goto{label: label}, acc -> [label | acc]
+          %Statement.Goto{label: label}, acc -> [label | acc]
           _, acc -> acc
         end)
 
@@ -913,7 +913,7 @@ defmodule Lua.AST.WalkerTest do
       # Count labels
       labels =
         Walker.reduce(ast, [], fn
-          %Stmt.Label{name: name}, acc -> [name | acc]
+          %Statement.Label{name: name}, acc -> [name | acc]
           _, acc -> acc
         end)
 
@@ -932,7 +932,7 @@ defmodule Lua.AST.WalkerTest do
 
       labels =
         Walker.reduce(transformed, [], fn
-          %Stmt.Label{name: name}, acc -> [name | acc]
+          %Statement.Label{name: name}, acc -> [name | acc]
           _, acc -> acc
         end)
 
@@ -984,7 +984,7 @@ defmodule Lua.AST.WalkerTest do
       # Verify structure
       if_stmts =
         Walker.reduce(ast, [], fn
-          %Stmt.If{elseifs: elseifs, else_block: else_block}, acc ->
+          %Statement.If{elseifs: elseifs, else_block: else_block}, acc ->
             [{elseifs, else_block} | acc]
 
           _, acc ->
@@ -1054,7 +1054,7 @@ defmodule Lua.AST.WalkerTest do
 
       locals =
         Walker.reduce(transformed, [], fn
-          %Stmt.Local{names: names, values: values}, acc -> [{names, values} | acc]
+          %Statement.Local{names: names, values: values}, acc -> [{names, values} | acc]
           _, acc -> acc
         end)
 
@@ -1200,7 +1200,7 @@ defmodule Lua.AST.WalkerTest do
       # Should walk through CallStmt to MethodCall
       call_stmt_count =
         Walker.reduce(ast, 0, fn
-          %Stmt.CallStmt{}, acc -> acc + 1
+          %Statement.CallStmt{}, acc -> acc + 1
           _, acc -> acc
         end)
 

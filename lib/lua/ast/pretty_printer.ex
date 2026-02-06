@@ -18,13 +18,13 @@ defmodule Lua.AST.PrettyPrinter do
       PrettyPrinter.print(ast, indent: 4)
   """
 
-  alias Lua.AST.{Chunk, Block, Expr, Stmt}
+  alias Lua.AST.{Chunk, Block, Expr, Statement}
 
   @type ast_node ::
           Chunk.t()
           | Block.t()
           | Expr.t()
-          | Stmt.t()
+          | Statement.t()
 
   @type opts :: [
           indent: pos_integer()
@@ -169,14 +169,14 @@ defmodule Lua.AST.PrettyPrinter do
 
   # Statements
 
-  defp do_print(%Stmt.Assign{targets: targets, values: values}, level, indent_size) do
+  defp do_print(%Statement.Assign{targets: targets, values: values}, level, indent_size) do
     targets_str = Enum.map(targets, &do_print(&1, level, indent_size)) |> Enum.join(", ")
     values_str = Enum.map(values, &do_print(&1, level, indent_size)) |> Enum.join(", ")
 
     "#{indent(level, indent_size)}#{targets_str} = #{values_str}"
   end
 
-  defp do_print(%Stmt.Local{names: names, values: values}, level, indent_size) do
+  defp do_print(%Statement.Local{names: names, values: values}, level, indent_size) do
     names_str = Enum.join(names, ", ")
 
     if values && values != [] do
@@ -187,7 +187,7 @@ defmodule Lua.AST.PrettyPrinter do
     end
   end
 
-  defp do_print(%Stmt.LocalFunc{name: name, params: params, body: body}, level, indent_size) do
+  defp do_print(%Statement.LocalFunc{name: name, params: params, body: body}, level, indent_size) do
     params_str =
       params
       |> Enum.map(fn
@@ -201,7 +201,7 @@ defmodule Lua.AST.PrettyPrinter do
     "#{indent(level, indent_size)}local function #{name}(#{params_str})\n#{body_str}#{indent(level, indent_size)}end"
   end
 
-  defp do_print(%Stmt.FuncDecl{name: name, params: params, body: body}, level, indent_size) do
+  defp do_print(%Statement.FuncDecl{name: name, params: params, body: body}, level, indent_size) do
     params_str =
       params
       |> Enum.map(fn
@@ -215,12 +215,12 @@ defmodule Lua.AST.PrettyPrinter do
     "#{indent(level, indent_size)}function #{format_func_name(name)}(#{params_str})\n#{body_str}#{indent(level, indent_size)}end"
   end
 
-  defp do_print(%Stmt.CallStmt{call: call}, level, indent_size) do
+  defp do_print(%Statement.CallStmt{call: call}, level, indent_size) do
     "#{indent(level, indent_size)}#{do_print(call, level, indent_size)}"
   end
 
   defp do_print(
-         %Stmt.If{
+         %Statement.If{
            condition: cond,
            then_block: then_block,
            elseifs: elseifs,
@@ -259,14 +259,14 @@ defmodule Lua.AST.PrettyPrinter do
     Enum.join(parts, "") <> "#{indent(level, indent_size)}end"
   end
 
-  defp do_print(%Stmt.While{condition: cond, body: body}, level, indent_size) do
+  defp do_print(%Statement.While{condition: cond, body: body}, level, indent_size) do
     cond_str = do_print(cond, level, indent_size)
     body_str = print_block_body(body, level + 1, indent_size)
 
     "#{indent(level, indent_size)}while #{cond_str} do\n#{body_str}#{indent(level, indent_size)}end"
   end
 
-  defp do_print(%Stmt.Repeat{body: body, condition: cond}, level, indent_size) do
+  defp do_print(%Statement.Repeat{body: body, condition: cond}, level, indent_size) do
     body_str = print_block_body(body, level + 1, indent_size)
     cond_str = do_print(cond, level, indent_size)
 
@@ -274,7 +274,7 @@ defmodule Lua.AST.PrettyPrinter do
   end
 
   defp do_print(
-         %Stmt.ForNum{var: var, start: start, limit: limit, step: step, body: body},
+         %Statement.ForNum{var: var, start: start, limit: limit, step: step, body: body},
          level,
          indent_size
        ) do
@@ -292,7 +292,11 @@ defmodule Lua.AST.PrettyPrinter do
     "#{indent(level, indent_size)}for #{var} = #{start_str}, #{limit_str}#{step_str} do\n#{body_str}#{indent(level, indent_size)}end"
   end
 
-  defp do_print(%Stmt.ForIn{vars: vars, iterators: iterators, body: body}, level, indent_size) do
+  defp do_print(
+         %Statement.ForIn{vars: vars, iterators: iterators, body: body},
+         level,
+         indent_size
+       ) do
     vars_str = Enum.join(vars, ", ")
     iterators_str = Enum.map(iterators, &do_print(&1, level, indent_size)) |> Enum.join(", ")
     body_str = print_block_body(body, level + 1, indent_size)
@@ -300,13 +304,13 @@ defmodule Lua.AST.PrettyPrinter do
     "#{indent(level, indent_size)}for #{vars_str} in #{iterators_str} do\n#{body_str}#{indent(level, indent_size)}end"
   end
 
-  defp do_print(%Stmt.Do{body: body}, level, indent_size) do
+  defp do_print(%Statement.Do{body: body}, level, indent_size) do
     body_str = print_block_body(body, level + 1, indent_size)
 
     "#{indent(level, indent_size)}do\n#{body_str}#{indent(level, indent_size)}end"
   end
 
-  defp do_print(%Stmt.Return{values: values}, level, indent_size) do
+  defp do_print(%Statement.Return{values: values}, level, indent_size) do
     if values == [] do
       "#{indent(level, indent_size)}return"
     else
@@ -315,15 +319,15 @@ defmodule Lua.AST.PrettyPrinter do
     end
   end
 
-  defp do_print(%Stmt.Break{}, level, indent_size) do
+  defp do_print(%Statement.Break{}, level, indent_size) do
     "#{indent(level, indent_size)}break"
   end
 
-  defp do_print(%Stmt.Goto{label: label}, level, indent_size) do
+  defp do_print(%Statement.Goto{label: label}, level, indent_size) do
     "#{indent(level, indent_size)}goto #{label}"
   end
 
-  defp do_print(%Stmt.Label{name: name}, level, indent_size) do
+  defp do_print(%Statement.Label{name: name}, level, indent_size) do
     "#{indent(level, indent_size)}::#{name}::"
   end
 

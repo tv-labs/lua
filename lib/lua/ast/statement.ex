@@ -1,4 +1,4 @@
-defmodule Lua.AST.Stmt do
+defmodule Lua.AST.Statement do
   @moduledoc """
   Statement AST nodes for Lua.
 
@@ -6,23 +6,6 @@ defmodule Lua.AST.Stmt do
   """
 
   alias Lua.AST.{Meta, Expr, Block}
-
-  @type t ::
-          Assign.t()
-          | Local.t()
-          | LocalFunc.t()
-          | FuncDecl.t()
-          | CallStmt.t()
-          | If.t()
-          | While.t()
-          | Repeat.t()
-          | ForNum.t()
-          | ForIn.t()
-          | Do.t()
-          | Return.t()
-          | Break.t()
-          | Goto.t()
-          | Label.t()
 
   defmodule Assign do
     @moduledoc """
@@ -259,4 +242,21 @@ defmodule Lua.AST.Stmt do
             meta: Meta.t() | nil
           }
   end
+
+  @type t ::
+          Assign.t()
+          | Local.t()
+          | LocalFunc.t()
+          | FuncDecl.t()
+          | CallStmt.t()
+          | If.t()
+          | While.t()
+          | Repeat.t()
+          | ForNum.t()
+          | ForIn.t()
+          | Do.t()
+          | Return.t()
+          | Break.t()
+          | Goto.t()
+          | Label.t()
 end

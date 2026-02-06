@@ -1,15 +1,15 @@
 defmodule Lua.Parser.ExprTest do
   use ExUnit.Case, async: true
   alias Lua.Parser
-  alias Lua.AST.{Expr, Stmt}
+  alias Lua.AST.{Expr, Statement}
 
   # Helper to extract the returned expression from "return expr"
   defp parse_return_expr(code) do
     case Parser.parse(code) do
-      {:ok, %{block: %{stmts: [%Stmt.Return{values: [expr]}]}}} ->
+      {:ok, %{block: %{stmts: [%Statement.Return{values: [expr]}]}}} ->
         {:ok, expr}
 
-      {:ok, %{block: %{stmts: [%Stmt.Return{values: exprs}]}}} ->
+      {:ok, %{block: %{stmts: [%Statement.Return{values: exprs}]}}} ->
         {:ok, exprs}
 
       other ->

@@ -153,10 +153,14 @@ defmodule Lua.Parser.ErrorTest do
       code = "if x then"
 
       assert {:error, msg} = Parser.parse(code)
-      assert msg =~ "\e[31m"  # Red for errors
-      assert msg =~ "\e[1m"   # Bold
-      assert msg =~ "\e[0m"   # Reset
-      assert msg =~ "\e[36m"  # Cyan for suggestions
+      # Red for errors
+      assert msg =~ "\e[31m"
+      # Bold
+      assert msg =~ "\e[1m"
+      # Reset
+      assert msg =~ "\e[0m"
+      # Cyan for suggestions
+      assert msg =~ "\e[36m"
     end
   end
 

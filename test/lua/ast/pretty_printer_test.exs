@@ -1074,12 +1074,12 @@ defmodule Lua.AST.PrettyPrinterTest do
   describe "binary name for function declaration" do
     test "prints function with string name" do
       # When passing a simple string name (not a list)
-      alias Lua.AST.Stmt
+      alias Lua.AST.Statement
 
       ast = %Lua.AST.Chunk{
         block: %Lua.AST.Block{
           stmts: [
-            %Stmt.FuncDecl{
+            %Statement.FuncDecl{
               name: "simple",
               params: [],
               body: %Lua.AST.Block{stmts: [return_stmt([])]},
