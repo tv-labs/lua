@@ -169,25 +169,33 @@ defmodule Lua.AST.PrettyPrinter do
 
   # Statements
 
-  defp do_print(%Statement.Assign{targets: targets, values: values}, level, indent_size) do
+  defp do_print(%Statement.Assign{targets: targets, values: values} = stmt, level, indent_size) do
     targets_str = Enum.map(targets, &do_print(&1, level, indent_size)) |> Enum.join(", ")
     values_str = Enum.map(values, &do_print(&1, level, indent_size)) |> Enum.join(", ")
 
-    "#{indent(level, indent_size)}#{targets_str} = #{values_str}"
+    stmt_line = "#{indent(level, indent_size)}#{targets_str} = #{values_str}"
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.Local{names: names, values: values}, level, indent_size) do
+  defp do_print(%Statement.Local{names: names, values: values} = stmt, level, indent_size) do
     names_str = Enum.join(names, ", ")
 
-    if values && values != [] do
-      values_str = Enum.map(values, &do_print(&1, level, indent_size)) |> Enum.join(", ")
-      "#{indent(level, indent_size)}local #{names_str} = #{values_str}"
-    else
-      "#{indent(level, indent_size)}local #{names_str}"
-    end
+    stmt_line =
+      if values && values != [] do
+        values_str = Enum.map(values, &do_print(&1, level, indent_size)) |> Enum.join(", ")
+        "#{indent(level, indent_size)}local #{names_str} = #{values_str}"
+      else
+        "#{indent(level, indent_size)}local #{names_str}"
+      end
+
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.LocalFunc{name: name, params: params, body: body}, level, indent_size) do
+  defp do_print(
+         %Statement.LocalFunc{name: name, params: params, body: body} = stmt,
+         level,
+         indent_size
+       ) do
     params_str =
       params
       |> Enum.map(fn
@@ -198,10 +206,17 @@ defmodule Lua.AST.PrettyPrinter do
 
     body_str = print_block_body(body, level + 1, indent_size)
 
-    "#{indent(level, indent_size)}local function #{name}(#{params_str})\n#{body_str}#{indent(level, indent_size)}end"
+    stmt_line =
+      "#{indent(level, indent_size)}local function #{name}(#{params_str})\n#{body_str}#{indent(level, indent_size)}end"
+
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.FuncDecl{name: name, params: params, body: body}, level, indent_size) do
+  defp do_print(
+         %Statement.FuncDecl{name: name, params: params, body: body} = stmt,
+         level,
+         indent_size
+       ) do
     params_str =
       params
       |> Enum.map(fn
@@ -212,11 +227,15 @@ defmodule Lua.AST.PrettyPrinter do
 
     body_str = print_block_body(body, level + 1, indent_size)
 
-    "#{indent(level, indent_size)}function #{format_func_name(name)}(#{params_str})\n#{body_str}#{indent(level, indent_size)}end"
+    stmt_line =
+      "#{indent(level, indent_size)}function #{format_func_name(name)}(#{params_str})\n#{body_str}#{indent(level, indent_size)}end"
+
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.CallStmt{call: call}, level, indent_size) do
-    "#{indent(level, indent_size)}#{do_print(call, level, indent_size)}"
+  defp do_print(%Statement.CallStmt{call: call} = stmt, level, indent_size) do
+    stmt_line = "#{indent(level, indent_size)}#{do_print(call, level, indent_size)}"
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
   defp do_print(
@@ -225,7 +244,7 @@ defmodule Lua.AST.PrettyPrinter do
            then_block: then_block,
            elseifs: elseifs,
            else_block: else_block
-         },
+         } = stmt,
          level,
          indent_size
        ) do
@@ -256,25 +275,32 @@ defmodule Lua.AST.PrettyPrinter do
         parts
       end
 
-    Enum.join(parts, "") <> "#{indent(level, indent_size)}end"
+    stmt_line = Enum.join(parts, "") <> "#{indent(level, indent_size)}end"
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.While{condition: cond, body: body}, level, indent_size) do
+  defp do_print(%Statement.While{condition: cond, body: body} = stmt, level, indent_size) do
     cond_str = do_print(cond, level, indent_size)
     body_str = print_block_body(body, level + 1, indent_size)
 
-    "#{indent(level, indent_size)}while #{cond_str} do\n#{body_str}#{indent(level, indent_size)}end"
+    stmt_line =
+      "#{indent(level, indent_size)}while #{cond_str} do\n#{body_str}#{indent(level, indent_size)}end"
+
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.Repeat{body: body, condition: cond}, level, indent_size) do
+  defp do_print(%Statement.Repeat{body: body, condition: cond} = stmt, level, indent_size) do
     body_str = print_block_body(body, level + 1, indent_size)
     cond_str = do_print(cond, level, indent_size)
 
-    "#{indent(level, indent_size)}repeat\n#{body_str}#{indent(level, indent_size)}until #{cond_str}"
+    stmt_line =
+      "#{indent(level, indent_size)}repeat\n#{body_str}#{indent(level, indent_size)}until #{cond_str}"
+
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
   defp do_print(
-         %Statement.ForNum{var: var, start: start, limit: limit, step: step, body: body},
+         %Statement.ForNum{var: var, start: start, limit: limit, step: step, body: body} = stmt,
          level,
          indent_size
        ) do
@@ -289,11 +315,14 @@ defmodule Lua.AST.PrettyPrinter do
         ""
       end
 
-    "#{indent(level, indent_size)}for #{var} = #{start_str}, #{limit_str}#{step_str} do\n#{body_str}#{indent(level, indent_size)}end"
+    stmt_line =
+      "#{indent(level, indent_size)}for #{var} = #{start_str}, #{limit_str}#{step_str} do\n#{body_str}#{indent(level, indent_size)}end"
+
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
   defp do_print(
-         %Statement.ForIn{vars: vars, iterators: iterators, body: body},
+         %Statement.ForIn{vars: vars, iterators: iterators, body: body} = stmt,
          level,
          indent_size
        ) do
@@ -301,34 +330,44 @@ defmodule Lua.AST.PrettyPrinter do
     iterators_str = Enum.map(iterators, &do_print(&1, level, indent_size)) |> Enum.join(", ")
     body_str = print_block_body(body, level + 1, indent_size)
 
-    "#{indent(level, indent_size)}for #{vars_str} in #{iterators_str} do\n#{body_str}#{indent(level, indent_size)}end"
+    stmt_line =
+      "#{indent(level, indent_size)}for #{vars_str} in #{iterators_str} do\n#{body_str}#{indent(level, indent_size)}end"
+
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.Do{body: body}, level, indent_size) do
+  defp do_print(%Statement.Do{body: body} = stmt, level, indent_size) do
     body_str = print_block_body(body, level + 1, indent_size)
 
-    "#{indent(level, indent_size)}do\n#{body_str}#{indent(level, indent_size)}end"
+    stmt_line = "#{indent(level, indent_size)}do\n#{body_str}#{indent(level, indent_size)}end"
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.Return{values: values}, level, indent_size) do
-    if values == [] do
-      "#{indent(level, indent_size)}return"
-    else
-      values_str = Enum.map(values, &do_print(&1, level, indent_size)) |> Enum.join(", ")
-      "#{indent(level, indent_size)}return #{values_str}"
-    end
+  defp do_print(%Statement.Return{values: values} = stmt, level, indent_size) do
+    stmt_line =
+      if values == [] do
+        "#{indent(level, indent_size)}return"
+      else
+        values_str = Enum.map(values, &do_print(&1, level, indent_size)) |> Enum.join(", ")
+        "#{indent(level, indent_size)}return #{values_str}"
+      end
+
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.Break{}, level, indent_size) do
-    "#{indent(level, indent_size)}break"
+  defp do_print(%Statement.Break{} = stmt, level, indent_size) do
+    stmt_line = "#{indent(level, indent_size)}break"
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.Goto{label: label}, level, indent_size) do
-    "#{indent(level, indent_size)}goto #{label}"
+  defp do_print(%Statement.Goto{label: label} = stmt, level, indent_size) do
+    stmt_line = "#{indent(level, indent_size)}goto #{label}"
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(%Statement.Label{name: name}, level, indent_size) do
-    "#{indent(level, indent_size)}::#{name}::"
+  defp do_print(%Statement.Label{name: name} = stmt, level, indent_size) do
+    stmt_line = "#{indent(level, indent_size)}::#{name}::"
+    print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
   # Helpers
@@ -481,5 +520,64 @@ defmodule Lua.AST.PrettyPrinter do
 
   defp format_func_name(name) when is_binary(name) do
     name
+  end
+
+  # Comment printing helpers
+
+  defp print_with_comments(stmt, level, indent_size, stmt_printer) do
+    leading = print_leading_comments(stmt.meta, level, indent_size)
+    stmt_str = stmt_printer.()
+    trailing_comment = get_trailing_comment_meta(stmt.meta)
+
+    stmt_with_trailing =
+      if trailing_comment && String.contains?(stmt_str, "\n") do
+        # Multi-line statement: add trailing comment to first line
+        [first_line | rest_lines] = String.split(stmt_str, "\n", parts: 2)
+
+        first_line <>
+          "  " <> format_comment_inline(trailing_comment) <> "\n" <> Enum.join(rest_lines, "\n")
+      else
+        # Single-line statement: add trailing comment to end
+        stmt_str <> print_trailing_comment_inline(trailing_comment)
+      end
+
+    leading <> stmt_with_trailing
+  end
+
+  defp get_trailing_comment_meta(nil), do: nil
+  defp get_trailing_comment_meta(meta), do: Map.get(meta.metadata, :trailing_comment)
+
+  defp print_leading_comments(nil, _level, _indent_size), do: ""
+
+  defp print_leading_comments(meta, level, indent_size) do
+    comments = Map.get(meta.metadata, :leading_comments, [])
+
+    if comments == [] do
+      ""
+    else
+      comments
+      |> Enum.map(&format_comment(&1, level, indent_size))
+      |> Enum.join("\n")
+      |> Kernel.<>("\n")
+    end
+  end
+
+  defp print_trailing_comment_inline(nil), do: ""
+  defp print_trailing_comment_inline(comment), do: "  " <> format_comment_inline(comment)
+
+  defp format_comment(%{type: :single, text: text}, level, indent_size) do
+    "#{indent(level, indent_size)}--#{text}"
+  end
+
+  defp format_comment(%{type: :multi, text: text}, level, indent_size) do
+    "#{indent(level, indent_size)}--[[#{text}]]"
+  end
+
+  defp format_comment_inline(%{type: :single, text: text}) do
+    "--#{text}"
+  end
+
+  defp format_comment_inline(%{type: :multi, text: text}) do
+    "--[[#{text}]]"
   end
 end

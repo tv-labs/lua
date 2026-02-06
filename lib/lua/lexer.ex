@@ -13,6 +13,7 @@ defmodule Lua.Lexer do
           | {:string, String.t(), position()}
           | {:operator, atom(), position()}
           | {:delimiter, atom(), position()}
+          | {:comment, :single | :multi, String.t(), position()}
           | {:eof, position()}
 
   @keywords ~w(
@@ -74,16 +75,16 @@ defmodule Lua.Lexer do
     case rest do
       <<"[", _::binary>> ->
         # Multi-line comment --[[ ... ]]
-        scan_multiline_comment(rest, acc, advance_column(pos, 3), 0)
+        scan_multiline_comment(rest, acc, advance_column(pos, 3), pos, 0)
 
       _ ->
         # Single-line comment starting with --[
-        scan_single_line_comment(rest, acc, advance_column(pos, 3))
+        scan_single_line_comment(rest, acc, advance_column(pos, 3), pos)
     end
   end
 
   defp do_tokenize(<<"--", rest::binary>>, acc, pos) do
-    scan_single_line_comment(rest, acc, advance_column(pos, 2))
+    scan_single_line_comment(rest, acc, advance_column(pos, 2), pos)
   end
 
   # Strings: double-quoted
@@ -220,57 +221,82 @@ defmodule Lua.Lexer do
     {:error, {:unexpected_character, c, pos}}
   end
 
-  # Scan single-line comment (skip until newline)
-  defp scan_single_line_comment(<<?\n, rest::binary>>, acc, pos) do
-    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
-    do_tokenize(rest, acc, new_pos)
+  # Scan single-line comment (collect text until newline)
+  # pos is the current scanning position (after --), token_pos is where the comment started
+  defp scan_single_line_comment(rest, acc, pos, token_pos) do
+    scan_single_line_comment_content(rest, "", acc, pos, token_pos)
   end
 
-  defp scan_single_line_comment(<<?\r, ?\n, rest::binary>>, acc, pos) do
+  defp scan_single_line_comment_content(<<?\n, rest::binary>>, text, acc, pos, start_pos) do
+    token = {:comment, :single, text, start_pos}
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
+    do_tokenize(rest, [token | acc], new_pos)
+  end
+
+  defp scan_single_line_comment_content(<<?\r, ?\n, rest::binary>>, text, acc, pos, start_pos) do
+    token = {:comment, :single, text, start_pos}
     new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 2}
-    do_tokenize(rest, acc, new_pos)
+    do_tokenize(rest, [token | acc], new_pos)
   end
 
-  defp scan_single_line_comment(<<?\r, rest::binary>>, acc, pos) do
+  defp scan_single_line_comment_content(<<?\r, rest::binary>>, text, acc, pos, start_pos) do
+    token = {:comment, :single, text, start_pos}
     new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
-    do_tokenize(rest, acc, new_pos)
+    do_tokenize(rest, [token | acc], new_pos)
   end
 
-  defp scan_single_line_comment(<<>>, acc, pos) do
-    {:ok, Enum.reverse([{:eof, pos} | acc])}
+  defp scan_single_line_comment_content(<<>>, text, acc, pos, start_pos) do
+    token = {:comment, :single, text, start_pos}
+    {:ok, Enum.reverse([{:eof, pos}, token | acc])}
   end
 
-  defp scan_single_line_comment(<<_, rest::binary>>, acc, pos) do
-    scan_single_line_comment(rest, acc, advance_column(pos, 1))
+  defp scan_single_line_comment_content(<<c, rest::binary>>, text, acc, pos, start_pos) do
+    scan_single_line_comment_content(rest, text <> <<c>>, acc, advance_column(pos, 1), start_pos)
   end
 
   # Scan multi-line comment --[[ ... ]] or --[=[ ... ]=]
-  defp scan_multiline_comment(<<"[", rest::binary>>, acc, pos, level) do
-    scan_multiline_comment_content(rest, acc, advance_column(pos, 1), level)
+  # pos is current scanning position, token_pos is where the comment started
+  defp scan_multiline_comment(<<"[", rest::binary>>, acc, pos, token_pos, level) do
+    scan_multiline_comment_text(rest, "", acc, advance_column(pos, 1), token_pos, level)
   end
 
-  defp scan_multiline_comment_content(<<"]", rest::binary>>, acc, pos, level) do
+  defp scan_multiline_comment_text(<<"]", rest::binary>>, text, acc, pos, start_pos, level) do
     case try_close_long_bracket(rest, level, 0) do
       {:ok, after_bracket} ->
+        token = {:comment, :multi, text, start_pos}
         new_pos = advance_column(pos, 2 + level)
-        do_tokenize(after_bracket, acc, new_pos)
+        do_tokenize(after_bracket, [token | acc], new_pos)
 
       :error ->
-        scan_multiline_comment_content(rest, acc, advance_column(pos, 1), level)
+        scan_multiline_comment_text(
+          rest,
+          text <> "]",
+          acc,
+          advance_column(pos, 1),
+          start_pos,
+          level
+        )
     end
   end
 
-  defp scan_multiline_comment_content(<<?\n, rest::binary>>, acc, pos, level) do
+  defp scan_multiline_comment_text(<<?\n, rest::binary>>, text, acc, pos, start_pos, level) do
     new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
-    scan_multiline_comment_content(rest, acc, new_pos, level)
+    scan_multiline_comment_text(rest, text <> "\n", acc, new_pos, start_pos, level)
   end
 
-  defp scan_multiline_comment_content(<<>>, _acc, pos, _level) do
+  defp scan_multiline_comment_text(<<>>, _text, _acc, pos, _start_pos, _level) do
     {:error, {:unclosed_comment, pos}}
   end
 
-  defp scan_multiline_comment_content(<<_, rest::binary>>, acc, pos, level) do
-    scan_multiline_comment_content(rest, acc, advance_column(pos, 1), level)
+  defp scan_multiline_comment_text(<<c, rest::binary>>, text, acc, pos, start_pos, level) do
+    scan_multiline_comment_text(
+      rest,
+      text <> <<c>>,
+      acc,
+      advance_column(pos, 1),
+      start_pos,
+      level
+    )
   end
 
   # Scan quoted string
