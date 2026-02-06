@@ -1,0 +1,515 @@
+defmodule Lua.Lexer do
+  @moduledoc """
+  Hand-written lexer for Lua 5.3 using Elixir binary pattern matching.
+
+  Tokenizes Lua source code into a list of tokens with position tracking.
+  """
+
+  @type position :: %{line: pos_integer(), column: pos_integer(), byte_offset: non_neg_integer()}
+  @type token ::
+          {:keyword, atom(), position()}
+          | {:identifier, String.t(), position()}
+          | {:number, number(), position()}
+          | {:string, String.t(), position()}
+          | {:operator, atom(), position()}
+          | {:delimiter, atom(), position()}
+          | {:eof, position()}
+
+  @keywords ~w(
+    and break do else elseif end false for function goto if in
+    local nil not or repeat return then true until while
+  )
+
+  @doc """
+  Tokenizes Lua source code into a list of tokens.
+
+  ## Examples
+
+      iex> Lua.Lexer.tokenize("local x = 42")
+      {:ok, [
+        {:keyword, :local, %{line: 1, column: 1, byte_offset: 0}},
+        {:identifier, "x", %{line: 1, column: 7, byte_offset: 6}},
+        {:operator, :assign, %{line: 1, column: 9, byte_offset: 8}},
+        {:number, 42, %{line: 1, column: 11, byte_offset: 10}},
+        {:eof, %{line: 1, column: 13, byte_offset: 12}}
+      ]}
+  """
+  @spec tokenize(String.t()) :: {:ok, [token()]} | {:error, term()}
+  def tokenize(code) when is_binary(code) do
+    pos = %{line: 1, column: 1, byte_offset: 0}
+    do_tokenize(code, [], pos)
+  end
+
+  # End of input
+  defp do_tokenize(<<>>, acc, pos) do
+    {:ok, Enum.reverse([{:eof, pos} | acc])}
+  end
+
+  # Whitespace (space, tab)
+  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in [?\s, ?\t] do
+    new_pos = advance_column(pos, 1)
+    do_tokenize(rest, acc, new_pos)
+  end
+
+  # Newline (LF)
+  defp do_tokenize(<<?\n, rest::binary>>, acc, pos) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
+    do_tokenize(rest, acc, new_pos)
+  end
+
+  # Carriage return (CR, or CRLF)
+  defp do_tokenize(<<?\r, ?\n, rest::binary>>, acc, pos) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 2}
+    do_tokenize(rest, acc, new_pos)
+  end
+
+  defp do_tokenize(<<?\r, rest::binary>>, acc, pos) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
+    do_tokenize(rest, acc, new_pos)
+  end
+
+  # Comments: single-line (--) or multi-line (--[[ ... ]])
+  defp do_tokenize(<<"--[", rest::binary>>, acc, pos) do
+    # Check if it's a multi-line comment
+    case rest do
+      <<"[", _::binary>> ->
+        # Multi-line comment --[[ ... ]]
+        scan_multiline_comment(rest, acc, advance_column(pos, 3), 0)
+
+      _ ->
+        # Single-line comment starting with --[
+        scan_single_line_comment(rest, acc, advance_column(pos, 3))
+    end
+  end
+
+  defp do_tokenize(<<"--", rest::binary>>, acc, pos) do
+    scan_single_line_comment(rest, acc, advance_column(pos, 2))
+  end
+
+  # Strings: double-quoted
+  defp do_tokenize(<<?", rest::binary>>, acc, pos) do
+    scan_string(rest, "", acc, advance_column(pos, 1), pos, ?")
+  end
+
+  # Strings: single-quoted
+  defp do_tokenize(<<?', rest::binary>>, acc, pos) do
+    scan_string(rest, "", acc, advance_column(pos, 1), pos, ?')
+  end
+
+  # Strings: multi-line [[ ... ]] or [=[ ... ]=]
+  defp do_tokenize(<<"[", rest::binary>>, acc, pos) do
+    case scan_long_bracket(rest, 0) do
+      {:ok, equals, after_bracket} ->
+        scan_long_string(after_bracket, "", acc, advance_column(pos, 2 + equals), pos, equals)
+
+      :error ->
+        # Not a long string, treat as delimiter
+        token = {:delimiter, :lbracket, pos}
+        do_tokenize(rest, [token | acc], advance_column(pos, 1))
+    end
+  end
+
+  # Numbers: hex (0x, 0X)
+  defp do_tokenize(<<"0", x, rest::binary>>, acc, pos) when x in [?x, ?X] do
+    scan_hex_number(rest, "", acc, advance_column(pos, 2), pos)
+  end
+
+  # Numbers: decimal or float
+  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in ?0..?9 do
+    scan_number(<<c, rest::binary>>, "", acc, pos, pos)
+  end
+
+  # Three-character operators
+  defp do_tokenize(<<"...", rest::binary>>, acc, pos) do
+    token = {:operator, :vararg, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 3))
+  end
+
+  # Two-character operators
+  defp do_tokenize(<<"==", rest::binary>>, acc, pos) do
+    token = {:operator, :eq, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 2))
+  end
+
+  defp do_tokenize(<<"~=", rest::binary>>, acc, pos) do
+    token = {:operator, :ne, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 2))
+  end
+
+  defp do_tokenize(<<"<=", rest::binary>>, acc, pos) do
+    token = {:operator, :le, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 2))
+  end
+
+  defp do_tokenize(<<">=", rest::binary>>, acc, pos) do
+    token = {:operator, :ge, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 2))
+  end
+
+  defp do_tokenize(<<"..", rest::binary>>, acc, pos) do
+    token = {:operator, :concat, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 2))
+  end
+
+  defp do_tokenize(<<"::", rest::binary>>, acc, pos) do
+    token = {:delimiter, :double_colon, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 2))
+  end
+
+  defp do_tokenize(<<"//", rest::binary>>, acc, pos) do
+    token = {:operator, :floordiv, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 2))
+  end
+
+  # Single-character operators and delimiters
+  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in [?+, ?-, ?*, ?/, ?%, ?^, ?#] do
+    op =
+      case c do
+        ?+ -> :add
+        ?- -> :sub
+        ?* -> :mul
+        ?/ -> :div
+        ?% -> :mod
+        ?^ -> :pow
+        ?# -> :len
+      end
+
+    token = {:operator, op, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 1))
+  end
+
+  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in [?<, ?>, ?=] do
+    op =
+      case c do
+        ?< -> :lt
+        ?> -> :gt
+        ?= -> :assign
+      end
+
+    token = {:operator, op, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 1))
+  end
+
+  defp do_tokenize(<<c, rest::binary>>, acc, pos)
+       when c in [?(, ?), ?{, ?}, ?], ?;, ?,, ?., ?:] do
+    delim =
+      case c do
+        ?( -> :lparen
+        ?) -> :rparen
+        ?{ -> :lbrace
+        ?} -> :rbrace
+        ?] -> :rbracket
+        ?; -> :semicolon
+        ?, -> :comma
+        ?. -> :dot
+        ?: -> :colon
+      end
+
+    token = {:delimiter, delim, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 1))
+  end
+
+  # Identifiers and keywords
+  defp do_tokenize(<<c, rest::binary>>, acc, pos)
+       when c in ?a..?z or c in ?A..?Z or c == ?_ do
+    scan_identifier(<<c, rest::binary>>, "", acc, pos, pos)
+  end
+
+  # Unexpected character
+  defp do_tokenize(<<c, _rest::binary>>, _acc, pos) do
+    {:error, {:unexpected_character, c, pos}}
+  end
+
+  # Scan single-line comment (skip until newline)
+  defp scan_single_line_comment(<<?\n, rest::binary>>, acc, pos) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
+    do_tokenize(rest, acc, new_pos)
+  end
+
+  defp scan_single_line_comment(<<?\r, ?\n, rest::binary>>, acc, pos) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 2}
+    do_tokenize(rest, acc, new_pos)
+  end
+
+  defp scan_single_line_comment(<<?\r, rest::binary>>, acc, pos) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
+    do_tokenize(rest, acc, new_pos)
+  end
+
+  defp scan_single_line_comment(<<>>, acc, pos) do
+    {:ok, Enum.reverse([{:eof, pos} | acc])}
+  end
+
+  defp scan_single_line_comment(<<_, rest::binary>>, acc, pos) do
+    scan_single_line_comment(rest, acc, advance_column(pos, 1))
+  end
+
+  # Scan multi-line comment --[[ ... ]] or --[=[ ... ]=]
+  defp scan_multiline_comment(<<"[", rest::binary>>, acc, pos, level) do
+    scan_multiline_comment_content(rest, acc, advance_column(pos, 1), level)
+  end
+
+  defp scan_multiline_comment_content(<<"]", rest::binary>>, acc, pos, level) do
+    case try_close_long_bracket(rest, level, 0) do
+      {:ok, after_bracket} ->
+        new_pos = advance_column(pos, 2 + level)
+        do_tokenize(after_bracket, acc, new_pos)
+
+      :error ->
+        scan_multiline_comment_content(rest, acc, advance_column(pos, 1), level)
+    end
+  end
+
+  defp scan_multiline_comment_content(<<?\n, rest::binary>>, acc, pos, level) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
+    scan_multiline_comment_content(rest, acc, new_pos, level)
+  end
+
+  defp scan_multiline_comment_content(<<>>, _acc, pos, _level) do
+    {:error, {:unclosed_comment, pos}}
+  end
+
+  defp scan_multiline_comment_content(<<_, rest::binary>>, acc, pos, level) do
+    scan_multiline_comment_content(rest, acc, advance_column(pos, 1), level)
+  end
+
+  # Scan quoted string
+  defp scan_string(<<quote, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
+    # Closing quote
+    token = {:string, str_acc, start_pos}
+    do_tokenize(rest, [token | acc], pos)
+  end
+
+  defp scan_string(<<?\\, esc, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
+    # Escape sequence
+    case escape_char(esc) do
+      {:ok, char} ->
+        scan_string(rest, str_acc <> <<char>>, acc, advance_column(pos, 2), start_pos, quote)
+
+      :error ->
+        # Invalid escape, but continue scanning
+        scan_string(rest, str_acc <> <<?\\, esc>>, acc, advance_column(pos, 2), start_pos, quote)
+    end
+  end
+
+  defp scan_string(<<?\n, _rest::binary>>, _str_acc, _acc, pos, _start_pos, _quote) do
+    {:error, {:unclosed_string, pos}}
+  end
+
+  defp scan_string(<<>>, _str_acc, _acc, pos, _start_pos, _quote) do
+    {:error, {:unclosed_string, pos}}
+  end
+
+  defp scan_string(<<c, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
+    scan_string(rest, str_acc <> <<c>>, acc, advance_column(pos, 1), start_pos, quote)
+  end
+
+  # Escape character mapping
+  defp escape_char(?a), do: {:ok, ?\a}
+  defp escape_char(?b), do: {:ok, ?\b}
+  defp escape_char(?f), do: {:ok, ?\f}
+  defp escape_char(?n), do: {:ok, ?\n}
+  defp escape_char(?r), do: {:ok, ?\r}
+  defp escape_char(?t), do: {:ok, ?\t}
+  defp escape_char(?v), do: {:ok, ?\v}
+  defp escape_char(?\\), do: {:ok, ?\\}
+  defp escape_char(?"), do: {:ok, ?"}
+  defp escape_char(?'), do: {:ok, ?'}
+  defp escape_char(_), do: :error
+
+  # Scan long bracket for level: [[ or [=[ or [==[ etc.
+  defp scan_long_bracket(rest, equals) do
+    case rest do
+      <<"=", after_eq::binary>> ->
+        scan_long_bracket(after_eq, equals + 1)
+
+      <<"[", after_bracket::binary>> ->
+        {:ok, equals, after_bracket}
+
+      _ ->
+        :error
+    end
+  end
+
+  # Try to close long bracket: ]] or ]=] or ]==] etc.
+  defp try_close_long_bracket(rest, target_level, current_level) do
+    if current_level == target_level do
+      case rest do
+        <<"]", after_bracket::binary>> ->
+          {:ok, after_bracket}
+
+        _ ->
+          :error
+      end
+    else
+      case rest do
+        <<"=", after_eq::binary>> ->
+          try_close_long_bracket(after_eq, target_level, current_level + 1)
+
+        _ ->
+          :error
+      end
+    end
+  end
+
+  # Scan long string [[ ... ]] or [=[ ... ]=]
+  defp scan_long_string(<<"]", rest::binary>>, str_acc, acc, pos, start_pos, level) do
+    case try_close_long_bracket(rest, level, 0) do
+      {:ok, after_bracket} ->
+        token = {:string, str_acc, start_pos}
+        new_pos = advance_column(pos, 2 + level)
+        do_tokenize(after_bracket, [token | acc], new_pos)
+
+      :error ->
+        scan_long_string(rest, str_acc <> "]", acc, advance_column(pos, 1), start_pos, level)
+    end
+  end
+
+  defp scan_long_string(<<?\n, rest::binary>>, str_acc, acc, pos, start_pos, level) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
+    scan_long_string(rest, str_acc <> "\n", acc, new_pos, start_pos, level)
+  end
+
+  defp scan_long_string(<<>>, _str_acc, _acc, pos, _start_pos, _level) do
+    {:error, {:unclosed_long_string, pos}}
+  end
+
+  defp scan_long_string(<<c, rest::binary>>, str_acc, acc, pos, start_pos, level) do
+    scan_long_string(rest, str_acc <> <<c>>, acc, advance_column(pos, 1), start_pos, level)
+  end
+
+  # Scan identifier or keyword
+  defp scan_identifier(<<c, rest::binary>>, id_acc, acc, pos, start_pos)
+       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ do
+    scan_identifier(rest, id_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  defp scan_identifier(rest, id_acc, acc, pos, start_pos) do
+    # Check if it's a keyword
+    token =
+      if id_acc in @keywords do
+        {:keyword, String.to_atom(id_acc), start_pos}
+      else
+        {:identifier, id_acc, start_pos}
+      end
+
+    do_tokenize(rest, [token | acc], pos)
+  end
+
+  # Scan decimal number
+  defp scan_number(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
+       when c in ?0..?9 do
+    scan_number(rest, num_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  defp scan_number(<<?.>>, num_acc, acc, pos, start_pos) do
+    # Trailing dot is not part of the number
+    finalize_number(num_acc, <<".">>, acc, pos, start_pos)
+  end
+
+  defp scan_number(<<".", c, rest::binary>>, num_acc, acc, pos, start_pos)
+       when c in ?0..?9 do
+    # Decimal point with digit following
+    scan_float(rest, num_acc <> "." <> <<c>>, acc, advance_column(pos, 2), start_pos)
+  end
+
+  defp scan_number(<<".", rest::binary>>, num_acc, acc, pos, start_pos) do
+    # Decimal point but no digit following - finalize number, reprocess "."
+    finalize_number(num_acc, <<".", rest::binary>>, acc, pos, start_pos)
+  end
+
+  defp scan_number(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
+       when c in [?e, ?E] do
+    # Scientific notation
+    scan_exponent(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
+  end
+
+  defp scan_number(rest, num_acc, acc, pos, start_pos) do
+    finalize_number(num_acc, rest, acc, pos, start_pos)
+  end
+
+  # Scan float part (after decimal point)
+  defp scan_float(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
+       when c in ?0..?9 do
+    scan_float(rest, num_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  defp scan_float(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
+       when c in [?e, ?E] do
+    scan_exponent(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
+  end
+
+  defp scan_float(rest, num_acc, acc, pos, start_pos) do
+    finalize_number(num_acc, rest, acc, pos, start_pos)
+  end
+
+  # Scan scientific notation exponent
+  defp scan_exponent(<<c, sign, rest::binary>>, num_acc, acc, pos, start_pos)
+       when c in [?e, ?E] and sign in [?+, ?-] do
+    scan_exponent_digits(rest, num_acc <> <<c, sign>>, acc, advance_column(pos, 2), start_pos)
+  end
+
+  defp scan_exponent(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
+       when c in [?e, ?E] do
+    scan_exponent_digits(rest, num_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  defp scan_exponent_digits(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
+       when c in ?0..?9 do
+    scan_exponent_digits(rest, num_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  defp scan_exponent_digits(rest, num_acc, acc, pos, start_pos) do
+    finalize_number(num_acc, rest, acc, pos, start_pos)
+  end
+
+  # Scan hexadecimal number (0x...)
+  defp scan_hex_number(<<c, rest::binary>>, hex_acc, acc, pos, start_pos)
+       when c in ?0..?9 or c in ?a..?f or c in ?A..?F do
+    scan_hex_number(rest, hex_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  defp scan_hex_number(rest, hex_acc, acc, pos, start_pos) do
+    case Integer.parse(hex_acc, 16) do
+      {num, ""} ->
+        token = {:number, num, start_pos}
+        do_tokenize(rest, [token | acc], pos)
+
+      _ ->
+        {:error, {:invalid_hex_number, start_pos}}
+    end
+  end
+
+  # Finalize number token
+  defp finalize_number(num_str, rest, acc, pos, start_pos) do
+    case parse_number(num_str) do
+      {:ok, num} ->
+        token = {:number, num, start_pos}
+        do_tokenize(rest, [token | acc], pos)
+
+      {:error, reason} ->
+        {:error, {reason, start_pos}}
+    end
+  end
+
+  # Parse number string to integer or float
+  defp parse_number(num_str) do
+    cond do
+      String.contains?(num_str, ".") or String.contains?(num_str, "e") or
+          String.contains?(num_str, "E") ->
+        case Float.parse(num_str) do
+          {num, ""} -> {:ok, num}
+          _ -> {:error, :invalid_number}
+        end
+
+      true ->
+        {num, ""} = Integer.parse(num_str)
+        {:ok, num}
+    end
+  end
+
+  # Position tracking helpers
+  defp advance_column(pos, n) do
+    %{pos | column: pos.column + n, byte_offset: pos.byte_offset + n}
+  end
+end
