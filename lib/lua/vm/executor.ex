@@ -183,6 +183,70 @@ defmodule Lua.VM.Executor do
     end
   end
 
+  # closure - create a closure value from a prototype
+  defp do_execute([{:closure, dest, proto_index} | rest], regs, upvals, proto, state) do
+    nested_proto = Enum.at(proto.prototypes, proto_index)
+    closure = {:lua_closure, nested_proto, upvals}
+    regs = put_elem(regs, dest, closure)
+    do_execute(rest, regs, upvals, proto, state)
+  end
+
+  # call - invoke a function value
+  defp do_execute([{:call, base, arg_count, result_count} | rest], regs, upvals, proto, state) do
+    func_value = elem(regs, base)
+
+    # Collect arguments from registers base+1..base+arg_count
+    args =
+      if arg_count > 0 do
+        for i <- 1..arg_count, do: elem(regs, base + i)
+      else
+        []
+      end
+
+    {results, state} =
+      case func_value do
+        {:lua_closure, callee_proto, callee_upvals} ->
+          # Create new register file for the callee
+          callee_regs =
+            Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 64)
+
+          # Copy arguments into callee registers (params are R[0..N-1])
+          callee_regs =
+            args
+            |> Enum.with_index()
+            |> Enum.reduce(callee_regs, fn {arg, i}, regs ->
+              if i < callee_proto.param_count, do: put_elem(regs, i, arg), else: regs
+            end)
+
+          # Execute the callee
+          {results, _callee_regs, state} =
+            do_execute(callee_proto.instructions, callee_regs, callee_upvals, callee_proto, state)
+
+          {results, state}
+
+        {:native_func, fun} ->
+          fun.(args, state)
+
+        other ->
+          raise "attempt to call a #{inspect(other)} value"
+      end
+
+    # Place results into caller registers starting at base
+    regs =
+      if result_count > 0 do
+        results_list = List.wrap(results)
+
+        Enum.reduce(0..(result_count - 1), regs, fn i, regs ->
+          value = Enum.at(results_list, i)
+          put_elem(regs, base + i, value)
+        end)
+      else
+        regs
+      end
+
+    do_execute(rest, regs, upvals, proto, state)
+  end
+
   # return
   defp do_execute([{:return, base, count} | _rest], regs, _upvals, _proto, state) do
     results =
