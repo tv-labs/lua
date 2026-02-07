@@ -209,6 +209,69 @@ defmodule Lua.Compiler.Scope do
     resolve_expr(operand, state)
   end
 
+  defp resolve_expr(%Expr.Function{params: params, body: body} = func, state) do
+    # Create a new function scope
+    func_key = make_ref()
+    param_count = Enum.count(params, &(&1 != :vararg))
+    is_vararg = :vararg in params
+
+    # Save current scope state
+    saved_locals = state.locals
+    saved_next_reg = state.next_register
+    saved_function = state.current_function
+
+    # Start fresh for the function scope
+    # Parameters get registers starting from 0
+    {param_locals, next_param_reg} =
+      params
+      |> Enum.reject(&(&1 == :vararg))
+      |> Enum.with_index()
+      |> Enum.reduce({%{}, 0}, fn {param, idx}, {locals, _} ->
+        {Map.put(locals, param, idx), idx + 1}
+      end)
+
+    state = %{state |
+      locals: param_locals,
+      next_register: next_param_reg,
+      current_function: func_key
+    }
+
+    # Create function scope entry
+    func_scope = %FunctionScope{
+      max_register: next_param_reg,
+      param_count: param_count,
+      is_vararg: is_vararg,
+      upvalue_descriptors: []
+    }
+
+    state = %{state | functions: Map.put(state.functions, func_key, func_scope)}
+
+    # Resolve the function body
+    state = resolve_block(body, state)
+
+    # Update max_register based on what was used in the body
+    func_scope = state.functions[func_key]
+    func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
+    state = %{state | functions: Map.put(state.functions, func_key, func_scope)}
+
+    # Store the function key in var_map for this function node
+    state = %{state | var_map: Map.put(state.var_map, func, func_key)}
+
+    # Restore previous scope
+    %{state |
+      locals: saved_locals,
+      next_register: saved_next_reg,
+      current_function: saved_function
+    }
+  end
+
+  defp resolve_expr(%Expr.Call{func: func, args: args}, state) do
+    # Resolve the function expression
+    state = resolve_expr(func, state)
+    # Resolve all arguments
+    Enum.reduce(args, state, &resolve_expr/2)
+  end
+
   # For now, stub out other expression types
   defp resolve_expr(_expr, state), do: state
 end
