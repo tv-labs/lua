@@ -90,6 +90,75 @@ defmodule Lua.VM.Executor do
     end
   end
 
+  # while_loop
+  defp do_execute([{:while_loop, cond_body, test_reg, loop_body} | rest], regs, upvals, state) do
+    # Execute condition
+    {_results, regs, state} = do_execute(cond_body, regs, upvals, state)
+
+    # Check condition
+    if truthy?(elem(regs, test_reg)) do
+      # Execute body
+      {_results, regs, state} = do_execute(loop_body, regs, upvals, state)
+      # Loop again
+      do_execute([{:while_loop, cond_body, test_reg, loop_body} | rest], regs, upvals, state)
+    else
+      # Condition false, continue after loop
+      do_execute(rest, regs, upvals, state)
+    end
+  end
+
+  # repeat_loop
+  defp do_execute([{:repeat_loop, loop_body, cond_body, test_reg} | rest], regs, upvals, state) do
+    # Execute body
+    {_results, regs, state} = do_execute(loop_body, regs, upvals, state)
+
+    # Execute condition
+    {_results, regs, state} = do_execute(cond_body, regs, upvals, state)
+
+    # Check condition (repeat UNTIL condition is true)
+    if truthy?(elem(regs, test_reg)) do
+      # Condition true, exit loop
+      do_execute(rest, regs, upvals, state)
+    else
+      # Condition false, loop again
+      do_execute([{:repeat_loop, loop_body, cond_body, test_reg} | rest], regs, upvals, state)
+    end
+  end
+
+  # numeric_for
+  defp do_execute([{:numeric_for, base, loop_var, body} | rest], regs, upvals, state) do
+    # Get internal loop state
+    counter = elem(regs, base)
+    limit = elem(regs, base + 1)
+    step = elem(regs, base + 2)
+
+    # Check if we should enter/continue the loop
+    should_continue =
+      if step > 0 do
+        counter <= limit
+      else
+        counter >= limit
+      end
+
+    if should_continue do
+      # Copy counter to loop variable
+      regs = put_elem(regs, loop_var, counter)
+
+      # Execute body
+      {_results, regs, state} = do_execute(body, regs, upvals, state)
+
+      # Increment counter
+      new_counter = counter + step
+      regs = put_elem(regs, base, new_counter)
+
+      # Loop again
+      do_execute([{:numeric_for, base, loop_var, body} | rest], regs, upvals, state)
+    else
+      # Loop finished
+      do_execute(rest, regs, upvals, state)
+    end
+  end
+
   # return
   defp do_execute([{:return, base, count} | _rest], regs, _upvals, state) do
     results =

@@ -617,4 +617,173 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [20]
     end
   end
+
+  describe "while loops" do
+    test "simple while loop" do
+      code = """
+      local i = 0
+      while i < 5 do
+        i = i + 1
+      end
+      return i
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [5]
+    end
+
+    test "while loop with sum" do
+      code = """
+      local sum = 0
+      local i = 1
+      while i <= 10 do
+        sum = sum + i
+        i = i + 1
+      end
+      return sum
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [55]
+    end
+
+    test "while loop never executes" do
+      code = """
+      local x = 0
+      while false do
+        x = x + 1
+      end
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [0]
+    end
+  end
+
+  describe "repeat loops" do
+    test "simple repeat loop" do
+      code = """
+      local i = 0
+      repeat
+        i = i + 1
+      until i >= 5
+      return i
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [5]
+    end
+
+    test "repeat executes at least once" do
+      code = """
+      local x = 0
+      repeat
+        x = x + 1
+      until true
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [1]
+    end
+  end
+
+  describe "numeric for loops" do
+    test "simple for loop" do
+      code = """
+      local sum = 0
+      for i = 1, 10 do
+        sum = sum + i
+      end
+      return sum
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [55]
+    end
+
+    test "for loop with step" do
+      code = """
+      local sum = 0
+      for i = 1, 10, 2 do
+        sum = sum + i
+      end
+      return sum
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      # 1 + 3 + 5 + 7 + 9
+      assert results == [25]
+    end
+
+    test "for loop counting down" do
+      code = """
+      local sum = 0
+      for i = 10, 1, -1 do
+        sum = sum + i
+      end
+      return sum
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [55]
+    end
+
+    test "for loop with zero iterations" do
+      code = """
+      local x = 0
+      for i = 10, 1 do
+        x = x + 1
+      end
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [0]
+    end
+
+    test "for loop variable" do
+      code = """
+      local last = 0
+      for i = 1, 5 do
+        last = i
+      end
+      return last
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [5]
+    end
+  end
 end
