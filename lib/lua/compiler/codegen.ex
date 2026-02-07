@@ -10,11 +10,16 @@ defmodule Lua.Compiler.Codegen do
   Generates instructions from a scope-resolved AST.
   """
   @spec generate(Chunk.t(), Scope.State.t(), keyword()) :: {:ok, Prototype.t()} | {:error, term()}
-  def generate(%Chunk{block: block}, _scope_state, opts \\ []) do
+  def generate(%Chunk{block: block}, scope_state, opts \\ []) do
     source = Keyword.get(opts, :source, <<"-no-source-">>)
 
     # Generate instructions for the chunk body
-    {instructions, _ctx} = gen_block(block, %{next_reg: 0, source: source})
+    # Start next_reg at the max_register from scope to account for locals
+    func_scope = scope_state.functions[:chunk]
+    start_reg = func_scope.max_register
+
+    {instructions, _ctx} =
+      gen_block(block, %{next_reg: start_reg, source: source, scope: scope_state})
 
     # Wrap in a prototype
     proto = %Prototype{
@@ -69,6 +74,44 @@ defmodule Lua.Compiler.Codegen do
         # Unsupported pattern for now
         {[], ctx}
     end
+  end
+
+  defp gen_statement(%Statement.Local{names: names, values: values}, ctx) do
+    # Get register assignments from scope
+    scope = ctx.scope
+    locals = scope.locals
+
+    # Generate code for all values
+    {value_instrs, value_regs, ctx} =
+      Enum.reduce(values, {[], [], ctx}, fn value, {instrs, regs, ctx} ->
+        {new_instrs, reg, ctx} = gen_expr(value, ctx)
+        {instrs ++ new_instrs, regs ++ [reg], ctx}
+      end)
+
+    # Generate move instructions to copy values to their assigned registers
+    move_instrs =
+      names
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {name, idx} ->
+        dest_reg = Map.get(locals, name)
+        source_reg = Enum.at(value_regs, idx)
+
+        cond do
+          # No value for this local - it's implicitly nil
+          is_nil(source_reg) ->
+            [Instruction.load_constant(dest_reg, nil)]
+
+          # Value is already in the right register
+          dest_reg == source_reg ->
+            []
+
+          # Need to move value to assigned register
+          true ->
+            [Instruction.move(dest_reg, source_reg)]
+        end
+      end)
+
+    {value_instrs ++ move_instrs, ctx}
   end
 
   # Stub for other statements
@@ -159,11 +202,25 @@ defmodule Lua.Compiler.Codegen do
     {operand_instrs ++ [op_instr], dest_reg, ctx}
   end
 
-  defp gen_expr(%Expr.Var{name: name}, ctx) do
-    # For now, all variables are global (Phase 1 will add locals)
-    reg = ctx.next_reg
-    ctx = %{ctx | next_reg: reg + 1}
-    {[Instruction.get_global(reg, name)], reg, ctx}
+  defp gen_expr(%Expr.Var{} = var, ctx) do
+    # Look up variable classification from scope
+    case Map.get(ctx.scope.var_map, var) do
+      {:register, reg} ->
+        # Local variable - already in a register, just return it
+        {[], reg, ctx}
+
+      {:global, name} ->
+        # Global variable - need to load it
+        reg = ctx.next_reg
+        ctx = %{ctx | next_reg: reg + 1}
+        {[Instruction.get_global(reg, name)], reg, ctx}
+
+      nil ->
+        # Variable not in scope (shouldn't happen after scope resolution)
+        reg = ctx.next_reg
+        ctx = %{ctx | next_reg: reg + 1}
+        {[Instruction.load_constant(reg, nil)], reg, ctx}
+    end
   end
 
   # Stub for other expressions

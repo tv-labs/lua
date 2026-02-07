@@ -73,6 +73,35 @@ defmodule Lua.Compiler.Scope do
     Enum.reduce(values, state, &resolve_expr/2)
   end
 
+  defp resolve_statement(%Statement.Assign{targets: targets, values: values}, state) do
+    # Resolve all value expressions first
+    state = Enum.reduce(values, state, &resolve_expr/2)
+    # Then resolve all target expressions (for table assignments, etc.)
+    Enum.reduce(targets, state, &resolve_expr/2)
+  end
+
+  defp resolve_statement(%Statement.Local{names: names, values: values}, state) do
+    # First, resolve all the value expressions with current scope
+    state = Enum.reduce(values, state, &resolve_expr/2)
+
+    # Then assign registers to the new local variables
+    {state, _} =
+      Enum.reduce(names, {state, state.next_register}, fn name, {state, reg} ->
+        # Add to locals map
+        state = %{state | locals: Map.put(state.locals, name, reg)}
+        # Update next_register
+        state = %{state | next_register: reg + 1}
+        {state, reg + 1}
+      end)
+
+    # Update max_register in current function scope
+    func_scope = state.functions[state.current_function]
+    func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
+    state = %{state | functions: Map.put(state.functions, state.current_function, func_scope)}
+
+    state
+  end
+
   # For now, stub out other statement types - we'll implement them incrementally
   defp resolve_statement(_stmt, state), do: state
 
@@ -80,6 +109,27 @@ defmodule Lua.Compiler.Scope do
   defp resolve_expr(%Expr.String{}, state), do: state
   defp resolve_expr(%Expr.Bool{}, state), do: state
   defp resolve_expr(%Expr.Nil{}, state), do: state
+
+  defp resolve_expr(%Expr.Var{name: name} = var, state) do
+    # Check if this variable is a local or global
+    var_ref =
+      case Map.get(state.locals, name) do
+        nil -> {:global, name}
+        reg -> {:register, reg}
+      end
+
+    # Store the classification in var_map using the node itself as key
+    %{state | var_map: Map.put(state.var_map, var, var_ref)}
+  end
+
+  defp resolve_expr(%Expr.BinOp{left: left, right: right}, state) do
+    state = resolve_expr(left, state)
+    resolve_expr(right, state)
+  end
+
+  defp resolve_expr(%Expr.UnOp{operand: operand}, state) do
+    resolve_expr(operand, state)
+  end
 
   # For now, stub out other expression types
   defp resolve_expr(_expr, state), do: state

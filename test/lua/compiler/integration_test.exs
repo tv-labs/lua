@@ -374,4 +374,76 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [10]
     end
   end
+
+  describe "local variables" do
+    test "simple local variable" do
+      code = "local x = 42\nreturn x"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [42]
+    end
+
+    test "local variable with arithmetic" do
+      code = "local x = 1\nreturn x + 2"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [3]
+    end
+
+    test "multiple local variables" do
+      code = "local a = 5\nlocal b = 3\nreturn a * b"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [15]
+    end
+
+    test "local variable reassignment via new declaration" do
+      code = "local x = 10\nlocal x = 20\nreturn x"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [20]
+    end
+
+    test "local variable with expression" do
+      code = "local x = 2 + 3\nreturn x * 4"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [20]
+    end
+
+    test "multiple locals in one declaration" do
+      code = "local a, b = 1, 2\nreturn a + b"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [3]
+    end
+
+    test "local with fewer values than names (implicit nil)" do
+      code = "local a, b = 1\nreturn b"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [nil]
+    end
+  end
 end
