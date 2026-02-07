@@ -466,6 +466,7 @@ defmodule Lua.AST.PrettyPrinter do
       :mul -> "*"
       :div -> "/"
       :floor_div -> "//"
+      :floordiv -> "//"
       :mod -> "%"
       :pow -> "^"
       :concat -> ".."
@@ -477,6 +478,11 @@ defmodule Lua.AST.PrettyPrinter do
       :ge -> ">="
       :and -> "and"
       :or -> "or"
+      :band -> "&"
+      :bor -> "|"
+      :bxor -> "~"
+      :shl -> "<<"
+      :shr -> ">>"
       _ -> "<?>"
     end
   end
@@ -486,6 +492,7 @@ defmodule Lua.AST.PrettyPrinter do
       :not -> "not "
       :neg -> "-"
       :len -> "#"
+      :bnot -> "~"
       _ -> "<?>"
     end
   end

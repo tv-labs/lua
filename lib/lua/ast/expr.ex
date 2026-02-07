@@ -66,6 +66,11 @@ defmodule Lua.AST.Expr do
             | :and
             | :or
             | :concat
+            | :band
+            | :bor
+            | :bxor
+            | :shl
+            | :shr
 
     @type t :: %__MODULE__{
             op: op(),
@@ -86,7 +91,7 @@ defmodule Lua.AST.Expr do
     """
     defstruct [:op, :operand, :meta]
 
-    @type op :: :not | :neg | :len
+    @type op :: :not | :neg | :len | :bnot
 
     @type t :: %__MODULE__{
             op: op(),
@@ -101,14 +106,14 @@ defmodule Lua.AST.Expr do
 
     Fields can be:
     - List entries: `{1, 2, 3}`  -> `[{:list, expr}, ...]`
-    - Key-value pairs: `{a = 1}` -> `[{:pair, key_expr, val_expr}, ...]`
-    - Computed keys: `{["key"] = value}` -> `[{:pair, key_expr, val_expr}, ...]`
+    - Key-value pairs: `{a = 1}` -> `[{:record, key_expr, val_expr}, ...]`
+    - Computed keys: `{["key"] = value}` -> `[{:record, key_expr, val_expr}, ...]`
     """
     defstruct [:fields, :meta]
 
     @type field ::
             {:list, Lua.AST.Expr.t()}
-            | {:pair, Lua.AST.Expr.t(), Lua.AST.Expr.t()}
+            | {:record, Lua.AST.Expr.t(), Lua.AST.Expr.t()}
 
     @type t :: %__MODULE__{
             fields: [field()],

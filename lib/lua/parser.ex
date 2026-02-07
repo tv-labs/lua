@@ -713,6 +713,10 @@ defmodule Lua.Parser do
         {_, rest} = consume(tokens)
         parse_unary(:len, pos, rest)
 
+      {:operator, :bxor, pos} ->
+        {_, rest} = consume(tokens)
+        parse_unary(:bxor, pos, rest)
+
       {:eof, pos} ->
         {:error, {:unexpected_token, :eof, pos, "Expected expression"}}
 
@@ -932,7 +936,7 @@ defmodule Lua.Parser do
              {:ok, _, rest3} <- expect(rest2, :delimiter, :rbracket),
              {:ok, _, rest4} <- expect(rest3, :operator, :assign),
              {:ok, value, rest5} <- parse_expr(rest4) do
-          {:ok, {:pair, key, value}, rest5}
+          {:ok, {:record, key, value}, rest5}
         end
 
       # name = expr (named field)
@@ -946,7 +950,7 @@ defmodule Lua.Parser do
             case parse_expr(rest2) do
               {:ok, value, rest3} ->
                 key = %Expr.String{value: name, meta: Meta.new(pos)}
-                {:ok, {:pair, key, value}, rest3}
+                {:ok, {:record, key, value}, rest3}
 
               {:error, reason} ->
                 {:error, reason}

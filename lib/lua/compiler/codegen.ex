@@ -1,0 +1,153 @@
+defmodule Lua.Compiler.Codegen do
+  @moduledoc """
+  Code generation - transforms AST into instructions.
+  """
+
+  alias Lua.AST.{Chunk, Block, Statement, Expr}
+  alias Lua.Compiler.{Prototype, Instruction, Scope}
+
+  @doc """
+  Generates instructions from a scope-resolved AST.
+  """
+  @spec generate(Chunk.t(), Scope.State.t(), keyword()) :: {:ok, Prototype.t()} | {:error, term()}
+  def generate(%Chunk{block: block}, _scope_state, opts \\ []) do
+    source = Keyword.get(opts, :source, <<"-no-source-">>)
+
+    # Generate instructions for the chunk body
+    {instructions, _ctx} = gen_block(block, %{next_reg: 0, source: source})
+
+    # Wrap in a prototype
+    proto = %Prototype{
+      instructions: instructions,
+      prototypes: [],
+      upvalue_descriptors: [],
+      param_count: 0,
+      is_vararg: false,
+      max_registers: 0,
+      source: source,
+      lines: {1, 1}
+    }
+
+    {:ok, proto}
+  end
+
+  defp gen_block(%Block{stmts: stmts}, ctx) do
+    Enum.reduce(stmts, {[], ctx}, fn stmt, {instrs, ctx} ->
+      {new_instrs, ctx} = gen_statement(stmt, ctx)
+      {instrs ++ new_instrs, ctx}
+    end)
+  end
+
+  defp gen_statement(%Statement.Return{values: values}, ctx) do
+    case values do
+      [] ->
+        # return with no values
+        {[Instruction.return_instr(0, 0)], ctx}
+
+      [value] ->
+        # return single value
+        {value_instrs, result_reg, ctx} = gen_expr(value, ctx)
+        {value_instrs ++ [Instruction.return_instr(result_reg, 1)], ctx}
+
+      _multiple ->
+        # For now, just handle single return
+        # TODO: implement multiple return values
+        {[Instruction.return_instr(0, 0)], ctx}
+    end
+  end
+
+  # Stub for other statements
+  defp gen_statement(_stmt, ctx), do: {[], ctx}
+
+  # Generate code for an expression, returning {instructions, result_register, context}
+  defp gen_expr(%Expr.Number{value: n}, ctx) do
+    reg = ctx.next_reg
+    ctx = %{ctx | next_reg: reg + 1}
+    {[Instruction.load_constant(reg, n)], reg, ctx}
+  end
+
+  defp gen_expr(%Expr.String{value: s}, ctx) do
+    reg = ctx.next_reg
+    ctx = %{ctx | next_reg: reg + 1}
+    {[Instruction.load_constant(reg, s)], reg, ctx}
+  end
+
+  defp gen_expr(%Expr.Bool{value: b}, ctx) do
+    reg = ctx.next_reg
+    ctx = %{ctx | next_reg: reg + 1}
+    {[Instruction.load_boolean(reg, b)], reg, ctx}
+  end
+
+  defp gen_expr(%Expr.Nil{}, ctx) do
+    reg = ctx.next_reg
+    ctx = %{ctx | next_reg: reg + 1}
+    {[Instruction.load_constant(reg, nil)], reg, ctx}
+  end
+
+  defp gen_expr(%Expr.BinOp{op: op, left: left, right: right}, ctx) do
+    # Generate code for left operand
+    {left_instrs, left_reg, ctx} = gen_expr(left, ctx)
+
+    # Generate code for right operand
+    {right_instrs, right_reg, ctx} = gen_expr(right, ctx)
+
+    # Allocate destination register
+    dest_reg = ctx.next_reg
+    ctx = %{ctx | next_reg: dest_reg + 1}
+
+    # Generate the operation instruction
+    op_instr =
+      case op do
+        :add -> Instruction.add(dest_reg, left_reg, right_reg)
+        :sub -> Instruction.subtract(dest_reg, left_reg, right_reg)
+        :mul -> Instruction.multiply(dest_reg, left_reg, right_reg)
+        :div -> Instruction.divide(dest_reg, left_reg, right_reg)
+        :floordiv -> Instruction.floor_divide(dest_reg, left_reg, right_reg)
+        :mod -> Instruction.modulo(dest_reg, left_reg, right_reg)
+        :pow -> Instruction.power(dest_reg, left_reg, right_reg)
+        :band -> Instruction.bitwise_and(dest_reg, left_reg, right_reg)
+        :bor -> Instruction.bitwise_or(dest_reg, left_reg, right_reg)
+        :bxor -> Instruction.bitwise_xor(dest_reg, left_reg, right_reg)
+        :shl -> Instruction.shift_left(dest_reg, left_reg, right_reg)
+        :shr -> Instruction.shift_right(dest_reg, left_reg, right_reg)
+        :concat -> Instruction.concatenate(dest_reg, left_reg, 2)
+        :eq -> Instruction.equal(dest_reg, left_reg, right_reg)
+        :ne -> {:not_equal, dest_reg, left_reg, right_reg}
+        :lt -> Instruction.less_than(dest_reg, left_reg, right_reg)
+        :le -> Instruction.less_equal(dest_reg, left_reg, right_reg)
+        :gt -> {:greater_than, dest_reg, left_reg, right_reg}
+        :ge -> {:greater_equal, dest_reg, left_reg, right_reg}
+        # and/or are handled specially with short-circuit
+        _ -> raise "Unsupported binary operator: #{op}"
+      end
+
+    {left_instrs ++ right_instrs ++ [op_instr], dest_reg, ctx}
+  end
+
+  defp gen_expr(%Expr.UnOp{op: op, operand: operand}, ctx) do
+    # Generate code for operand
+    {operand_instrs, operand_reg, ctx} = gen_expr(operand, ctx)
+
+    # Allocate destination register
+    dest_reg = ctx.next_reg
+    ctx = %{ctx | next_reg: dest_reg + 1}
+
+    # Generate the operation instruction
+    op_instr =
+      case op do
+        :neg -> Instruction.negate(dest_reg, operand_reg)
+        :not -> Instruction.logical_not(dest_reg, operand_reg)
+        :len -> Instruction.length(dest_reg, operand_reg)
+        :bnot -> Instruction.bitwise_not(dest_reg, operand_reg)
+      end
+
+    {operand_instrs ++ [op_instr], dest_reg, ctx}
+  end
+
+  # Stub for other expressions
+  defp gen_expr(_expr, ctx) do
+    reg = ctx.next_reg
+    ctx = %{ctx | next_reg: reg + 1}
+    {[Instruction.load_constant(reg, nil)], reg, ctx}
+  end
+end

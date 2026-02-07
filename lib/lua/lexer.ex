@@ -162,8 +162,19 @@ defmodule Lua.Lexer do
     do_tokenize(rest, [token | acc], advance_column(pos, 2))
   end
 
+  # Bitwise shift operators (must come before single < and >)
+  defp do_tokenize(<<"<<", rest::binary>>, acc, pos) do
+    token = {:operator, :shl, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 2))
+  end
+
+  defp do_tokenize(<<">>", rest::binary>>, acc, pos) do
+    token = {:operator, :shr, pos}
+    do_tokenize(rest, [token | acc], advance_column(pos, 2))
+  end
+
   # Single-character operators and delimiters
-  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in [?+, ?-, ?*, ?/, ?%, ?^, ?#] do
+  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in [?+, ?-, ?*, ?/, ?%, ?^, ?#, ?&, ?|, ?~] do
     op =
       case c do
         ?+ -> :add
@@ -173,6 +184,9 @@ defmodule Lua.Lexer do
         ?% -> :mod
         ?^ -> :pow
         ?# -> :len
+        ?& -> :band
+        ?| -> :bor
+        ?~ -> :bxor
       end
 
     token = {:operator, op, pos}

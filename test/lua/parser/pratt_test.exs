@@ -20,32 +20,40 @@ defmodule Lua.Parser.PrattTest do
       assert {5, 6} = Pratt.binding_power(:eq)
     end
 
+    test "returns correct binding power for bitwise operators" do
+      assert {7, 8} = Pratt.binding_power(:bor)
+      assert {9, 10} = Pratt.binding_power(:bxor)
+      assert {11, 12} = Pratt.binding_power(:band)
+      assert {13, 14} = Pratt.binding_power(:shl)
+      assert {13, 14} = Pratt.binding_power(:shr)
+    end
+
     test "returns correct binding power for concat operator (right associative)" do
-      assert {7, 6} = Pratt.binding_power(:concat)
+      assert {15, 14} = Pratt.binding_power(:concat)
     end
 
     test "returns correct binding power for additive operators" do
-      assert {9, 10} = Pratt.binding_power(:add)
-      assert {9, 10} = Pratt.binding_power(:sub)
+      assert {17, 18} = Pratt.binding_power(:add)
+      assert {17, 18} = Pratt.binding_power(:sub)
     end
 
     test "returns correct binding power for multiplicative operators" do
-      assert {11, 12} = Pratt.binding_power(:mul)
-      assert {11, 12} = Pratt.binding_power(:div)
-      assert {11, 12} = Pratt.binding_power(:floordiv)
-      assert {11, 12} = Pratt.binding_power(:mod)
+      assert {19, 20} = Pratt.binding_power(:mul)
+      assert {19, 20} = Pratt.binding_power(:div)
+      assert {19, 20} = Pratt.binding_power(:floordiv)
+      assert {19, 20} = Pratt.binding_power(:mod)
     end
 
     test "returns correct binding power for unary operators (should not be used as binary)" do
       # These are unary operators, but the function includes them for completeness
       # They should not be used as binary operators in practice
-      assert {13, 14} = Pratt.binding_power(:not)
-      assert {13, 14} = Pratt.binding_power(:neg)
-      assert {13, 14} = Pratt.binding_power(:len)
+      assert {21, 22} = Pratt.binding_power(:not)
+      assert {21, 22} = Pratt.binding_power(:neg)
+      assert {21, 22} = Pratt.binding_power(:len)
     end
 
     test "returns correct binding power for power operator (right associative)" do
-      assert {16, 15} = Pratt.binding_power(:pow)
+      assert {24, 23} = Pratt.binding_power(:pow)
     end
 
     test "returns nil for non-operators" do
@@ -58,15 +66,19 @@ defmodule Lua.Parser.PrattTest do
 
   describe "prefix_binding_power/1" do
     test "returns correct binding power for not operator" do
-      assert 14 = Pratt.prefix_binding_power(:not)
+      assert 22 = Pratt.prefix_binding_power(:not)
     end
 
     test "returns correct binding power for unary minus (sub)" do
-      assert 13 = Pratt.prefix_binding_power(:sub)
+      assert 21 = Pratt.prefix_binding_power(:sub)
     end
 
     test "returns correct binding power for length operator" do
-      assert 14 = Pratt.prefix_binding_power(:len)
+      assert 22 = Pratt.prefix_binding_power(:len)
+    end
+
+    test "returns correct binding power for bitwise not" do
+      assert 22 = Pratt.prefix_binding_power(:bxor)
     end
 
     test "returns nil for non-prefix operators" do
@@ -105,6 +117,14 @@ defmodule Lua.Parser.PrattTest do
       assert :pow = Pratt.token_to_binop(:pow)
     end
 
+    test "maps bitwise operators" do
+      assert :band = Pratt.token_to_binop(:band)
+      assert :bor = Pratt.token_to_binop(:bor)
+      assert :bxor = Pratt.token_to_binop(:bxor)
+      assert :shl = Pratt.token_to_binop(:shl)
+      assert :shr = Pratt.token_to_binop(:shr)
+    end
+
     test "returns nil for non-binary operators" do
       assert nil == Pratt.token_to_binop(:not)
       assert nil == Pratt.token_to_binop(:len)
@@ -117,6 +137,7 @@ defmodule Lua.Parser.PrattTest do
       assert :not = Pratt.token_to_unop(:not)
       assert :neg = Pratt.token_to_unop(:sub)
       assert :len = Pratt.token_to_unop(:len)
+      assert :bnot = Pratt.token_to_unop(:bxor)
     end
 
     test "returns nil for non-unary operators" do
@@ -145,6 +166,11 @@ defmodule Lua.Parser.PrattTest do
       assert Pratt.is_binary_op?(:floordiv)
       assert Pratt.is_binary_op?(:mod)
       assert Pratt.is_binary_op?(:pow)
+      assert Pratt.is_binary_op?(:band)
+      assert Pratt.is_binary_op?(:bor)
+      assert Pratt.is_binary_op?(:bxor)
+      assert Pratt.is_binary_op?(:shl)
+      assert Pratt.is_binary_op?(:shr)
     end
 
     test "returns false for non-binary operators" do
@@ -159,6 +185,7 @@ defmodule Lua.Parser.PrattTest do
       assert Pratt.is_prefix_op?(:not)
       assert Pratt.is_prefix_op?(:sub)
       assert Pratt.is_prefix_op?(:len)
+      assert Pratt.is_prefix_op?(:bxor)
     end
 
     test "returns false for non-prefix operators" do
