@@ -18,17 +18,18 @@ defmodule Lua.Compiler.Codegen do
     func_scope = scope_state.functions[:chunk]
     start_reg = func_scope.max_register
 
-    {instructions, _ctx} =
-      gen_block(block, %{next_reg: start_reg, source: source, scope: scope_state})
+    {instructions, ctx} =
+      gen_block(block, %{next_reg: start_reg, source: source, scope: scope_state, prototypes: []})
 
     # Wrap in a prototype
     proto = %Prototype{
       instructions: instructions,
-      prototypes: [],
+      # Reverse to maintain order
+      prototypes: Enum.reverse(ctx.prototypes),
       upvalue_descriptors: [],
       param_count: 0,
       is_vararg: false,
-      max_registers: 0,
+      max_registers: func_scope.max_register,
       source: source,
       lines: {1, 1}
     }
@@ -416,6 +417,79 @@ defmodule Lua.Compiler.Codegen do
         ctx = %{ctx | next_reg: reg + 1}
         {[Instruction.load_constant(reg, nil)], reg, ctx}
     end
+  end
+
+  defp gen_expr(%Expr.Function{params: params, body: body} = func, ctx) do
+    # Get the function scope from the resolved AST
+    func_key = Map.get(ctx.scope.var_map, func)
+    func_scope = ctx.scope.functions[func_key]
+
+    # Generate the function body in a fresh context
+    {body_instrs, _body_ctx} =
+      gen_block(body, %{
+        next_reg: func_scope.param_count,
+        source: ctx.source,
+        scope: ctx.scope,
+        prototypes: []
+      })
+
+    # Create the nested prototype
+    nested_proto = %Prototype{
+      instructions: body_instrs,
+      # For now, no nested-nested functions
+      prototypes: [],
+      upvalue_descriptors: [],
+      param_count: func_scope.param_count,
+      is_vararg: func_scope.is_vararg,
+      max_registers: func_scope.max_register,
+      source: ctx.source,
+      lines: {1, 1}
+    }
+
+    # Add to prototypes list and get its index
+    proto_index = length(ctx.prototypes)
+    ctx = %{ctx | prototypes: [nested_proto | ctx.prototypes]}
+
+    # Generate closure instruction
+    dest_reg = ctx.next_reg
+    ctx = %{ctx | next_reg: dest_reg + 1}
+
+    {[Instruction.closure(dest_reg, proto_index)], dest_reg, ctx}
+  end
+
+  defp gen_expr(%Expr.Call{func: func_expr, args: args}, ctx) do
+    # Allocate base register for the call
+    base_reg = ctx.next_reg
+
+    # Generate code for the function expression
+    {func_instrs, func_reg, ctx} = gen_expr(func_expr, ctx)
+
+    # Move function to base register if needed
+    move_func =
+      if func_reg == base_reg do
+        []
+      else
+        [Instruction.move(base_reg, func_reg)]
+      end
+
+    ctx = %{ctx | next_reg: base_reg + 1}
+
+    # Generate code for arguments (they go in base+1, base+2, ...)
+    {arg_instrs, _arg_regs, ctx} =
+      Enum.reduce(args, {[], [], ctx}, fn arg, {instrs, regs, ctx} ->
+        {arg_instrs, arg_reg, ctx} = gen_expr(arg, ctx)
+        {instrs ++ arg_instrs, regs ++ [arg_reg], ctx}
+      end)
+
+    # Generate call instruction
+    # For now, assume single return value
+    arg_count = length(args)
+    result_count = 1
+
+    call_instr = Instruction.call(base_reg, arg_count, result_count)
+
+    # Result will be in base_reg
+    {func_instrs ++ move_func ++ arg_instrs ++ [call_instr], base_reg, ctx}
   end
 
   # Stub for other expressions
