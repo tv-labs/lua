@@ -29,8 +29,10 @@ defmodule Lua.Compiler do
   @spec compile!(Chunk.t(), compile_opts()) :: Prototype.t()
   def compile!(%Chunk{} = chunk, opts \\ []) do
     case compile(chunk, opts) do
-      {:ok, prototype} -> prototype
-      {:error, reason} -> raise "Compilation failed: #{inspect(reason)}"
+      {:ok, prototype} ->
+        prototype
+        # TODO bring back when the compiler can return errors 
+        # {:error, reason} -> raise "Compilation failed: #{inspect(reason)}"
     end
   end
 end

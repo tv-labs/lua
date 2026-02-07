@@ -162,12 +162,14 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:length, dest, source} | rest], regs, upvals, state) do
     # For now, handle string length. Will add table/list length later
     value = elem(regs, source)
+
     result =
       cond do
         is_binary(value) -> byte_size(value)
         is_list(value) -> length(value)
         true -> 0
       end
+
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvals, state)
   end

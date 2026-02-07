@@ -97,7 +97,8 @@ defmodule Lua.Parser.Pratt do
   # Between mult (19) and power (24)
   def prefix_binding_power(:sub), do: 21
   def prefix_binding_power(:len), do: 22
-  def prefix_binding_power(:bxor), do: 22  # ~ as unary bitwise not
+  # ~ as unary bitwise not
+  def prefix_binding_power(:bxor), do: 22
   def prefix_binding_power(_), do: nil
 
   @doc """
@@ -134,7 +135,8 @@ defmodule Lua.Parser.Pratt do
   def token_to_unop(:not), do: :not
   def token_to_unop(:sub), do: :neg
   def token_to_unop(:len), do: :len
-  def token_to_unop(:bxor), do: :bnot  # ~ as unary bitwise not
+  # ~ as unary bitwise not
+  def token_to_unop(:bxor), do: :bnot
   def token_to_unop(_), do: nil
 
   @doc """

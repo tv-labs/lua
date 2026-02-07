@@ -18,6 +18,13 @@ defmodule Lua.Compiler.Scope do
               param_count: 0,
               is_vararg: false,
               upvalue_descriptors: []
+
+    @type t :: %__MODULE__{
+            max_register: non_neg_integer(),
+            param_count: non_neg_integer(),
+            is_vararg: boolean(),
+            upvalue_descriptors: [term()]
+          }
   end
 
   defmodule State do
@@ -27,6 +34,14 @@ defmodule Lua.Compiler.Scope do
               current_function: nil,
               next_register: 0,
               locals: %{}
+
+    @type t :: %__MODULE__{
+            var_map: %{optional(term()) => Lua.Compiler.Scope.var_ref()},
+            functions: %{optional(term()) => Lua.Compiler.Scope.FunctionScope.t()},
+            current_function: term(),
+            next_register: non_neg_integer(),
+            locals: %{optional(binary()) => non_neg_integer()}
+          }
   end
 
   @doc """

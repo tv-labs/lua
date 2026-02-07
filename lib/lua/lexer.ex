@@ -174,7 +174,8 @@ defmodule Lua.Lexer do
   end
 
   # Single-character operators and delimiters
-  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in [?+, ?-, ?*, ?/, ?%, ?^, ?#, ?&, ?|, ?~] do
+  defp do_tokenize(<<c, rest::binary>>, acc, pos)
+       when c in [?+, ?-, ?*, ?/, ?%, ?^, ?#, ?&, ?|, ?~] do
     op =
       case c do
         ?+ -> :add
