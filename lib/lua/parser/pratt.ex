@@ -3,17 +3,21 @@ defmodule Lua.Parser.Pratt do
   Pratt parser for Lua expressions.
 
   Implements operator precedence parsing using binding powers.
-  Handles all 11 precedence levels in Lua 5.3.
+  Handles all Lua 5.3 precedence levels including bitwise operators.
 
   Precedence (lowest to highest):
   1. or
   2. and
   3. < > <= >= ~= ==
-  4. ..
-  5. + -
-  6. * / // %
-  7. unary (not # -)
-  8. ^
+  4. |
+  5. ~
+  6. &
+  7. << >>
+  8. ..
+  9. + -
+  10. * / // %
+  11. unary (not # - ~)
+  12. ^
   """
 
   alias Lua.AST.Expr
@@ -40,26 +44,39 @@ defmodule Lua.Parser.Pratt do
   def binding_power(:ne), do: {5, 6}
   def binding_power(:eq), do: {5, 6}
 
+  # Bitwise OR (left associative)
+  def binding_power(:bor), do: {7, 8}
+
+  # Bitwise XOR (left associative)
+  def binding_power(:bxor), do: {9, 10}
+
+  # Bitwise AND (left associative)
+  def binding_power(:band), do: {11, 12}
+
+  # Bitwise shifts (left associative)
+  def binding_power(:shl), do: {13, 14}
+  def binding_power(:shr), do: {13, 14}
+
   # String concatenation (right associative)
-  def binding_power(:concat), do: {7, 6}
+  def binding_power(:concat), do: {15, 14}
 
   # Additive (left associative)
-  def binding_power(:add), do: {9, 10}
-  def binding_power(:sub), do: {9, 10}
+  def binding_power(:add), do: {17, 18}
+  def binding_power(:sub), do: {17, 18}
 
   # Multiplicative (left associative)
-  def binding_power(:mul), do: {11, 12}
-  def binding_power(:div), do: {11, 12}
-  def binding_power(:floordiv), do: {11, 12}
-  def binding_power(:mod), do: {11, 12}
+  def binding_power(:mul), do: {19, 20}
+  def binding_power(:div), do: {19, 20}
+  def binding_power(:floordiv), do: {19, 20}
+  def binding_power(:mod), do: {19, 20}
 
   # Unary operators
-  def binding_power(:not), do: {13, 14}
-  def binding_power(:neg), do: {13, 14}
-  def binding_power(:len), do: {13, 14}
+  def binding_power(:not), do: {21, 22}
+  def binding_power(:neg), do: {21, 22}
+  def binding_power(:len), do: {21, 22}
 
   # Power (right associative)
-  def binding_power(:pow), do: {16, 15}
+  def binding_power(:pow), do: {24, 23}
 
   # Not a binary operator
   def binding_power(_), do: nil
@@ -76,10 +93,12 @@ defmodule Lua.Parser.Pratt do
   But 13 > multiplication left_bp (11), so -a*b = (-a)*b.
   """
   @spec prefix_binding_power(atom()) :: non_neg_integer() | nil
-  def prefix_binding_power(:not), do: 14
-  # Between mult (11) and power (16)
-  def prefix_binding_power(:sub), do: 13
-  def prefix_binding_power(:len), do: 14
+  def prefix_binding_power(:not), do: 22
+  # Between mult (19) and power (24)
+  def prefix_binding_power(:sub), do: 21
+  def prefix_binding_power(:len), do: 22
+  # ~ as unary bitwise not
+  def prefix_binding_power(:bxor), do: 22
   def prefix_binding_power(_), do: nil
 
   @doc """
@@ -102,6 +121,11 @@ defmodule Lua.Parser.Pratt do
   def token_to_binop(:floordiv), do: :floordiv
   def token_to_binop(:mod), do: :mod
   def token_to_binop(:pow), do: :pow
+  def token_to_binop(:band), do: :band
+  def token_to_binop(:bor), do: :bor
+  def token_to_binop(:bxor), do: :bxor
+  def token_to_binop(:shl), do: :shl
+  def token_to_binop(:shr), do: :shr
   def token_to_binop(_), do: nil
 
   @doc """
@@ -111,6 +135,8 @@ defmodule Lua.Parser.Pratt do
   def token_to_unop(:not), do: :not
   def token_to_unop(:sub), do: :neg
   def token_to_unop(:len), do: :len
+  # ~ as unary bitwise not
+  def token_to_unop(:bxor), do: :bnot
   def token_to_unop(_), do: nil
 
   @doc """
