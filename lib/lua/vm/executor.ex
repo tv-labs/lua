@@ -35,6 +35,20 @@ defmodule Lua.VM.Executor do
     do_execute(rest, regs, upvals, state)
   end
 
+  # get_global
+  defp do_execute([{:get_global, dest, name} | rest], regs, upvals, state) do
+    value = Map.get(state.globals, name, nil)
+    regs = put_elem(regs, dest, value)
+    do_execute(rest, regs, upvals, state)
+  end
+
+  # set_global
+  defp do_execute([{:set_global, name, source} | rest], regs, upvals, state) do
+    value = elem(regs, source)
+    state = %{state | globals: Map.put(state.globals, name, value)}
+    do_execute(rest, regs, upvals, state)
+  end
+
   # return
   defp do_execute([{:return, base, count} | _rest], regs, _upvals, state) do
     results =

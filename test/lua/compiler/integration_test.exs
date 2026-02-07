@@ -319,4 +319,59 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [5]
     end
   end
+
+  describe "global variables" do
+    test "assign and return global variable" do
+      code = "x = 42\nreturn x"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, state} = VM.execute(proto)
+
+      assert results == [42]
+      assert state.globals["x"] == 42
+    end
+
+    test "multiple global assignments" do
+      code = "a = 1\nb = 2\nreturn a + b"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, state} = VM.execute(proto)
+
+      assert results == [3]
+      assert state.globals["a"] == 1
+      assert state.globals["b"] == 2
+    end
+
+    test "reassign global variable" do
+      code = "x = 10\nx = x + 5\nreturn x"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [15]
+    end
+
+    test "undefined global returns nil" do
+      code = "return undefined_var"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [nil]
+    end
+
+    test "global with arithmetic expression" do
+      code = "result = 2 * 3 + 4\nreturn result"
+
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast)
+      {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [10]
+    end
+  end
 end

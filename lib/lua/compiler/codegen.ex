@@ -56,6 +56,21 @@ defmodule Lua.Compiler.Codegen do
     end
   end
 
+  defp gen_statement(%Statement.Assign{targets: targets, values: values}, ctx) do
+    # For now, handle simple case: single target, single value
+    # TODO: handle multiple assignment and table indexing
+    case {targets, values} do
+      {[%Expr.Var{name: name}], [value]} ->
+        # Simple global assignment: x = value
+        {value_instrs, value_reg, ctx} = gen_expr(value, ctx)
+        {value_instrs ++ [Instruction.set_global(name, value_reg)], ctx}
+
+      _ ->
+        # Unsupported pattern for now
+        {[], ctx}
+    end
+  end
+
   # Stub for other statements
   defp gen_statement(_stmt, ctx), do: {[], ctx}
 
@@ -142,6 +157,13 @@ defmodule Lua.Compiler.Codegen do
       end
 
     {operand_instrs ++ [op_instr], dest_reg, ctx}
+  end
+
+  defp gen_expr(%Expr.Var{name: name}, ctx) do
+    # For now, all variables are global (Phase 1 will add locals)
+    reg = ctx.next_reg
+    ctx = %{ctx | next_reg: reg + 1}
+    {[Instruction.get_global(reg, name)], reg, ctx}
   end
 
   # Stub for other expressions
