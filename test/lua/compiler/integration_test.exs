@@ -786,4 +786,164 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [5]
     end
   end
+
+  describe "functions" do
+    test "simple function definition and call" do
+      code = """
+      local f = function(x)
+        return x + 1
+      end
+      return f(5)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [6]
+    end
+
+    test "function with multiple parameters" do
+      code = """
+      local add = function(a, b)
+        return a + b
+      end
+      return add(3, 4)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [7]
+    end
+
+    test "function with no parameters" do
+      code = """
+      local f = function()
+        return 42
+      end
+      return f()
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [42]
+    end
+
+    test "function modifying globals" do
+      code = """
+      x = 10
+      local double = function()
+        x = x * 2
+      end
+      double()
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [20]
+    end
+
+    @tag :skip
+    test "function called multiple times (requires upvalues)" do
+      code = """
+      local counter = 0
+      local inc = function()
+        counter = counter + 1
+      end
+      inc()
+      inc()
+      inc()
+      return counter
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [3]
+    end
+
+    test "function as argument to another function" do
+      code = """
+      local apply = function(f, x)
+        return f(x)
+      end
+      local double = function(n)
+        return n * 2
+      end
+      return apply(double, 5)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [10]
+    end
+
+    test "recursive function via global" do
+      code = """
+      factorial = function(n)
+        if n <= 1 then
+          return 1
+        end
+        return n * factorial(n - 1)
+      end
+      return factorial(5)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [120]
+    end
+
+    test "native function call" do
+      code = """
+      return add(3, 4)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      native_add =
+        {:native_func,
+         fn args, state ->
+           [a, b] = args
+           {[a + b], state}
+         end}
+
+      state = %Lua.VM.State{globals: %{"add" => native_add}}
+      assert {:ok, results, _state} = VM.execute(proto, state)
+
+      assert results == [7]
+    end
+
+    @tag :skip
+    test "function returning function (requires upvalues)" do
+      code = """
+      local make_adder = function(n)
+        return function(x)
+          return x + n
+        end
+      end
+      local add5 = make_adder(5)
+      return add5(10)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [15]
+    end
+  end
 end

@@ -180,6 +180,10 @@ defmodule Lua.Compiler.Scope do
     state
   end
 
+  defp resolve_statement(%Statement.CallStmt{call: call}, state) do
+    resolve_expr(call, state)
+  end
+
   # For now, stub out other statement types - we'll implement them incrementally
   defp resolve_statement(_stmt, state), do: state
 

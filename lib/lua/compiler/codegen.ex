@@ -232,6 +232,23 @@ defmodule Lua.Compiler.Codegen do
     {start_instrs ++ limit_instrs ++ step_instrs ++ init_instrs ++ [loop_instr], ctx}
   end
 
+  defp gen_statement(%Statement.CallStmt{call: call}, ctx) do
+    # Compile the call expression, but discard the result (0 result count)
+    {call_instrs, _result_reg, ctx} = gen_expr(call, ctx)
+
+    # Patch the last instruction to request 0 results
+    call_instrs =
+      case List.last(call_instrs) do
+        {:call, base, arg_count, _result_count} ->
+          List.replace_at(call_instrs, length(call_instrs) - 1, {:call, base, arg_count, 0})
+
+        _ ->
+          call_instrs
+      end
+
+    {call_instrs, ctx}
+  end
+
   # Stub for other statements
   defp gen_statement(_stmt, ctx), do: {[], ctx}
 
@@ -419,7 +436,7 @@ defmodule Lua.Compiler.Codegen do
     end
   end
 
-  defp gen_expr(%Expr.Function{params: params, body: body} = func, ctx) do
+  defp gen_expr(%Expr.Function{params: _params, body: body} = func, ctx) do
     # Get the function scope from the resolved AST
     func_key = Map.get(ctx.scope.var_map, func)
     func_scope = ctx.scope.functions[func_key]
@@ -474,22 +491,36 @@ defmodule Lua.Compiler.Codegen do
 
     ctx = %{ctx | next_reg: base_reg + 1}
 
-    # Generate code for arguments (they go in base+1, base+2, ...)
-    {arg_instrs, _arg_regs, ctx} =
+    # Generate code for arguments into temp registers above the arg window.
+    # We skip over the arg slots (base+1..base+arg_count) so temps don't clobber them.
+    arg_count = length(args)
+    ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
+
+    {arg_instrs, arg_regs, ctx} =
       Enum.reduce(args, {[], [], ctx}, fn arg, {instrs, regs, ctx} ->
         {arg_instrs, arg_reg, ctx} = gen_expr(arg, ctx)
         {instrs ++ arg_instrs, regs ++ [arg_reg], ctx}
       end)
 
-    # Generate call instruction
-    # For now, assume single return value
-    arg_count = length(args)
-    result_count = 1
+    # Move each arg result to its expected position (base+1+i)
+    move_instrs =
+      arg_regs
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {arg_reg, i} ->
+        expected_reg = base_reg + 1 + i
 
-    call_instr = Instruction.call(base_reg, arg_count, result_count)
+        if arg_reg == expected_reg do
+          []
+        else
+          [Instruction.move(expected_reg, arg_reg)]
+        end
+      end)
+
+    # Generate call instruction (single return value for now)
+    call_instr = Instruction.call(base_reg, arg_count, 1)
 
     # Result will be in base_reg
-    {func_instrs ++ move_func ++ arg_instrs ++ [call_instr], base_reg, ctx}
+    {func_instrs ++ move_func ++ arg_instrs ++ move_instrs ++ [call_instr], base_reg, ctx}
   end
 
   # Stub for other expressions
