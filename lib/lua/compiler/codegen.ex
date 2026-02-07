@@ -114,8 +114,59 @@ defmodule Lua.Compiler.Codegen do
     {value_instrs ++ move_instrs, ctx}
   end
 
+  defp gen_statement(
+         %Statement.If{
+           condition: condition,
+           then_block: then_block,
+           elseifs: elseifs,
+           else_block: else_block
+         },
+         ctx
+       ) do
+    # Generate code for the condition
+    {cond_instrs, cond_reg, ctx} = gen_expr(condition, ctx)
+
+    # Generate code for the then block
+    {then_instrs, ctx} = gen_block(then_block, ctx)
+
+    # Generate code for elseifs and else by building nested if-else
+    {else_instrs, ctx} = gen_elseifs_and_else(elseifs, else_block, ctx)
+
+    # Create the test instruction
+    test_instr = Instruction.test(cond_reg, then_instrs, else_instrs)
+
+    {cond_instrs ++ [test_instr], ctx}
+  end
+
   # Stub for other statements
   defp gen_statement(_stmt, ctx), do: {[], ctx}
+
+  # Helper functions for if statement code generation
+  defp gen_elseifs_and_else([], nil, ctx) do
+    # No elseifs, no else - empty else branch
+    {[], ctx}
+  end
+
+  defp gen_elseifs_and_else([], else_block, ctx) do
+    # No elseifs, just else block
+    gen_block(else_block, ctx)
+  end
+
+  defp gen_elseifs_and_else([{elseif_cond, elseif_block} | rest_elseifs], else_block, ctx) do
+    # Generate condition for this elseif
+    {cond_instrs, cond_reg, ctx} = gen_expr(elseif_cond, ctx)
+
+    # Generate body for this elseif
+    {then_instrs, ctx} = gen_block(elseif_block, ctx)
+
+    # Generate remaining elseifs and else
+    {else_instrs, ctx} = gen_elseifs_and_else(rest_elseifs, else_block, ctx)
+
+    # Create nested test instruction
+    test_instr = Instruction.test(cond_reg, then_instrs, else_instrs)
+
+    {cond_instrs ++ [test_instr], ctx}
+  end
 
   # Generate code for an expression, returning {instructions, result_register, context}
   defp gen_expr(%Expr.Number{value: n}, ctx) do
@@ -140,6 +191,58 @@ defmodule Lua.Compiler.Codegen do
     reg = ctx.next_reg
     ctx = %{ctx | next_reg: reg + 1}
     {[Instruction.load_constant(reg, nil)], reg, ctx}
+  end
+
+  defp gen_expr(%Expr.BinOp{op: :and, left: left, right: right}, ctx) do
+    # Short-circuit AND: if left is falsy, return left, else evaluate and return right
+    # Generate code for left operand
+    {left_instrs, left_reg, ctx} = gen_expr(left, ctx)
+
+    # Allocate destination register
+    dest_reg = ctx.next_reg
+    ctx = %{ctx | next_reg: dest_reg + 1}
+
+    # Generate code for right operand (to be executed conditionally)
+    {right_instrs, right_reg, ctx} = gen_expr(right, ctx)
+
+    # Move right result to destination
+    move_instr =
+      if dest_reg == right_reg do
+        []
+      else
+        [Instruction.move(dest_reg, right_reg)]
+      end
+
+    # test_and: if falsy(left_reg) then dest=left else execute right_body
+    and_instr = Instruction.test_and(dest_reg, left_reg, right_instrs ++ move_instr)
+
+    {left_instrs ++ [and_instr], dest_reg, ctx}
+  end
+
+  defp gen_expr(%Expr.BinOp{op: :or, left: left, right: right}, ctx) do
+    # Short-circuit OR: if left is truthy, return left, else evaluate and return right
+    # Generate code for left operand
+    {left_instrs, left_reg, ctx} = gen_expr(left, ctx)
+
+    # Allocate destination register
+    dest_reg = ctx.next_reg
+    ctx = %{ctx | next_reg: dest_reg + 1}
+
+    # Generate code for right operand (to be executed conditionally)
+    {right_instrs, right_reg, ctx} = gen_expr(right, ctx)
+
+    # Move right result to destination
+    move_instr =
+      if dest_reg == right_reg do
+        []
+      else
+        [Instruction.move(dest_reg, right_reg)]
+      end
+
+    # test_or: if truthy(left_reg) then dest=left else execute right_body
+    or_instr = Instruction.test_or(dest_reg, left_reg, right_instrs ++ move_instr)
+
+    {left_instrs ++ [or_instr], dest_reg, ctx}
   end
 
   defp gen_expr(%Expr.BinOp{op: op, left: left, right: right}, ctx) do
@@ -175,7 +278,6 @@ defmodule Lua.Compiler.Codegen do
         :le -> Instruction.less_equal(dest_reg, left_reg, right_reg)
         :gt -> {:greater_than, dest_reg, left_reg, right_reg}
         :ge -> {:greater_equal, dest_reg, left_reg, right_reg}
-        # and/or are handled specially with short-circuit
         _ -> raise "Unsupported binary operator: #{op}"
       end
 

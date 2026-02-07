@@ -102,6 +102,36 @@ defmodule Lua.Compiler.Scope do
     state
   end
 
+  defp resolve_statement(
+         %Statement.If{
+           condition: condition,
+           then_block: then_block,
+           elseifs: elseifs,
+           else_block: else_block
+         },
+         state
+       ) do
+    # Resolve the main condition
+    state = resolve_expr(condition, state)
+
+    # Resolve the then block
+    state = resolve_block(then_block, state)
+
+    # Resolve all elseif clauses
+    state =
+      Enum.reduce(elseifs, state, fn {elseif_cond, elseif_block}, state ->
+        state = resolve_expr(elseif_cond, state)
+        resolve_block(elseif_block, state)
+      end)
+
+    # Resolve the else block if present
+    if else_block do
+      resolve_block(else_block, state)
+    else
+      state
+    end
+  end
+
   # For now, stub out other statement types - we'll implement them incrementally
   defp resolve_statement(_stmt, state), do: state
 

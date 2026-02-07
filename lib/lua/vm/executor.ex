@@ -56,6 +56,40 @@ defmodule Lua.VM.Executor do
     do_execute(rest, regs, upvals, state)
   end
 
+  # test - conditional execution
+  defp do_execute([{:test, reg, then_body, else_body} | rest], regs, upvals, state) do
+    body = if truthy?(elem(regs, reg)), do: then_body, else: else_body
+    do_execute(body ++ rest, regs, upvals, state)
+  end
+
+  # test_and - short-circuit AND
+  defp do_execute([{:test_and, dest, source, rest_body} | rest], regs, upvals, state) do
+    value = elem(regs, source)
+
+    if truthy?(value) do
+      # Value is truthy, execute rest_body to compute final result
+      do_execute(rest_body ++ rest, regs, upvals, state)
+    else
+      # Value is falsy, store it in dest and continue
+      regs = put_elem(regs, dest, value)
+      do_execute(rest, regs, upvals, state)
+    end
+  end
+
+  # test_or - short-circuit OR
+  defp do_execute([{:test_or, dest, source, rest_body} | rest], regs, upvals, state) do
+    value = elem(regs, source)
+
+    if truthy?(value) do
+      # Value is truthy, store it in dest and continue
+      regs = put_elem(regs, dest, value)
+      do_execute(rest, regs, upvals, state)
+    else
+      # Value is falsy, execute rest_body to compute final result
+      do_execute(rest_body ++ rest, regs, upvals, state)
+    end
+  end
+
   # return
   defp do_execute([{:return, base, count} | _rest], regs, _upvals, state) do
     results =
@@ -163,6 +197,24 @@ defmodule Lua.VM.Executor do
 
   defp do_execute([{:less_equal, dest, a, b} | rest], regs, upvals, state) do
     result = elem(regs, a) <= elem(regs, b)
+    regs = put_elem(regs, dest, result)
+    do_execute(rest, regs, upvals, state)
+  end
+
+  defp do_execute([{:greater_than, dest, a, b} | rest], regs, upvals, state) do
+    result = elem(regs, a) > elem(regs, b)
+    regs = put_elem(regs, dest, result)
+    do_execute(rest, regs, upvals, state)
+  end
+
+  defp do_execute([{:greater_equal, dest, a, b} | rest], regs, upvals, state) do
+    result = elem(regs, a) >= elem(regs, b)
+    regs = put_elem(regs, dest, result)
+    do_execute(rest, regs, upvals, state)
+  end
+
+  defp do_execute([{:not_equal, dest, a, b} | rest], regs, upvals, state) do
+    result = elem(regs, a) != elem(regs, b)
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvals, state)
   end
