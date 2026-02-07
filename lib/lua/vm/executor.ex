@@ -49,6 +49,13 @@ defmodule Lua.VM.Executor do
     do_execute(rest, regs, upvals, state)
   end
 
+  # move
+  defp do_execute([{:move, dest, source} | rest], regs, upvals, state) do
+    value = elem(regs, source)
+    regs = put_elem(regs, dest, value)
+    do_execute(rest, regs, upvals, state)
+  end
+
   # return
   defp do_execute([{:return, base, count} | _rest], regs, _upvals, state) do
     results =
