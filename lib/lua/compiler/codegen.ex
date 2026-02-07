@@ -24,7 +24,8 @@ defmodule Lua.Compiler.Codegen do
     # Wrap in a prototype
     proto = %Prototype{
       instructions: instructions,
-      prototypes: Enum.reverse(ctx.prototypes),  # Reverse to maintain order
+      # Reverse to maintain order
+      prototypes: Enum.reverse(ctx.prototypes),
       upvalue_descriptors: [],
       param_count: 0,
       is_vararg: false,
@@ -435,7 +436,8 @@ defmodule Lua.Compiler.Codegen do
     # Create the nested prototype
     nested_proto = %Prototype{
       instructions: body_instrs,
-      prototypes: [],  # For now, no nested-nested functions
+      # For now, no nested-nested functions
+      prototypes: [],
       upvalue_descriptors: [],
       param_count: func_scope.param_count,
       is_vararg: func_scope.is_vararg,

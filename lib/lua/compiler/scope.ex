@@ -230,10 +230,11 @@ defmodule Lua.Compiler.Scope do
         {Map.put(locals, param, idx), idx + 1}
       end)
 
-    state = %{state |
-      locals: param_locals,
-      next_register: next_param_reg,
-      current_function: func_key
+    state = %{
+      state
+      | locals: param_locals,
+        next_register: next_param_reg,
+        current_function: func_key
     }
 
     # Create function scope entry
@@ -258,10 +259,11 @@ defmodule Lua.Compiler.Scope do
     state = %{state | var_map: Map.put(state.var_map, func, func_key)}
 
     # Restore previous scope
-    %{state |
-      locals: saved_locals,
-      next_register: saved_next_reg,
-      current_function: saved_function
+    %{
+      state
+      | locals: saved_locals,
+        next_register: saved_next_reg,
+        current_function: saved_function
     }
   end
 
