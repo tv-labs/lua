@@ -68,7 +68,7 @@ defmodule Lua.Compiler.Instruction do
   def repeat_loop(loop_body, condition_body, test_reg),
     do: {:repeat_loop, loop_body, condition_body, test_reg}
 
-  def numeric_for(base, body), do: {:numeric_for, base, body}
+  def numeric_for(base, loop_var, body), do: {:numeric_for, base, loop_var, body}
   def generic_for(base, var_count, body), do: {:generic_for, base, var_count, body}
 
   def break_instr, do: :break

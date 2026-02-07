@@ -132,6 +132,54 @@ defmodule Lua.Compiler.Scope do
     end
   end
 
+  defp resolve_statement(%Statement.While{condition: condition, body: body}, state) do
+    # Resolve the condition
+    state = resolve_expr(condition, state)
+    # Resolve the body
+    resolve_block(body, state)
+  end
+
+  defp resolve_statement(%Statement.Repeat{body: body, condition: condition}, state) do
+    # Resolve the body first (in Lua, the condition can reference variables declared in the body)
+    state = resolve_block(body, state)
+    # Resolve the condition
+    resolve_expr(condition, state)
+  end
+
+  defp resolve_statement(
+         %Statement.ForNum{
+           var: var,
+           start: start_expr,
+           limit: limit_expr,
+           step: step_expr,
+           body: body
+         },
+         state
+       ) do
+    # Resolve start, limit, and step expressions with current scope
+    state = resolve_expr(start_expr, state)
+    state = resolve_expr(limit_expr, state)
+    state = if step_expr, do: resolve_expr(step_expr, state), else: state
+
+    # The loop variable is a local within the loop body
+    # Assign it a register
+    loop_var_reg = state.next_register
+    state = %{state | locals: Map.put(state.locals, var, loop_var_reg)}
+    state = %{state | next_register: loop_var_reg + 1}
+
+    # Update max_register
+    func_scope = state.functions[state.current_function]
+    func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
+    state = %{state | functions: Map.put(state.functions, state.current_function, func_scope)}
+
+    # Resolve the body with the loop variable in scope
+    state = resolve_block(body, state)
+
+    # Remove the loop variable from scope after the loop
+    # (In real implementation, we'd need scope stack management, but for now this is fine)
+    state
+  end
+
   # For now, stub out other statement types - we'll implement them incrementally
   defp resolve_statement(_stmt, state), do: state
 
