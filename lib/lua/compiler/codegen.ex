@@ -66,9 +66,25 @@ defmodule Lua.Compiler.Codegen do
     # TODO: handle multiple assignment and table indexing
     case {targets, values} do
       {[%Expr.Var{name: name}], [value]} ->
-        # Simple global assignment: x = value
+        # Check if this is a local or global variable
         {value_instrs, value_reg, ctx} = gen_expr(value, ctx)
-        {value_instrs ++ [Instruction.set_global(name, value_reg)], ctx}
+
+        case Map.get(ctx.scope.locals, name) do
+          nil ->
+            # Global variable
+            {value_instrs ++ [Instruction.set_global(name, value_reg)], ctx}
+
+          local_reg ->
+            # Local variable - move to the local's register
+            move_instr =
+              if local_reg == value_reg do
+                []
+              else
+                [Instruction.move(local_reg, value_reg)]
+              end
+
+            {value_instrs ++ move_instr, ctx}
+        end
 
       _ ->
         # Unsupported pattern for now
@@ -136,6 +152,83 @@ defmodule Lua.Compiler.Codegen do
     test_instr = Instruction.test(cond_reg, then_instrs, else_instrs)
 
     {cond_instrs ++ [test_instr], ctx}
+  end
+
+  defp gen_statement(%Statement.While{condition: condition, body: body}, ctx) do
+    # Generate code for the condition
+    {cond_instrs, cond_reg, ctx} = gen_expr(condition, ctx)
+
+    # Generate code for the body
+    {body_instrs, ctx} = gen_block(body, ctx)
+
+    # Create while loop instruction
+    loop_instr = Instruction.while_loop(cond_instrs, cond_reg, body_instrs)
+
+    {[loop_instr], ctx}
+  end
+
+  defp gen_statement(%Statement.Repeat{body: body, condition: condition}, ctx) do
+    # Generate code for the body
+    {body_instrs, ctx} = gen_block(body, ctx)
+
+    # Generate code for the condition
+    {cond_instrs, cond_reg, ctx} = gen_expr(condition, ctx)
+
+    # Create repeat loop instruction
+    loop_instr = Instruction.repeat_loop(body_instrs, cond_instrs, cond_reg)
+
+    {[loop_instr], ctx}
+  end
+
+  defp gen_statement(
+         %Statement.ForNum{
+           var: var,
+           start: start_expr,
+           limit: limit_expr,
+           step: step_expr,
+           body: body
+         },
+         ctx
+       ) do
+    # Get the loop variable's register from scope
+    loop_var_reg = ctx.scope.locals[var]
+
+    # Allocate 3 internal registers for: counter, limit, step
+    base = ctx.next_reg
+    ctx = %{ctx | next_reg: ctx.next_reg + 3}
+
+    # Generate code for start, limit, step
+    {start_instrs, start_reg, ctx} = gen_expr(start_expr, ctx)
+    {limit_instrs, limit_reg, ctx} = gen_expr(limit_expr, ctx)
+
+    {step_instrs, step_reg, ctx} =
+      if step_expr do
+        gen_expr(step_expr, ctx)
+      else
+        # Default step is 1
+        reg = ctx.next_reg
+        ctx = %{ctx | next_reg: reg + 1}
+        {[Instruction.load_constant(reg, 1)], reg, ctx}
+      end
+
+    # Move start/limit/step to internal registers
+    init_instrs = [
+      # internal counter = start
+      Instruction.move(base, start_reg),
+      # limit
+      Instruction.move(base + 1, limit_reg),
+      # step
+      Instruction.move(base + 2, step_reg)
+    ]
+
+    # Generate body
+    {body_instrs, ctx} = gen_block(body, ctx)
+
+    # Create numeric for instruction
+    # The VM will handle: copying base to loop_var_reg, incrementing, checking limit
+    loop_instr = Instruction.numeric_for(base, loop_var_reg, body_instrs)
+
+    {start_instrs ++ limit_instrs ++ step_instrs ++ init_instrs ++ [loop_instr], ctx}
   end
 
   # Stub for other statements
