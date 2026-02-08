@@ -81,6 +81,7 @@ defmodule Lua.Compiler.Instruction do
   def call(base, arg_count, result_count), do: {:call, base, arg_count, result_count}
   def tail_call(base, arg_count), do: {:tail_call, base, arg_count}
   def return_instr(base, count), do: {:return, base, count}
+  def return_vararg, do: {:return_vararg}
   def self_instr(base, object, method_name), do: {:self, base, object, method_name}
   def vararg(base, count), do: {:vararg, base, count}
 

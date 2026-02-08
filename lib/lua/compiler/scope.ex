@@ -18,13 +18,15 @@ defmodule Lua.Compiler.Scope do
     defstruct max_register: 0,
               param_count: 0,
               is_vararg: false,
-              upvalue_descriptors: []
+              upvalue_descriptors: [],
+              locals: %{}
 
     @type t :: %__MODULE__{
             max_register: non_neg_integer(),
             param_count: non_neg_integer(),
             is_vararg: boolean(),
-            upvalue_descriptors: [term()]
+            upvalue_descriptors: [term()],
+            locals: %{optional(binary()) => non_neg_integer()}
           }
   end
 
@@ -66,6 +68,11 @@ defmodule Lua.Compiler.Scope do
 
     # Resolve the chunk body
     state = resolve_block(block, state)
+
+    # Save chunk locals for codegen
+    func_scope = state.functions[:chunk]
+    func_scope = %{func_scope | locals: state.locals}
+    state = %{state | functions: Map.put(state.functions, :chunk, func_scope)}
 
     {:ok, state}
   end
@@ -199,6 +206,30 @@ defmodule Lua.Compiler.Scope do
     resolve_expr(call, state)
   end
 
+  defp resolve_statement(
+         %Statement.ForIn{vars: vars, iterators: iterators, body: body},
+         state
+       ) do
+    # Resolve iterator expressions with current scope
+    state = Enum.reduce(iterators, state, &resolve_expr/2)
+
+    # Assign registers for loop variables (same pattern as ForNum)
+    {state, _} =
+      Enum.reduce(vars, {state, state.next_register}, fn name, {state, reg} ->
+        state = %{state | locals: Map.put(state.locals, name, reg)}
+        state = %{state | next_register: reg + 1}
+        {state, reg + 1}
+      end)
+
+    # Update max_register
+    func_scope = state.functions[state.current_function]
+    func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
+    state = %{state | functions: Map.put(state.functions, state.current_function, func_scope)}
+
+    # Resolve the body with loop variables in scope
+    resolve_block(body, state)
+  end
+
   # For now, stub out other statement types - we'll implement them incrementally
   defp resolve_statement(_stmt, state), do: state
 
@@ -286,9 +317,15 @@ defmodule Lua.Compiler.Scope do
     # Resolve the function body
     state = resolve_block(body, state)
 
-    # Update max_register based on what was used in the body
+    # Update max_register and save locals for codegen
     func_scope = state.functions[func_key]
-    func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
+
+    func_scope = %{
+      func_scope
+      | max_register: max(func_scope.max_register, state.next_register),
+        locals: state.locals
+    }
+
     state = %{state | functions: Map.put(state.functions, func_key, func_scope)}
 
     # Store the function key in var_map for this function node
@@ -345,6 +382,8 @@ defmodule Lua.Compiler.Scope do
     state = resolve_expr(object, state)
     Enum.reduce(args, state, &resolve_expr/2)
   end
+
+  defp resolve_expr(%Expr.Vararg{}, state), do: state
 
   # For now, stub out other expression types
   defp resolve_expr(_expr, state), do: state

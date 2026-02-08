@@ -44,6 +44,31 @@ defmodule Lua.Compiler.Codegen do
     end)
   end
 
+  defp gen_statement(%Statement.Return{values: [%Expr.Vararg{}]}, ctx) do
+    {[Instruction.return_vararg()], ctx}
+  end
+
+  defp gen_statement(%Statement.Return{values: [%Expr.Call{} = call]}, ctx) do
+    # return f(...) — forward all results from the call
+    {call_instructions, _result_reg, ctx} = gen_expr(call, ctx)
+
+    # Patch the call to request all results (sentinel -1)
+    call_instructions =
+      case List.last(call_instructions) do
+        {:call, base, arg_count, _result_count} ->
+          List.replace_at(
+            call_instructions,
+            length(call_instructions) - 1,
+            {:call, base, arg_count, -1}
+          )
+
+        _ ->
+          call_instructions
+      end
+
+    {call_instructions, ctx}
+  end
+
   defp gen_statement(%Statement.Return{values: values}, ctx) do
     case values do
       [] ->
@@ -55,10 +80,23 @@ defmodule Lua.Compiler.Codegen do
         {value_instructions, result_reg, ctx} = gen_expr(value, ctx)
         {value_instructions ++ [Instruction.return_instr(result_reg, 1)], ctx}
 
-      _multiple ->
-        # For now, just handle single return
-        # TODO: implement multiple return values
-        {[Instruction.return_instr(0, 0)], ctx}
+      multiple ->
+        base_reg = ctx.next_reg
+
+        {all_instructions, ctx} =
+          multiple
+          |> Enum.with_index()
+          |> Enum.reduce({[], ctx}, fn {value, i}, {instructions, ctx} ->
+            target_reg = base_reg + i
+            {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
+
+            move =
+              if value_reg == target_reg, do: [], else: [Instruction.move(target_reg, value_reg)]
+
+            {instructions ++ value_instructions ++ move, ctx}
+          end)
+
+        {all_instructions ++ [Instruction.return_instr(base_reg, length(multiple))], ctx}
     end
   end
 
@@ -219,6 +257,83 @@ defmodule Lua.Compiler.Codegen do
        step_instructions ++
        init_instructions ++
        [loop_instruction], ctx}
+  end
+
+  defp gen_statement(
+         %Statement.ForIn{vars: vars, iterators: iterators, body: body},
+         ctx
+       ) do
+    # Look up loop variable registers from scope
+    var_regs = Enum.map(vars, fn name -> ctx.scope.locals[name] end)
+
+    # Allocate 3 internal registers for: iterator function, invariant state, control variable
+    base = ctx.next_reg
+    ctx = %{ctx | next_reg: base + 3}
+
+    # Generate iterator expression(s)
+    # Typically `pairs(t)` or `ipairs(t)` — a single call that returns 3 values
+    {iter_instructions, ctx} =
+      case iterators do
+        [single_iter] ->
+          {iter_instr, _iter_reg, ctx} = gen_expr(single_iter, ctx)
+
+          # Patch the call instruction to request 3 results
+          iter_instr =
+            case List.last(iter_instr) do
+              {:call, call_base, arg_count, _result_count} ->
+                List.replace_at(
+                  iter_instr,
+                  length(iter_instr) - 1,
+                  {:call, call_base, arg_count, 3}
+                )
+
+              _ ->
+                iter_instr
+            end
+
+          # Move the 3 results (at call_base, call_base+1, call_base+2) into base, base+1, base+2
+          call_base =
+            case List.last(iter_instr) do
+              {:call, cb, _, _} -> cb
+              _ -> base
+            end
+
+          move_instructions =
+            for i <- 0..2, call_base + i != base + i do
+              Instruction.move(base + i, call_base + i)
+            end
+
+          {iter_instr ++ move_instructions, ctx}
+
+        _ ->
+          # Multiple iterator expressions — evaluate each and move to base+0,1,2
+          {instrs, regs, ctx} =
+            Enum.reduce(iterators, {[], [], ctx}, fn expr, {instructions, regs, ctx} ->
+              {expr_instr, expr_reg, ctx} = gen_expr(expr, ctx)
+              {instructions ++ expr_instr, regs ++ [expr_reg], ctx}
+            end)
+
+          move_instructions =
+            regs
+            |> Enum.with_index()
+            |> Enum.flat_map(fn {src_reg, i} ->
+              if i < 3 and src_reg != base + i do
+                [Instruction.move(base + i, src_reg)]
+              else
+                []
+              end
+            end)
+
+          {instrs ++ move_instructions, ctx}
+      end
+
+    # Generate body
+    {body_instructions, ctx} = gen_block(body, ctx)
+
+    # Emit generic_for instruction with var_regs as a list of register indices
+    loop_instruction = Instruction.generic_for(base, var_regs, body_instructions)
+
+    {iter_instructions ++ [loop_instruction], ctx}
   end
 
   defp gen_statement(%Statement.CallStmt{call: call}, ctx) do
@@ -485,12 +600,14 @@ defmodule Lua.Compiler.Codegen do
     func_key = Map.get(ctx.scope.var_map, func)
     func_scope = ctx.scope.functions[func_key]
 
-    # Generate the function body in a fresh context
+    # Generate the function body in a fresh context with function-scoped locals
+    func_locals_scope = %{ctx.scope | locals: func_scope.locals}
+
     {body_instructions, body_ctx} =
       gen_block(body, %{
         next_reg: func_scope.param_count,
         source: ctx.source,
-        scope: ctx.scope,
+        scope: func_locals_scope,
         prototypes: []
       })
 
@@ -694,6 +811,12 @@ defmodule Lua.Compiler.Codegen do
        arg_instructions ++
        move_instructions ++
        [call_instruction], base_reg, ctx}
+  end
+
+  defp gen_expr(%Expr.Vararg{}, ctx) do
+    reg = ctx.next_reg
+    ctx = %{ctx | next_reg: reg + 1}
+    {[Instruction.vararg(reg, 1)], reg, ctx}
   end
 
   # Stub for other expressions

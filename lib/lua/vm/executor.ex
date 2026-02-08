@@ -239,6 +239,53 @@ defmodule Lua.VM.Executor do
     end
   end
 
+  # generic_for - generic for loop (for k, v in iterator do ... end)
+  defp do_execute(
+         [{:generic_for, base, var_regs, body} | rest],
+         regs,
+         upvalues,
+         proto,
+         state
+       ) do
+    # Read iterator function, invariant state, control from internal registers
+    iter_func = elem(regs, base)
+    invariant_state = elem(regs, base + 1)
+    control = elem(regs, base + 2)
+
+    # Call iterator: f(state, control)
+    {results, state} = call_value(iter_func, [invariant_state, control], proto, state)
+
+    # If first result is nil, exit loop
+    first_result = List.first(results)
+
+    if first_result == nil do
+      do_execute(rest, regs, upvalues, proto, state)
+    else
+      # Update control variable
+      regs = put_elem(regs, base + 2, first_result)
+
+      # Copy results to loop variable registers
+      regs =
+        var_regs
+        |> Enum.with_index()
+        |> Enum.reduce(regs, fn {var_reg, i}, regs ->
+          put_elem(regs, var_reg, Enum.at(results, i))
+        end)
+
+      # Execute body
+      {_results, regs, state} = do_execute(body, regs, upvalues, proto, state)
+
+      # Loop again
+      do_execute(
+        [{:generic_for, base, var_regs, body} | rest],
+        regs,
+        upvalues,
+        proto,
+        state
+      )
+    end
+  end
+
   # closure - create a closure value from a prototype, capturing upvalues
   defp do_execute(
          [{:closure, dest, proto_index} | rest],
@@ -310,6 +357,14 @@ defmodule Lua.VM.Executor do
               if i < callee_proto.param_count, do: put_elem(regs, i, arg), else: regs
             end)
 
+          # Populate varargs if function is vararg
+          callee_proto =
+            if callee_proto.is_vararg do
+              %{callee_proto | varargs: Enum.drop(args, callee_proto.param_count)}
+            else
+              callee_proto
+            end
+
           # Execute the callee with fresh open_upvalues
           {results, _callee_regs, state} =
             do_execute(
@@ -347,20 +402,43 @@ defmodule Lua.VM.Executor do
             source: proto.source
       end
 
-    # Place results into caller registers starting at base
+    # result_count == -1 means "return all results" (used in return f() position)
+    if result_count == -1 do
+      {results, regs, state}
+    else
+      # Place results into caller registers starting at base
+      regs =
+        if result_count > 0 do
+          results_list = List.wrap(results)
+
+          Enum.reduce(0..(result_count - 1), regs, fn i, regs ->
+            value = Enum.at(results_list, i)
+            put_elem(regs, base + i, value)
+          end)
+        else
+          regs
+        end
+
+      do_execute(rest, regs, upvalue_context, proto, state)
+    end
+  end
+
+  # vararg - load vararg values into registers
+  defp do_execute([{:vararg, base, count} | rest], regs, upvalues, proto, state) do
+    varargs = Map.get(proto, :varargs, [])
+
     regs =
-      if result_count > 0 do
-        results_list = List.wrap(results)
+      Enum.reduce(0..(count - 1), regs, fn i, regs ->
+        put_elem(regs, base + i, Enum.at(varargs, i))
+      end)
 
-        Enum.reduce(0..(result_count - 1), regs, fn i, regs ->
-          value = Enum.at(results_list, i)
-          put_elem(regs, base + i, value)
-        end)
-      else
-        regs
-      end
+    do_execute(rest, regs, upvalues, proto, state)
+  end
 
-    do_execute(rest, regs, upvalue_context, proto, state)
+  # return_vararg - return all varargs
+  defp do_execute([{:return_vararg} | _rest], regs, _upvalues, proto, state) do
+    varargs = Map.get(proto, :varargs, [])
+    {varargs, regs, state}
   end
 
   # return
@@ -643,5 +721,58 @@ defmodule Lua.VM.Executor do
   # Catch-all for unimplemented instructions
   defp do_execute([instr | _rest], _regs, _upvalues, _proto, _state) do
     raise InternalError, value: "unimplemented instruction: #{inspect(instr)}"
+  end
+
+  # Helper: call a function value inline (used by generic_for)
+  defp call_value({:lua_closure, callee_proto, callee_upvalues}, args, _proto, state) do
+    callee_regs =
+      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 64)
+
+    callee_regs =
+      args
+      |> Enum.with_index()
+      |> Enum.reduce(callee_regs, fn {arg, i}, regs ->
+        if i < callee_proto.param_count, do: put_elem(regs, i, arg), else: regs
+      end)
+
+    callee_proto =
+      if callee_proto.is_vararg do
+        %{callee_proto | varargs: Enum.drop(args, callee_proto.param_count)}
+      else
+        callee_proto
+      end
+
+    {results, _callee_regs, state} =
+      do_execute(
+        callee_proto.instructions,
+        callee_regs,
+        {callee_upvalues, %{}},
+        callee_proto,
+        state
+      )
+
+    {results, state}
+  end
+
+  defp call_value({:native_func, fun}, args, _proto, state) do
+    case fun.(args, state) do
+      {results, %State{} = new_state} when is_list(results) ->
+        {results, new_state}
+
+      {results, %State{} = new_state} ->
+        {List.wrap(results), new_state}
+    end
+  end
+
+  defp call_value(nil, _args, proto, _state) do
+    raise TypeError,
+      value: "attempt to call a nil value",
+      source: proto.source
+  end
+
+  defp call_value(other, _args, proto, _state) do
+    raise TypeError,
+      value: "attempt to call a #{Value.type_name(other)} value",
+      source: proto.source
   end
 end
