@@ -128,12 +128,35 @@ defmodule Lua do
   end
 
   @doc """
-  Sets the path patterns that the VM will look in when requiring Lua scripts.
+  Sets the path patterns that the VM will look in when requiring Lua scripts. For example,
+  if you store Lua files in your application's priv directory:
+
+      #iex> lua = Lua.new(exclude: [[:package], [:require]])
+      #iex> Lua.set_lua_paths(lua, ["myapp/priv/lua/?.lua", "myapp/lua/?/init.lua"])
+
+  Now you can use the [Lua require](https://www.lua.org/pil/8.1.html) function to import
+  these scripts
 
   > #### Warning {: .warning}
+  > In order to use `Lua.set_lua_paths/2`, the following functions cannot be sandboxed:
+  > * `[:package]`
+  > * `[:require]`
+  >
+  > By default these are sandboxed, see the `:exclude` option in `Lua.new/1` to allow them.
+
+  > #### Not Yet Implemented {: .warning}
   > `require` and `package` support is not yet implemented in the new VM.
-  > This function will raise an error.
+  > This function will raise an error until support is added.
   """
+  # TODO: Restore original implementation once require/package support is added:
+  #
+  #   def set_lua_paths(%__MODULE__{} = lua, paths) when is_list(paths) do
+  #     set_lua_paths(lua, Enum.join(paths, ";"))
+  #   end
+  #
+  #   def set_lua_paths(%__MODULE__{} = lua, paths) when is_binary(paths) do
+  #     set!(lua, ["package", "path"], paths)
+  #   end
   def set_lua_paths(%__MODULE__{} = _lua, _paths) do
     raise Lua.RuntimeException, "set_lua_paths is not yet supported in the new VM"
   end
@@ -498,6 +521,8 @@ defmodule Lua do
 
   Errors found during parsing will be returned as a list of formatted strings
 
+      <!-- Old Luerl error format: Lua.parse_chunk("local foo =;") returned {:error, ["Line 1: syntax error before: ';'"]} -->
+
       iex> {:error, [msg]} = Lua.parse_chunk("local foo =;")
       iex> msg =~ "Expected expression"
       true
@@ -527,7 +552,9 @@ defmodule Lua do
 
       iex> {%Lua.Chunk{}, %Lua{}} = Lua.load_chunk!(Lua.new(), "return 2 + 2")
 
-  Or a pre-compiled chunk can be loaded as well.
+  Or a pre-compiled chunk can be loaded as well. In the old Luerl-backed implementation,
+  loaded chunks were marked as loaded so they wouldn't be re-loaded on each `eval!/2` call.
+  With the new VM, chunks hold a compiled prototype and don't need a separate loading step.
 
       iex> {%Lua.Chunk{}, %Lua{}} = Lua.load_chunk!(Lua.new(), ~LUA[return 2 + 2]c)
   """
@@ -545,11 +572,22 @@ defmodule Lua do
   @doc """
   Calls a function in Lua's state
 
+      # TODO: Restore once string stdlib is implemented
+      #iex> {:ok, [ret], _lua} = Lua.call_function(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
+      #iex> ret
+      #"hello robert"
+
       iex> lua = Lua.new()
       iex> lua = Lua.set!(lua, [:double], fn [val] -> [val * 2] end)
       iex> {:ok, [_ret], _lua} = Lua.call_function(lua, [:double], [5])
 
   References to functions can also be passed
+
+      # TODO: Restore once string stdlib is implemented
+      #iex> {[ref], lua} = Lua.eval!("return string.lower", decode: false)
+      #iex> {:ok, [ret], _lua} = Lua.call_function(lua, ref, ["FUNCTION REF"])
+      #iex> ret
+      #"function ref"
 
       iex> {[ref], lua} = Lua.eval!(Lua.new(), "return function(x) return x end", decode: false)
       iex> {:ok, [ret], _lua} = Lua.call_function(lua, ref, [42])
@@ -626,6 +664,10 @@ defmodule Lua do
   defmodule MyAPI do
     use Lua.API, scope: "example"
 
+    # TODO: Restore once string stdlib is implemented
+    # deflua foo(value), state do
+    #   Lua.call_function!(state, [:string, :lower], [value])
+    # end
     deflua foo(value), state do
       Lua.call_function!(state, [:my_func], [value])
     end
@@ -641,6 +683,8 @@ defmodule Lua do
 
   @doc """
   Encodes a Lua value into its internal form
+
+      <!-- Old Luerl implementation returned specific tref IDs: {encoded, _} = Lua.encode!(Lua.new(), %{a: 1}); encoded => {:tref, 14} -->
 
       iex> {encoded, _} = Lua.encode!(Lua.new(), %{a: 1})
       iex> match?({:tref, _}, encoded)

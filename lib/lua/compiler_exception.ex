@@ -23,6 +23,19 @@ defmodule Lua.CompilerException do
     %__MODULE__{errors: [error]}
   end
 
+  # TODO: Re-add stacktrace formatting once the new VM has stacktrace support.
+  # The old Luerl-backed implementation included stacktraces in compiler errors:
+  #
+  #   def message(%__MODULE__{errors: errors, state: state}) do
+  #     stacktrace = :luerl.get_stacktrace(state)
+  #     """
+  #     Failed to compile Lua!
+  #
+  #     #{Enum.join(errors, "\n")}
+  #
+  #     #{Util.format_stacktrace(stacktrace, state)}
+  #     """
+  #   end
   def message(%__MODULE__{errors: errors}) do
     """
     Failed to compile Lua!
