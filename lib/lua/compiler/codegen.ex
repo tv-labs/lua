@@ -38,9 +38,9 @@ defmodule Lua.Compiler.Codegen do
   end
 
   defp gen_block(%Block{stmts: stmts}, ctx) do
-    Enum.reduce(stmts, {[], ctx}, fn stmt, {instrs, ctx} ->
-      {new_instrs, ctx} = gen_statement(stmt, ctx)
-      {instrs ++ new_instrs, ctx}
+    Enum.reduce(stmts, {[], ctx}, fn stmt, {instructions, ctx} ->
+      {new_instructions, ctx} = gen_statement(stmt, ctx)
+      {instructions ++ new_instructions, ctx}
     end)
   end
 
@@ -52,8 +52,8 @@ defmodule Lua.Compiler.Codegen do
 
       [value] ->
         # return single value
-        {value_instrs, result_reg, ctx} = gen_expr(value, ctx)
-        {value_instrs ++ [Instruction.return_instr(result_reg, 1)], ctx}
+        {value_instructions, result_reg, ctx} = gen_expr(value, ctx)
+        {value_instructions ++ [Instruction.return_instr(result_reg, 1)], ctx}
 
       _multiple ->
         # For now, just handle single return
@@ -65,11 +65,11 @@ defmodule Lua.Compiler.Codegen do
   defp gen_statement(%Statement.Assign{targets: targets, values: values}, ctx) do
     case {targets, values} do
       {[target], [value]} ->
-        {value_instrs, value_reg, ctx} = gen_expr(value, ctx)
+        {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
 
-        {store_instrs, ctx} = gen_assign_target(target, value_reg, ctx)
+        {store_instructions, ctx} = gen_assign_target(target, value_reg, ctx)
 
-        {value_instrs ++ store_instrs, ctx}
+        {value_instructions ++ store_instructions, ctx}
 
       _ ->
         # Unsupported pattern for now
@@ -83,14 +83,14 @@ defmodule Lua.Compiler.Codegen do
     locals = scope.locals
 
     # Generate code for all values
-    {value_instrs, value_regs, ctx} =
-      Enum.reduce(values, {[], [], ctx}, fn value, {instrs, regs, ctx} ->
-        {new_instrs, reg, ctx} = gen_expr(value, ctx)
-        {instrs ++ new_instrs, regs ++ [reg], ctx}
+    {value_instructions, value_regs, ctx} =
+      Enum.reduce(values, {[], [], ctx}, fn value, {instructions, regs, ctx} ->
+        {new_instructions, reg, ctx} = gen_expr(value, ctx)
+        {instructions ++ new_instructions, regs ++ [reg], ctx}
       end)
 
     # Generate move instructions to copy values to their assigned registers
-    move_instrs =
+    move_instructions =
       names
       |> Enum.with_index()
       |> Enum.flat_map(fn {name, index} ->
@@ -112,7 +112,7 @@ defmodule Lua.Compiler.Codegen do
         end
       end)
 
-    {value_instrs ++ move_instrs, ctx}
+    {value_instructions ++ move_instructions, ctx}
   end
 
   defp gen_statement(
@@ -125,44 +125,45 @@ defmodule Lua.Compiler.Codegen do
          ctx
        ) do
     # Generate code for the condition
-    {cond_instrs, cond_reg, ctx} = gen_expr(condition, ctx)
+    {condition_instructions, cond_reg, ctx} = gen_expr(condition, ctx)
 
     # Generate code for the then block
-    {then_instrs, ctx} = gen_block(then_block, ctx)
+    {then_instructions, ctx} = gen_block(then_block, ctx)
 
     # Generate code for elseifs and else by building nested if-else
-    {else_instrs, ctx} = gen_elseifs_and_else(elseifs, else_block, ctx)
+    {else_instructions, ctx} = gen_elseifs_and_else(elseifs, else_block, ctx)
 
     # Create the test instruction
-    test_instr = Instruction.test(cond_reg, then_instrs, else_instrs)
+    test_instruction = Instruction.test(cond_reg, then_instructions, else_instructions)
 
-    {cond_instrs ++ [test_instr], ctx}
+    {condition_instructions ++ [test_instruction], ctx}
   end
 
   defp gen_statement(%Statement.While{condition: condition, body: body}, ctx) do
     # Generate code for the condition
-    {cond_instrs, cond_reg, ctx} = gen_expr(condition, ctx)
+    {condition_instructions, cond_reg, ctx} = gen_expr(condition, ctx)
 
     # Generate code for the body
-    {body_instrs, ctx} = gen_block(body, ctx)
+    {body_instructions, ctx} = gen_block(body, ctx)
 
     # Create while loop instruction
-    loop_instr = Instruction.while_loop(cond_instrs, cond_reg, body_instrs)
+    loop_instruction = Instruction.while_loop(condition_instructions, cond_reg, body_instructions)
 
-    {[loop_instr], ctx}
+    {[loop_instruction], ctx}
   end
 
   defp gen_statement(%Statement.Repeat{body: body, condition: condition}, ctx) do
     # Generate code for the body
-    {body_instrs, ctx} = gen_block(body, ctx)
+    {body_instructions, ctx} = gen_block(body, ctx)
 
     # Generate code for the condition
-    {cond_instrs, cond_reg, ctx} = gen_expr(condition, ctx)
+    {condition_instructions, cond_reg, ctx} = gen_expr(condition, ctx)
 
     # Create repeat loop instruction
-    loop_instr = Instruction.repeat_loop(body_instrs, cond_instrs, cond_reg)
+    loop_instruction =
+      Instruction.repeat_loop(body_instructions, condition_instructions, cond_reg)
 
-    {[loop_instr], ctx}
+    {[loop_instruction], ctx}
   end
 
   defp gen_statement(
@@ -183,10 +184,10 @@ defmodule Lua.Compiler.Codegen do
     ctx = %{ctx | next_reg: ctx.next_reg + 3}
 
     # Generate code for start, limit, step
-    {start_instrs, start_reg, ctx} = gen_expr(start_expr, ctx)
-    {limit_instrs, limit_reg, ctx} = gen_expr(limit_expr, ctx)
+    {start_instructions, start_reg, ctx} = gen_expr(start_expr, ctx)
+    {limit_instructions, limit_reg, ctx} = gen_expr(limit_expr, ctx)
 
-    {step_instrs, step_reg, ctx} =
+    {step_instructions, step_reg, ctx} =
       if step_expr do
         gen_expr(step_expr, ctx)
       else
@@ -197,7 +198,7 @@ defmodule Lua.Compiler.Codegen do
       end
 
     # Move start/limit/step to internal registers
-    init_instrs = [
+    init_instructions = [
       # internal counter = start
       Instruction.move(base, start_reg),
       # limit
@@ -207,30 +208,38 @@ defmodule Lua.Compiler.Codegen do
     ]
 
     # Generate body
-    {body_instrs, ctx} = gen_block(body, ctx)
+    {body_instructions, ctx} = gen_block(body, ctx)
 
     # Create numeric for instruction
     # The VM will handle: copying base to loop_var_reg, incrementing, checking limit
-    loop_instr = Instruction.numeric_for(base, loop_var_reg, body_instrs)
+    loop_instruction = Instruction.numeric_for(base, loop_var_reg, body_instructions)
 
-    {start_instrs ++ limit_instrs ++ step_instrs ++ init_instrs ++ [loop_instr], ctx}
+    {start_instructions ++
+       limit_instructions ++
+       step_instructions ++
+       init_instructions ++
+       [loop_instruction], ctx}
   end
 
   defp gen_statement(%Statement.CallStmt{call: call}, ctx) do
     # Compile the call expression, but discard the result (0 result count)
-    {call_instrs, _result_reg, ctx} = gen_expr(call, ctx)
+    {call_instructions, _result_reg, ctx} = gen_expr(call, ctx)
 
     # Patch the last instruction to request 0 results
-    call_instrs =
-      case List.last(call_instrs) do
+    call_instructions =
+      case List.last(call_instructions) do
         {:call, base, arg_count, _result_count} ->
-          List.replace_at(call_instrs, length(call_instrs) - 1, {:call, base, arg_count, 0})
+          List.replace_at(
+            call_instructions,
+            length(call_instructions) - 1,
+            {:call, base, arg_count, 0}
+          )
 
         _ ->
-          call_instrs
+          call_instructions
       end
 
-    {call_instrs, ctx}
+    {call_instructions, ctx}
   end
 
   # Stub for other statements
@@ -238,7 +247,7 @@ defmodule Lua.Compiler.Codegen do
 
   # Helpers for assignment target code generation
   defp gen_assign_target(%Expr.Var{} = target_var, value_reg, ctx) do
-    store_instr =
+    store_instructions =
       case Map.get(ctx.scope.var_map, target_var) do
         {:register, local_reg} ->
           if local_reg == value_reg, do: [], else: [Instruction.move(local_reg, value_reg)]
@@ -256,18 +265,21 @@ defmodule Lua.Compiler.Codegen do
           [Instruction.set_global(target_var.name, value_reg)]
       end
 
-    {store_instr, ctx}
+    {store_instructions, ctx}
   end
 
   defp gen_assign_target(%Expr.Property{table: table_expr, field: field}, value_reg, ctx) do
-    {table_instrs, table_reg, ctx} = gen_expr(table_expr, ctx)
-    {table_instrs ++ [Instruction.set_field(table_reg, field, value_reg)], ctx}
+    {table_instructions, table_reg, ctx} = gen_expr(table_expr, ctx)
+    {table_instructions ++ [Instruction.set_field(table_reg, field, value_reg)], ctx}
   end
 
   defp gen_assign_target(%Expr.Index{table: table_expr, key: key_expr}, value_reg, ctx) do
-    {table_instrs, table_reg, ctx} = gen_expr(table_expr, ctx)
-    {key_instrs, key_reg, ctx} = gen_expr(key_expr, ctx)
-    {table_instrs ++ key_instrs ++ [Instruction.set_table(table_reg, key_reg, value_reg)], ctx}
+    {table_instructions, table_reg, ctx} = gen_expr(table_expr, ctx)
+    {key_instructions, key_reg, ctx} = gen_expr(key_expr, ctx)
+
+    {table_instructions ++
+       key_instructions ++
+       [Instruction.set_table(table_reg, key_reg, value_reg)], ctx}
   end
 
   # Helper functions for if statement code generation
@@ -283,18 +295,18 @@ defmodule Lua.Compiler.Codegen do
 
   defp gen_elseifs_and_else([{elseif_cond, elseif_block} | rest_elseifs], else_block, ctx) do
     # Generate condition for this elseif
-    {cond_instrs, cond_reg, ctx} = gen_expr(elseif_cond, ctx)
+    {condition_instructions, cond_reg, ctx} = gen_expr(elseif_cond, ctx)
 
     # Generate body for this elseif
-    {then_instrs, ctx} = gen_block(elseif_block, ctx)
+    {then_instructions, ctx} = gen_block(elseif_block, ctx)
 
     # Generate remaining elseifs and else
-    {else_instrs, ctx} = gen_elseifs_and_else(rest_elseifs, else_block, ctx)
+    {else_instructions, ctx} = gen_elseifs_and_else(rest_elseifs, else_block, ctx)
 
     # Create nested test instruction
-    test_instr = Instruction.test(cond_reg, then_instrs, else_instrs)
+    test_instruction = Instruction.test(cond_reg, then_instructions, else_instructions)
 
-    {cond_instrs ++ [test_instr], ctx}
+    {condition_instructions ++ [test_instruction], ctx}
   end
 
   # Generate code for an expression, returning {instructions, result_register, context}
@@ -325,17 +337,17 @@ defmodule Lua.Compiler.Codegen do
   defp gen_expr(%Expr.BinOp{op: :and, left: left, right: right}, ctx) do
     # Short-circuit AND: if left is falsy, return left, else evaluate and return right
     # Generate code for left operand
-    {left_instrs, left_reg, ctx} = gen_expr(left, ctx)
+    {left_instructions, left_reg, ctx} = gen_expr(left, ctx)
 
     # Allocate destination register
     dest_reg = ctx.next_reg
     ctx = %{ctx | next_reg: dest_reg + 1}
 
     # Generate code for right operand (to be executed conditionally)
-    {right_instrs, right_reg, ctx} = gen_expr(right, ctx)
+    {right_instructions, right_reg, ctx} = gen_expr(right, ctx)
 
     # Move right result to destination
-    move_instr =
+    move_instruction =
       if dest_reg == right_reg do
         []
       else
@@ -343,25 +355,26 @@ defmodule Lua.Compiler.Codegen do
       end
 
     # test_and: if falsy(left_reg) then dest=left else execute right_body
-    and_instr = Instruction.test_and(dest_reg, left_reg, right_instrs ++ move_instr)
+    and_instruction =
+      Instruction.test_and(dest_reg, left_reg, right_instructions ++ move_instruction)
 
-    {left_instrs ++ [and_instr], dest_reg, ctx}
+    {left_instructions ++ [and_instruction], dest_reg, ctx}
   end
 
   defp gen_expr(%Expr.BinOp{op: :or, left: left, right: right}, ctx) do
     # Short-circuit OR: if left is truthy, return left, else evaluate and return right
     # Generate code for left operand
-    {left_instrs, left_reg, ctx} = gen_expr(left, ctx)
+    {left_instructions, left_reg, ctx} = gen_expr(left, ctx)
 
     # Allocate destination register
     dest_reg = ctx.next_reg
     ctx = %{ctx | next_reg: dest_reg + 1}
 
     # Generate code for right operand (to be executed conditionally)
-    {right_instrs, right_reg, ctx} = gen_expr(right, ctx)
+    {right_instructions, right_reg, ctx} = gen_expr(right, ctx)
 
     # Move right result to destination
-    move_instr =
+    move_instruction =
       if dest_reg == right_reg do
         []
       else
@@ -369,24 +382,25 @@ defmodule Lua.Compiler.Codegen do
       end
 
     # test_or: if truthy(left_reg) then dest=left else execute right_body
-    or_instr = Instruction.test_or(dest_reg, left_reg, right_instrs ++ move_instr)
+    or_instruction =
+      Instruction.test_or(dest_reg, left_reg, right_instructions ++ move_instruction)
 
-    {left_instrs ++ [or_instr], dest_reg, ctx}
+    {left_instructions ++ [or_instruction], dest_reg, ctx}
   end
 
   defp gen_expr(%Expr.BinOp{op: op, left: left, right: right}, ctx) do
     # Generate code for left operand
-    {left_instrs, left_reg, ctx} = gen_expr(left, ctx)
+    {left_instructions, left_reg, ctx} = gen_expr(left, ctx)
 
     # Generate code for right operand
-    {right_instrs, right_reg, ctx} = gen_expr(right, ctx)
+    {right_instructions, right_reg, ctx} = gen_expr(right, ctx)
 
     # Allocate destination register
     dest_reg = ctx.next_reg
     ctx = %{ctx | next_reg: dest_reg + 1}
 
     # Generate the operation instruction
-    op_instr =
+    operation_instruction =
       case op do
         :add -> Instruction.add(dest_reg, left_reg, right_reg)
         :sub -> Instruction.subtract(dest_reg, left_reg, right_reg)
@@ -410,19 +424,19 @@ defmodule Lua.Compiler.Codegen do
         _ -> raise "Unsupported binary operator: #{op}"
       end
 
-    {left_instrs ++ right_instrs ++ [op_instr], dest_reg, ctx}
+    {left_instructions ++ right_instructions ++ [operation_instruction], dest_reg, ctx}
   end
 
   defp gen_expr(%Expr.UnOp{op: op, operand: operand}, ctx) do
     # Generate code for operand
-    {operand_instrs, operand_reg, ctx} = gen_expr(operand, ctx)
+    {operand_instructions, operand_reg, ctx} = gen_expr(operand, ctx)
 
     # Allocate destination register
     dest_reg = ctx.next_reg
     ctx = %{ctx | next_reg: dest_reg + 1}
 
     # Generate the operation instruction
-    op_instr =
+    operation_instruction =
       case op do
         :neg -> Instruction.negate(dest_reg, operand_reg)
         :not -> Instruction.logical_not(dest_reg, operand_reg)
@@ -430,7 +444,7 @@ defmodule Lua.Compiler.Codegen do
         :bnot -> Instruction.bitwise_not(dest_reg, operand_reg)
       end
 
-    {operand_instrs ++ [op_instr], dest_reg, ctx}
+    {operand_instructions ++ [operation_instruction], dest_reg, ctx}
   end
 
   defp gen_expr(%Expr.Var{} = var, ctx) do
@@ -472,7 +486,7 @@ defmodule Lua.Compiler.Codegen do
     func_scope = ctx.scope.functions[func_key]
 
     # Generate the function body in a fresh context
-    {body_instrs, body_ctx} =
+    {body_instructions, body_ctx} =
       gen_block(body, %{
         next_reg: func_scope.param_count,
         source: ctx.source,
@@ -482,7 +496,7 @@ defmodule Lua.Compiler.Codegen do
 
     # Create the nested prototype (include nested prototypes from body)
     nested_proto = %Prototype{
-      instructions: body_instrs,
+      instructions: body_instructions,
       prototypes: Enum.reverse(body_ctx.prototypes),
       upvalue_descriptors: func_scope.upvalue_descriptors,
       param_count: func_scope.param_count,
@@ -508,10 +522,10 @@ defmodule Lua.Compiler.Codegen do
     base_reg = ctx.next_reg
 
     # Generate code for the function expression
-    {func_instrs, func_reg, ctx} = gen_expr(func_expr, ctx)
+    {function_instructions, func_reg, ctx} = gen_expr(func_expr, ctx)
 
     # Move function to base register if needed
-    move_func =
+    move_function =
       if func_reg == base_reg do
         []
       else
@@ -525,14 +539,14 @@ defmodule Lua.Compiler.Codegen do
     arg_count = length(args)
     ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
 
-    {arg_instrs, arg_regs, ctx} =
-      Enum.reduce(args, {[], [], ctx}, fn arg, {instrs, regs, ctx} ->
-        {arg_instrs, arg_reg, ctx} = gen_expr(arg, ctx)
-        {instrs ++ arg_instrs, regs ++ [arg_reg], ctx}
+    {arg_instructions, arg_regs, ctx} =
+      Enum.reduce(args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
+        {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
+        {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
       end)
 
     # Move each arg result to its expected position (base+1+i)
-    move_instrs =
+    move_instructions =
       arg_regs
       |> Enum.with_index()
       |> Enum.flat_map(fn {arg_reg, i} ->
@@ -546,10 +560,14 @@ defmodule Lua.Compiler.Codegen do
       end)
 
     # Generate call instruction (single return value for now)
-    call_instr = Instruction.call(base_reg, arg_count, 1)
+    call_instruction = Instruction.call(base_reg, arg_count, 1)
 
     # Result will be in base_reg
-    {func_instrs ++ move_func ++ arg_instrs ++ move_instrs ++ [call_instr], base_reg, ctx}
+    {function_instructions ++
+       move_function ++
+       arg_instructions ++
+       move_instructions ++
+       [call_instruction], base_reg, ctx}
   end
 
   defp gen_expr(%Expr.Table{fields: fields}, ctx) do
@@ -563,10 +581,10 @@ defmodule Lua.Compiler.Codegen do
     array_hint = length(list_fields)
     hash_hint = length(record_fields)
 
-    new_table_instr = Instruction.new_table(dest, array_hint, hash_hint)
+    new_table_instruction = Instruction.new_table(dest, array_hint, hash_hint)
 
     # Compile list fields into consecutive temp registers, then emit set_list
-    {list_instrs, ctx} =
+    {list_instructions, ctx} =
       if list_fields == [] do
         {[], ctx}
       else
@@ -574,58 +592,61 @@ defmodule Lua.Compiler.Codegen do
         start_reg = ctx.next_reg
         ctx = %{ctx | next_reg: start_reg + array_hint}
 
-        {val_instrs, ctx} =
+        {value_instructions, ctx} =
           list_fields
           |> Enum.with_index()
-          |> Enum.reduce({[], ctx}, fn {val_expr, i}, {instrs, ctx} ->
+          |> Enum.reduce({[], ctx}, fn {val_expr, i}, {instructions, ctx} ->
             target_reg = start_reg + i
-            {val_instrs, val_reg, ctx} = gen_expr(val_expr, ctx)
+            {value_instructions, val_reg, ctx} = gen_expr(val_expr, ctx)
 
             move =
               if val_reg == target_reg, do: [], else: [Instruction.move(target_reg, val_reg)]
 
-            {instrs ++ val_instrs ++ move, ctx}
+            {instructions ++ value_instructions ++ move, ctx}
           end)
 
-        set_list_instr = Instruction.set_list(dest, start_reg, array_hint, 0)
-        {val_instrs ++ [set_list_instr], ctx}
+        set_list_instruction = Instruction.set_list(dest, start_reg, array_hint, 0)
+        {value_instructions ++ [set_list_instruction], ctx}
       end
 
     # Compile record fields
-    {record_instrs, ctx} =
-      Enum.reduce(record_fields, {[], ctx}, fn {key_expr, val_expr}, {instrs, ctx} ->
-        {val_instrs, val_reg, ctx} = gen_expr(val_expr, ctx)
+    {record_instructions, ctx} =
+      Enum.reduce(record_fields, {[], ctx}, fn {key_expr, val_expr}, {instructions, ctx} ->
+        {value_instructions, val_reg, ctx} = gen_expr(val_expr, ctx)
 
         case key_expr do
           %Expr.String{value: name} ->
-            {instrs ++ val_instrs ++ [Instruction.set_field(dest, name, val_reg)], ctx}
+            {instructions ++ value_instructions ++ [Instruction.set_field(dest, name, val_reg)],
+             ctx}
 
           _ ->
-            {key_instrs, key_reg, ctx} = gen_expr(key_expr, ctx)
+            {key_instructions, key_reg, ctx} = gen_expr(key_expr, ctx)
 
-            {instrs ++
-               val_instrs ++
-               key_instrs ++
+            {instructions ++
+               value_instructions ++
+               key_instructions ++
                [Instruction.set_table(dest, key_reg, val_reg)], ctx}
         end
       end)
 
-    {[new_table_instr] ++ list_instrs ++ record_instrs, dest, ctx}
+    {[new_table_instruction] ++ list_instructions ++ record_instructions, dest, ctx}
   end
 
   defp gen_expr(%Expr.Property{table: table_expr, field: field}, ctx) do
-    {table_instrs, table_reg, ctx} = gen_expr(table_expr, ctx)
+    {table_instructions, table_reg, ctx} = gen_expr(table_expr, ctx)
     dest = ctx.next_reg
     ctx = %{ctx | next_reg: dest + 1}
-    {table_instrs ++ [Instruction.get_field(dest, table_reg, field)], dest, ctx}
+    {table_instructions ++ [Instruction.get_field(dest, table_reg, field)], dest, ctx}
   end
 
   defp gen_expr(%Expr.Index{table: table_expr, key: key_expr}, ctx) do
-    {table_instrs, table_reg, ctx} = gen_expr(table_expr, ctx)
-    {key_instrs, key_reg, ctx} = gen_expr(key_expr, ctx)
+    {table_instructions, table_reg, ctx} = gen_expr(table_expr, ctx)
+    {key_instructions, key_reg, ctx} = gen_expr(key_expr, ctx)
     dest = ctx.next_reg
     ctx = %{ctx | next_reg: dest + 1}
-    {table_instrs ++ key_instrs ++ [Instruction.get_table(dest, table_reg, key_reg)], dest, ctx}
+
+    {table_instructions ++ key_instructions ++ [Instruction.get_table(dest, table_reg, key_reg)],
+     dest, ctx}
   end
 
   defp gen_expr(%Expr.MethodCall{object: obj_expr, method: method, args: args}, ctx) do
@@ -634,10 +655,10 @@ defmodule Lua.Compiler.Codegen do
     base_reg = ctx.next_reg
 
     # Compile the object expression
-    {obj_instrs, obj_reg, ctx} = gen_expr(obj_expr, ctx)
+    {object_instructions, obj_reg, ctx} = gen_expr(obj_expr, ctx)
 
     # self instruction: R[base+1] = obj, R[base] = obj["method"]
-    self_instr = Instruction.self_instr(base_reg, obj_reg, method)
+    self_instruction = Instruction.self_instr(base_reg, obj_reg, method)
 
     ctx = %{ctx | next_reg: base_reg + 2}
 
@@ -645,14 +666,14 @@ defmodule Lua.Compiler.Codegen do
     arg_count = length(args)
     ctx = %{ctx | next_reg: base_reg + 2 + arg_count}
 
-    {arg_instrs, arg_regs, ctx} =
-      Enum.reduce(args, {[], [], ctx}, fn arg, {instrs, regs, ctx} ->
-        {arg_instrs, arg_reg, ctx} = gen_expr(arg, ctx)
-        {instrs ++ arg_instrs, regs ++ [arg_reg], ctx}
+    {arg_instructions, arg_regs, ctx} =
+      Enum.reduce(args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
+        {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
+        {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
       end)
 
     # Move each arg result to its expected position (base+2+i)
-    move_instrs =
+    move_instructions =
       arg_regs
       |> Enum.with_index()
       |> Enum.flat_map(fn {arg_reg, i} ->
@@ -666,9 +687,13 @@ defmodule Lua.Compiler.Codegen do
       end)
 
     # Call with arg_count + 1 for self
-    call_instr = Instruction.call(base_reg, arg_count + 1, 1)
+    call_instruction = Instruction.call(base_reg, arg_count + 1, 1)
 
-    {obj_instrs ++ [self_instr] ++ arg_instrs ++ move_instrs ++ [call_instr], base_reg, ctx}
+    {object_instructions ++
+       [self_instruction] ++
+       arg_instructions ++
+       move_instructions ++
+       [call_instruction], base_reg, ctx}
   end
 
   # Stub for other expressions
