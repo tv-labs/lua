@@ -59,11 +59,37 @@ defmodule Lua.UtilTest do
     @tag :pending
     test "it pretty prints a stacktrace" do
       # Stacktrace formatting not yet implemented for new VM
+      # Original implementation:
+      # stacktrace = [
+      #   {nil, [], [file: "-no-file-", line: 1]},
+      #   {"foo", [], [file: "-no-file-", line: 2]},
+      #   {"-no-name-", [], [file: "-no-file-", line: 6]}
+      # ]
+      #
+      # assert Lua.Util.format_stacktrace(stacktrace, %{}) ==
+      #          String.trim("""
+      #          script line 2: <unknown function>()
+      #          script line 6: foo()
+      #          """)
     end
 
     @tag :pending
     test "it can show function arities" do
       # Stacktrace formatting not yet implemented for new VM
+      # Original implementation:
+      # stacktrace = [
+      #   {nil, ["dude"], [file: "-no-file-", line: 1]},
+      #   {"foo", [2, "dude"], [file: "-no-file-", line: 2]},
+      #   {"bar", [1], [file: "-no-file-", line: 8]},
+      #   {"-no-name-", [], [file: "-no-file-", line: 11]}
+      # ]
+      #
+      # assert Lua.Util.format_stacktrace(stacktrace, %{}) ==
+      #          String.trim("""
+      #          script line 2: <unknown function>(\"dude\")
+      #          script line 8: foo(2, "dude\")
+      #          script line 11: bar(1)
+      #          """)
     end
   end
 end

@@ -103,6 +103,20 @@ defmodule LuaTest do
 
     @tag :pending
     test "loading files with illegal tokens returns an error" do
+      # Error message format differs from Luerl
+      # Original implementation:
+      # path = test_file("illegal_token")
+      #
+      # error = """
+      # Failed to compile Lua!
+      #
+      # Line 1: syntax error near '''
+      # """
+      #
+      # assert_raise Lua.CompilerException, error, fn ->
+      #   Lua.load_file!(Lua.new(), path)
+      # end
+
       path = test_file("illegal_token")
 
       assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
@@ -123,6 +137,20 @@ defmodule LuaTest do
 
     @tag :pending
     test "loading files with syntax errors returns an error" do
+      # Error message format differs from Luerl
+      # Original implementation:
+      # path = test_file("syntax_error")
+      #
+      # error = """
+      # Failed to compile Lua!
+      #
+      # Line 1: syntax error before: ','
+      # """
+      #
+      # assert_raise Lua.CompilerException, error, fn ->
+      #   Lua.load_file!(Lua.new(), path)
+      # end
+
       path = test_file("syntax_error")
 
       assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
@@ -132,6 +160,24 @@ defmodule LuaTest do
 
     @tag :pending
     test "loading files with undefined functions returns an error" do
+      # Error message format differs from Luerl - Luerl raises CompilerException,
+      # new VM may raise RuntimeException since undefined functions are a runtime error
+      # Original implementation:
+      # path = test_file("undefined_function")
+      #
+      # error =
+      #   """
+      #   Failed to compile Lua!
+      #
+      #   undefined function nil
+      #
+      #   script line 1: <unknown function>()
+      #   """
+      #
+      # assert_raise Lua.CompilerException, error, fn ->
+      #   Lua.load_file!(Lua.new(), path)
+      # end
+
       path = test_file("undefined_function")
 
       assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
@@ -217,6 +263,34 @@ defmodule LuaTest do
     @tag :pending
     test "it can register functions that take callbacks that modify state" do
       # Requires pcall and function ref passing which needs more work
+      # Original implementation:
+      # require Logger
+      #
+      # lua = ~LUA"""
+      # state = {}
+      #
+      # function assignFoo()
+      #   state["foo"] = "bar"
+      # end
+      #
+      # function assignBar()
+      #   state["bar"] = "foo"
+      # end
+      #
+      # assignBar()
+      # run(assignFoo)
+      #
+      # return state
+      # """
+      #
+      # assert {[ret], _lua} =
+      #          Lua.new()
+      #          |> Lua.set!([:run], fn [callback], lua ->
+      #            Lua.call_function!(lua, callback, [])
+      #          end)
+      #          |> Lua.eval!(lua)
+      #
+      # assert Lua.Table.as_map(ret) == %{"foo" => "bar", "bar" => "foo"}
     end
 
     test "it can evaluate chunks" do
@@ -240,6 +314,18 @@ defmodule LuaTest do
     @tag :pending
     test "invalid functions raise" do
       # The exact error message format differs from Luerl
+      # Original implementation:
+      # lua = Lua.new()
+      #
+      # error = """
+      # Lua runtime error: undefined function nil
+      #
+      # script line 1: <unknown function>()
+      # """
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   Lua.eval!(lua, "bogus()")
+      # end
     end
 
     test "parsing errors raise" do
@@ -278,11 +364,52 @@ defmodule LuaTest do
     @tag :pending
     test "functions that raise errors still update state" do
       # Requires pcall
+      # Original implementation:
+      # assert {[2, false, "bang"], _} =
+      #          Lua.eval!("""
+      #          global = 1
+      #
+      #          local success, message =
+      #            pcall(function()
+      #              global = 2
+      #              error("bang")
+      #            end)
+      #
+      #          return global, success, message
+      #          """)
     end
 
     @tag :pending
     test "functions that raise errors from Elixir still update state" do
       # Requires pcall
+      # Original implementation:
+      # lua =
+      #   Lua.set!(Lua.new(), [:foo], fn [callback], lua ->
+      #     case Lua.call_function(lua, callback, []) do
+      #       {:ok, ret, lua} ->
+      #         {ret, lua}
+      #
+      #       {:error, reason, state} ->
+      #         {:error, reason, state}
+      #     end
+      #   end)
+      #
+      # assert {[2, false, "whoopsie"], _lua} =
+      #          Lua.eval!(lua, """
+      #          global = 1
+      #
+      #          success, message =
+      #            pcall(function()
+      #              return foo(function()
+      #                global = 2
+      #
+      #                error("whoopsie")
+      #
+      #                return "yay"
+      #              end)
+      #            end)
+      #          return global, success, message
+      #          """)
     end
   end
 
@@ -317,6 +444,9 @@ defmodule LuaTest do
     @tag :pending
     test "can call standard library functions" do
       # Requires string.lower stdlib
+      # Original implementation:
+      # assert {["hello robert"], %Lua{}} =
+      #          Lua.call_function!(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
     end
 
     test "can call user defined functions" do
@@ -333,11 +463,32 @@ defmodule LuaTest do
     @tag :pending
     test "can call references to functions" do
       # Requires decode: false to return function refs and then calling them
+      # Original implementation:
+      # {[func], lua} = Lua.eval!("return string.lower", decode: false)
+      #
+      # assert {["it works"], %Lua{}} = Lua.call_function!(lua, func, ["IT WORKS"])
     end
 
     @tag :pending
     test "it plays nicely with elixir function callbacks" do
       # Requires string.lower stdlib
+      # Original implementation:
+      # defmodule Callback do
+      #   use Lua.API, scope: "callback"
+      #
+      #   deflua callme(func), state do
+      #     Lua.call_function!(state, func, ["MAYBE"])
+      #   end
+      # end
+      #
+      # lua = Lua.new() |> Lua.load_api(Callback)
+      #
+      # assert {["maybe"], %Lua{}} =
+      #          Lua.eval!(lua, """
+      #          return callback.callme(function(value)
+      #            return string.lower(value)
+      #          end)
+      #          """)
     end
 
     test "you can return single values from the state variant of deflua" do
@@ -373,6 +524,42 @@ defmodule LuaTest do
     @tag :pending
     test "api functions can return errors" do
       # Requires pcall
+      # Original implementation:
+      # defmodule APIErrors do
+      #   use Lua.API, scope: "bang"
+      #
+      #   deflua ohno(), state do
+      #     {:error, "oh no", state}
+      #   end
+      #
+      #   deflua whoops() do
+      #     {:error, "whoops"}
+      #   end
+      # end
+      #
+      # lua = Lua.load_api(Lua.new(), APIErrors)
+      #
+      # assert {[2, false, "oh no!"], _lua} =
+      #          Lua.eval!(lua, """
+      #          global = 1
+      #          local success, message =
+      #            pcall(function()
+      #              global = 2
+      #              return bang.ohno()
+      #            end)
+      #          return global, success, message
+      #          """)
+      #
+      # assert {[2, false, "whoops!"], _lua} =
+      #          Lua.eval!(lua, """
+      #          global = 1
+      #          local success, message =
+      #            pcall(function()
+      #              global = 2
+      #              return bang.whoops()
+      #            end)
+      #          return global, success, message
+      #          """)
     end
 
     test "table handling in function return values" do
@@ -426,6 +613,21 @@ defmodule LuaTest do
     @tag :pending
     test "calling non-functions raises" do
       # Error message format differs
+      # Original implementation:
+      # {_, lua} =
+      #   Lua.eval!("""
+      #   foo = "bar"
+      #   """)
+      #
+      # error = """
+      # Lua runtime error: undefined function 'bar'
+      #
+      #
+      # """
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   Lua.call_function!(lua, :foo, [])
+      # end
     end
   end
 
@@ -465,6 +667,21 @@ defmodule LuaTest do
     @tag :pending
     test "function doesn't exist" do
       # Error message format differs from Luerl
+      # Original implementation:
+      # lua = Lua.new()
+      #
+      # error = """
+      # Lua runtime error: undefined function nil
+      #
+      # script line 2: <unknown function>("yuup")
+      # """
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   Lua.eval!(lua, """
+      #   local foo = 1 + 1
+      #   nope("yuup")
+      #   """)
+      # end
     end
 
     test "missing quote" do
@@ -486,16 +703,89 @@ defmodule LuaTest do
     @tag :pending
     test "method that references property" do
       # Requires setmetatable/__index
+      # Original implementation:
+      # lua = Lua.new()
+      #
+      # error = """
+      # Lua runtime error: undefined function 'a'
+      #
+      # "a" with arguments ("b")
+      # ^--- self is incorrect for object with keys "name"
+      #
+      #
+      # script line 15
+      #
+      # """
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   Lua.eval!(lua, """
+      #   Thing = {}
+      #   Thing.__index = Thing
+      #
+      #   function Thing.new(name)
+      #     local self = setmetatable({}, Thing)
+      #     self.name = name
+      #     return self
+      #   end
+      #
+      #   function Thing:name()
+      #     return self.name
+      #   end
+      #
+      #   local foo = Thing.new("a")
+      #   foo:name("b")
+      #   """)
+      # end
     end
 
     @tag :pending
     test "function doesn't exist in nested function" do
       # Error message format differs
+      # Original implementation:
+      # lua = Lua.new()
+      #
+      # error = """
+      # Lua runtime error: undefined function nil
+      #
+      # script line 2: <unknown function>(\"dude\")
+      # script line 6: foo(2, \"dude\")
+      # script line 9: bar(1)
+      # """
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   Lua.eval!(lua, """
+      #   function foo(thing, name)
+      #     doesnt_exist(name)
+      #   end
+      #
+      #   function bar(thing)
+      #     foo(thing + 1, "dude")
+      #   end
+      #
+      #   bar(1)
+      #   """)
+      # end
     end
 
     @tag :pending
     test "api function that doesn't exist" do
       # Error message format differs
+      # Original implementation:
+      # error = """
+      # Lua runtime error: invalid index "nope"
+      #
+      # script line 5: thing()
+      # """
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   Lua.eval!("""
+      #   function thing()
+      #     module.nope()
+      #   end
+      #
+      #   thing()
+      #   """)
+      # end
     end
 
     test "erlang function called with the wrong arity" do
@@ -547,6 +837,18 @@ defmodule LuaTest do
     @tag :pending
     test "arithmetic exceptions are handled" do
       # Division by zero handling differs in new VM
+      # Original implementation:
+      # error = """
+      # Lua runtime error: bad arithmetic 5 / 0
+      #
+      #
+      # """
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   lua = Lua.new()
+      #
+      #   Lua.eval!(lua, "return 5 / 0")
+      # end
     end
   end
 
@@ -784,11 +1086,68 @@ defmodule LuaTest do
     @tag :pending
     test "it can return userdata", %{lua: _lua} do
       # Requires userdata support
+      # Original implementation:
+      # assert {[{:userdata, {:not, :valid, :lua}}], _} =
+      #          Lua.eval!(lua, "return example.userdata()")
     end
 
     @tag :pending
     test "userdata must be encoded" do
       # Requires userdata support
+      # Original implementation:
+      # get_random_no_encode = fn _args, lua ->
+      #   {[{:userdata, "private data"}], lua}
+      # end
+      #
+      # get_random = fn _args, lua ->
+      #   Lua.encode!(lua, {:userdata, "private data"})
+      # end
+      #
+      # return_random = fn [data], state ->
+      #   {[data], state}
+      # end
+      #
+      # lua =
+      #   Lua.new()
+      #   |> Lua.set!([:get_random], get_random)
+      #   |> Lua.set!([:get_random_no_encode], get_random_no_encode)
+      #   |> Lua.set!([:return_random], return_random)
+      #
+      # error_message =
+      #   "Lua runtime error: get_random_no_encode() failed, deflua functions must return encoded data, got [userdata: \"private data\"]"
+      #
+      # for decode? <- [true, false] do
+      #   assert_raise Lua.RuntimeException, error_message, fn ->
+      #     Lua.eval!(
+      #       lua,
+      #       """
+      #       local userdata = get_random_no_encode()
+      #       return return_random(userdata)
+      #       """,
+      #       decode: decode?
+      #     )
+      #   end
+      # end
+      #
+      # assert {[{:usdref, _}], _state} =
+      #          Lua.eval!(
+      #            lua,
+      #            """
+      #            local userdata = get_random()
+      #            return return_random(userdata)
+      #            """,
+      #            decode: false
+      #          )
+      #
+      # assert {[{:userdata, "private data"}], _state} =
+      #          Lua.eval!(
+      #            lua,
+      #            """
+      #            local userdata = get_random()
+      #            return return_random(userdata)
+      #            """,
+      #            decode: true
+      #          )
     end
 
     test "it can return binary data from Elixir", %{lua: lua} do
@@ -801,16 +1160,46 @@ defmodule LuaTest do
     @tag :pending
     test "it can find lua code when modifying package.path" do
       # Requires require/package support
+      # Original implementation:
+      # lua = Lua.new(sandboxed: [])
+      #
+      # assert {["required file successfully"], _} =
+      #          Lua.eval!(lua, """
+      #          package.path = "./test/fixtures/?.lua"
+      #
+      #          return require("test_require")
+      #          """)
     end
 
     @tag :pending
     test "we can use set_lua_paths/2 to add the paths" do
       # Requires require/package support
+      # Original implementation:
+      # lua = Lua.new(sandboxed: [])
+      #
+      # lua = Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
+      #
+      # assert {["required file successfully"], _} =
+      #          Lua.eval!(lua, """
+      #          return require("test_require")
+      #          """)
     end
 
     @tag :pending
     test "set_lua_paths/2 raises if package is sandboxed" do
       # Requires require/package support
+      # Original implementation:
+      # lua = Lua.new()
+      #
+      # message = """
+      # Lua runtime error: invalid index "package.path"
+      #
+      #
+      # """
+      #
+      # assert_raise Lua.RuntimeException, message, fn ->
+      #   Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
+      # end
     end
   end
 
