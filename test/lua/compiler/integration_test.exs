@@ -1230,7 +1230,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast)
 
-      assert_raise RuntimeError, "attempt to call a nil value", fn ->
+      assert_raise Lua.VM.TypeError, ~r/attempt to call a nil value/, fn ->
         VM.execute(proto)
       end
     end
@@ -1244,7 +1244,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast)
 
-      assert_raise RuntimeError, "attempt to call a number value", fn ->
+      assert_raise Lua.VM.TypeError, ~r/attempt to call a number value/, fn ->
         VM.execute(proto)
       end
     end
@@ -1338,7 +1338,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast)
 
-      assert_raise Lua.VM.LuaError, "something went wrong", fn ->
+      assert_raise Lua.VM.RuntimeError, ~r/runtime error: something went wrong/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -1357,7 +1357,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast)
 
-      assert_raise Lua.VM.LuaError, "expected true", fn ->
+      assert_raise Lua.VM.AssertionError, ~r/assertion failed: expected true/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -1368,7 +1368,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast)
 
-      assert_raise Lua.VM.LuaError, "assertion failed!", fn ->
+      assert_raise Lua.VM.AssertionError, ~r/assertion failed: assertion failed!/, fn ->
         VM.execute(proto, state)
       end
     end
