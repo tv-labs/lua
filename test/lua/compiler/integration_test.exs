@@ -1454,5 +1454,210 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
       assert {:ok, [3], _state} = VM.execute(proto, state)
     end
+
+    test "next() returns first key for non-empty table", %{state: state} do
+      code = """
+      local t = {a = 1}
+      local k = next(t)
+      return k
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, ["a"], _state} = VM.execute(proto, state)
+    end
+
+    test "next() returns nil for empty table", %{state: state} do
+      code = """
+      local t = {}
+      local k = next(t)
+      return k
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [nil], _state} = VM.execute(proto, state)
+    end
+
+    test "ipairs() iterates sequential keys", %{state: state} do
+      code = """
+      local sum = 0
+      for i, v in ipairs({10, 20, 30}) do
+        sum = sum + v
+      end
+      return sum
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [60], _state} = VM.execute(proto, state)
+    end
+
+    test "pairs() iterates all entries", %{state: state} do
+      code = """
+      local sum = 0
+      for k, v in pairs({a = 1, b = 2}) do
+        sum = sum + v
+      end
+      return sum
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [3], _state} = VM.execute(proto, state)
+    end
+
+    test "pairs() on empty table does nothing", %{state: state} do
+      code = """
+      local count = 0
+      for k, v in pairs({}) do
+        count = count + 1
+      end
+      return count
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [0], _state} = VM.execute(proto, state)
+    end
+  end
+
+  describe "multiple returns" do
+    test "return multiple values" do
+      code = "return 1, 2, 3"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1, 2, 3], _state} = VM.execute(proto)
+    end
+
+    test "return multiple expressions" do
+      code = "return 1 + 2, 3 * 4"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [3, 12], _state} = VM.execute(proto)
+    end
+  end
+
+  describe "varargs" do
+    test "function(...) return ... end" do
+      code = """
+      local f = function(...)
+        return ...
+      end
+      return f(1, 2, 3)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1, 2, 3], _state} = VM.execute(proto)
+    end
+
+    test "function(a, b, ...) return ... end" do
+      code = """
+      local f = function(a, b, ...)
+        return ...
+      end
+      return f(1, 2, 3, 4)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [3, 4], _state} = VM.execute(proto)
+    end
+
+    test "vararg in local assignment" do
+      code = """
+      local f = function(...)
+        local x = ...
+        return x
+      end
+      return f(1, 2, 3)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1], _state} = VM.execute(proto)
+    end
+  end
+
+  describe "generic for loops" do
+    setup do
+      state = Lua.VM.Stdlib.install(VM.State.new())
+      {:ok, state: state}
+    end
+
+    test "for i, v in ipairs({10, 20, 30})", %{state: state} do
+      code = """
+      local sum = 0
+      for i, v in ipairs({10, 20, 30}) do
+        sum = sum + v
+      end
+      return sum
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [60], _state} = VM.execute(proto, state)
+    end
+
+    test "for k, v in pairs({a=1, b=2})", %{state: state} do
+      code = """
+      local sum = 0
+      for k, v in pairs({a = 1, b = 2}) do
+        sum = sum + v
+      end
+      return sum
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [3], _state} = VM.execute(proto, state)
+    end
+
+    test "generic for on empty table", %{state: state} do
+      code = """
+      local count = 0
+      for k, v in pairs({}) do
+        count = count + 1
+      end
+      return count
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [0], _state} = VM.execute(proto, state)
+    end
+
+    test "ipairs collects indices and values", %{state: state} do
+      code = """
+      local keys = 0
+      local vals = 0
+      for i, v in ipairs({10, 20, 30}) do
+        keys = keys + i
+        vals = vals + v
+      end
+      return keys, vals
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [6, 60], _state} = VM.execute(proto, state)
+    end
+
+    test "generic for with single variable", %{state: state} do
+      code = """
+      local count = 0
+      for k in pairs({a = 1, b = 2, c = 3}) do
+        count = count + 1
+      end
+      return count
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [3], _state} = VM.execute(proto, state)
+    end
   end
 end

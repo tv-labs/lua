@@ -30,7 +30,8 @@ defmodule Lua.Compiler.Prototype do
             is_vararg: false,
             max_registers: 0,
             source: <<"-no-source-">>,
-            lines: {0, 0}
+            lines: {0, 0},
+            varargs: []
 
   @doc """
   Creates a new prototype with the given options.

@@ -24,6 +24,9 @@ defmodule Lua.VM.Stdlib do
     |> State.register_function("rawset", &lua_rawset/2)
     |> State.register_function("rawlen", &lua_rawlen/2)
     |> State.register_function("rawequal", &lua_rawequal/2)
+    |> State.register_function("next", &lua_next/2)
+    |> State.register_function("pairs", &lua_pairs/2)
+    |> State.register_function("ipairs", &lua_ipairs/2)
   end
 
   # type(v) — returns the type of v as a string
@@ -130,4 +133,73 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp lua_rawequal(_, state), do: {[false], state}
+
+  # next(table [, key]) — returns next key-value pair after key
+  defp lua_next([{:tref, id} | rest], state) do
+    key = List.first(rest)
+    table = Map.fetch!(state.tables, id)
+
+    case find_next_entry(table.data, key) do
+      nil -> {[nil, nil], state}
+      {k, v} -> {[k, v], state}
+    end
+  end
+
+  defp lua_next(_, state), do: {[nil, nil], state}
+
+  defp find_next_entry(data, nil) do
+    # Return the first entry
+    iter = :maps.iterator(data)
+
+    case :maps.next(iter) do
+      :none -> nil
+      {k, v, _} -> {k, v}
+    end
+  end
+
+  defp find_next_entry(data, key) do
+    # Walk the iterator until we find key, then return the next entry
+    iter = :maps.iterator(data)
+    find_after_key(iter, key)
+  end
+
+  defp find_after_key(iter, key) do
+    case :maps.next(iter) do
+      :none ->
+        nil
+
+      {^key, _, next_iter} ->
+        case :maps.next(next_iter) do
+          :none -> nil
+          {k, v, _} -> {k, v}
+        end
+
+      {_, _, next_iter} ->
+        find_after_key(next_iter, key)
+    end
+  end
+
+  # pairs(table) — returns next, table, nil
+  defp lua_pairs([{:tref, _} = tref | _], state) do
+    next_func = Map.fetch!(state.globals, "next")
+    {[next_func, tref, nil], state}
+  end
+
+  # ipairs(table) — returns iterator function, table, 0
+  defp lua_ipairs([{:tref, _} = tref | _], state) do
+    iterator =
+      {:native_func,
+       fn [table_ref, index], state ->
+         i = index + 1
+         {:tref, id} = table_ref
+         table = Map.fetch!(state.tables, id)
+
+         case Map.get(table.data, i) do
+           nil -> {[nil], state}
+           v -> {[i, v], state}
+         end
+       end}
+
+    {[iterator, tref, 0], state}
+  end
 end
