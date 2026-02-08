@@ -354,7 +354,8 @@ defmodule Lua.Compiler.Scope do
                 current_func = %{
                   current_func
                   | upvalue_descriptors:
-                      current_func.upvalue_descriptors ++ [{:parent_upvalue, parent_upvalue_index, name}]
+                      current_func.upvalue_descriptors ++
+                        [{:parent_upvalue, parent_upvalue_index, name}]
                 }
 
                 state = %{
@@ -376,7 +377,8 @@ defmodule Lua.Compiler.Scope do
             current_func = %{
               current_func
               | upvalue_descriptors:
-                  current_func.upvalue_descriptors ++ [{:parent_upvalue, parent_upvalue_index, name}]
+                  current_func.upvalue_descriptors ++
+                    [{:parent_upvalue, parent_upvalue_index, name}]
             }
 
             state = %{
@@ -397,7 +399,11 @@ defmodule Lua.Compiler.Scope do
           | upvalue_descriptors: current_func.upvalue_descriptors ++ [{:parent_local, reg, name}]
         }
 
-        state = %{state | functions: Map.put(state.functions, state.current_function, current_func)}
+        state = %{
+          state
+          | functions: Map.put(state.functions, state.current_function, current_func)
+        }
+
         {:ok, upvalue_index, state}
     end
   end

@@ -50,7 +50,13 @@ defmodule Lua.VM.Executor do
   end
 
   # get_upvalue
-  defp do_execute([{:get_upvalue, dest, index} | rest], regs, {upvalues, _} = upvalue_context, proto, state) do
+  defp do_execute(
+         [{:get_upvalue, dest, index} | rest],
+         regs,
+         {upvalues, _} = upvalue_context,
+         proto,
+         state
+       ) do
     cell_ref = Enum.at(upvalues, index)
     value = Map.get(state.upvalue_cells, cell_ref)
     regs = put_elem(regs, dest, value)
@@ -234,7 +240,13 @@ defmodule Lua.VM.Executor do
   end
 
   # closure - create a closure value from a prototype, capturing upvalues
-  defp do_execute([{:closure, dest, proto_index} | rest], regs, {upvalues, open_upvalues}, proto, state) do
+  defp do_execute(
+         [{:closure, dest, proto_index} | rest],
+         regs,
+         {upvalues, open_upvalues},
+         proto,
+         state
+       ) do
     nested_proto = Enum.at(proto.prototypes, proto_index)
 
     # Capture upvalues based on descriptors, reusing open upvalue cells when available
@@ -266,7 +278,13 @@ defmodule Lua.VM.Executor do
   end
 
   # call - invoke a function value
-  defp do_execute([{:call, base, arg_count, result_count} | rest], regs, upvalue_context, proto, state) do
+  defp do_execute(
+         [{:call, base, arg_count, result_count} | rest],
+         regs,
+         upvalue_context,
+         proto,
+         state
+       ) do
     func_value = elem(regs, base)
 
     # Collect arguments from registers base+1..base+arg_count
