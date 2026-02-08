@@ -63,32 +63,13 @@ defmodule Lua.Compiler.Codegen do
   end
 
   defp gen_statement(%Statement.Assign{targets: targets, values: values}, ctx) do
-    # For now, handle simple case: single target, single value
-    # TODO: handle multiple assignment and table indexing
     case {targets, values} do
-      {[%Expr.Var{} = target_var], [value]} ->
+      {[target], [value]} ->
         {value_instrs, value_reg, ctx} = gen_expr(value, ctx)
 
-        # Look up the target's classification from scope
-        store_instr =
-          case Map.get(ctx.scope.var_map, target_var) do
-            {:register, local_reg} ->
-              if local_reg == value_reg, do: [], else: [Instruction.move(local_reg, value_reg)]
+        {store_instrs, ctx} = gen_assign_target(target, value_reg, ctx)
 
-            {:captured_local, local_reg} ->
-              [Instruction.set_open_upvalue(local_reg, value_reg)]
-
-            {:upvalue, index} ->
-              [Instruction.set_upvalue(index, value_reg)]
-
-            {:global, name} ->
-              [Instruction.set_global(name, value_reg)]
-
-            nil ->
-              [Instruction.set_global(target_var.name, value_reg)]
-          end
-
-        {value_instrs ++ store_instr, ctx}
+        {value_instrs ++ store_instrs, ctx}
 
       _ ->
         # Unsupported pattern for now
@@ -254,6 +235,40 @@ defmodule Lua.Compiler.Codegen do
 
   # Stub for other statements
   defp gen_statement(_stmt, ctx), do: {[], ctx}
+
+  # Helpers for assignment target code generation
+  defp gen_assign_target(%Expr.Var{} = target_var, value_reg, ctx) do
+    store_instr =
+      case Map.get(ctx.scope.var_map, target_var) do
+        {:register, local_reg} ->
+          if local_reg == value_reg, do: [], else: [Instruction.move(local_reg, value_reg)]
+
+        {:captured_local, local_reg} ->
+          [Instruction.set_open_upvalue(local_reg, value_reg)]
+
+        {:upvalue, index} ->
+          [Instruction.set_upvalue(index, value_reg)]
+
+        {:global, name} ->
+          [Instruction.set_global(name, value_reg)]
+
+        nil ->
+          [Instruction.set_global(target_var.name, value_reg)]
+      end
+
+    {store_instr, ctx}
+  end
+
+  defp gen_assign_target(%Expr.Property{table: table_expr, field: field}, value_reg, ctx) do
+    {table_instrs, table_reg, ctx} = gen_expr(table_expr, ctx)
+    {table_instrs ++ [Instruction.set_field(table_reg, field, value_reg)], ctx}
+  end
+
+  defp gen_assign_target(%Expr.Index{table: table_expr, key: key_expr}, value_reg, ctx) do
+    {table_instrs, table_reg, ctx} = gen_expr(table_expr, ctx)
+    {key_instrs, key_reg, ctx} = gen_expr(key_expr, ctx)
+    {table_instrs ++ key_instrs ++ [Instruction.set_table(table_reg, key_reg, value_reg)], ctx}
+  end
 
   # Helper functions for if statement code generation
   defp gen_elseifs_and_else([], nil, ctx) do
@@ -535,6 +550,125 @@ defmodule Lua.Compiler.Codegen do
 
     # Result will be in base_reg
     {func_instrs ++ move_func ++ arg_instrs ++ move_instrs ++ [call_instr], base_reg, ctx}
+  end
+
+  defp gen_expr(%Expr.Table{fields: fields}, ctx) do
+    dest = ctx.next_reg
+    ctx = %{ctx | next_reg: dest + 1}
+
+    # Separate list and record fields
+    list_fields = for {:list, val} <- fields, do: val
+    record_fields = for {:record, k, v} <- fields, do: {k, v}
+
+    array_hint = length(list_fields)
+    hash_hint = length(record_fields)
+
+    new_table_instr = Instruction.new_table(dest, array_hint, hash_hint)
+
+    # Compile list fields into consecutive temp registers, then emit set_list
+    {list_instrs, ctx} =
+      if list_fields == [] do
+        {[], ctx}
+      else
+        # Reserve contiguous slots for the list values
+        start_reg = ctx.next_reg
+        ctx = %{ctx | next_reg: start_reg + array_hint}
+
+        {val_instrs, ctx} =
+          list_fields
+          |> Enum.with_index()
+          |> Enum.reduce({[], ctx}, fn {val_expr, i}, {instrs, ctx} ->
+            target_reg = start_reg + i
+            {val_instrs, val_reg, ctx} = gen_expr(val_expr, ctx)
+
+            move =
+              if val_reg == target_reg, do: [], else: [Instruction.move(target_reg, val_reg)]
+
+            {instrs ++ val_instrs ++ move, ctx}
+          end)
+
+        set_list_instr = Instruction.set_list(dest, start_reg, array_hint, 0)
+        {val_instrs ++ [set_list_instr], ctx}
+      end
+
+    # Compile record fields
+    {record_instrs, ctx} =
+      Enum.reduce(record_fields, {[], ctx}, fn {key_expr, val_expr}, {instrs, ctx} ->
+        {val_instrs, val_reg, ctx} = gen_expr(val_expr, ctx)
+
+        case key_expr do
+          %Expr.String{value: name} ->
+            {instrs ++ val_instrs ++ [Instruction.set_field(dest, name, val_reg)], ctx}
+
+          _ ->
+            {key_instrs, key_reg, ctx} = gen_expr(key_expr, ctx)
+
+            {instrs ++
+               val_instrs ++
+               key_instrs ++
+               [Instruction.set_table(dest, key_reg, val_reg)], ctx}
+        end
+      end)
+
+    {[new_table_instr] ++ list_instrs ++ record_instrs, dest, ctx}
+  end
+
+  defp gen_expr(%Expr.Property{table: table_expr, field: field}, ctx) do
+    {table_instrs, table_reg, ctx} = gen_expr(table_expr, ctx)
+    dest = ctx.next_reg
+    ctx = %{ctx | next_reg: dest + 1}
+    {table_instrs ++ [Instruction.get_field(dest, table_reg, field)], dest, ctx}
+  end
+
+  defp gen_expr(%Expr.Index{table: table_expr, key: key_expr}, ctx) do
+    {table_instrs, table_reg, ctx} = gen_expr(table_expr, ctx)
+    {key_instrs, key_reg, ctx} = gen_expr(key_expr, ctx)
+    dest = ctx.next_reg
+    ctx = %{ctx | next_reg: dest + 1}
+    {table_instrs ++ key_instrs ++ [Instruction.get_table(dest, table_reg, key_reg)], dest, ctx}
+  end
+
+  defp gen_expr(%Expr.MethodCall{object: obj_expr, method: method, args: args}, ctx) do
+    # Method call: obj:method(a, b)
+    # Layout: R[base] = obj["method"], R[base+1] = obj (self), R[base+2..] = args
+    base_reg = ctx.next_reg
+
+    # Compile the object expression
+    {obj_instrs, obj_reg, ctx} = gen_expr(obj_expr, ctx)
+
+    # self instruction: R[base+1] = obj, R[base] = obj["method"]
+    self_instr = Instruction.self_instr(base_reg, obj_reg, method)
+
+    ctx = %{ctx | next_reg: base_reg + 2}
+
+    # Compile arguments into temp registers above the arg window
+    arg_count = length(args)
+    ctx = %{ctx | next_reg: base_reg + 2 + arg_count}
+
+    {arg_instrs, arg_regs, ctx} =
+      Enum.reduce(args, {[], [], ctx}, fn arg, {instrs, regs, ctx} ->
+        {arg_instrs, arg_reg, ctx} = gen_expr(arg, ctx)
+        {instrs ++ arg_instrs, regs ++ [arg_reg], ctx}
+      end)
+
+    # Move each arg result to its expected position (base+2+i)
+    move_instrs =
+      arg_regs
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {arg_reg, i} ->
+        expected_reg = base_reg + 2 + i
+
+        if arg_reg == expected_reg do
+          []
+        else
+          [Instruction.move(expected_reg, arg_reg)]
+        end
+      end)
+
+    # Call with arg_count + 1 for self
+    call_instr = Instruction.call(base_reg, arg_count + 1, 1)
+
+    {obj_instrs ++ [self_instr] ++ arg_instrs ++ move_instrs ++ [call_instr], base_reg, ctx}
   end
 
   # Stub for other expressions

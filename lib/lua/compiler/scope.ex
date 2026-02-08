@@ -81,8 +81,18 @@ defmodule Lua.Compiler.Scope do
   defp resolve_statement(%Statement.Assign{targets: targets, values: values}, state) do
     # Resolve all value expressions first
     state = Enum.reduce(values, state, &resolve_expr/2)
-    # Then resolve all target expressions (for table assignments, etc.)
-    Enum.reduce(targets, state, &resolve_expr/2)
+    # Then resolve all target expressions (variables, table fields, index expressions)
+    Enum.reduce(targets, state, fn
+      %Expr.Index{table: table, key: key}, state ->
+        state = resolve_expr(table, state)
+        resolve_expr(key, state)
+
+      %Expr.Property{table: table}, state ->
+        resolve_expr(table, state)
+
+      target, state ->
+        resolve_expr(target, state)
+    end)
   end
 
   defp resolve_statement(%Statement.Local{names: names, values: values}, state) do
@@ -308,6 +318,31 @@ defmodule Lua.Compiler.Scope do
     # Resolve the function expression
     state = resolve_expr(func, state)
     # Resolve all arguments
+    Enum.reduce(args, state, &resolve_expr/2)
+  end
+
+  defp resolve_expr(%Expr.Table{fields: fields}, state) do
+    Enum.reduce(fields, state, fn
+      {:list, val_expr}, state ->
+        resolve_expr(val_expr, state)
+
+      {:record, key_expr, val_expr}, state ->
+        state = resolve_expr(key_expr, state)
+        resolve_expr(val_expr, state)
+    end)
+  end
+
+  defp resolve_expr(%Expr.Index{table: table, key: key}, state) do
+    state = resolve_expr(table, state)
+    resolve_expr(key, state)
+  end
+
+  defp resolve_expr(%Expr.Property{table: table}, state) do
+    resolve_expr(table, state)
+  end
+
+  defp resolve_expr(%Expr.MethodCall{object: object, args: args}, state) do
+    state = resolve_expr(object, state)
     Enum.reduce(args, state, &resolve_expr/2)
   end
 

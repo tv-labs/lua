@@ -488,23 +488,156 @@ defmodule Lua.VM.Executor do
   end
 
   defp do_execute([{:length, dest, source} | rest], regs, upvalues, proto, state) do
-    # For now, handle string length. Will add table/list length later
     value = elem(regs, source)
 
     result =
-      cond do
-        is_binary(value) -> byte_size(value)
-        is_list(value) -> length(value)
-        true -> 0
+      case value do
+        {:tref, id} ->
+          table = Map.fetch!(state.tables, id)
+          compute_sequence_length(table.data)
+
+        v when is_binary(v) ->
+          byte_size(v)
+
+        v when is_list(v) ->
+          length(v)
+
+        _ ->
+          0
       end
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
+  # new_table
+  defp do_execute(
+         [{:new_table, dest, _array_hint, _hash_hint} | rest],
+         regs,
+         upvalues,
+         proto,
+         state
+       ) do
+    {tref, state} = State.alloc_table(state)
+    regs = put_elem(regs, dest, tref)
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
+  # get_table — R[dest] = table[R[key_reg]]
+  defp do_execute([{:get_table, dest, table_reg, key_reg} | rest], regs, upvalues, proto, state) do
+    {:tref, id} = elem(regs, table_reg)
+    key = elem(regs, key_reg)
+    table = Map.fetch!(state.tables, id)
+    value = Map.get(table.data, key)
+    regs = put_elem(regs, dest, value)
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
+  # set_table — table[R[key_reg]] = R[value_reg]
+  defp do_execute(
+         [{:set_table, table_reg, key_reg, value_reg} | rest],
+         regs,
+         upvalues,
+         proto,
+         state
+       ) do
+    {:tref, id} = elem(regs, table_reg)
+    key = elem(regs, key_reg)
+    value = elem(regs, value_reg)
+
+    state =
+      State.update_table(state, {:tref, id}, fn table ->
+        %{table | data: Map.put(table.data, key, value)}
+      end)
+
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
+  # get_field — R[dest] = table[name] (string key literal)
+  defp do_execute([{:get_field, dest, table_reg, name} | rest], regs, upvalues, proto, state) do
+    {:tref, id} = elem(regs, table_reg)
+    table = Map.fetch!(state.tables, id)
+    value = Map.get(table.data, name)
+    regs = put_elem(regs, dest, value)
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
+  # set_field — table[name] = R[value_reg]
+  defp do_execute(
+         [{:set_field, table_reg, name, value_reg} | rest],
+         regs,
+         upvalues,
+         proto,
+         state
+       ) do
+    {:tref, id} = elem(regs, table_reg)
+    value = elem(regs, value_reg)
+
+    state =
+      State.update_table(state, {:tref, id}, fn table ->
+        %{table | data: Map.put(table.data, name, value)}
+      end)
+
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
+  # set_list — bulk store: table[offset+i] = R[start+i-1] for i in 1..count
+  defp do_execute(
+         [{:set_list, table_reg, start, count, offset} | rest],
+         regs,
+         upvalues,
+         proto,
+         state
+       ) do
+    {:tref, id} = elem(regs, table_reg)
+
+    state =
+      State.update_table(state, {:tref, id}, fn table ->
+        new_data =
+          Enum.reduce(1..count, table.data, fn i, data ->
+            value = elem(regs, start + i - 1)
+            Map.put(data, offset + i, value)
+          end)
+
+        %{table | data: new_data}
+      end)
+
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
+  # self — R[base+1] = R[obj_reg], R[base] = R[obj_reg]["method"]
+  defp do_execute(
+         [{:self, base, obj_reg, method_name} | rest],
+         regs,
+         upvalues,
+         proto,
+         state
+       ) do
+    obj = elem(regs, obj_reg)
+    {:tref, id} = obj
+    table = Map.fetch!(state.tables, id)
+    func = Map.get(table.data, method_name)
+    regs = put_elem(regs, base + 1, obj)
+    regs = put_elem(regs, base, func)
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
   # Catch-all for unimplemented instructions
   defp do_execute([instr | _rest], _regs, _upvalues, _proto, _state) do
     raise "Unimplemented instruction: #{inspect(instr)}"
+  end
+
+  # Find the largest N where keys 1..N are all present (Lua sequence length)
+  defp compute_sequence_length(data) do
+    compute_sequence_length(data, 1)
+  end
+
+  defp compute_sequence_length(data, n) do
+    if Map.has_key?(data, n) do
+      compute_sequence_length(data, n + 1)
+    else
+      n - 1
+    end
   end
 
   # Helper for Lua truthiness
