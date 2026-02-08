@@ -323,10 +323,23 @@ defmodule Lua.VM.Executor do
           {results, state}
 
         {:native_func, fun} ->
-          fun.(args, state)
+          case fun.(args, state) do
+            {results, %State{} = new_state} when is_list(results) ->
+              {results, new_state}
+
+            {results, %State{} = new_state} ->
+              {List.wrap(results), new_state}
+
+            other ->
+              raise "native function returned invalid result: #{inspect(other)}, " <>
+                      "expected {results, state}"
+          end
+
+        nil ->
+          raise "attempt to call a nil value"
 
         other ->
-          raise "attempt to call a #{inspect(other)} value"
+          raise "attempt to call a #{lua_type_name(other)} value"
       end
 
     # Place results into caller registers starting at base
@@ -644,4 +657,14 @@ defmodule Lua.VM.Executor do
   defp truthy?(nil), do: false
   defp truthy?(false), do: false
   defp truthy?(_), do: true
+
+  # Helper for Lua type names in error messages
+  defp lua_type_name(nil), do: "nil"
+  defp lua_type_name(v) when is_boolean(v), do: "boolean"
+  defp lua_type_name(v) when is_number(v), do: "number"
+  defp lua_type_name(v) when is_binary(v), do: "string"
+  defp lua_type_name({:tref, _}), do: "table"
+  defp lua_type_name({:lua_closure, _, _}), do: "function"
+  defp lua_type_name({:native_func, _}), do: "function"
+  defp lua_type_name(_), do: "userdata"
 end
