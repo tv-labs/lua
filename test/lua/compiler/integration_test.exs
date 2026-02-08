@@ -850,8 +850,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [20]
     end
 
-    @tag :skip
-    test "function called multiple times (requires upvalues)" do
+    test "function called multiple times" do
       code = """
       local counter = 0
       local inc = function()
@@ -927,8 +926,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [7]
     end
 
-    @tag :skip
-    test "function returning function (requires upvalues)" do
+    test "function returning function" do
       code = """
       local make_adder = function(n)
         return function(x)
