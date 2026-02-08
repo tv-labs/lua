@@ -944,4 +944,185 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [15]
     end
   end
+
+  describe "tables" do
+    test "empty table" do
+      code = """
+      local t = {}
+      return t
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [{:tref, _id}], _state} = VM.execute(proto)
+    end
+
+    test "array access" do
+      code = """
+      local t = {1, 2, 3}
+      return t[2]
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [2]
+    end
+
+    test "field access" do
+      code = """
+      local t = {a = 1, b = 2}
+      return t.a
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [1]
+    end
+
+    test "field assignment" do
+      code = """
+      local t = {}
+      t.x = 10
+      return t.x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [10]
+    end
+
+    test "index assignment" do
+      code = """
+      local t = {}
+      t[1] = "a"
+      return t[1]
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == ["a"]
+    end
+
+    test "table length" do
+      code = """
+      local t = {1, 2, 3}
+      return #t
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [3]
+    end
+
+    test "mixed constructor" do
+      code = """
+      local t = {1, 2, 3, a = 4, ["b"] = 5}
+      return t[1] + t[2] + t[3] + t.a + t["b"]
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [15]
+    end
+
+    test "table as function argument and return value" do
+      code = """
+      local get_x = function(t)
+        return t.x
+      end
+      local t = {x = 42}
+      return get_x(t)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [42]
+    end
+
+    test "nested tables" do
+      code = """
+      local t = {inner = {x = 1}}
+      return t.inner.x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [1]
+    end
+
+    test "table reference semantics" do
+      code = """
+      local a = {}
+      local b = a
+      b.x = 1
+      return a.x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [1]
+    end
+
+    test "method call" do
+      code = """
+      local obj = {}
+      obj.greet = function(self, name)
+        return name
+      end
+      return obj:greet("world")
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == ["world"]
+    end
+
+    test "computed key access" do
+      code = """
+      local t = {}
+      local key = "hello"
+      t[key] = 99
+      return t[key]
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [99]
+    end
+
+    test "table length with gaps" do
+      code = """
+      local t = {1, 2, 3}
+      return #t
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == [3]
+    end
+  end
 end
