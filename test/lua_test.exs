@@ -42,6 +42,15 @@ defmodule LuaTest do
 
   describe "~LUA" do
     test "it can validate code at compile time" do
+      # Original implementation (exact Luerl error message):
+      # message = """
+      # Failed to compile Lua!
+      #
+      # Line 1: syntax error near '\"'
+      # """
+      #
+      # assert_raise Lua.CompilerException, message, fn ->
+
       assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
         Code.compile_quoted(
           quote do
@@ -62,6 +71,15 @@ defmodule LuaTest do
     end
 
     test "it can handle multi-line programs" do
+      # Original implementation (exact Luerl error message):
+      # message = """
+      # Failed to compile Lua!
+      #
+      # Line 3: syntax error before: '&'
+      # """
+      #
+      # assert_raise Lua.CompilerException, message, fn ->
+
       assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
         Code.compile_quoted(
           quote do
@@ -300,6 +318,11 @@ defmodule LuaTest do
     end
 
     test "chunks return values are conditionally decoded" do
+      # Original implementation (Luerl returned sorted keyword lists):
+      # assert {[[{"a", 1}, {"b", 2}]], _} = Lua.eval!(chunk)
+      # assert {[[{"a", 1}, {"b", 2}]], _} = Lua.eval!(chunk, decode: true)
+      # assert {[{:tref, _}], _} = Lua.eval!(chunk, decode: false)
+
       assert %Lua.Chunk{} = chunk = ~LUA[return { a = 1, b = 2 }]c
 
       {[decoded], _} = Lua.eval!(chunk)
@@ -329,6 +352,7 @@ defmodule LuaTest do
     end
 
     test "parsing errors raise" do
+      # Original implementation used same regex pattern
       lua = Lua.new()
 
       assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
@@ -342,6 +366,7 @@ defmodule LuaTest do
     end
 
     test "sandboxed functions show a nice error message" do
+      # Original implementation used same message format
       lua = Lua.new()
 
       message = "Lua runtime error: os.exit(_) is sandboxed"
@@ -354,6 +379,26 @@ defmodule LuaTest do
     end
 
     test "it can make assertions" do
+      # Original implementation (exact Luerl error message + pcall test):
+      # assert {[true], _} = Lua.eval!("return assert(true)")
+      #
+      # message = """
+      # Lua runtime error: assertion failed!
+      #
+      # script line 1:assert(false)
+      # """
+      #
+      # assert_raise Lua.RuntimeException, message, fn ->
+      #   Lua.eval!("assert(false)")
+      # end
+      #
+      # assert {[false, "oh no!"], _lua} =
+      #          Lua.eval!(~LUA"""
+      #          return pcall(function()
+      #            assert(false, "oh no")
+      #          end)
+      #          """)
+
       assert {[true], _} = Lua.eval!("return assert(true)")
 
       assert_raise Lua.RuntimeException, ~r/assertion failed/, fn ->
@@ -415,16 +460,36 @@ defmodule LuaTest do
 
   describe "load_chunk!/2" do
     test "loads a chunk into state" do
+      # Original implementation (checked Luerl ref field):
+      # assert %Lua.Chunk{ref: nil} = chunk = ~LUA[print("hello")]c
+      # assert {%Lua.Chunk{} = chunk, %Lua{}} = Lua.load_chunk!(Lua.new(), chunk)
+      # assert chunk.ref
+
       assert %Lua.Chunk{} = chunk = ~LUA[print("hello")]c
       assert {%Lua.Chunk{} = _chunk, %Lua{}} = Lua.load_chunk!(Lua.new(), chunk)
     end
 
     test "can load strings as well" do
+      # Original implementation (checked Luerl ref field):
+      # assert {%Lua.Chunk{} = chunk, %Lua{}} = Lua.load_chunk!(Lua.new(), ~S[print("hello")])
+      # assert chunk.ref
+
       assert {%Lua.Chunk{} = chunk, %Lua{}} = Lua.load_chunk!(Lua.new(), ~S[print("hello")])
       assert chunk.prototype != nil
     end
 
     test "invalid strings raise Lua.CompilerException" do
+      # Original implementation (exact Luerl error message):
+      # message = """
+      # Failed to compile Lua!
+      #
+      # Line 1: syntax error before: ';'
+      # """
+      #
+      # assert_raise Lua.CompilerException, message, fn ->
+      #   Lua.load_chunk!(Lua.new(), "local foo = ;")
+      # end
+
       assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
         Lua.load_chunk!(Lua.new(), "local foo = ;")
       end
@@ -492,6 +557,10 @@ defmodule LuaTest do
     end
 
     test "you can return single values from the state variant of deflua" do
+      # Original implementation (Luerl returned sorted keyword lists):
+      # assert {[[{"a", 1}]], _lua} = Lua.eval!(lua, "return single.foo({ a = 1 })")
+      # assert {[[{"a", 1}]], _lua} = Lua.eval!(lua, "return single.bar({ a = 1 })")
+
       defmodule SingleValueState do
         use Lua.API, scope: "single"
 
@@ -563,6 +632,12 @@ defmodule LuaTest do
     end
 
     test "table handling in function return values" do
+      # Original implementation (exact Luerl error messages):
+      # message =
+      #   "Lua runtime error: tables.keyword_table() failed, keyword lists must be explicitly encoded to tables using Lua.encode!/2"
+      # assert_raise Lua.RuntimeException, message, fn -> ... end
+      # (same pattern for keyword_table_with_state, map_table, map_table_with_state)
+
       defmodule TableFunctions do
         use Lua.API, scope: "tables"
 
@@ -633,6 +708,10 @@ defmodule LuaTest do
 
   describe "encode!/1 and decode!/1" do
     test "it can encode values into their internal representation" do
+      # Original implementation (Luerl returned sorted keyword lists):
+      # assert [{"a", 1}, {"b", 2}] = Lua.decode!(lua, ref)
+      # assert [{1, 1}, {2, 2}] = Lua.decode!(lua, ref)
+
       lua = Lua.new()
 
       assert {"hello", lua} = Lua.encode!(lua, "hello")
@@ -685,6 +764,31 @@ defmodule LuaTest do
     end
 
     test "missing quote" do
+      # Original implementation (exact Luerl error messages):
+      # error = """
+      # Failed to compile Lua!
+      #
+      # Line 1: syntax error near '\"'
+      # """
+      #
+      # assert_raise Lua.CompilerException, error, fn ->
+      #   Lua.eval!(lua, """
+      #   print(yuup")
+      #   """)
+      # end
+      #
+      # error = """
+      # Failed to compile Lua!
+      #
+      # Line 1: syntax error near '\"'
+      # """
+      #
+      # assert_raise Lua.CompilerException, error, fn ->
+      #   Lua.eval!(lua, """
+      #   print("yuup)
+      #   """)
+      # end
+
       lua = Lua.new()
 
       assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
@@ -825,6 +929,21 @@ defmodule LuaTest do
     end
 
     test "error/1 raises an exception" do
+      # Original implementation (exact Luerl error message):
+      # error = """
+      # Lua runtime error: this is an error
+      #
+      # script line 1:error("this is an error")
+      # """
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   lua = Lua.new(sandboxed: [])
+      #
+      #   Lua.eval!(lua, """
+      #   error("this is an error")
+      #   """)
+      # end
+
       assert_raise Lua.RuntimeException, ~r/runtime error/, fn ->
         lua = Lua.new(sandboxed: [])
 
@@ -864,6 +983,13 @@ defmodule LuaTest do
     end
 
     test "if the key already has a value, it raises" do
+      # Original implementation (exact Luerl error message, used [:_G, :print, :nope]):
+      # error = "Lua runtime error: invalid index \"print.nope\"\n\n\n"
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   Lua.set!(Lua.new(), [:_G, :print, :nope], "uh oh")
+      # end
+
       assert_raise Lua.RuntimeException, ~r/invalid index/, fn ->
         Lua.set!(Lua.new(), [:print, :nope], "uh oh")
       end
@@ -874,18 +1000,37 @@ defmodule LuaTest do
     end
 
     test "if a path is nil, it raises a runtime error" do
+      # Original implementation (exact Luerl error message):
+      # error = "Lua runtime error: invalid index \"one.two\"\n\n\n"
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   Lua.get!(Lua.new(), [:one, :two])
+      # end
+
       assert_raise Lua.RuntimeException, ~r/invalid index/, fn ->
         Lua.get!(Lua.new(), [:one, :two])
       end
     end
 
     test "if the key is not a table, it raises" do
+      # Original implementation (exact Luerl error message):
+      # error = "Lua runtime error: invalid index \"print.nope\"\n\n\n"
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   Lua.get!(Lua.new(), [:print, :nope])
+      # end
+
       assert_raise Lua.RuntimeException, ~r/invalid index/, fn ->
         Lua.get!(Lua.new(), [:print, :nope])
       end
     end
 
     test "can work with encoded values" do
+      # Original implementation (used userdata encoding):
+      # {encoded, lua} = Lua.encode!(Lua.new(), {:userdata, "1234"})
+      #
+      # assert Lua.set!(lua, [:foo], encoded)
+
       {encoded, lua} = Lua.encode!(Lua.new(), %{a: 1})
 
       assert Lua.set!(lua, [:foo], encoded)
@@ -990,6 +1135,13 @@ defmodule LuaTest do
     end
 
     test "it can handle tref values", %{lua: lua} do
+      # Original implementation (Luerl returned sorted keyword lists):
+      # assert {[[{"a", 1}]], _lua} =
+      #          Lua.eval!(lua, """
+      #          foo = { a = 1 }
+      #          return gv.get("foo")
+      #          """)
+
       defmodule GlobalVar do
         use Lua.API, scope: "gv"
 
@@ -1067,6 +1219,14 @@ defmodule LuaTest do
     end
 
     test "it cannot return atom values", %{lua: lua} do
+      # Original implementation (exact Luerl error message):
+      # error_message =
+      #   "Lua runtime error: atom() failed, deflua functions must return encoded data, got [:atom]"
+      #
+      # assert_raise Lua.RuntimeException, error_message, fn ->
+      #   Lua.eval!(lua, "return example.atom()", decode: true)
+      # end
+
       assert_raise Lua.RuntimeException, ~r/deflua functions must return encoded data/, fn ->
         Lua.eval!(lua, "return example.atom()", decode: true)
       end
@@ -1078,6 +1238,14 @@ defmodule LuaTest do
     end
 
     test "it cannot return tuples from Elixir", %{lua: lua} do
+      # Original implementation (exact Luerl error message):
+      # error =
+      #   "Lua runtime error: tuple() failed, deflua functions must return encoded data, got [key: \"value\"]"
+      #
+      # assert_raise Lua.RuntimeException, error, fn ->
+      #   Lua.eval!(lua, "return example.tuple()")
+      # end
+
       assert_raise Lua.RuntimeException, ~r/deflua functions must return encoded data/, fn ->
         Lua.eval!(lua, "return example.tuple()")
       end

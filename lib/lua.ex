@@ -7,6 +7,10 @@ defmodule Lua do
 
   @type t :: %__MODULE__{}
 
+  # Compiler.compile/1 currently always succeeds but the spec allows {:error, _}
+  # for future-proofing. Suppress dialyzer warnings on those defensive branches.
+  @dialyzer {:no_match, eval!: 2, eval!: 3, parse_chunk: 1}
+
   defstruct [:state]
 
   alias Lua.Util
@@ -95,10 +99,8 @@ defmodule Lua do
     chunk =
       case Lua.Parser.parse(code) do
         {:ok, ast} ->
-          case Lua.Compiler.compile(ast) do
-            {:ok, proto} -> %Lua.Chunk{prototype: proto}
-            {:error, msg} -> raise Lua.CompilerException, msg
-          end
+          proto = Lua.Compiler.compile!(ast)
+          %Lua.Chunk{prototype: proto}
 
         {:error, msg} ->
           raise Lua.CompilerException, msg
@@ -576,7 +578,7 @@ defmodule Lua do
     keys = name |> List.wrap() |> Enum.map(&to_lua_key/1)
     func = do_get_nested(lua.state, keys)
 
-    if func == nil or (not is_tuple(func)) do
+    if func == nil or not is_tuple(func) do
       {:error, "undefined function '#{inspect(func)}'", lua}
     else
       case do_call_function(func, args, lua.state) do

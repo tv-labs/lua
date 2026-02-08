@@ -13,6 +13,12 @@ defmodule Lua.RuntimeExceptionTest do
     end
 
     test "includes formatted error message" do
+      # Original implementation (also checked state and original fields):
+      # test "includes formatted error message and stacktrace" do
+      #   ...
+      #   assert exception.state != nil
+      #   assert exception.original != nil
+
       lua = Lua.new()
 
       exception =

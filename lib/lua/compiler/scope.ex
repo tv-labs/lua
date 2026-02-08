@@ -202,7 +202,10 @@ defmodule Lua.Compiler.Scope do
     state
   end
 
-  defp resolve_statement(%Statement.FuncDecl{params: params, body: body, is_method: is_method} = decl, state) do
+  defp resolve_statement(
+         %Statement.FuncDecl{params: params, body: body, is_method: is_method} = decl,
+         state
+       ) do
     all_params = if is_method, do: ["self" | params], else: params
     resolve_function_scope(decl, all_params, body, state)
   end

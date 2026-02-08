@@ -368,15 +368,21 @@ defmodule Lua.Compiler.Codegen do
       [first | rest] ->
         # Dotted name: get the table chain, then set the final field
         {get_instructions, table_reg, ctx} = gen_expr(%Expr.Var{name: first}, ctx)
+
         {final_instructions, final_table_reg, ctx} =
-          Enum.reduce(Enum.slice(rest, 0..-2//1), {get_instructions, table_reg, ctx}, fn field, {instrs, reg, ctx} ->
+          Enum.reduce(Enum.slice(rest, 0..-2//1), {get_instructions, table_reg, ctx}, fn field,
+                                                                                         {instrs,
+                                                                                          reg,
+                                                                                          ctx} ->
             field_reg = ctx.next_reg
             ctx = %{ctx | next_reg: field_reg + 1}
             {instrs ++ [Instruction.get_field(field_reg, reg, field)], field_reg, ctx}
           end)
 
         last_field = List.last(rest)
-        {final_instructions ++ [Instruction.set_field(final_table_reg, last_field, closure_reg)], ctx}
+
+        {final_instructions ++ [Instruction.set_field(final_table_reg, last_field, closure_reg)],
+         ctx}
     end
   end
 
