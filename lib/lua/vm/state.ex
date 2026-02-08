@@ -5,12 +5,14 @@ defmodule Lua.VM.State do
 
   defstruct globals: %{},
             call_stack: [],
-            metatables: %{}
+            metatables: %{},
+            upvalue_cells: %{}
 
   @type t :: %__MODULE__{
           globals: map(),
           call_stack: list(),
-          metatables: map()
+          metatables: map(),
+          upvalue_cells: map()
         }
 
   @doc """

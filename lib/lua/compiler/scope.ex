@@ -9,6 +9,7 @@ defmodule Lua.Compiler.Scope do
 
   @type var_ref ::
           {:register, index :: non_neg_integer()}
+          | {:captured_local, index :: non_neg_integer()}
           | {:upvalue, index :: non_neg_integer()}
           | {:global, name :: binary()}
 
@@ -33,14 +34,18 @@ defmodule Lua.Compiler.Scope do
               functions: %{},
               current_function: nil,
               next_register: 0,
-              locals: %{}
+              locals: %{},
+              parent_scopes: [],
+              captured_locals: MapSet.new()
 
     @type t :: %__MODULE__{
             var_map: %{optional(term()) => Lua.Compiler.Scope.var_ref()},
             functions: %{optional(term()) => Lua.Compiler.Scope.FunctionScope.t()},
             current_function: term(),
             next_register: non_neg_integer(),
-            locals: %{optional(binary()) => non_neg_integer()}
+            locals: %{optional(binary()) => non_neg_integer()},
+            parent_scopes: [%{locals: map(), function: term()}],
+            captured_locals: MapSet.t()
           }
   end
 
@@ -193,15 +198,25 @@ defmodule Lua.Compiler.Scope do
   defp resolve_expr(%Expr.Nil{}, state), do: state
 
   defp resolve_expr(%Expr.Var{name: name} = var, state) do
-    # Check if this variable is a local or global
-    var_ref =
-      case Map.get(state.locals, name) do
-        nil -> {:global, name}
-        reg -> {:register, reg}
-      end
+    # Check if this variable is a local, upvalue, or global
+    case Map.get(state.locals, name) do
+      nil ->
+        # Not a local — check parent scopes for upvalue
+        case find_upvalue(name, state.parent_scopes, state) do
+          {:ok, upvalue_index, state} ->
+            %{state | var_map: Map.put(state.var_map, var, {:upvalue, upvalue_index})}
 
-    # Store the classification in var_map using the node itself as key
-    %{state | var_map: Map.put(state.var_map, var, var_ref)}
+          :not_found ->
+            %{state | var_map: Map.put(state.var_map, var, {:global, name})}
+        end
+
+      reg ->
+        if MapSet.member?(state.captured_locals, name) do
+          %{state | var_map: Map.put(state.var_map, var, {:captured_local, reg})}
+        else
+          %{state | var_map: Map.put(state.var_map, var, {:register, reg})}
+        end
+    end
   end
 
   defp resolve_expr(%Expr.BinOp{left: left, right: right}, state) do
@@ -221,8 +236,13 @@ defmodule Lua.Compiler.Scope do
 
     # Save current scope state
     saved_locals = state.locals
-    saved_next_reg = state.next_register
+    saved_next_register = state.next_register
     saved_function = state.current_function
+    saved_parent_scopes = state.parent_scopes
+    saved_captured_locals = state.captured_locals
+
+    # Push current scope onto parent_scopes for upvalue resolution
+    parent_scope_entry = %{locals: state.locals, function: state.current_function}
 
     # Start fresh for the function scope
     # Parameters get registers starting from 0
@@ -230,15 +250,17 @@ defmodule Lua.Compiler.Scope do
       params
       |> Enum.reject(&(&1 == :vararg))
       |> Enum.with_index()
-      |> Enum.reduce({%{}, 0}, fn {param, idx}, {locals, _} ->
-        {Map.put(locals, param, idx), idx + 1}
+      |> Enum.reduce({%{}, 0}, fn {param, index}, {locals, _} ->
+        {Map.put(locals, param, index), index + 1}
       end)
 
     state = %{
       state
       | locals: param_locals,
         next_register: next_param_reg,
-        current_function: func_key
+        current_function: func_key,
+        parent_scopes: [parent_scope_entry | state.parent_scopes],
+        captured_locals: MapSet.new()
     }
 
     # Create function scope entry
@@ -262,12 +284,23 @@ defmodule Lua.Compiler.Scope do
     # Store the function key in var_map for this function node
     state = %{state | var_map: Map.put(state.var_map, func, func_key)}
 
-    # Restore previous scope
+    # Detect which parent locals this inner function captures
+    func_scope_final = state.functions[func_key]
+
+    newly_captured =
+      func_scope_final.upvalue_descriptors
+      |> Enum.filter(fn {type, _, _} -> type == :parent_local end)
+      |> Enum.map(fn {:parent_local, _reg, name} -> name end)
+      |> MapSet.new()
+
+    # Restore previous scope, merging newly captured locals
     %{
       state
       | locals: saved_locals,
-        next_register: saved_next_reg,
-        current_function: saved_function
+        next_register: saved_next_register,
+        current_function: saved_function,
+        parent_scopes: saved_parent_scopes,
+        captured_locals: MapSet.union(saved_captured_locals, newly_captured)
     }
   end
 
@@ -280,4 +313,92 @@ defmodule Lua.Compiler.Scope do
 
   # For now, stub out other expression types
   defp resolve_expr(_expr, state), do: state
+
+  # Walk up the scope chain to find a variable and create upvalue descriptors
+  defp find_upvalue(_name, [], _state), do: :not_found
+
+  defp find_upvalue(name, [parent | rest], state) do
+    case Map.get(parent.locals, name) do
+      nil ->
+        # Not in this parent — check if the parent already has it as an upvalue
+        parent_func = state.functions[parent.function]
+
+        case Enum.find_index(parent_func.upvalue_descriptors, fn
+               {:parent_local, _, n} -> n == name
+               {:parent_upvalue, _, n} -> n == name
+             end) do
+          nil ->
+            # Not in parent's upvalues either — recurse further up
+            case find_upvalue(name, rest, state) do
+              {:ok, grandparent_upvalue_index, state} ->
+                # The variable was found further up. The parent needs an upvalue too.
+                parent_func = state.functions[parent.function]
+                parent_upvalue_index = length(parent_func.upvalue_descriptors)
+
+                parent_func = %{
+                  parent_func
+                  | upvalue_descriptors:
+                      parent_func.upvalue_descriptors ++
+                        [{:parent_upvalue, grandparent_upvalue_index, name}]
+                }
+
+                state = %{
+                  state
+                  | functions: Map.put(state.functions, parent.function, parent_func)
+                }
+
+                # Now add upvalue in current function referencing parent's upvalue
+                current_func = state.functions[state.current_function]
+                cur_upvalue_index = length(current_func.upvalue_descriptors)
+
+                current_func = %{
+                  current_func
+                  | upvalue_descriptors:
+                      current_func.upvalue_descriptors ++ [{:parent_upvalue, parent_upvalue_index, name}]
+                }
+
+                state = %{
+                  state
+                  | functions: Map.put(state.functions, state.current_function, current_func)
+                }
+
+                {:ok, cur_upvalue_index, state}
+
+              :not_found ->
+                :not_found
+            end
+
+          parent_upvalue_index ->
+            # Parent already has this upvalue — reference it
+            current_func = state.functions[state.current_function]
+            cur_upvalue_index = length(current_func.upvalue_descriptors)
+
+            current_func = %{
+              current_func
+              | upvalue_descriptors:
+                  current_func.upvalue_descriptors ++ [{:parent_upvalue, parent_upvalue_index, name}]
+            }
+
+            state = %{
+              state
+              | functions: Map.put(state.functions, state.current_function, current_func)
+            }
+
+            {:ok, cur_upvalue_index, state}
+        end
+
+      reg ->
+        # Found in parent's locals — create upvalue descriptor
+        current_func = state.functions[state.current_function]
+        upvalue_index = length(current_func.upvalue_descriptors)
+
+        current_func = %{
+          current_func
+          | upvalue_descriptors: current_func.upvalue_descriptors ++ [{:parent_local, reg, name}]
+        }
+
+        state = %{state | functions: Map.put(state.functions, state.current_function, current_func)}
+        {:ok, upvalue_index, state}
+    end
+  end
 end

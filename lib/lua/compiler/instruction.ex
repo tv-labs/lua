@@ -15,6 +15,8 @@ defmodule Lua.Compiler.Instruction do
   # Upvalue & global access
   def get_upvalue(dest, index), do: {:get_upvalue, dest, index}
   def set_upvalue(index, source), do: {:set_upvalue, index, source}
+  def get_open_upvalue(dest, reg), do: {:get_open_upvalue, dest, reg}
+  def set_open_upvalue(reg, source), do: {:set_open_upvalue, reg, source}
   def get_global(dest, name), do: {:get_global, dest, name}
   def set_global(name, source), do: {:set_global, name, source}
 

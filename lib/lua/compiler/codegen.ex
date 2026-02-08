@@ -66,26 +66,29 @@ defmodule Lua.Compiler.Codegen do
     # For now, handle simple case: single target, single value
     # TODO: handle multiple assignment and table indexing
     case {targets, values} do
-      {[%Expr.Var{name: name}], [value]} ->
-        # Check if this is a local or global variable
+      {[%Expr.Var{} = target_var], [value]} ->
         {value_instrs, value_reg, ctx} = gen_expr(value, ctx)
 
-        case Map.get(ctx.scope.locals, name) do
-          nil ->
-            # Global variable
-            {value_instrs ++ [Instruction.set_global(name, value_reg)], ctx}
+        # Look up the target's classification from scope
+        store_instr =
+          case Map.get(ctx.scope.var_map, target_var) do
+            {:register, local_reg} ->
+              if local_reg == value_reg, do: [], else: [Instruction.move(local_reg, value_reg)]
 
-          local_reg ->
-            # Local variable - move to the local's register
-            move_instr =
-              if local_reg == value_reg do
-                []
-              else
-                [Instruction.move(local_reg, value_reg)]
-              end
+            {:captured_local, local_reg} ->
+              [Instruction.set_open_upvalue(local_reg, value_reg)]
 
-            {value_instrs ++ move_instr, ctx}
-        end
+            {:upvalue, index} ->
+              [Instruction.set_upvalue(index, value_reg)]
+
+            {:global, name} ->
+              [Instruction.set_global(name, value_reg)]
+
+            nil ->
+              [Instruction.set_global(target_var.name, value_reg)]
+          end
+
+        {value_instrs ++ store_instr, ctx}
 
       _ ->
         # Unsupported pattern for now
@@ -109,9 +112,9 @@ defmodule Lua.Compiler.Codegen do
     move_instrs =
       names
       |> Enum.with_index()
-      |> Enum.flat_map(fn {name, idx} ->
+      |> Enum.flat_map(fn {name, index} ->
         dest_reg = Map.get(locals, name)
-        source_reg = Enum.at(value_regs, idx)
+        source_reg = Enum.at(value_regs, index)
 
         cond do
           # No value for this local - it's implicitly nil
@@ -422,6 +425,18 @@ defmodule Lua.Compiler.Codegen do
         # Local variable - already in a register, just return it
         {[], reg, ctx}
 
+      {:captured_local, reg} ->
+        # Local captured by a closure - read from open upvalue cell
+        dest = ctx.next_reg
+        ctx = %{ctx | next_reg: dest + 1}
+        {[Instruction.get_open_upvalue(dest, reg)], dest, ctx}
+
+      {:upvalue, index} ->
+        # Upvalue - load from upvalue list
+        reg = ctx.next_reg
+        ctx = %{ctx | next_reg: reg + 1}
+        {[Instruction.get_upvalue(reg, index)], reg, ctx}
+
       {:global, name} ->
         # Global variable - need to load it
         reg = ctx.next_reg
@@ -442,7 +457,7 @@ defmodule Lua.Compiler.Codegen do
     func_scope = ctx.scope.functions[func_key]
 
     # Generate the function body in a fresh context
-    {body_instrs, _body_ctx} =
+    {body_instrs, body_ctx} =
       gen_block(body, %{
         next_reg: func_scope.param_count,
         source: ctx.source,
@@ -450,12 +465,11 @@ defmodule Lua.Compiler.Codegen do
         prototypes: []
       })
 
-    # Create the nested prototype
+    # Create the nested prototype (include nested prototypes from body)
     nested_proto = %Prototype{
       instructions: body_instrs,
-      # For now, no nested-nested functions
-      prototypes: [],
-      upvalue_descriptors: [],
+      prototypes: Enum.reverse(body_ctx.prototypes),
+      upvalue_descriptors: func_scope.upvalue_descriptors,
       param_count: func_scope.param_count,
       is_vararg: func_scope.is_vararg,
       max_registers: func_scope.max_register,
