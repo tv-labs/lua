@@ -1700,4 +1700,53 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, [3], _state} = VM.execute(proto, state)
     end
   end
+
+  describe "value encode/decode round-trip" do
+    test "encode Elixir map as global, execute Lua, decode result" do
+      # Encode an Elixir map into state as a global
+      state = Lua.VM.Stdlib.install(VM.State.new())
+      {tref, state} = Lua.VM.Value.encode(%{x: 10, y: 20}, state)
+      state = VM.State.set_global(state, "config", tref)
+
+      # Execute Lua code that reads from the encoded table
+      code = "return config.x + config.y"
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [30], _state} = VM.execute(proto, state)
+    end
+
+    test "encode list as global, iterate in Lua, decode result" do
+      state = Lua.VM.Stdlib.install(VM.State.new())
+      {tref, state} = Lua.VM.Value.encode([10, 20, 30], state)
+      state = VM.State.set_global(state, "items", tref)
+
+      code = """
+      local sum = 0
+      for i, v in ipairs(items) do
+        sum = sum + v
+      end
+      return sum
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [60], _state} = VM.execute(proto, state)
+    end
+
+    test "Lua produces table, decode to Elixir" do
+      state = Lua.VM.Stdlib.install(VM.State.new())
+
+      code = """
+      local t = {a = 1, b = 2}
+      return t
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [tref], state} = VM.execute(proto, state)
+
+      decoded = Lua.VM.Value.decode(tref, state)
+      assert Enum.sort(decoded) == [{"a", 1}, {"b", 2}]
+    end
+  end
 end

@@ -3,8 +3,11 @@ defmodule Lua.VM.Value do
   Shared utilities for working with Lua values in the VM.
 
   Provides type inspection, truthiness, string conversion, number parsing,
-  and sequence length computation used by both the executor and stdlib.
+  sequence length computation, and value encoding/decoding used by both
+  the executor and stdlib.
   """
+
+  alias Lua.VM.State
 
   @doc """
   Returns the Lua type name as a string for the given value.
@@ -99,5 +102,109 @@ defmodule Lua.VM.Value do
 
   defp do_sequence_length(data, n) do
     if Map.has_key?(data, n), do: do_sequence_length(data, n + 1), else: n - 1
+  end
+
+  # --- Encoding (Elixir → Lua VM) ---
+
+  @doc """
+  Encodes an Elixir value into the Lua VM's internal representation.
+
+  Returns `{encoded_value, state}` since encoding maps and lists allocates tables.
+  """
+  @spec encode(term(), State.t()) :: {term(), State.t()}
+  def encode(nil, state), do: {nil, state}
+  def encode(value, state) when is_boolean(value), do: {value, state}
+  def encode(value, state) when is_number(value), do: {value, state}
+  def encode(value, state) when is_binary(value), do: {value, state}
+
+  def encode(fun, state) when is_function(fun, 2), do: {{:native_func, fun}, state}
+
+  def encode(fun, state) when is_function(fun, 1) do
+    wrapper = fn args, st -> {List.wrap(fun.(args)), st} end
+    {{:native_func, wrapper}, state}
+  end
+
+  def encode(map, state) when is_map(map) do
+    {data, state} =
+      Enum.reduce(map, {%{}, state}, fn {k, v}, {data, state} ->
+        key = if is_atom(k), do: Atom.to_string(k), else: k
+        {encoded_v, state} = encode(v, state)
+        {Map.put(data, key, encoded_v), state}
+      end)
+
+    State.alloc_table(state, data)
+  end
+
+  def encode(list, state) when is_list(list) do
+    if keyword_list?(list) do
+      {data, state} =
+        Enum.reduce(list, {%{}, state}, fn {k, v}, {data, state} ->
+          key = Atom.to_string(k)
+          {encoded_v, state} = encode(v, state)
+          {Map.put(data, key, encoded_v), state}
+        end)
+
+      State.alloc_table(state, data)
+    else
+      {data, state} =
+        list
+        |> Enum.with_index(1)
+        |> Enum.reduce({%{}, state}, fn {v, idx}, {data, state} ->
+          {encoded_v, state} = encode(v, state)
+          {Map.put(data, idx, encoded_v), state}
+        end)
+
+      State.alloc_table(state, data)
+    end
+  end
+
+  @doc """
+  Encodes a list of Elixir values, threading state through each encoding.
+
+  Returns `{encoded_values, state}`.
+  """
+  @spec encode_list([term()], State.t()) :: {[term()], State.t()}
+  def encode_list(values, state) do
+    {reversed, state} =
+      Enum.reduce(values, {[], state}, fn v, {acc, state} ->
+        {encoded, state} = encode(v, state)
+        {[encoded | acc], state}
+      end)
+
+    {Enum.reverse(reversed), state}
+  end
+
+  defp keyword_list?([{k, _v} | rest]) when is_atom(k), do: keyword_list?(rest)
+  defp keyword_list?([]), do: true
+  defp keyword_list?(_), do: false
+
+  # --- Decoding (Lua VM → Elixir) ---
+
+  @doc """
+  Decodes a Lua VM value into an Elixir-friendly representation.
+
+  Tables are returned as lists of `{key, decoded_value}` tuples.
+  Functions (closures, native) pass through as-is.
+  """
+  @spec decode(term(), State.t()) :: term()
+  def decode(nil, _state), do: nil
+  def decode(value, _state) when is_boolean(value), do: value
+  def decode(value, _state) when is_number(value), do: value
+  def decode(value, _state) when is_binary(value), do: value
+
+  def decode({:tref, id}, state) do
+    table = Map.fetch!(state.tables, id)
+
+    Enum.map(table.data, fn {k, v} -> {k, decode(v, state)} end)
+  end
+
+  def decode(value, _state), do: value
+
+  @doc """
+  Decodes a list of Lua VM values.
+  """
+  @spec decode_list([term()], State.t()) :: [term()]
+  def decode_list(values, state) do
+    Enum.map(values, &decode(&1, state))
   end
 end
