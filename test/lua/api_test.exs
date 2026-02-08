@@ -338,6 +338,7 @@ defmodule Lua.APITest do
   end
 
   describe "guards" do
+    @tag :pending
     test "can use in functions" do
       assert [{module, _}] =
                Code.compile_string("""

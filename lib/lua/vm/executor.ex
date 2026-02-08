@@ -18,9 +18,9 @@ defmodule Lua.VM.Executor do
     do_execute(instructions, registers, {upvalues, %{}}, proto, state)
   end
 
-  # Empty instruction list - implicit return nil
+  # Empty instruction list - implicit return (no values)
   defp do_execute([], regs, _upvalues, _proto, state) do
-    {[nil], regs, state}
+    {[], regs, state}
   end
 
   # load_constant

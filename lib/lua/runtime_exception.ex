@@ -4,18 +4,12 @@ defmodule Lua.RuntimeException do
   alias Lua.Util
 
   @impl true
-  def exception({:lua_error, error, state}) do
+  def exception({:lua_error, error, _state}) do
     message = Util.format_error(error)
-    stacktrace = :luerl.get_stacktrace(state)
 
     %__MODULE__{
       original: error,
-      state: state,
-      message: """
-      Lua runtime error: #{message}
-
-      #{Util.format_stacktrace(stacktrace, state)}
-      """
+      message: "Lua runtime error: #{message}"
     }
   end
 

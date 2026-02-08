@@ -10,7 +10,8 @@ defmodule Lua.VM.State do
             metatables: %{},
             upvalue_cells: %{},
             tables: %{},
-            table_next_id: 0
+            table_next_id: 0,
+            private: %{}
 
   @type t :: %__MODULE__{
           globals: map(),
@@ -18,7 +19,8 @@ defmodule Lua.VM.State do
           metatables: map(),
           upvalue_cells: map(),
           tables: %{optional(non_neg_integer()) => Table.t()},
-          table_next_id: non_neg_integer()
+          table_next_id: non_neg_integer(),
+          private: map()
         }
 
   @doc """
@@ -74,5 +76,29 @@ defmodule Lua.VM.State do
   @spec update_table(t(), {:tref, non_neg_integer()}, (Table.t() -> Table.t())) :: t()
   def update_table(state, {:tref, id}, fun) do
     %{state | tables: Map.update!(state.tables, id, fun)}
+  end
+
+  @doc """
+  Stores a private value not exposed to Lua.
+  """
+  @spec put_private(t(), term(), term()) :: t()
+  def put_private(%__MODULE__{} = state, key, value) do
+    %{state | private: Map.put(state.private, key, value)}
+  end
+
+  @doc """
+  Retrieves a private value. Raises `KeyError` if the key doesn't exist.
+  """
+  @spec get_private(t(), term()) :: term()
+  def get_private(%__MODULE__{} = state, key) do
+    Map.fetch!(state.private, key)
+  end
+
+  @doc """
+  Deletes a private value.
+  """
+  @spec delete_private(t(), term()) :: t()
+  def delete_private(%__MODULE__{} = state, key) do
+    %{state | private: Map.delete(state.private, key)}
   end
 end
