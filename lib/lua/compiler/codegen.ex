@@ -529,7 +529,7 @@ defmodule Lua.Compiler.Codegen do
         :bxor -> Instruction.bitwise_xor(dest_reg, left_reg, right_reg)
         :shl -> Instruction.shift_left(dest_reg, left_reg, right_reg)
         :shr -> Instruction.shift_right(dest_reg, left_reg, right_reg)
-        :concat -> Instruction.concatenate(dest_reg, left_reg, 2)
+        :concat -> Instruction.concatenate(dest_reg, left_reg, right_reg)
         :eq -> Instruction.equal(dest_reg, left_reg, right_reg)
         :ne -> {:not_equal, dest_reg, left_reg, right_reg}
         :lt -> Instruction.less_than(dest_reg, left_reg, right_reg)

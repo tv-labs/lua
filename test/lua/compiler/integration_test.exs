@@ -313,6 +313,46 @@ defmodule Lua.Compiler.IntegrationTest do
 
       assert results == [5]
     end
+
+    test "string concatenation" do
+      code = ~s[return "hello" .. " " .. "world"]
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == ["hello world"]
+    end
+
+    test "string concatenation with number coercion" do
+      code = ~s[return "count: " .. 42]
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == ["count: 42"]
+    end
+
+    test "concatenation of two numbers" do
+      code = "return 1 .. 2"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == ["12"]
+    end
+
+    test "chained concatenation" do
+      code = ~s[return "x" .. "y" .. "z"]
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, results, _state} = VM.execute(proto)
+
+      assert results == ["xyz"]
+    end
   end
 
   describe "global variables" do
