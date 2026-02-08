@@ -5,7 +5,7 @@ defmodule Lua.VM.Executor do
   Tail-recursive dispatch loop that executes instructions.
   """
 
-  alias Lua.VM.State
+  alias Lua.VM.{InternalError, State, TypeError, Value}
 
   @doc """
   Executes instructions with the given register file and state.
@@ -114,7 +114,7 @@ defmodule Lua.VM.Executor do
 
   # test - conditional execution
   defp do_execute([{:test, reg, then_body, else_body} | rest], regs, upvalues, proto, state) do
-    body = if truthy?(elem(regs, reg)), do: then_body, else: else_body
+    body = if Value.truthy?(elem(regs, reg)), do: then_body, else: else_body
     do_execute(body ++ rest, regs, upvalues, proto, state)
   end
 
@@ -122,7 +122,7 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:test_and, dest, source, rest_body} | rest], regs, upvalues, proto, state) do
     value = elem(regs, source)
 
-    if truthy?(value) do
+    if Value.truthy?(value) do
       # Value is truthy, execute rest_body to compute final result
       do_execute(rest_body ++ rest, regs, upvalues, proto, state)
     else
@@ -136,7 +136,7 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:test_or, dest, source, rest_body} | rest], regs, upvalues, proto, state) do
     value = elem(regs, source)
 
-    if truthy?(value) do
+    if Value.truthy?(value) do
       # Value is truthy, store it in dest and continue
       regs = put_elem(regs, dest, value)
       do_execute(rest, regs, upvalues, proto, state)
@@ -158,7 +158,7 @@ defmodule Lua.VM.Executor do
     {_results, regs, state} = do_execute(cond_body, regs, upvalues, proto, state)
 
     # Check condition
-    if truthy?(elem(regs, test_reg)) do
+    if Value.truthy?(elem(regs, test_reg)) do
       # Execute body
       {_results, regs, state} = do_execute(loop_body, regs, upvalues, proto, state)
       # Loop again
@@ -190,7 +190,7 @@ defmodule Lua.VM.Executor do
     {_results, regs, state} = do_execute(cond_body, regs, upvalues, proto, state)
 
     # Check condition (repeat UNTIL condition is true)
-    if truthy?(elem(regs, test_reg)) do
+    if Value.truthy?(elem(regs, test_reg)) do
       # Condition true, exit loop
       do_execute(rest, regs, upvalues, proto, state)
     else
@@ -323,10 +323,28 @@ defmodule Lua.VM.Executor do
           {results, state}
 
         {:native_func, fun} ->
-          fun.(args, state)
+          case fun.(args, state) do
+            {results, %State{} = new_state} when is_list(results) ->
+              {results, new_state}
+
+            {results, %State{} = new_state} ->
+              {List.wrap(results), new_state}
+
+            other ->
+              raise InternalError,
+                value:
+                  "native function returned invalid result: #{inspect(other)}, expected {results, state}"
+          end
+
+        nil ->
+          raise TypeError,
+            value: "attempt to call a nil value",
+            source: proto.source
 
         other ->
-          raise "attempt to call a #{inspect(other)} value"
+          raise TypeError,
+            value: "attempt to call a #{Value.type_name(other)} value",
+            source: proto.source
       end
 
     # Place results into caller registers starting at base
@@ -482,7 +500,7 @@ defmodule Lua.VM.Executor do
   end
 
   defp do_execute([{:not, dest, source} | rest], regs, upvalues, proto, state) do
-    result = not truthy?(elem(regs, source))
+    result = not Value.truthy?(elem(regs, source))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
@@ -494,7 +512,7 @@ defmodule Lua.VM.Executor do
       case value do
         {:tref, id} ->
           table = Map.fetch!(state.tables, id)
-          compute_sequence_length(table.data)
+          Value.sequence_length(table.data)
 
         v when is_binary(v) ->
           byte_size(v)
@@ -624,24 +642,6 @@ defmodule Lua.VM.Executor do
 
   # Catch-all for unimplemented instructions
   defp do_execute([instr | _rest], _regs, _upvalues, _proto, _state) do
-    raise "Unimplemented instruction: #{inspect(instr)}"
+    raise InternalError, value: "unimplemented instruction: #{inspect(instr)}"
   end
-
-  # Find the largest N where keys 1..N are all present (Lua sequence length)
-  defp compute_sequence_length(data) do
-    compute_sequence_length(data, 1)
-  end
-
-  defp compute_sequence_length(data, n) do
-    if Map.has_key?(data, n) do
-      compute_sequence_length(data, n + 1)
-    else
-      n - 1
-    end
-  end
-
-  # Helper for Lua truthiness
-  defp truthy?(nil), do: false
-  defp truthy?(false), do: false
-  defp truthy?(_), do: true
 end

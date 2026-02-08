@@ -30,6 +30,26 @@ defmodule Lua.VM.State do
   end
 
   @doc """
+  Sets a global variable in the VM state.
+  """
+  @spec set_global(t(), binary(), term()) :: t()
+  def set_global(%__MODULE__{} = state, name, value) when is_binary(name) do
+    %{state | globals: Map.put(state.globals, name, value)}
+  end
+
+  @doc """
+  Registers a native Elixir function as a global in the VM state.
+
+  The function should accept `(args, state)` and return `{results, state}`,
+  where `args` is a list of Lua values and `results` is a list of return values.
+  """
+  @spec register_function(t(), binary(), (list(), t() -> {list(), t()})) :: t()
+  def register_function(%__MODULE__{} = state, name, fun)
+      when is_binary(name) and is_function(fun) do
+    set_global(state, name, {:native_func, fun})
+  end
+
+  @doc """
   Allocates a fresh table in the state, returning `{{:tref, id}, new_state}`.
   """
   @spec alloc_table(t(), map()) :: {{:tref, non_neg_integer()}, t()}

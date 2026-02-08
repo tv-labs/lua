@@ -1125,4 +1125,334 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [3]
     end
   end
+
+  describe "native function calls" do
+    test "native function registered via set_global" do
+      code = "return double(21)"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      state =
+        VM.State.new()
+        |> VM.State.register_function("double", fn [n], state -> {[n * 2], state} end)
+
+      assert {:ok, [42], _state} = VM.execute(proto, state)
+    end
+
+    test "native function with multiple arguments" do
+      code = "return add(10, 20, 30)"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      state =
+        VM.State.new()
+        |> VM.State.register_function("add", fn args, state ->
+          {[Enum.sum(args)], state}
+        end)
+
+      assert {:ok, [60], _state} = VM.execute(proto, state)
+    end
+
+    test "native function with no arguments" do
+      code = "return get_answer()"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      state =
+        VM.State.new()
+        |> VM.State.register_function("get_answer", fn _args, state -> {[42], state} end)
+
+      assert {:ok, [42], _state} = VM.execute(proto, state)
+    end
+
+    test "native function modifying state" do
+      code = """
+      set_x(99)
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      state =
+        VM.State.new()
+        |> VM.State.register_function("set_x", fn [val], state ->
+          {[], VM.State.set_global(state, "x", val)}
+        end)
+
+      assert {:ok, [99], _state} = VM.execute(proto, state)
+    end
+
+    test "native function receiving table" do
+      code = """
+      local t = {x = 42}
+      return get_field(t, "x")
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      state =
+        VM.State.new()
+        |> VM.State.register_function("get_field", fn [{:tref, id}, key], state ->
+          table = Map.fetch!(state.tables, id)
+          {[Map.get(table.data, key)], state}
+        end)
+
+      assert {:ok, [42], _state} = VM.execute(proto, state)
+    end
+
+    test "native function creating table" do
+      code = """
+      local t = make_table()
+      return t.x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      state =
+        VM.State.new()
+        |> VM.State.register_function("make_table", fn _args, state ->
+          {tref, state} = VM.State.alloc_table(state, %{"x" => 100})
+          {[tref], state}
+        end)
+
+      assert {:ok, [100], _state} = VM.execute(proto, state)
+    end
+
+    test "calling nil value raises" do
+      code = "return foo()"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      assert_raise Lua.VM.TypeError, ~r/attempt to call a nil value/, fn ->
+        VM.execute(proto)
+      end
+    end
+
+    test "calling number value raises" do
+      code = """
+      local x = 42
+      return x()
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      assert_raise Lua.VM.TypeError, ~r/attempt to call a number value/, fn ->
+        VM.execute(proto)
+      end
+    end
+  end
+
+  describe "standard library" do
+    setup do
+      state = Lua.VM.Stdlib.install(VM.State.new())
+      {:ok, state: state}
+    end
+
+    test "type() on various values", %{state: state} do
+      tests = [
+        {"return type(42)", "number"},
+        {"return type(3.14)", "number"},
+        {~s[return type("hello")], "string"},
+        {"return type(true)", "boolean"},
+        {"return type(nil)", "nil"},
+        {"return type({})", "table"},
+        {"return type(type)", "function"}
+      ]
+
+      for {code, expected} <- tests do
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast)
+        assert {:ok, [^expected], _state} = VM.execute(proto, state), "type() failed for: #{code}"
+      end
+    end
+
+    test "tostring() converts values", %{state: state} do
+      tests = [
+        {"return tostring(42)", "42"},
+        {"return tostring(nil)", "nil"},
+        {"return tostring(true)", "true"},
+        {"return tostring(false)", "false"},
+        {~s[return tostring("hello")], "hello"}
+      ]
+
+      for {code, expected} <- tests do
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast)
+
+        assert {:ok, [^expected], _state} = VM.execute(proto, state),
+               "tostring() failed for: #{code}"
+      end
+    end
+
+    test "tonumber() converts strings", %{state: state} do
+      tests = [
+        {~s[return tonumber("42")], 42},
+        {~s[return tonumber("3.14")], 3.14},
+        {"return tonumber(42)", 42},
+        {~s[return tonumber("hello")], nil},
+        {~s[return tonumber("0xff")], 255}
+      ]
+
+      for {code, expected} <- tests do
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast)
+
+        assert {:ok, [^expected], _state} = VM.execute(proto, state),
+               "tonumber() failed for: #{code}"
+      end
+    end
+
+    test "tonumber() with base", %{state: state} do
+      code = ~s[return tonumber("ff", 16)]
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [255], _state} = VM.execute(proto, state)
+    end
+
+    test "print() outputs to console", %{state: state} do
+      code = ~s[print("hello", "world")]
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          VM.execute(proto, state)
+        end)
+
+      assert output == "hello\tworld\n"
+    end
+
+    test "error() raises", %{state: state} do
+      code = ~s[error("something went wrong")]
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      assert_raise Lua.VM.RuntimeError, ~r/runtime error: something went wrong/, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
+    test "assert() passes with truthy value", %{state: state} do
+      code = "return assert(42)"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [42], _state} = VM.execute(proto, state)
+    end
+
+    test "assert() raises with falsy value", %{state: state} do
+      code = ~s[assert(false, "expected true")]
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      assert_raise Lua.VM.AssertionError, ~r/assertion failed: expected true/, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
+    test "assert() raises default message with nil", %{state: state} do
+      code = "assert(nil)"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+
+      assert_raise Lua.VM.AssertionError, ~r/assertion failed: assertion failed!/, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
+    test "rawget() accesses table fields", %{state: state} do
+      code = """
+      local t = {x = 42}
+      return rawget(t, "x")
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [42], _state} = VM.execute(proto, state)
+    end
+
+    test "rawset() sets table fields", %{state: state} do
+      code = """
+      local t = {}
+      rawset(t, "x", 99)
+      return t.x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [99], _state} = VM.execute(proto, state)
+    end
+
+    test "rawlen() returns sequence length", %{state: state} do
+      code = """
+      local t = {1, 2, 3, 4, 5}
+      return rawlen(t)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [5], _state} = VM.execute(proto, state)
+    end
+
+    test "rawlen() on string", %{state: state} do
+      code = ~s[return rawlen("hello")]
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [5], _state} = VM.execute(proto, state)
+    end
+
+    test "rawequal() compares values", %{state: state} do
+      code = "return rawequal(1, 1)"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [true], _state} = VM.execute(proto, state)
+    end
+
+    test "rawequal() returns false for different values", %{state: state} do
+      code = "return rawequal(1, 2)"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [false], _state} = VM.execute(proto, state)
+    end
+
+    test "native function as callback from Lua", %{state: state} do
+      code = """
+      local apply = function(f, x)
+        return f(x)
+      end
+      return apply(tostring, 42)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, ["42"], _state} = VM.execute(proto, state)
+    end
+
+    test "chaining stdlib calls", %{state: state} do
+      code = """
+      local t = {1, 2, 3}
+      return rawlen(t)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [3], _state} = VM.execute(proto, state)
+    end
+  end
 end
