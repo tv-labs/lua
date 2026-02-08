@@ -496,6 +496,15 @@ defmodule Lua.VM.Executor do
     do_execute(rest, regs, upvalues, proto, state)
   end
 
+  # String concatenation
+  defp do_execute([{:concatenate, dest, a, b} | rest], regs, upvalues, proto, state) do
+    left = elem(regs, a)
+    right = elem(regs, b)
+    result = concat_coerce(left) <> concat_coerce(right)
+    regs = put_elem(regs, dest, result)
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
   # Bitwise operations
   defp do_execute([{:bitwise_and, dest, a, b} | rest], regs, upvalues, proto, state) do
     result = Bitwise.band(trunc(elem(regs, a)), trunc(elem(regs, b)))
@@ -774,5 +783,15 @@ defmodule Lua.VM.Executor do
     raise TypeError,
       value: "attempt to call a #{Value.type_name(other)} value",
       source: proto.source
+  end
+
+  # Coerce a value to a string for concatenation (Lua semantics: numbers become strings)
+  defp concat_coerce(value) when is_binary(value), do: value
+  defp concat_coerce(value) when is_integer(value), do: Integer.to_string(value)
+  defp concat_coerce(value) when is_float(value), do: Value.to_string(value)
+
+  defp concat_coerce(value) do
+    raise TypeError,
+      value: "attempt to concatenate a #{Value.type_name(value)} value"
   end
 end

@@ -39,7 +39,7 @@ defmodule Lua.Compiler.Instruction do
   def modulo(dest, a, b), do: {:modulo, dest, a, b}
   def power(dest, a, b), do: {:power, dest, a, b}
   def negate(dest, source), do: {:negate, dest, source}
-  def concatenate(dest, start, count), do: {:concatenate, dest, start, count}
+  def concatenate(dest, a, b), do: {:concatenate, dest, a, b}
 
   # Bitwise
   def bitwise_and(dest, a, b), do: {:bitwise_and, dest, a, b}
