@@ -412,12 +412,16 @@ defmodule Lua.VM.Executor do
         nil ->
           raise TypeError,
             value: "attempt to call a nil value",
-            source: proto.source
+            source: proto.source,
+            call_stack: state.call_stack,
+            line: Map.get(state, :current_line)
 
         other ->
           raise TypeError,
             value: "attempt to call a #{Value.type_name(other)} value",
-            source: proto.source
+            source: proto.source,
+            call_stack: state.call_stack,
+            line: Map.get(state, :current_line)
       end
 
     # result_count == -1 means "return all results" (used in return f() position)
@@ -791,16 +795,20 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  defp call_value(nil, _args, proto, _state) do
+  defp call_value(nil, _args, proto, state) do
     raise TypeError,
       value: "attempt to call a nil value",
-      source: proto.source
+      source: proto.source,
+      call_stack: state.call_stack,
+      line: Map.get(state, :current_line)
   end
 
-  defp call_value(other, _args, proto, _state) do
+  defp call_value(other, _args, proto, state) do
     raise TypeError,
       value: "attempt to call a #{Value.type_name(other)} value",
-      source: proto.source
+      source: proto.source,
+      call_stack: state.call_stack,
+      line: Map.get(state, :current_line)
   end
 
   # Coerce a value to a string for concatenation (Lua semantics: numbers become strings)

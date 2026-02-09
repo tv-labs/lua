@@ -60,7 +60,6 @@ defmodule Lua.Util do
   def format_stacktrace(stack, _, _) when is_list(stack) do
     frames =
       stack
-      |> Enum.reverse()
       |> Enum.map(&format_stack_frame/1)
       |> Enum.join("\n")
 
