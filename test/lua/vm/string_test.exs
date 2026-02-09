@@ -28,7 +28,7 @@ defmodule Lua.VM.StringTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new() |> Lua.VM.Stdlib.install()
 
-      assert_raise Lua.VM.RuntimeError, ~r/string expected/, fn ->
+      assert_raise Lua.VM.ArgumentError, ~r/string expected/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -187,7 +187,7 @@ defmodule Lua.VM.StringTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new() |> Lua.VM.Stdlib.install()
 
-      assert_raise Lua.VM.RuntimeError, ~r/out of range/, fn ->
+      assert_raise Lua.VM.ArgumentError, ~r/out of range/, fn ->
         VM.execute(proto, state)
       end
     end
