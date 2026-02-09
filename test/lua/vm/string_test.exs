@@ -1,5 +1,6 @@
 defmodule Lua.VM.StringTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Lua.{Parser, Compiler, VM}
   alias Lua.VM.State
@@ -288,5 +289,134 @@ defmodule Lua.VM.StringTest do
       state = State.new() |> Lua.VM.Stdlib.install()
       assert {:ok, ["HELLO"], _state} = VM.execute(proto, state)
     end
+  end
+
+  describe "property tests" do
+    property "string.lower always returns a string" do
+      check all(str <- string(:printable)) do
+        code = "return string.lower(\"#{escape_string(str)}\")"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        state = State.new() |> Lua.VM.Stdlib.install()
+        assert {:ok, [result], _state} = VM.execute(proto, state)
+        assert is_binary(result)
+        assert result == String.downcase(str)
+      end
+    end
+
+    property "string.upper always returns a string" do
+      check all(str <- string(:printable)) do
+        code = "return string.upper(\"#{escape_string(str)}\")"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        state = State.new() |> Lua.VM.Stdlib.install()
+        assert {:ok, [result], _state} = VM.execute(proto, state)
+        assert is_binary(result)
+        assert result == String.upcase(str)
+      end
+    end
+
+    property "string.len returns non-negative integer" do
+      check all(str <- string(:printable)) do
+        code = "return string.len(\"#{escape_string(str)}\")"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        state = State.new() |> Lua.VM.Stdlib.install()
+        assert {:ok, [result], _state} = VM.execute(proto, state)
+        assert is_integer(result)
+        assert result >= 0
+        assert result == byte_size(str)
+      end
+    end
+
+    property "string.reverse twice gives original (ASCII)" do
+      # Note: Lua operates on bytes, not graphemes, so we test with ASCII only
+      # Multi-byte UTF-8 characters would be reversed incorrectly by Lua's string.reverse
+      check all(str <- string(:ascii)) do
+        code = "return string.reverse(string.reverse(\"#{escape_string(str)}\"))"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        state = State.new() |> Lua.VM.Stdlib.install()
+        assert {:ok, [result], _state} = VM.execute(proto, state)
+        assert result == str
+      end
+    end
+
+    property "string.rep with 0 returns empty string" do
+      check all(str <- string(:printable)) do
+        code = "return string.rep(\"#{escape_string(str)}\", 0)"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        state = State.new() |> Lua.VM.Stdlib.install()
+        assert {:ok, [""], _state} = VM.execute(proto, state)
+      end
+    end
+
+    property "string.rep with 1 returns original" do
+      check all(str <- string(:printable, max_length: 10)) do
+        code = "return string.rep(\"#{escape_string(str)}\", 1)"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        state = State.new() |> Lua.VM.Stdlib.install()
+        assert {:ok, [result], _state} = VM.execute(proto, state)
+        assert result == str
+      end
+    end
+
+    property "string.byte/char round-trip for single bytes" do
+      check all(byte <- integer(0..255)) do
+        code = "return string.char(string.byte(string.char(#{byte})))"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        state = State.new() |> Lua.VM.Stdlib.install()
+        assert {:ok, [result], _state} = VM.execute(proto, state)
+        assert result == <<byte>>
+      end
+    end
+
+    property "string.sub with full range returns original" do
+      check all(str <- string(:printable, max_length: 10)) do
+        len = byte_size(str)
+        code = "return string.sub(\"#{escape_string(str)}\", 1, #{len})"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        state = State.new() |> Lua.VM.Stdlib.install()
+        assert {:ok, [result], _state} = VM.execute(proto, state)
+        assert result == str
+      end
+    end
+
+    property "string.format %s always produces string" do
+      check all(str <- string(:printable, max_length: 20)) do
+        code = "return string.format(\"Result: %s\", \"#{escape_string(str)}\")"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        state = State.new() |> Lua.VM.Stdlib.install()
+        assert {:ok, [result], _state} = VM.execute(proto, state)
+        assert is_binary(result)
+        assert String.starts_with?(result, "Result: ")
+      end
+    end
+
+    property "string.format %d works with integers" do
+      check all(int <- integer(-1000..1000)) do
+        code = "return string.format(\"Number: %d\", #{int})"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        state = State.new() |> Lua.VM.Stdlib.install()
+        assert {:ok, [result], _state} = VM.execute(proto, state)
+        assert result == "Number: #{int}"
+      end
+    end
+  end
+
+  # Helper to escape strings for Lua code
+  defp escape_string(str) do
+    str
+    |> String.replace("\\", "\\\\")
+    |> String.replace("\"", "\\\"")
+    |> String.replace("\n", "\\n")
+    |> String.replace("\r", "\\r")
+    |> String.replace("\t", "\\t")
   end
 end
