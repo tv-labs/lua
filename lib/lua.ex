@@ -162,6 +162,42 @@ defmodule Lua do
   end
 
   @doc """
+  Configures the Lua VM to find vendored LuaRocks packages.
+
+  This is a convenience wrapper around `Lua.set_lua_paths/2` that
+  automatically constructs the correct path patterns for the vendored
+  tree installed by `mix lua.rocks.install`.
+
+      iex> lua = Lua.new(exclude: [[:package], [:require]])
+      iex> Lua.with_rocks(lua)
+
+  You can also pass additional paths that will be appended:
+
+      iex> lua = Lua.new(exclude: [[:package], [:require]])
+      iex> Lua.with_rocks(lua, extra_paths: ["priv/lua/?.lua"])
+
+  ## Options
+    * `:tree` - path to the vendored tree (default: `"priv/lua_deps"`)
+    * `:root` - project root directory (default: `File.cwd!()`)
+    * `:extra_paths` - additional Lua path patterns to include (default: `[]`)
+
+  > #### Warning {: .warning}
+  > In order to use `Lua.with_rocks/2`, the following functions cannot be sandboxed:
+  > * `[:package]`
+  > * `[:require]`
+  >
+  > By default these are sandboxed, see the `:exclude` option in `Lua.new/1` to allow them.
+  """
+  def with_rocks(%__MODULE__{} = lua, opts \\ []) do
+    opts = Keyword.validate!(opts, tree: "priv/lua_deps", root: File.cwd!(), extra_paths: [])
+
+    rocks_paths = Lua.Rocks.lua_paths(tree: opts[:tree], root: opts[:root])
+    all_paths = rocks_paths ++ opts[:extra_paths]
+
+    set_lua_paths(lua, all_paths)
+  end
+
+  @doc """
   Sets a table value in Lua. Nested keys will allocate
   intermediate tables
 
