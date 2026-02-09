@@ -283,7 +283,7 @@ defmodule Lua.VM.Stdlib do
         {[tref], state}
 
       _ ->
-        raise ArgumentError,
+        raise Lua.VM.ArgumentError,
           function_name: "setmetatable",
           arg_num: 2,
           expected: "nil or table"
@@ -291,7 +291,7 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp lua_setmetatable([non_table | _], _state) do
-    raise ArgumentError,
+    raise Lua.VM.ArgumentError,
       function_name: "setmetatable",
       arg_num: 1,
       expected: "table",
@@ -299,7 +299,7 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp lua_setmetatable([], _state) do
-    raise ArgumentError.value_expected("setmetatable", 1)
+    raise Lua.VM.ArgumentError.value_expected("setmetatable", 1)
   end
 
   # getmetatable(object) — returns the metatable of an object
