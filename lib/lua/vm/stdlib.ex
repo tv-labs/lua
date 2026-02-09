@@ -30,6 +30,8 @@ defmodule Lua.VM.Stdlib do
     |> State.register_function("pairs", &lua_pairs/2)
     |> State.register_function("ipairs", &lua_ipairs/2)
     |> Lua.VM.Stdlib.String.install()
+    |> Lua.VM.Stdlib.Math.install()
+    |> Lua.VM.Stdlib.Table.install()
   end
 
   # type(v) — returns the type of v as a string
