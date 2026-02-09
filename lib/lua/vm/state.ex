@@ -11,7 +11,9 @@ defmodule Lua.VM.State do
             upvalue_cells: %{},
             tables: %{},
             table_next_id: 0,
-            private: %{}
+            private: %{},
+            current_line: 0,
+            current_source: nil
 
   @type t :: %__MODULE__{
           globals: map(),
@@ -20,7 +22,9 @@ defmodule Lua.VM.State do
           upvalue_cells: map(),
           tables: %{optional(non_neg_integer()) => Table.t()},
           table_next_id: non_neg_integer(),
-          private: map()
+          private: map(),
+          current_line: non_neg_integer(),
+          current_source: binary() | nil
         }
 
   @doc """

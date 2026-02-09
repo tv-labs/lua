@@ -105,6 +105,12 @@ defmodule Lua.VM.Executor do
     do_execute(rest, regs, upvalue_context, proto, state)
   end
 
+  # source_line - track current source location
+  defp do_execute([{:source_line, line, _file} | rest], regs, upvalues, proto, state) do
+    state = %{state | current_line: line}
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
   # move
   defp do_execute([{:move, dest, source} | rest], regs, upvalues, proto, state) do
     value = elem(regs, source)
@@ -345,6 +351,15 @@ defmodule Lua.VM.Executor do
     {results, state} =
       case func_value do
         {:lua_closure, callee_proto, callee_upvalues} ->
+          # Push call stack frame
+          frame = %{
+            source: proto.source,
+            line: Map.get(state, :current_line, 0),
+            name: nil
+          }
+
+          state = %{state | call_stack: [frame | state.call_stack]}
+
           # Create new register file for the callee
           callee_regs =
             Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 64)
@@ -374,6 +389,9 @@ defmodule Lua.VM.Executor do
               callee_proto,
               state
             )
+
+          # Pop call stack frame
+          state = %{state | call_stack: tl(state.call_stack)}
 
           {results, state}
 

@@ -21,6 +21,9 @@ defmodule Lua.Compiler.Codegen do
     {instructions, ctx} =
       gen_block(block, %{next_reg: start_reg, source: source, scope: scope_state, prototypes: []})
 
+    # Compute line range from block statements
+    lines = compute_line_range(block)
+
     # Wrap in a prototype
     proto = %Prototype{
       instructions: instructions,
@@ -31,7 +34,7 @@ defmodule Lua.Compiler.Codegen do
       is_vararg: false,
       max_registers: func_scope.max_register,
       source: source,
-      lines: {1, 1}
+      lines: lines
     }
 
     {:ok, proto}
@@ -39,9 +42,37 @@ defmodule Lua.Compiler.Codegen do
 
   defp gen_block(%Block{stmts: stmts}, ctx) do
     Enum.reduce(stmts, {[], ctx}, fn stmt, {instructions, ctx} ->
+      # Emit source_line before each statement
+      line_instr = emit_source_line(stmt, ctx)
       {new_instructions, ctx} = gen_statement(stmt, ctx)
-      {instructions ++ new_instructions, ctx}
+      {instructions ++ line_instr ++ new_instructions, ctx}
     end)
+  end
+
+  defp emit_source_line(%{meta: %{start: %{line: line}}}, ctx) when is_integer(line) do
+    [Instruction.source_line(line, ctx.source)]
+  end
+
+  defp emit_source_line(_, _), do: []
+
+  defp compute_line_range(%Block{stmts: stmts}) do
+    lines =
+      stmts
+      |> Enum.flat_map(fn
+        %{meta: %{start: %{line: start_line}, stop: %{line: stop_line}}} ->
+          [start_line, stop_line]
+
+        %{meta: %{start: %{line: line}}} ->
+          [line]
+
+        _ ->
+          []
+      end)
+
+    case lines do
+      [] -> {1, 1}
+      _ -> {Enum.min(lines), Enum.max(lines)}
+    end
   end
 
   defp gen_statement(%Statement.Return{values: [%Expr.Vararg{}]}, ctx) do
@@ -837,6 +868,9 @@ defmodule Lua.Compiler.Codegen do
         prototypes: []
       })
 
+    # Compute line range from function body
+    lines = compute_line_range(node.body)
+
     # Create the nested prototype (include nested prototypes from body)
     nested_proto = %Prototype{
       instructions: body_instructions,
@@ -846,7 +880,7 @@ defmodule Lua.Compiler.Codegen do
       is_vararg: func_scope.is_vararg,
       max_registers: func_scope.max_register,
       source: ctx.source,
-      lines: {1, 1}
+      lines: lines
     }
 
     # Add to prototypes list and get its index
