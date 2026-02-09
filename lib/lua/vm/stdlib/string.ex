@@ -26,7 +26,8 @@ defmodule Lua.VM.Stdlib.String do
 
   @behaviour Lua.VM.Stdlib.Library
 
-  alias Lua.VM.{ArgumentError, State}
+  alias Lua.VM.ArgumentError
+  alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
 
   @impl true

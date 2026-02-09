@@ -82,6 +82,10 @@ mix usage_rules.search_docs "Enum.zip" --query-by title
 - Only use macros if explicitly requested
 - There are many useful standard library functions, prefer to use them where possible
 
+## Code Style
+- Use `alias Module.Submodule` instead of `alias Module.{Submodule}` - avoid curly braces for single aliases
+- When aliasing multiple modules from the same namespace, use separate `alias` statements on individual lines
+
 ## Function Design
 - Use guard clauses: `when is_binary(name) and byte_size(name) > 0`
 - Prefer multiple function clauses over complex conditional logic
