@@ -40,12 +40,43 @@ defmodule Lua.Util do
   end
 
   @doc """
-  Pretty prints a stack trace.
+  Pretty prints a stack trace in Lua 5.3 format.
 
-  Currently returns empty string as the new VM doesn't have Luerl-style stack traces yet.
+  ## Examples
+
+      iex> stack = [
+      ...>   %{source: "-no-source-", line: 3, name: "bar"},
+      ...>   %{source: "-no-source-", line: 7, name: "foo"},
+      ...>   %{source: "-no-source-", line: 10, name: nil}
+      ...> ]
+      iex> Lua.Util.format_stacktrace(stack, nil)
+      "stack traceback:\\n    -no-source-:3: in function 'bar'\\n    -no-source-:7: in function 'foo'\\n    -no-source-:10: in main chunk"
+
   """
-  def format_stacktrace(_stack, _state, _opts \\ [])
-  def format_stacktrace(_, _, _), do: ""
+  def format_stacktrace(stack, _state, _opts \\ [])
+
+  def format_stacktrace([], _, _), do: ""
+
+  def format_stacktrace(stack, _, _) when is_list(stack) do
+    frames =
+      stack
+      |> Enum.map(&format_stack_frame/1)
+      |> Enum.join("\n")
+
+    "stack traceback:\n" <> frames
+  end
+
+  defp format_stack_frame(%{source: source, line: line, name: name}) do
+    location = "    #{source || "-no-source-"}:#{line}:"
+
+    context =
+      case name do
+        nil -> " in main chunk"
+        func_name -> " in function '#{func_name}'"
+      end
+
+    location <> context
+  end
 
   @doc """
   Formats the scope as a function
