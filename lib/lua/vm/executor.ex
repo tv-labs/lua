@@ -765,11 +765,48 @@ defmodule Lua.VM.Executor do
     {:tref, id} = elem(regs, table_reg)
     key = elem(regs, key_reg)
     value = elem(regs, value_reg)
+    table = Map.fetch!(state.tables, id)
 
     state =
-      State.update_table(state, {:tref, id}, fn table ->
-        %{table | data: Map.put(table.data, key, value)}
-      end)
+      if Map.has_key?(table.data, key) do
+        # Key exists, update directly
+        State.update_table(state, {:tref, id}, fn table ->
+          %{table | data: Map.put(table.data, key, value)}
+        end)
+      else
+        # Key doesn't exist, check for __newindex metamethod
+        case table.metatable do
+          nil ->
+            # No metatable, just set the value
+            State.update_table(state, {:tref, id}, fn table ->
+              %{table | data: Map.put(table.data, key, value)}
+            end)
+
+          {:tref, mt_id} ->
+            mt = Map.fetch!(state.tables, mt_id)
+
+            case Map.get(mt.data, "__newindex") do
+              nil ->
+                # No __newindex, just set the value
+                State.update_table(state, {:tref, id}, fn table ->
+                  %{table | data: Map.put(table.data, key, value)}
+                end)
+
+              {:tref, _} = newindex_table ->
+                # __newindex is a table, set the value in that table
+                State.update_table(state, newindex_table, fn table ->
+                  %{table | data: Map.put(table.data, key, value)}
+                end)
+
+              _other ->
+                # __newindex can also be a function, but we don't support that yet
+                # For now, just set the value directly
+                State.update_table(state, {:tref, id}, fn table ->
+                  %{table | data: Map.put(table.data, key, value)}
+                end)
+            end
+        end
+      end
 
     do_execute(rest, regs, upvalues, proto, state)
   end
@@ -822,11 +859,48 @@ defmodule Lua.VM.Executor do
        ) do
     {:tref, id} = elem(regs, table_reg)
     value = elem(regs, value_reg)
+    table = Map.fetch!(state.tables, id)
 
     state =
-      State.update_table(state, {:tref, id}, fn table ->
-        %{table | data: Map.put(table.data, name, value)}
-      end)
+      if Map.has_key?(table.data, name) do
+        # Key exists, update directly
+        State.update_table(state, {:tref, id}, fn table ->
+          %{table | data: Map.put(table.data, name, value)}
+        end)
+      else
+        # Key doesn't exist, check for __newindex metamethod
+        case table.metatable do
+          nil ->
+            # No metatable, just set the value
+            State.update_table(state, {:tref, id}, fn table ->
+              %{table | data: Map.put(table.data, name, value)}
+            end)
+
+          {:tref, mt_id} ->
+            mt = Map.fetch!(state.tables, mt_id)
+
+            case Map.get(mt.data, "__newindex") do
+              nil ->
+                # No __newindex, just set the value
+                State.update_table(state, {:tref, id}, fn table ->
+                  %{table | data: Map.put(table.data, name, value)}
+                end)
+
+              {:tref, _} = newindex_table ->
+                # __newindex is a table, set the value in that table
+                State.update_table(state, newindex_table, fn table ->
+                  %{table | data: Map.put(table.data, name, value)}
+                end)
+
+              _other ->
+                # __newindex can also be a function, but we don't support that yet
+                # For now, just set the value directly
+                State.update_table(state, {:tref, id}, fn table ->
+                  %{table | data: Map.put(table.data, name, value)}
+                end)
+            end
+        end
+      end
 
     do_execute(rest, regs, upvalues, proto, state)
   end
