@@ -24,11 +24,12 @@ defmodule Lua.VM.Stdlib.String do
   - `string.find/4`, `string.match/3`, `string.gmatch/2`, `string.gsub/4`
   """
 
+  @behaviour Lua.VM.Stdlib.Library
+
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
 
-  @doc false
-  @spec install(State.t()) :: State.t()
+  @impl true
   def install(%State{} = state) do
     # Create string table with all functions
     string_table = %{
