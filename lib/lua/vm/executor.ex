@@ -18,6 +18,67 @@ defmodule Lua.VM.Executor do
     do_execute(instructions, registers, {upvalues, %{}}, proto, state)
   end
 
+  @doc """
+  Calls a Lua function value with the given arguments.
+
+  Used by pcall/xpcall to invoke functions in protected mode.
+  Returns {results, final_state}.
+  """
+  @spec call_function(term(), list(), State.t()) :: {list(), State.t()}
+  def call_function({:lua_closure, callee_proto, callee_upvalues}, args, state) do
+    callee_regs =
+      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 64)
+
+    callee_regs =
+      args
+      |> Enum.with_index()
+      |> Enum.reduce(callee_regs, fn {arg, i}, regs ->
+        if i < callee_proto.param_count, do: put_elem(regs, i, arg), else: regs
+      end)
+
+    callee_proto =
+      if callee_proto.is_vararg do
+        %{callee_proto | varargs: Enum.drop(args, callee_proto.param_count)}
+      else
+        callee_proto
+      end
+
+    {results, _callee_regs, state} =
+      do_execute(
+        callee_proto.instructions,
+        callee_regs,
+        {callee_upvalues, %{}},
+        callee_proto,
+        state
+      )
+
+    {results, state}
+  end
+
+  def call_function({:native_func, fun}, args, state) do
+    case fun.(args, state) do
+      {results, %State{} = new_state} when is_list(results) ->
+        {results, new_state}
+
+      {results, %State{} = new_state} ->
+        {List.wrap(results), new_state}
+    end
+  end
+
+  def call_function(nil, _args, _state) do
+    raise TypeError,
+      value: "attempt to call a nil value",
+      error_kind: :call_nil,
+      value_type: nil
+  end
+
+  def call_function(other, _args, _state) do
+    raise TypeError,
+      value: "attempt to call a #{Value.type_name(other)} value",
+      error_kind: :call_non_function,
+      value_type: value_type(other)
+  end
+
   # Empty instruction list - implicit return (no values)
   defp do_execute([], regs, _upvalues, _proto, state) do
     {[], regs, state}
