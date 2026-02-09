@@ -6,7 +6,7 @@ defmodule Lua.VM.Stdlib do
   scope when the standard library is installed.
   """
 
-  alias Lua.VM.{AssertionError, RuntimeError, State, Value}
+  alias Lua.VM.{AssertionError, State, Value}
 
   @doc """
   Installs the standard library into the given VM state.
@@ -20,6 +20,8 @@ defmodule Lua.VM.Stdlib do
     |> State.register_function("print", &lua_print/2)
     |> State.register_function("error", &lua_error/2)
     |> State.register_function("assert", &lua_assert/2)
+    |> State.register_function("pcall", &lua_pcall/2)
+    |> State.register_function("xpcall", &lua_xpcall/2)
     |> State.register_function("rawget", &lua_rawget/2)
     |> State.register_function("rawset", &lua_rawset/2)
     |> State.register_function("rawlen", &lua_rawlen/2)
@@ -73,11 +75,11 @@ defmodule Lua.VM.Stdlib do
 
   # error(message) — raises a Lua runtime error
   defp lua_error([message | _], _state) do
-    raise RuntimeError, value: message
+    raise Lua.VM.RuntimeError, value: message
   end
 
   defp lua_error([], _state) do
-    raise RuntimeError, value: nil
+    raise Lua.VM.RuntimeError, value: nil
   end
 
   # assert(v [, message]) — raises if v is falsy
@@ -98,6 +100,66 @@ defmodule Lua.VM.Stdlib do
   defp lua_assert([], _state) do
     raise AssertionError, value: "assertion failed!"
   end
+
+  # pcall(f [, arg1, ...]) — calls function in protected mode
+  # Returns true, result(s) on success or false, error_message on error
+  defp lua_pcall([func | args], state) do
+    try do
+      {results, state} = Lua.VM.Executor.call_function(func, args, state)
+      {[true | results], state}
+    rescue
+      e in [Lua.VM.RuntimeError, AssertionError, Lua.VM.TypeError] ->
+        error_msg = extract_error_message(e)
+        {[false, error_msg], state}
+
+      e ->
+        # Catch any other error
+        {[false, Exception.message(e)], state}
+    end
+  end
+
+  defp lua_pcall([], state), do: {[false, "bad argument #1 to 'pcall' (value expected)"], state}
+
+  # xpcall(f, msgh [, arg1, ...]) — calls function with message handler
+  # Returns true, result(s) on success or false, handler_result on error
+  defp lua_xpcall([func, handler | args], state) do
+    try do
+      {results, state} = Lua.VM.Executor.call_function(func, args, state)
+      {[true | results], state}
+    rescue
+      e in [Lua.VM.RuntimeError, AssertionError, Lua.VM.TypeError] ->
+        error_msg = extract_error_message(e)
+
+        # Call the error handler
+        try do
+          {handler_results, state} = Lua.VM.Executor.call_function(handler, [error_msg], state)
+          {[false | handler_results], state}
+        rescue
+          _ ->
+            # If handler fails, return original error
+            {[false, error_msg], state}
+        end
+
+      e ->
+        # Catch any other error
+        error_msg = Exception.message(e)
+
+        try do
+          {handler_results, state} = Lua.VM.Executor.call_function(handler, [error_msg], state)
+          {[false | handler_results], state}
+        rescue
+          _ ->
+            {[false, error_msg], state}
+        end
+    end
+  end
+
+  defp lua_xpcall(_, state), do: {[false, "bad argument to 'xpcall'"], state}
+
+  # Extract error message from exception
+  defp extract_error_message(%{value: value}) when is_binary(value), do: value
+  defp extract_error_message(%{value: value}) when not is_nil(value), do: Value.to_string(value)
+  defp extract_error_message(e), do: Exception.message(e)
 
   # rawget(table, key) — get without metamethods
   defp lua_rawget([{:tref, id}, key | _], state) do

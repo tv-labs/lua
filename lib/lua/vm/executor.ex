@@ -18,6 +18,67 @@ defmodule Lua.VM.Executor do
     do_execute(instructions, registers, {upvalues, %{}}, proto, state)
   end
 
+  @doc """
+  Calls a Lua function value with the given arguments.
+
+  Used by pcall/xpcall to invoke functions in protected mode.
+  Returns {results, final_state}.
+  """
+  @spec call_function(term(), list(), State.t()) :: {list(), State.t()}
+  def call_function({:lua_closure, callee_proto, callee_upvalues}, args, state) do
+    callee_regs =
+      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 64)
+
+    callee_regs =
+      args
+      |> Enum.with_index()
+      |> Enum.reduce(callee_regs, fn {arg, i}, regs ->
+        if i < callee_proto.param_count, do: put_elem(regs, i, arg), else: regs
+      end)
+
+    callee_proto =
+      if callee_proto.is_vararg do
+        %{callee_proto | varargs: Enum.drop(args, callee_proto.param_count)}
+      else
+        callee_proto
+      end
+
+    {results, _callee_regs, state} =
+      do_execute(
+        callee_proto.instructions,
+        callee_regs,
+        {callee_upvalues, %{}},
+        callee_proto,
+        state
+      )
+
+    {results, state}
+  end
+
+  def call_function({:native_func, fun}, args, state) do
+    case fun.(args, state) do
+      {results, %State{} = new_state} when is_list(results) ->
+        {results, new_state}
+
+      {results, %State{} = new_state} ->
+        {List.wrap(results), new_state}
+    end
+  end
+
+  def call_function(nil, _args, _state) do
+    raise TypeError,
+      value: "attempt to call a nil value",
+      error_kind: :call_nil,
+      value_type: nil
+  end
+
+  def call_function(other, _args, _state) do
+    raise TypeError,
+      value: "attempt to call a #{Value.type_name(other)} value",
+      error_kind: :call_non_function,
+      value_type: value_type(other)
+  end
+
   # Empty instruction list - implicit return (no values)
   defp do_execute([], regs, _upvalues, _proto, state) do
     {[], regs, state}
@@ -481,43 +542,43 @@ defmodule Lua.VM.Executor do
 
   # Arithmetic operations
   defp do_execute([{:add, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = elem(regs, a) + elem(regs, b)
+    result = safe_add(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
   defp do_execute([{:subtract, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = elem(regs, a) - elem(regs, b)
+    result = safe_subtract(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
   defp do_execute([{:multiply, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = elem(regs, a) * elem(regs, b)
+    result = safe_multiply(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
   defp do_execute([{:divide, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = elem(regs, a) / elem(regs, b)
+    result = safe_divide(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
   defp do_execute([{:floor_divide, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = div(trunc(elem(regs, a)), trunc(elem(regs, b)))
+    result = safe_floor_divide(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
   defp do_execute([{:modulo, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = rem(elem(regs, a), elem(regs, b))
+    result = safe_modulo(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
   defp do_execute([{:power, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = :math.pow(elem(regs, a), elem(regs, b))
+    result = safe_power(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
@@ -576,25 +637,25 @@ defmodule Lua.VM.Executor do
   end
 
   defp do_execute([{:less_than, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = elem(regs, a) < elem(regs, b)
+    result = safe_compare_lt(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
   defp do_execute([{:less_equal, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = elem(regs, a) <= elem(regs, b)
+    result = safe_compare_le(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
   defp do_execute([{:greater_than, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = elem(regs, a) > elem(regs, b)
+    result = safe_compare_gt(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
   defp do_execute([{:greater_equal, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = elem(regs, a) >= elem(regs, b)
+    result = safe_compare_ge(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
@@ -607,7 +668,7 @@ defmodule Lua.VM.Executor do
 
   # Unary operations
   defp do_execute([{:negate, dest, source} | rest], regs, upvalues, proto, state) do
-    result = -elem(regs, source)
+    result = safe_negate(elem(regs, source))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state)
   end
@@ -830,6 +891,203 @@ defmodule Lua.VM.Executor do
       error_kind: :concatenate_type_error,
       value_type: value_type(value)
   end
+
+  # Type-safe arithmetic operations
+  defp safe_add(a, b) do
+    with {:ok, na} <- to_number(a),
+         {:ok, nb} <- to_number(b) do
+      na + nb
+    else
+      {:error, val} ->
+        raise TypeError,
+          value: "attempt to perform arithmetic on a #{Value.type_name(val)} value",
+          error_kind: :arithmetic_on_non_number,
+          value_type: value_type(val)
+    end
+  end
+
+  defp safe_subtract(a, b) do
+    with {:ok, na} <- to_number(a),
+         {:ok, nb} <- to_number(b) do
+      na - nb
+    else
+      {:error, val} ->
+        raise TypeError,
+          value: "attempt to perform arithmetic on a #{Value.type_name(val)} value",
+          error_kind: :arithmetic_on_non_number,
+          value_type: value_type(val)
+    end
+  end
+
+  defp safe_multiply(a, b) do
+    with {:ok, na} <- to_number(a),
+         {:ok, nb} <- to_number(b) do
+      na * nb
+    else
+      {:error, val} ->
+        raise TypeError,
+          value: "attempt to perform arithmetic on a #{Value.type_name(val)} value",
+          error_kind: :arithmetic_on_non_number,
+          value_type: value_type(val)
+    end
+  end
+
+  defp safe_divide(a, b) do
+    with {:ok, na} <- to_number(a),
+         {:ok, nb} <- to_number(b) do
+      # Check for division by zero
+      # Note: Standard Lua 5.3 returns inf/-inf/nan for float division by zero,
+      # but Elixir doesn't support creating these values easily, so we raise an error
+      if nb == 0 or nb == 0.0 do
+        raise Lua.VM.RuntimeError, value: "attempt to divide by zero"
+      else
+        na / nb
+      end
+    else
+      {:error, val} ->
+        raise TypeError,
+          value: "attempt to perform arithmetic on a #{Value.type_name(val)} value",
+          error_kind: :arithmetic_on_non_number,
+          value_type: value_type(val)
+    end
+  end
+
+  defp safe_floor_divide(a, b) do
+    with {:ok, na} <- to_number(a),
+         {:ok, nb} <- to_number(b) do
+      if trunc(nb) == 0 do
+        raise Lua.VM.RuntimeError, value: "attempt to divide by zero"
+      else
+        div(trunc(na), trunc(nb))
+      end
+    else
+      {:error, val} ->
+        raise TypeError,
+          value: "attempt to perform arithmetic on a #{Value.type_name(val)} value",
+          error_kind: :arithmetic_on_non_number,
+          value_type: value_type(val)
+    end
+  end
+
+  defp safe_modulo(a, b) do
+    with {:ok, na} <- to_number(a),
+         {:ok, nb} <- to_number(b) do
+      if trunc(nb) == 0 do
+        raise Lua.VM.RuntimeError, value: "attempt to perform modulo by zero"
+      else
+        rem(trunc(na), trunc(nb))
+      end
+    else
+      {:error, val} ->
+        raise TypeError,
+          value: "attempt to perform arithmetic on a #{Value.type_name(val)} value",
+          error_kind: :arithmetic_on_non_number,
+          value_type: value_type(val)
+    end
+  end
+
+  defp safe_power(a, b) do
+    with {:ok, na} <- to_number(a),
+         {:ok, nb} <- to_number(b) do
+      :math.pow(na, nb)
+    else
+      {:error, val} ->
+        raise TypeError,
+          value: "attempt to perform arithmetic on a #{Value.type_name(val)} value",
+          error_kind: :arithmetic_on_non_number,
+          value_type: value_type(val)
+    end
+  end
+
+  defp safe_negate(a) do
+    case to_number(a) do
+      {:ok, na} ->
+        -na
+
+      {:error, val} ->
+        raise TypeError,
+          value: "attempt to perform arithmetic on a #{Value.type_name(val)} value",
+          error_kind: :arithmetic_on_non_number,
+          value_type: value_type(val)
+    end
+  end
+
+  # Type-safe comparison operations
+  defp safe_compare_lt(a, b) do
+    cond do
+      is_number(a) and is_number(b) ->
+        a < b
+
+      is_binary(a) and is_binary(b) ->
+        a < b
+
+      true ->
+        raise TypeError,
+          value: "attempt to compare #{Value.type_name(a)} with #{Value.type_name(b)}",
+          error_kind: :compare_incompatible_types,
+          value_type: value_type(a)
+    end
+  end
+
+  defp safe_compare_le(a, b) do
+    cond do
+      is_number(a) and is_number(b) ->
+        a <= b
+
+      is_binary(a) and is_binary(b) ->
+        a <= b
+
+      true ->
+        raise TypeError,
+          value: "attempt to compare #{Value.type_name(a)} with #{Value.type_name(b)}",
+          error_kind: :compare_incompatible_types,
+          value_type: value_type(a)
+    end
+  end
+
+  defp safe_compare_gt(a, b) do
+    cond do
+      is_number(a) and is_number(b) ->
+        a > b
+
+      is_binary(a) and is_binary(b) ->
+        a > b
+
+      true ->
+        raise TypeError,
+          value: "attempt to compare #{Value.type_name(a)} with #{Value.type_name(b)}",
+          error_kind: :compare_incompatible_types,
+          value_type: value_type(a)
+    end
+  end
+
+  defp safe_compare_ge(a, b) do
+    cond do
+      is_number(a) and is_number(b) ->
+        a >= b
+
+      is_binary(a) and is_binary(b) ->
+        a >= b
+
+      true ->
+        raise TypeError,
+          value: "attempt to compare #{Value.type_name(a)} with #{Value.type_name(b)}",
+          error_kind: :compare_incompatible_types,
+          value_type: value_type(a)
+    end
+  end
+
+  # Convert value to number (coerce strings like Lua does)
+  defp to_number(v) when is_number(v), do: {:ok, v}
+
+  defp to_number(v) when is_binary(v) do
+    case Value.parse_number(v) do
+      nil -> {:error, v}
+      n -> {:ok, n}
+    end
+  end
+
+  defp to_number(v), do: {:error, v}
 
   # Helper to determine Lua type from Elixir value
   defp value_type(nil), do: nil
