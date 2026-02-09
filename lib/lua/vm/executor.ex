@@ -720,7 +720,36 @@ defmodule Lua.VM.Executor do
     {:tref, id} = elem(regs, table_reg)
     key = elem(regs, key_reg)
     table = Map.fetch!(state.tables, id)
-    value = Map.get(table.data, key)
+
+    value =
+      case Map.get(table.data, key) do
+        nil ->
+          # Key not found, check for __index metamethod
+          case table.metatable do
+            nil ->
+              nil
+
+            {:tref, mt_id} ->
+              mt = Map.fetch!(state.tables, mt_id)
+
+              case Map.get(mt.data, "__index") do
+                nil ->
+                  nil
+
+                {:tref, _} = index_table ->
+                  index_table_data = State.get_table(state, index_table).data
+                  Map.get(index_table_data, key)
+
+                _other ->
+                  # __index can also be a function, but we don't support that yet
+                  nil
+              end
+          end
+
+        v ->
+          v
+      end
+
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state)
   end
@@ -749,7 +778,36 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:get_field, dest, table_reg, name} | rest], regs, upvalues, proto, state) do
     {:tref, id} = elem(regs, table_reg)
     table = Map.fetch!(state.tables, id)
-    value = Map.get(table.data, name)
+
+    value =
+      case Map.get(table.data, name) do
+        nil ->
+          # Key not found, check for __index metamethod
+          case table.metatable do
+            nil ->
+              nil
+
+            {:tref, mt_id} ->
+              mt = Map.fetch!(state.tables, mt_id)
+
+              case Map.get(mt.data, "__index") do
+                nil ->
+                  nil
+
+                {:tref, _} = index_table ->
+                  index_table_data = State.get_table(state, index_table).data
+                  Map.get(index_table_data, name)
+
+                _other ->
+                  # __index can also be a function, but we don't support that yet
+                  nil
+              end
+          end
+
+        v ->
+          v
+      end
+
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state)
   end
