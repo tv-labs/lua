@@ -6,5 +6,5 @@ defmodule Lua.Chunk do
 
   @type t :: %__MODULE__{}
 
-  defstruct [:instructions, :ref]
+  defstruct [:prototype]
 end

@@ -357,6 +357,35 @@ defmodule Lua.Compiler.Codegen do
     {call_instructions, ctx}
   end
 
+  # FuncDecl: function name(params) body end
+  defp gen_statement(%Statement.FuncDecl{name: name} = decl, ctx) do
+    {closure_instructions, closure_reg, ctx} = gen_closure_from_node(decl, ctx)
+
+    case name do
+      [single_name] ->
+        {closure_instructions ++ [Instruction.set_global(single_name, closure_reg)], ctx}
+
+      [first | rest] ->
+        # Dotted name: get the table chain, then set the final field
+        {get_instructions, table_reg, ctx} = gen_expr(%Expr.Var{name: first}, ctx)
+
+        {final_instructions, final_table_reg, ctx} =
+          Enum.reduce(Enum.slice(rest, 0..-2//1), {get_instructions, table_reg, ctx}, fn field,
+                                                                                         {instrs,
+                                                                                          reg,
+                                                                                          ctx} ->
+            field_reg = ctx.next_reg
+            ctx = %{ctx | next_reg: field_reg + 1}
+            {instrs ++ [Instruction.get_field(field_reg, reg, field)], field_reg, ctx}
+          end)
+
+        last_field = List.last(rest)
+
+        {final_instructions ++ [Instruction.set_field(final_table_reg, last_field, closure_reg)],
+         ctx}
+    end
+  end
+
   # Stub for other statements
   defp gen_statement(_stmt, ctx), do: {[], ctx}
 
@@ -595,43 +624,8 @@ defmodule Lua.Compiler.Codegen do
     end
   end
 
-  defp gen_expr(%Expr.Function{params: _params, body: body} = func, ctx) do
-    # Get the function scope from the resolved AST
-    func_key = Map.get(ctx.scope.var_map, func)
-    func_scope = ctx.scope.functions[func_key]
-
-    # Generate the function body in a fresh context with function-scoped locals
-    func_locals_scope = %{ctx.scope | locals: func_scope.locals}
-
-    {body_instructions, body_ctx} =
-      gen_block(body, %{
-        next_reg: func_scope.param_count,
-        source: ctx.source,
-        scope: func_locals_scope,
-        prototypes: []
-      })
-
-    # Create the nested prototype (include nested prototypes from body)
-    nested_proto = %Prototype{
-      instructions: body_instructions,
-      prototypes: Enum.reverse(body_ctx.prototypes),
-      upvalue_descriptors: func_scope.upvalue_descriptors,
-      param_count: func_scope.param_count,
-      is_vararg: func_scope.is_vararg,
-      max_registers: func_scope.max_register,
-      source: ctx.source,
-      lines: {1, 1}
-    }
-
-    # Add to prototypes list and get its index
-    proto_index = length(ctx.prototypes)
-    ctx = %{ctx | prototypes: [nested_proto | ctx.prototypes]}
-
-    # Generate closure instruction
-    dest_reg = ctx.next_reg
-    ctx = %{ctx | next_reg: dest_reg + 1}
-
-    {[Instruction.closure(dest_reg, proto_index)], dest_reg, ctx}
+  defp gen_expr(%Expr.Function{} = func, ctx) do
+    gen_closure_from_node(func, ctx)
   end
 
   defp gen_expr(%Expr.Call{func: func_expr, args: args}, ctx) do
@@ -824,5 +818,45 @@ defmodule Lua.Compiler.Codegen do
     reg = ctx.next_reg
     ctx = %{ctx | next_reg: reg + 1}
     {[Instruction.load_constant(reg, nil)], reg, ctx}
+  end
+
+  # Shared helper: generates a closure from a function node (Expr.Function, Statement.FuncDecl, etc.)
+  # Returns {instructions, dest_reg, ctx} like gen_expr.
+  defp gen_closure_from_node(node, ctx) do
+    func_key = Map.get(ctx.scope.var_map, node)
+    func_scope = ctx.scope.functions[func_key]
+
+    # Generate the function body in a fresh context with function-scoped locals
+    func_locals_scope = %{ctx.scope | locals: func_scope.locals}
+
+    {body_instructions, body_ctx} =
+      gen_block(node.body, %{
+        next_reg: func_scope.param_count,
+        source: ctx.source,
+        scope: func_locals_scope,
+        prototypes: []
+      })
+
+    # Create the nested prototype (include nested prototypes from body)
+    nested_proto = %Prototype{
+      instructions: body_instructions,
+      prototypes: Enum.reverse(body_ctx.prototypes),
+      upvalue_descriptors: func_scope.upvalue_descriptors,
+      param_count: func_scope.param_count,
+      is_vararg: func_scope.is_vararg,
+      max_registers: func_scope.max_register,
+      source: ctx.source,
+      lines: {1, 1}
+    }
+
+    # Add to prototypes list and get its index
+    proto_index = length(ctx.prototypes)
+    ctx = %{ctx | prototypes: [nested_proto | ctx.prototypes]}
+
+    # Generate closure instruction
+    dest_reg = ctx.next_reg
+    ctx = %{ctx | next_reg: dest_reg + 1}
+
+    {[Instruction.closure(dest_reg, proto_index)], dest_reg, ctx}
   end
 end

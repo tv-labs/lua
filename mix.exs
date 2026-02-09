@@ -15,7 +15,7 @@ defmodule Lua.MixProject do
 
       # Docs
       name: "Lua",
-      description: "The most ergomonic interface to Luerl in Elixir",
+      description: "A Lua VM implementation in Elixir",
       source_url: @url,
       homepage_url: @url,
       package: package(),
@@ -56,7 +56,6 @@ defmodule Lua.MixProject do
   defp deps do
     [
       {:usage_rules, "~> 0.1", only: [:dev]},
-      {:luerl, "~> 1.5.1"},
       {:ex_doc, "~> 0.38", only: :dev, runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]

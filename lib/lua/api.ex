@@ -82,13 +82,10 @@ defmodule Lua.API do
   values. E.g.
 
       deflua say_type(value) when is_table(value), do: "table"
-      deflua say_type(value) when is_userdata(value), do: "userdata"
 
   Keep in mind that if you want to work with values passed to `deflua` functions,
   they still need to be decoded first.
   """
-
-  require Record
 
   defmacro __using__(opts) do
     scope = opts |> Keyword.get(:scope, "") |> String.split(".", trim: true)
@@ -126,29 +123,35 @@ defmodule Lua.API do
 
   @doc """
   Is the value a reference to a Lua table?
-
   """
-  defguard is_table(record) when Record.is_record(record, :tref)
+  defguard is_table(value)
+           when is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :tref
 
   @doc """
   Is the value a reference to userdata?
+
+  Note: userdata is not yet supported in the new VM. This guard always returns false.
   """
-  defguard is_userdata(record) when Record.is_record(record, :usdref)
+  defguard is_userdata(_value) when false
 
   @doc """
   Is the value a reference to a Lua function?
   """
-  defguard is_lua_func(record) when Record.is_record(record, :funref)
+  defguard is_lua_func(value)
+           when is_tuple(value) and tuple_size(value) == 3 and elem(value, 0) == :lua_closure
 
   @doc """
   Is the value a reference to an Erlang / Elixir function?
   """
-  defguard is_erl_func(record) when Record.is_record(record, :erl_func)
+  defguard is_erl_func(value)
+           when is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :native_func
 
   @doc """
   Is the value a reference to an Erlang / Elixir mfa?
+
+  Note: MFA references are not used in the new VM. This guard always returns false.
   """
-  defguard is_mfa(record) when Record.is_record(record, :erl_mfa)
+  defguard is_mfa(_value) when false
 
   @doc """
   Raises a runtime exception inside an API function, displaying contextual

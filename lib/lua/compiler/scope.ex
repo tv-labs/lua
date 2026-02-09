@@ -202,6 +202,14 @@ defmodule Lua.Compiler.Scope do
     state
   end
 
+  defp resolve_statement(
+         %Statement.FuncDecl{params: params, body: body, is_method: is_method} = decl,
+         state
+       ) do
+    all_params = if is_method, do: ["self" | params], else: params
+    resolve_function_scope(decl, all_params, body, state)
+  end
+
   defp resolve_statement(%Statement.CallStmt{call: call}, state) do
     resolve_expr(call, state)
   end
@@ -270,85 +278,7 @@ defmodule Lua.Compiler.Scope do
   end
 
   defp resolve_expr(%Expr.Function{params: params, body: body} = func, state) do
-    # Create a new function scope
-    func_key = make_ref()
-    param_count = Enum.count(params, &(&1 != :vararg))
-    is_vararg = :vararg in params
-
-    # Save current scope state
-    saved_locals = state.locals
-    saved_next_register = state.next_register
-    saved_function = state.current_function
-    saved_parent_scopes = state.parent_scopes
-    saved_captured_locals = state.captured_locals
-
-    # Push current scope onto parent_scopes for upvalue resolution
-    parent_scope_entry = %{locals: state.locals, function: state.current_function}
-
-    # Start fresh for the function scope
-    # Parameters get registers starting from 0
-    {param_locals, next_param_reg} =
-      params
-      |> Enum.reject(&(&1 == :vararg))
-      |> Enum.with_index()
-      |> Enum.reduce({%{}, 0}, fn {param, index}, {locals, _} ->
-        {Map.put(locals, param, index), index + 1}
-      end)
-
-    state = %{
-      state
-      | locals: param_locals,
-        next_register: next_param_reg,
-        current_function: func_key,
-        parent_scopes: [parent_scope_entry | state.parent_scopes],
-        captured_locals: MapSet.new()
-    }
-
-    # Create function scope entry
-    func_scope = %FunctionScope{
-      max_register: next_param_reg,
-      param_count: param_count,
-      is_vararg: is_vararg,
-      upvalue_descriptors: []
-    }
-
-    state = %{state | functions: Map.put(state.functions, func_key, func_scope)}
-
-    # Resolve the function body
-    state = resolve_block(body, state)
-
-    # Update max_register and save locals for codegen
-    func_scope = state.functions[func_key]
-
-    func_scope = %{
-      func_scope
-      | max_register: max(func_scope.max_register, state.next_register),
-        locals: state.locals
-    }
-
-    state = %{state | functions: Map.put(state.functions, func_key, func_scope)}
-
-    # Store the function key in var_map for this function node
-    state = %{state | var_map: Map.put(state.var_map, func, func_key)}
-
-    # Detect which parent locals this inner function captures
-    func_scope_final = state.functions[func_key]
-
-    newly_captured =
-      func_scope_final.upvalue_descriptors
-      |> Enum.filter(fn {type, _, _} -> type == :parent_local end)
-      |> Enum.map(fn {:parent_local, _reg, name} -> name end)
-      |> MapSet.new()
-
-    # Restore previous scope, merging newly captured locals
-    %{
-      state
-      | locals: saved_locals,
-        next_register: saved_next_register,
-        current_function: saved_function,
-        parent_scopes: saved_parent_scopes,
-        captured_locals: MapSet.union(saved_captured_locals, newly_captured)
-    }
+    resolve_function_scope(func, params, body, state)
   end
 
   defp resolve_expr(%Expr.Call{func: func, args: args}, state) do
@@ -480,5 +410,86 @@ defmodule Lua.Compiler.Scope do
 
         {:ok, upvalue_index, state}
     end
+  end
+
+  # Shared helper: resolves a function body scope for Expr.Function, Statement.FuncDecl, etc.
+  # The `node` is used as the var_map key so codegen can look up the function scope.
+  defp resolve_function_scope(node, params, body, state) do
+    func_key = make_ref()
+    param_count = Enum.count(params, &(&1 != :vararg))
+    is_vararg = :vararg in params
+
+    # Save current scope state
+    saved_locals = state.locals
+    saved_next_register = state.next_register
+    saved_function = state.current_function
+    saved_parent_scopes = state.parent_scopes
+    saved_captured_locals = state.captured_locals
+
+    # Push current scope onto parent_scopes for upvalue resolution
+    parent_scope_entry = %{locals: state.locals, function: state.current_function}
+
+    # Start fresh for the function scope
+    {param_locals, next_param_reg} =
+      params
+      |> Enum.reject(&(&1 == :vararg))
+      |> Enum.with_index()
+      |> Enum.reduce({%{}, 0}, fn {param, index}, {locals, _} ->
+        {Map.put(locals, param, index), index + 1}
+      end)
+
+    state = %{
+      state
+      | locals: param_locals,
+        next_register: next_param_reg,
+        current_function: func_key,
+        parent_scopes: [parent_scope_entry | state.parent_scopes],
+        captured_locals: MapSet.new()
+    }
+
+    func_scope = %FunctionScope{
+      max_register: next_param_reg,
+      param_count: param_count,
+      is_vararg: is_vararg,
+      upvalue_descriptors: []
+    }
+
+    state = %{state | functions: Map.put(state.functions, func_key, func_scope)}
+
+    # Resolve the function body
+    state = resolve_block(body, state)
+
+    # Update max_register and save locals for codegen
+    func_scope = state.functions[func_key]
+
+    func_scope = %{
+      func_scope
+      | max_register: max(func_scope.max_register, state.next_register),
+        locals: state.locals
+    }
+
+    state = %{state | functions: Map.put(state.functions, func_key, func_scope)}
+
+    # Store the function key in var_map for this node
+    state = %{state | var_map: Map.put(state.var_map, node, func_key)}
+
+    # Detect which parent locals this inner function captures
+    func_scope_final = state.functions[func_key]
+
+    newly_captured =
+      func_scope_final.upvalue_descriptors
+      |> Enum.filter(fn {type, _, _} -> type == :parent_local end)
+      |> Enum.map(fn {:parent_local, _reg, name} -> name end)
+      |> MapSet.new()
+
+    # Restore previous scope, merging newly captured locals
+    %{
+      state
+      | locals: saved_locals,
+        next_register: saved_next_register,
+        current_function: saved_function,
+        parent_scopes: saved_parent_scopes,
+        captured_locals: MapSet.union(saved_captured_locals, newly_captured)
+    }
   end
 end

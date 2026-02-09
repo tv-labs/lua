@@ -1,14 +1,5 @@
 defmodule Lua.Util do
   @moduledoc false
-  # Exposes functions for creating and accessing all of the
-  # Erlang records defined in https://github.com/rvirding/luerl/blob/develop/include/luerl.hrl
-  # These functions are primarily used for inspecting the state of Luerl
-
-  require Record
-
-  for {name, fields} <- Record.extract_all(from_lib: "luerl/include/luerl.hrl") do
-    Record.defrecord(name, fields)
-  end
 
   # Check if all members of the list are encoded
   # useful for checking return values
@@ -17,95 +8,44 @@ defmodule Lua.Util do
   end
 
   # Returns true for identity values
-  # or values that hold internal Luerl representations like tref
+  # or values that hold internal VM representations
   def encoded?(nil), do: true
   def encoded?(false), do: true
   def encoded?(true), do: true
   def encoded?(binary) when is_binary(binary), do: true
-  # TODO Remove since this shouldn't be decoded
-  # take out when https://github.com/rvirding/luerl/pull/213
-  # is released
   def encoded?(number) when is_number(number), do: true
-  def encoded?(record) when Record.is_record(record, :tref), do: true
-  def encoded?(record) when Record.is_record(record, :usdref), do: true
-  def encoded?(record) when Record.is_record(record, :funref), do: true
-  def encoded?(record) when Record.is_record(record, :erl_func), do: true
-  def encoded?(record) when Record.is_record(record, :erl_mfa), do: true
-
+  def encoded?({:tref, _}), do: true
+  def encoded?({:lua_closure, _, _}), do: true
+  def encoded?({:native_func, _}), do: true
   def encoded?(_), do: false
 
   def format_error(error) do
     case error do
-      {line, type, {:illegal, value}} ->
-        type =
-          case type do
-            :luerl_parse -> "parse"
-            :luerl_scan -> "tokenize"
-          end
-
-        "Failed to #{type}: illegal token on line #{line}: #{value}"
-
       {:badarith, operator, values} ->
         expression = values |> Enum.map(&to_string/1) |> Enum.join(" #{operator} ")
-
         "bad arithmetic #{expression}"
 
       {:illegal_index, _type, message} ->
-        # TODO we can try to get fancy here and
-        # print what the object was that they tried to access
         "invalid index \"#{message}\""
 
-      {line, _type, {:user, message}} ->
-        "Line #{line}: #{message}"
+      message when is_binary(message) ->
+        message
 
-      {line, _type, message} ->
-        "Line #{line}: #{message}"
+      %{message: message} when is_binary(message) ->
+        message
 
-      error ->
-        :luerl_lib.format_error(error)
-        # "unknown error #{inspect(error)}"
+      other ->
+        inspect(other)
     end
   end
 
   @doc """
-  Pretty prints a stack trace
+  Pretty prints a stack trace.
+
+  Currently returns empty string as the new VM doesn't have Luerl-style stack traces yet.
   """
   def format_stacktrace(_stack, _state, _opts \\ [])
-  def format_stacktrace([], _state, _opts), do: ""
-
-  def format_stacktrace([_ | rest] = stacktrace, state, opts) do
-    script_name = Keyword.get(opts, :script_name, "script")
-
-    stacktrace
-    |> Enum.zip(rest)
-    |> Enum.map_join("\n", fn
-      {{func, [{:tref, _} = tref | rest], _}, {_, _, context}} ->
-        # Tried to call a method on something that wasn't setup correctly
-        keys = tref |> :luerl.decode(state) |> Enum.map_join(", ", fn {k, _} -> inspect(k) end)
-
-        """
-        #{inspect(func)} with arguments #{format_args(rest)}
-        ^--- self is incorrect for object with keys #{keys}
-
-
-        #{script_name} line #{context[:line]}
-        """
-
-      {{func, args, _}, {_, _, context}} ->
-        name =
-          case func do
-            nil -> " <unknown function>#{format_args(args)}"
-            "-no-name-" -> ""
-            {:luerl_lib_basic, :basic_error} -> format_error(func, args)
-            {:luerl_lib_basic, :basic_error, :undefined} -> format_error(func, args)
-            {:luerl_lib_basic, :error_call, :undefined} -> format_error(func, args)
-            {:luerl_lib_basic, :assert, :undefined} -> format_error(func, args)
-            func -> " #{format_function([func], args)}"
-          end
-
-        "#{script_name} line #{context[:line]}:#{name}"
-    end)
-  end
+  def format_stacktrace(_, _, _), do: ""
 
   @doc """
   Formats the scope as a function
@@ -157,24 +97,4 @@ defmodule Lua.Util do
 
   defp format_scope({:tref, _val}), do: "<reference>"
   defp format_scope(scope), do: scope
-
-  defp format_error({:luerl_lib_basic, :basic_error}, {:undefined, args}) do
-    format_function("error", args)
-  end
-
-  defp format_error({:luerl_lib_basic, :basic_error, :undefined}, args) do
-    format_function("error", args)
-  end
-
-  defp format_error({:luerl_lib_basic, :error_call, :undefined}, args) do
-    format_function("error", args)
-  end
-
-  defp format_error({:luerl_lib_basic, :assert, :undefined}, args) do
-    format_function("assert", args)
-  end
-
-  defp format_error(_, {:undefined, args}) do
-    format_function("unknown_error", args)
-  end
 end

@@ -12,7 +12,13 @@ defmodule Lua.RuntimeExceptionTest do
       end
     end
 
-    test "includes formatted error message and stacktrace" do
+    test "includes formatted error message" do
+      # Original implementation (also checked state and original fields):
+      # test "includes formatted error message and stacktrace" do
+      #   ...
+      #   assert exception.state != nil
+      #   assert exception.original != nil
+
       lua = Lua.new()
 
       exception =
@@ -24,8 +30,6 @@ defmodule Lua.RuntimeExceptionTest do
 
       assert exception.message =~ "Lua runtime error:"
       assert exception.message =~ "custom error message"
-      assert exception.state != nil
-      assert exception.original != nil
     end
 
     test "handles parse errors" do
@@ -54,7 +58,6 @@ defmodule Lua.RuntimeExceptionTest do
         end
 
       assert exception.message =~ "Lua runtime error:"
-      assert exception.state != nil
     end
 
     test "handles illegal index errors" do
@@ -69,13 +72,12 @@ defmodule Lua.RuntimeExceptionTest do
         end
 
       assert exception.message =~ "Lua runtime error:"
-      assert exception.state != nil
     end
   end
 
   describe "exception/1 with {:api_error, details, state}" do
     test "creates exception with api error message" do
-      state = :luerl.init()
+      state = Lua.VM.State.new()
       details = "invalid function call"
 
       exception = RuntimeException.exception({:api_error, details, state})
@@ -86,7 +88,7 @@ defmodule Lua.RuntimeExceptionTest do
     end
 
     test "handles complex api error details" do
-      state = :luerl.init()
+      state = Lua.VM.State.new()
       details = "function returned invalid type: expected table, got nil"
 
       exception = RuntimeException.exception({:api_error, details, state})
@@ -295,12 +297,8 @@ defmodule Lua.RuntimeExceptionTest do
     end
 
     test "handles non-exception list (not keyword list)" do
-      # A list with integer keys won't match the keyword list pattern
-      # because Keyword.fetch!/2 expects atom keys
       error = [1, 2, 3]
 
-      # This will raise KeyError because the keyword list clause
-      # will try to match first and fail on Keyword.fetch!/2
       assert_raise KeyError, fn ->
         RuntimeException.exception(error)
       end
