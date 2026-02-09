@@ -1,15 +1,33 @@
 defmodule Lua.VM.Stdlib.String do
   @moduledoc """
-  String standard library functions for Lua.
+  String standard library functions for Lua 5.3.
 
-  Implements the string.* functions from Lua 5.3.
+  This module implements the Lua string library, providing functions for string
+  manipulation. All functions are registered in the global `string` table when
+  the standard library is installed.
+
+  ## Implemented Functions
+
+  - `string.lower(s)` - converts string to lowercase
+  - `string.upper(s)` - converts string to uppercase
+  - `string.len(s)` - returns length of string in bytes
+  - `string.sub(s, i [, j])` - extracts substring (1-based indexing)
+  - `string.rep(s, n [, sep])` - repeats string with optional separator
+  - `string.reverse(s)` - reverses a string
+  - `string.byte(s [, i [, j]])` - returns byte values of characters
+  - `string.char(...)` - creates string from byte values
+  - `string.format(fmt, ...)` - C-style string formatting
+
+  ## Pattern Matching (Not Yet Implemented)
+
+  The following functions require Lua's pattern matching engine and are deferred:
+  - `string.find/4`, `string.match/3`, `string.gmatch/2`, `string.gsub/4`
   """
 
-  alias Lua.VM.{RuntimeError, State}
+  alias Lua.VM.State
+  alias Lua.VM.Stdlib.Util
 
-  @doc """
-  Returns a table with all string library functions.
-  """
+  @doc false
   @spec install(State.t()) :: State.t()
   def install(%State{} = state) do
     # Create string table with all functions
@@ -77,7 +95,7 @@ defmodule Lua.VM.Stdlib.String do
     j = Enum.at(rest, 1)
 
     unless is_integer(i) do
-      raise RuntimeError, value: "bad argument #2 to 'sub' (number expected)"
+      raise Lua.VM.RuntimeError, value: "bad argument #2 to 'string.sub' (number expected)"
     end
 
     # Convert Lua 1-based indices to 0-based, handle negative indices
@@ -111,8 +129,8 @@ defmodule Lua.VM.Stdlib.String do
     sep = Enum.at(rest, 0, "")
 
     unless is_binary(sep) do
-      raise RuntimeError,
-        value: "bad argument #3 to 'rep' (string expected, got #{typeof(sep)})"
+      raise Lua.VM.RuntimeError,
+        value: "bad argument #3 to 'string.rep' (string expected, got #{Util.typeof(sep)})"
     end
 
     result =
@@ -128,7 +146,8 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   defp string_rep([str, n | _], _state) when is_binary(str) do
-    raise RuntimeError, value: "bad argument #2 to 'rep' (number expected, got #{typeof(n)})"
+    raise Lua.VM.RuntimeError,
+      value: "bad argument #2 to 'string.rep' (number expected, got #{Util.typeof(n)})"
   end
 
   defp string_rep([other, _ | _], _state) do
@@ -136,7 +155,7 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   defp string_rep([_], _state) do
-    raise RuntimeError, value: "bad argument #2 to 'rep' (number expected)"
+    raise Lua.VM.RuntimeError, value: "bad argument #2 to 'string.rep' (number expected)"
   end
 
   defp string_rep([], _state) do
@@ -162,11 +181,11 @@ defmodule Lua.VM.Stdlib.String do
     j = Enum.at(rest, 1, i)
 
     unless is_integer(i) do
-      raise RuntimeError, value: "bad argument #2 to 'byte' (number expected)"
+      raise Lua.VM.RuntimeError, value: "bad argument #2 to 'string.byte' (number expected)"
     end
 
     unless is_integer(j) do
-      raise RuntimeError, value: "bad argument #3 to 'byte' (number expected)"
+      raise Lua.VM.RuntimeError, value: "bad argument #3 to 'string.byte' (number expected)"
     end
 
     len = byte_size(str)
@@ -213,7 +232,7 @@ defmodule Lua.VM.Stdlib.String do
 
     case result do
       {:error, msg} ->
-        raise RuntimeError, value: "bad argument to 'char' (#{msg})"
+        raise Lua.VM.RuntimeError, value: "bad argument to 'string.char' (#{msg})"
 
       str ->
         {[str], state}
@@ -225,7 +244,7 @@ defmodule Lua.VM.Stdlib.String do
     result = format_string(fmt, args, "")
     {[result], state}
   rescue
-    e in RuntimeError ->
+    e in Lua.VM.RuntimeError ->
       reraise e, __STACKTRACE__
   end
 
@@ -247,7 +266,7 @@ defmodule Lua.VM.Stdlib.String do
 
       "s" <> rest ->
         [arg | remaining_args] = args
-        str = to_lua_string(arg)
+        str = Util.to_lua_string(arg)
         format_string(rest, remaining_args, acc <> str)
 
       "d" <> rest ->
@@ -291,7 +310,8 @@ defmodule Lua.VM.Stdlib.String do
         format_string(rest, remaining_args, acc <> str)
 
       _ ->
-        raise RuntimeError, value: "invalid option '%#{String.first(rest)}' to 'format'"
+        raise Lua.VM.RuntimeError,
+          value: "invalid option '%#{String.first(rest)}' to 'string.format'"
     end
   end
 
@@ -300,17 +320,11 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   # Format helpers
-  defp to_lua_string(nil), do: "nil"
-  defp to_lua_string(val) when is_binary(val), do: val
-  defp to_lua_string(val) when is_boolean(val), do: to_string(val)
-  defp to_lua_string(val) when is_number(val), do: Lua.VM.Value.to_string(val)
-  defp to_lua_string(_), do: "table"
-
   defp format_integer(val) when is_integer(val), do: Integer.to_string(val)
   defp format_integer(val) when is_float(val), do: Integer.to_string(trunc(val))
 
   defp format_integer(_) do
-    raise RuntimeError, value: "bad argument to 'format' (number expected)"
+    raise Lua.VM.RuntimeError, value: "bad argument to 'string.format' (number expected)"
   end
 
   defp format_float(val) when is_number(val) do
@@ -318,7 +332,7 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   defp format_float(_) do
-    raise RuntimeError, value: "bad argument to 'format' (number expected)"
+    raise Lua.VM.RuntimeError, value: "bad argument to 'string.format' (number expected)"
   end
 
   defp format_hex(val, case_style) when is_integer(val) do
@@ -331,20 +345,20 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   defp format_hex(_, _) do
-    raise RuntimeError, value: "bad argument to 'format' (number expected)"
+    raise Lua.VM.RuntimeError, value: "bad argument to 'string.format' (number expected)"
   end
 
   defp format_octal(val) when is_integer(val), do: Integer.to_string(val, 8)
   defp format_octal(val) when is_float(val), do: Integer.to_string(trunc(val), 8)
 
   defp format_octal(_) do
-    raise RuntimeError, value: "bad argument to 'format' (number expected)"
+    raise Lua.VM.RuntimeError, value: "bad argument to 'string.format' (number expected)"
   end
 
   defp format_char(val) when is_integer(val) and val >= 0 and val <= 255, do: <<val>>
 
   defp format_char(_) do
-    raise RuntimeError, value: "bad argument to 'format' (invalid value for %%c)"
+    raise Lua.VM.RuntimeError, value: "bad argument to 'string.format' (invalid value for %%c)"
   end
 
   defp format_quoted(val) when is_binary(val) do
@@ -360,7 +374,7 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   defp format_quoted(_) do
-    raise RuntimeError, value: "bad argument to 'format' (string expected for %q)"
+    raise Lua.VM.RuntimeError, value: "bad argument to 'string.format' (string expected for %q)"
   end
 
   # Helper: convert Lua 1-based index to 0-based, handle negative indices
@@ -370,22 +384,14 @@ defmodule Lua.VM.Stdlib.String do
 
   # Error helpers
   defp raise_string_expected(arg_num, func_name, value) do
-    type = typeof(value)
+    type = Util.typeof(value)
 
-    raise RuntimeError,
-      value: "bad argument ##{arg_num} to '#{func_name}' (string expected, got #{type})"
+    raise Lua.VM.RuntimeError,
+      value: "bad argument ##{arg_num} to 'string.#{func_name}' (string expected, got #{type})"
   end
 
   defp raise_arg_expected(arg_num, func_name) do
-    raise RuntimeError, value: "bad argument ##{arg_num} to '#{func_name}' (value expected)"
+    raise Lua.VM.RuntimeError,
+      value: "bad argument ##{arg_num} to 'string.#{func_name}' (value expected)"
   end
-
-  defp typeof(nil), do: "nil"
-  defp typeof(v) when is_boolean(v), do: "boolean"
-  defp typeof(v) when is_number(v), do: "number"
-  defp typeof(v) when is_binary(v), do: "string"
-  defp typeof({:tref, _}), do: "table"
-  defp typeof({:lua_closure, _, _}), do: "function"
-  defp typeof({:native_func, _}), do: "function"
-  defp typeof(_), do: "unknown"
 end
