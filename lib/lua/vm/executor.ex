@@ -414,14 +414,18 @@ defmodule Lua.VM.Executor do
             value: "attempt to call a nil value",
             source: proto.source,
             call_stack: state.call_stack,
-            line: Map.get(state, :current_line)
+            line: Map.get(state, :current_line),
+            error_kind: :call_nil,
+            value_type: nil
 
         other ->
           raise TypeError,
             value: "attempt to call a #{Value.type_name(other)} value",
             source: proto.source,
             call_stack: state.call_stack,
-            line: Map.get(state, :current_line)
+            line: Map.get(state, :current_line),
+            error_kind: :call_non_function,
+            value_type: value_type(other)
       end
 
     # result_count == -1 means "return all results" (used in return f() position)
@@ -800,7 +804,9 @@ defmodule Lua.VM.Executor do
       value: "attempt to call a nil value",
       source: proto.source,
       call_stack: state.call_stack,
-      line: Map.get(state, :current_line)
+      line: Map.get(state, :current_line),
+      error_kind: :call_nil,
+      value_type: nil
   end
 
   defp call_value(other, _args, proto, state) do
@@ -808,7 +814,9 @@ defmodule Lua.VM.Executor do
       value: "attempt to call a #{Value.type_name(other)} value",
       source: proto.source,
       call_stack: state.call_stack,
-      line: Map.get(state, :current_line)
+      line: Map.get(state, :current_line),
+      error_kind: :call_non_function,
+      value_type: value_type(other)
   end
 
   # Coerce a value to a string for concatenation (Lua semantics: numbers become strings)
@@ -818,6 +826,18 @@ defmodule Lua.VM.Executor do
 
   defp concat_coerce(value) do
     raise TypeError,
-      value: "attempt to concatenate a #{Value.type_name(value)} value"
+      value: "attempt to concatenate a #{Value.type_name(value)} value",
+      error_kind: :concatenate_type_error,
+      value_type: value_type(value)
   end
+
+  # Helper to determine Lua type from Elixir value
+  defp value_type(nil), do: nil
+  defp value_type(v) when is_boolean(v), do: :boolean
+  defp value_type(v) when is_number(v), do: :number
+  defp value_type(v) when is_binary(v), do: :string
+  defp value_type({:tref, _}), do: :table
+  defp value_type({:lua_closure, _, _}), do: :function
+  defp value_type({:native_func, _}), do: :function
+  defp value_type(_), do: :unknown
 end

@@ -12,19 +12,31 @@ defmodule Lua.VM.ErrorFormatter do
 
   @doc """
   Formats a runtime error into a beautiful multi-line string.
+
+  ## Options
+
+    * `:source` - Source file name
+    * `:line` - Line number where error occurred
+    * `:call_stack` - List of stack frames
+    * `:source_code` - Full source code for context display
+    * `:error_kind` - Structured error kind atom for suggestions (e.g., `:call_nil`, `:call_non_function`, `:index_non_table`)
+    * `:value_type` - Type of the problematic value (e.g., `:number`, `:string`, `:table`)
+
   """
   def format(error_type, message, opts \\ []) do
     source = Keyword.get(opts, :source)
     line = Keyword.get(opts, :line)
     call_stack = Keyword.get(opts, :call_stack, [])
     source_code = Keyword.get(opts, :source_code)
+    error_kind = Keyword.get(opts, :error_kind)
+    value_type = Keyword.get(opts, :value_type)
 
     header = format_header(error_type)
     location = format_location(source, line)
     message_section = format_message(message)
     context = format_source_context(source_code, line)
     stack_trace = format_stack_trace(call_stack)
-    suggestion = format_suggestion(error_type, message)
+    suggestion = format_suggestion(error_type, error_kind, value_type)
 
     [header, location, message_section, context, stack_trace, suggestion]
     |> Enum.reject(&is_nil/1)
@@ -123,53 +135,54 @@ defmodule Lua.VM.ErrorFormatter do
     location <> context
   end
 
-  defp format_suggestion(:type_error, message) do
-    cond do
-      String.contains?(message, "call a nil value") ->
+  defp format_suggestion(:type_error, error_kind, value_type) do
+    case error_kind do
+      :call_nil ->
         suggestion(
           "The value you're trying to call as a function is nil. Check that the function exists and is defined before this point."
         )
 
-      String.contains?(message, "call a") ->
+      :call_non_function ->
+        type_name = format_type_name(value_type)
+
         suggestion(
-          "You can only call function values. Check that you're calling a function, not a #{extract_type(message)}."
+          "You can only call function values. Check that you're calling a function, not a #{type_name}."
         )
 
-      String.contains?(message, "index") ->
+      :index_non_table ->
+        type_name = format_type_name(value_type)
+
         suggestion(
-          "You can only index tables. Make sure the value you're indexing is a table, not a #{extract_type(message)}."
+          "You can only index tables. Make sure the value you're indexing is a table, not a #{type_name}."
         )
 
-      String.contains?(message, "arithmetic") ->
+      :arithmetic_type_error ->
         suggestion(
           "Arithmetic operations require numbers. Make sure both operands are numbers or strings that can be converted to numbers."
         )
 
-      String.contains?(message, "concatenate") ->
+      :concatenate_type_error ->
         suggestion("String concatenation (..) requires strings or numbers, not other types.")
 
-      true ->
+      _ ->
         nil
     end
   end
 
-  defp format_suggestion(:assertion_error, _message) do
+  defp format_suggestion(:assertion_error, _error_kind, _value_type) do
     suggestion("The assertion condition evaluated to false or nil. Check your logic.")
   end
 
-  defp format_suggestion(_, _), do: nil
+  defp format_suggestion(_, _, _), do: nil
 
   defp suggestion(text) do
     "\n\n" <> IO.ANSI.cyan() <> "Suggestion:" <> IO.ANSI.reset() <> "\n  " <> text
   end
 
-  defp extract_type(message) do
-    cond do
-      String.contains?(message, "string value") -> "string"
-      String.contains?(message, "number value") -> "number"
-      String.contains?(message, "boolean value") -> "boolean"
-      String.contains?(message, "table value") -> "table"
-      true -> "value"
-    end
-  end
+  defp format_type_name(:number), do: "number"
+  defp format_type_name(:string), do: "string"
+  defp format_type_name(:boolean), do: "boolean"
+  defp format_type_name(:table), do: "table"
+  defp format_type_name(nil), do: "nil"
+  defp format_type_name(_), do: "value"
 end

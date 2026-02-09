@@ -209,7 +209,9 @@ defmodule Lua.ErrorMessagesTest do
         ErrorFormatter.format(:type_error, message,
           source: "test.lua",
           line: 3,
-          call_stack: []
+          call_stack: [],
+          error_kind: :call_nil,
+          value_type: nil
         )
 
       assert formatted =~ "Suggestion"
