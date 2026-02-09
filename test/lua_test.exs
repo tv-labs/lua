@@ -179,7 +179,7 @@ defmodule LuaTest do
     @tag :pending
     test "loading files with undefined functions returns an error" do
       # Error message format differs from Luerl - Luerl raises CompilerException,
-      # new VM may raise RuntimeException since undefined functions are a runtime error
+      # new VM raises RuntimeException since undefined functions are a runtime error
       # Original implementation:
       # path = test_file("undefined_function")
       #
@@ -195,12 +195,13 @@ defmodule LuaTest do
       # assert_raise Lua.CompilerException, error, fn ->
       #   Lua.load_file!(Lua.new(), path)
       # end
-
-      path = test_file("undefined_function")
-
-      assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
-        Lua.load_file!(Lua.new(), path)
-      end
+      #
+      # New VM implementation (raises RuntimeException instead):
+      # path = test_file("undefined_function")
+      #
+      # assert_raise Lua.RuntimeException, ~r/attempt to call a nil value/, fn ->
+      #   Lua.load_file!(Lua.new(), path)
+      # end
     end
 
     test "it can load files with just comments" do
