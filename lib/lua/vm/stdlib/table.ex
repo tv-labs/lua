@@ -366,13 +366,14 @@ defmodule Lua.VM.Stdlib.Table do
 
   # Helper: Get the length of the array part of a table (consecutive integer keys starting from 1)
   defp get_table_length(table) do
-    Stream.iterate(1, &(&1 + 1))
-    |> Enum.reduce_while(0, fn i, _acc ->
-      if Map.has_key?(table.data, i) do
-        {:cont, i}
-      else
-        {:halt, i - 1}
-      end
-    end)
+    find_table_length(table.data, 1)
+  end
+
+  defp find_table_length(data, i) do
+    if Map.has_key?(data, i) do
+      find_table_length(data, i + 1)
+    else
+      i - 1
+    end
   end
 end
