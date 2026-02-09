@@ -6,7 +6,7 @@ defmodule Lua.VM.Stdlib do
   scope when the standard library is installed.
   """
 
-  alias Lua.VM.{AssertionError, RuntimeError, State, Value}
+  alias Lua.VM.{AssertionError, State, Value}
 
   @doc """
   Installs the standard library into the given VM state.
@@ -75,11 +75,11 @@ defmodule Lua.VM.Stdlib do
 
   # error(message) — raises a Lua runtime error
   defp lua_error([message | _], _state) do
-    raise RuntimeError, value: message
+    raise Lua.VM.RuntimeError, value: message
   end
 
   defp lua_error([], _state) do
-    raise RuntimeError, value: nil
+    raise Lua.VM.RuntimeError, value: nil
   end
 
   # assert(v [, message]) — raises if v is falsy
@@ -108,7 +108,7 @@ defmodule Lua.VM.Stdlib do
       {results, state} = Lua.VM.Executor.call_function(func, args, state)
       {[true | results], state}
     rescue
-      e in [RuntimeError, AssertionError, Lua.VM.TypeError] ->
+      e in [Lua.VM.RuntimeError, AssertionError, Lua.VM.TypeError] ->
         error_msg = extract_error_message(e)
         {[false, error_msg], state}
 
@@ -127,7 +127,7 @@ defmodule Lua.VM.Stdlib do
       {results, state} = Lua.VM.Executor.call_function(func, args, state)
       {[true | results], state}
     rescue
-      e in [RuntimeError, AssertionError, Lua.VM.TypeError] ->
+      e in [Lua.VM.RuntimeError, AssertionError, Lua.VM.TypeError] ->
         error_msg = extract_error_message(e)
 
         # Call the error handler
