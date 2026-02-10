@@ -29,6 +29,8 @@ defmodule Lua.VM.Stdlib do
     |> State.register_function("next", &lua_next/2)
     |> State.register_function("pairs", &lua_pairs/2)
     |> State.register_function("ipairs", &lua_ipairs/2)
+    |> State.register_function("setmetatable", &lua_setmetatable/2)
+    |> State.register_function("getmetatable", &lua_getmetatable/2)
     |> Lua.VM.Stdlib.String.install()
     |> Lua.VM.Stdlib.Math.install()
     |> Lua.VM.Stdlib.Table.install()
@@ -266,5 +268,52 @@ defmodule Lua.VM.Stdlib do
        end}
 
     {[iterator, tref, 0], state}
+  end
+
+  # setmetatable(table, metatable) — sets the metatable for a table
+  defp lua_setmetatable([{:tref, _} = tref, metatable], state) do
+    # Validate metatable is nil or a table
+    case metatable do
+      nil ->
+        state = State.update_table(state, tref, fn table -> %{table | metatable: nil} end)
+        {[tref], state}
+
+      {:tref, _} = mt_ref ->
+        state = State.update_table(state, tref, fn table -> %{table | metatable: mt_ref} end)
+        {[tref], state}
+
+      _ ->
+        raise Lua.VM.RuntimeError,
+          value: "bad argument #2 to 'setmetatable' (nil or table expected)"
+    end
+  end
+
+  defp lua_setmetatable([non_table | _], _state) do
+    raise Lua.VM.RuntimeError,
+      value:
+        "bad argument #1 to 'setmetatable' (table expected, got #{Value.type_name(non_table)})"
+  end
+
+  defp lua_setmetatable([], _state) do
+    raise Lua.VM.RuntimeError, value: "bad argument #1 to 'setmetatable' (table expected)"
+  end
+
+  # getmetatable(object) — returns the metatable of an object
+  defp lua_getmetatable([{:tref, _} = tref], state) do
+    table = State.get_table(state, tref)
+
+    case table.metatable do
+      nil -> {[nil], state}
+      mt_ref -> {[mt_ref], state}
+    end
+  end
+
+  defp lua_getmetatable([_other], state) do
+    # For non-tables, Lua returns nil (or the metatable set for that type, but we don't support that yet)
+    {[nil], state}
+  end
+
+  defp lua_getmetatable([], state) do
+    {[nil], state}
   end
 end
