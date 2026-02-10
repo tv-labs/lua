@@ -11,6 +11,8 @@ defmodule Lua.VM.State do
             upvalue_cells: %{},
             tables: %{},
             table_next_id: 0,
+            userdata: %{},
+            userdata_next_id: 0,
             private: %{},
             current_line: 0,
             current_source: nil
@@ -22,6 +24,8 @@ defmodule Lua.VM.State do
           upvalue_cells: map(),
           tables: %{optional(non_neg_integer()) => Table.t()},
           table_next_id: non_neg_integer(),
+          userdata: %{optional(non_neg_integer()) => term()},
+          userdata_next_id: non_neg_integer(),
           private: map(),
           current_line: non_neg_integer(),
           current_source: binary() | nil
@@ -80,6 +84,33 @@ defmodule Lua.VM.State do
   @spec update_table(t(), {:tref, non_neg_integer()}, (Table.t() -> Table.t())) :: t()
   def update_table(state, {:tref, id}, fun) do
     %{state | tables: Map.update!(state.tables, id, fun)}
+  end
+
+  @doc """
+  Allocates userdata and returns a reference.
+
+  Userdata stores arbitrary Elixir terms that can be passed through Lua
+  but not directly manipulated by Lua code.
+  """
+  @spec alloc_userdata(t(), term()) :: {{:udref, non_neg_integer()}, t()}
+  def alloc_userdata(state, value) do
+    id = state.userdata_next_id
+
+    state = %{
+      state
+      | userdata: Map.put(state.userdata, id, value),
+        userdata_next_id: id + 1
+    }
+
+    {{:udref, id}, state}
+  end
+
+  @doc """
+  Gets userdata by reference.
+  """
+  @spec get_userdata(t(), {:udref, non_neg_integer()}) :: term()
+  def get_userdata(state, {:udref, id}) do
+    Map.fetch!(state.userdata, id)
   end
 
   @doc """

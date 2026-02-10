@@ -1222,7 +1222,7 @@ defmodule Lua.VM.Executor do
       end
 
     # Only use metamethod if both have the SAME __eq metamethod
-    if eq_a != nil and eq_a == eq_b do
+    if not is_nil(eq_a) and eq_a == eq_b do
       case eq_a do
         {:native_func, func} ->
           {[result], new_state} = func.([a, b], state)

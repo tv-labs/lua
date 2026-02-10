@@ -21,6 +21,7 @@ defmodule Lua.VM.Value do
   def type_name({:tref, _}), do: "table"
   def type_name({:lua_closure, _, _}), do: "function"
   def type_name({:native_func, _}), do: "function"
+  def type_name({:udref, _}), do: "userdata"
   def type_name(_), do: "userdata"
 
   @doc """
@@ -124,6 +125,10 @@ defmodule Lua.VM.Value do
     {{:native_func, wrapper}, state}
   end
 
+  def encode({:userdata, value}, state) do
+    State.alloc_userdata(state, value)
+  end
+
   def encode(map, state) when is_map(map) do
     {data, state} =
       Enum.reduce(map, {%{}, state}, fn {k, v}, {data, state} ->
@@ -191,6 +196,11 @@ defmodule Lua.VM.Value do
   def decode(value, _state) when is_boolean(value), do: value
   def decode(value, _state) when is_number(value), do: value
   def decode(value, _state) when is_binary(value), do: value
+
+  def decode({:udref, _} = ref, state) do
+    value = State.get_userdata(state, ref)
+    {:userdata, value}
+  end
 
   def decode({:tref, id}, state) do
     table = Map.fetch!(state.tables, id)

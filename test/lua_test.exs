@@ -1252,71 +1252,66 @@ defmodule LuaTest do
       end
     end
 
-    @tag :pending
-    test "it can return userdata", %{lua: _lua} do
-      # Requires userdata support
-      # Original implementation:
-      # assert {[{:userdata, {:not, :valid, :lua}}], _} =
-      #          Lua.eval!(lua, "return example.userdata()")
+    test "it can return userdata", %{lua: lua} do
+      # Function that returns userdata
+      get_userdata = fn _args, state ->
+        {encoded, lua} = Lua.encode!(state, {:userdata, {:not, :valid, :lua}})
+        {[encoded], lua}
+      end
+
+      lua = Lua.set!(lua, [:get_userdata], get_userdata)
+
+      assert {[{:userdata, {:not, :valid, :lua}}], _} =
+               Lua.eval!(lua, "return get_userdata()")
     end
 
-    @tag :pending
-    test "userdata must be encoded" do
-      # Requires userdata support
-      # Original implementation:
-      # get_random_no_encode = fn _args, lua ->
-      #   {[{:userdata, "private data"}], lua}
-      # end
-      #
-      # get_random = fn _args, lua ->
-      #   Lua.encode!(lua, {:userdata, "private data"})
-      # end
-      #
-      # return_random = fn [data], state ->
-      #   {[data], state}
-      # end
-      #
-      # lua =
-      #   Lua.new()
-      #   |> Lua.set!([:get_random], get_random)
-      #   |> Lua.set!([:get_random_no_encode], get_random_no_encode)
-      #   |> Lua.set!([:return_random], return_random)
-      #
-      # error_message =
-      #   "Lua runtime error: get_random_no_encode() failed, deflua functions must return encoded data, got [userdata: \"private data\"]"
-      #
-      # for decode? <- [true, false] do
-      #   assert_raise Lua.RuntimeException, error_message, fn ->
-      #     Lua.eval!(
-      #       lua,
-      #       """
-      #       local userdata = get_random_no_encode()
-      #       return return_random(userdata)
-      #       """,
-      #       decode: decode?
-      #     )
-      #   end
-      # end
-      #
-      # assert {[{:usdref, _}], _state} =
-      #          Lua.eval!(
-      #            lua,
-      #            """
-      #            local userdata = get_random()
-      #            return return_random(userdata)
-      #            """,
-      #            decode: false
-      #          )
-      #
-      # assert {[{:userdata, "private data"}], _state} =
-      #          Lua.eval!(
-      #            lua,
-      #            """
-      #            local userdata = get_random()
-      #            return return_random(userdata)
-      #            """,
-      #            decode: true
-      #          )
+    test "userdata can be passed through Lua", %{lua: lua} do
+      # Function that returns userdata
+      get_data = fn _args, state ->
+        {encoded, lua} = Lua.encode!(state, {:userdata, %{foo: "bar"}})
+        {[encoded], lua}
+      end
+
+      # Function that receives userdata and passes it back
+      return_data = fn [data], state ->
+        {[data], state}
+      end
+
+      lua =
+        lua
+        |> Lua.set!([:get_data], get_data)
+        |> Lua.set!([:return_data], return_data)
+
+      # Userdata can be passed through Lua without being decoded
+      assert {[{:userdata, %{foo: "bar"}}], _} =
+               Lua.eval!(lua, """
+               local data = get_data()
+               return return_data(data)
+               """)
+    end
+
+    test "userdata must be properly encoded", %{lua: lua} do
+      # Functions must return properly encoded userdata (as {:udref, id}), not raw {:userdata, value}
+      get_data_encoded = fn _args, state ->
+        {encoded, lua} = Lua.encode!(state, {:userdata, "private data"})
+        {[encoded], lua}
+      end
+
+      return_data = fn [data], state ->
+        {[data], state}
+      end
+
+      lua =
+        lua
+        |> Lua.set!([:get_data], get_data_encoded)
+        |> Lua.set!([:return_data], return_data)
+
+      # Properly encoded userdata works fine
+      assert {[{:userdata, "private data"}], _} =
+               Lua.eval!(lua, """
+               local data = get_data()
+               return return_data(data)
+               """)
     end
 
     test "it can return binary data from Elixir", %{lua: lua} do
