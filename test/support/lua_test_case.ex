@@ -16,7 +16,7 @@ defmodule Lua.TestCase do
   * `:sandbox` - Whether to run in sandbox mode (default: true)
   * `:path` - Additional paths to add to package.path
   """
-  def run_lua_file(path, opts \\ []) do
+  def run_lua_file(path, _opts \\ []) do
     source = File.read!(path)
     # Exclude package and require from sandbox so tests can use them
     lua = Lua.new(exclude: [[:package], [:require]])
@@ -55,10 +55,8 @@ defmodule Lua.TestCase do
         {:ok, ast} ->
           case Lua.Compiler.compile(ast, source: "<dostring>") do
             {:ok, proto} ->
-              case Lua.VM.execute(proto, state) do
-                {:ok, results, state} -> {results, state}
-                {:error, error} -> raise Lua.VM.RuntimeError, value: "dostring error: #{inspect(error)}"
-              end
+              {:ok, results, state} = Lua.VM.execute(proto, state)
+              {results, state}
             {:error, error} ->
               raise Lua.VM.RuntimeError, value: "compile error: #{inspect(error)}"
           end
