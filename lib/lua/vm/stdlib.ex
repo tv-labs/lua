@@ -284,17 +284,22 @@ defmodule Lua.VM.Stdlib do
 
       _ ->
         raise ArgumentError,
-          value: "bad argument #2 to 'setmetatable' (nil or table expected)"
+          function_name: "setmetatable",
+          arg_num: 2,
+          expected: "nil or table"
     end
   end
 
   defp lua_setmetatable([non_table | _], _state) do
     raise ArgumentError,
-      value: "bad argument #1 to 'setmetatable' (table expected, got #{Value.type_name(non_table)})"
+      function_name: "setmetatable",
+      arg_num: 1,
+      expected: "table",
+      got: Value.type_name(non_table)
   end
 
   defp lua_setmetatable([], _state) do
-    raise ArgumentError, value: "bad argument #1 to 'setmetatable' (table expected)"
+    raise ArgumentError.value_expected("setmetatable", 1)
   end
 
   # getmetatable(object) — returns the metatable of an object

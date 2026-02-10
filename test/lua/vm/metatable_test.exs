@@ -97,6 +97,49 @@ defmodule Lua.VM.MetatableTest do
       assert {:ok, [10, nil], _state} = VM.execute(proto, state)
     end
 
+    test "setmetatable raises ArgumentError for non-table first argument" do
+      code = """
+      setmetatable(42, {})
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert_raise Lua.VM.ArgumentError, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
+    test "setmetatable raises ArgumentError for invalid metatable type" do
+      code = """
+      local t = {}
+      setmetatable(t, 42)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert_raise Lua.VM.ArgumentError, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
+    test "setmetatable raises ArgumentError when called with no arguments" do
+      code = """
+      setmetatable()
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert_raise Lua.VM.ArgumentError, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
     test "__newindex metamethod with table" do
       code = """
       local t = {x = 10}
