@@ -81,10 +81,13 @@ defmodule Mix.Tasks.Lua.GetTests do
         # Move files from extracted directory to test_dir
         File.ls!(extracted_dir)
         |> Enum.each(fn file ->
-          File.rename!(
-            Path.join(extracted_dir, file),
-            Path.join(dest_dir, file)
-          )
+          src = Path.join(extracted_dir, file)
+          dest = Path.join(dest_dir, file)
+
+          # Remove destination if it exists
+          if File.exists?(dest), do: File.rm_rf!(dest)
+
+          File.rename!(src, dest)
         end)
 
         # Remove the extracted directory
