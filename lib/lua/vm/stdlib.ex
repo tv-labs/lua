@@ -380,46 +380,51 @@ defmodule Lua.VM.Stdlib do
 
     case find_module_file(modname, patterns) do
       {:ok, file_path, content} ->
-        # Parse and compile the module
-        case Lua.Parser.parse(content) do
-          {:ok, ast} ->
-            case Lua.Compiler.compile(ast) do
-              {:ok, proto} ->
-                # Execute the module
-                {:ok, results, state} = Lua.VM.execute(proto, state)
-
-                # Get the return value (or true if no return value)
-                result =
-                  case results do
-                    [value | _] -> value
-                    [] -> true
-                  end
-
-                # Store in package.loaded
-                {:tref, pkg_id} = Map.fetch!(state.globals, "package")
-                package = Map.fetch!(state.tables, pkg_id)
-                {:tref, loaded_id} = Map.fetch!(package.data, "loaded")
-
-                state =
-                  State.update_table(state, {:tref, loaded_id}, fn loaded_table ->
-                    %{loaded_table | data: Map.put(loaded_table.data, modname, result)}
-                  end)
-
-                {[result], state}
-
-              {:error, msg} ->
-                raise Lua.VM.RuntimeError,
-                  value: "error loading module '#{modname}' from file '#{file_path}':\n#{msg}"
-            end
-
-          {:error, msg} ->
-            raise Lua.VM.RuntimeError,
-              value: "error loading module '#{modname}' from file '#{file_path}':\n#{msg}"
-        end
+        parse_and_execute_module(modname, file_path, content, state)
 
       {:error, :not_found} ->
         raise Lua.VM.RuntimeError,
           value: "module '#{modname}' not found:\n\tno file '#{search_path}'"
+    end
+  end
+
+  # Parse, compile, and execute a module file
+  defp parse_and_execute_module(modname, file_path, content, state) do
+    with {:ok, ast} <- Lua.Parser.parse(content),
+         {:ok, proto} <- Lua.Compiler.compile(ast),
+         {:ok, results, state} <- Lua.VM.execute(proto, state) do
+      # Get the return value (or true if no return value)
+      result =
+        case results do
+          [value | _] -> value
+          [] -> true
+        end
+
+      # Store in package.loaded
+      state = cache_module_result(state, modname, result)
+      {[result], state}
+    else
+      {:error, msg} ->
+        raise Lua.VM.RuntimeError,
+          value: "error loading module '#{modname}' from file '#{file_path}':\n#{msg}"
+    end
+  end
+
+  # Cache the module result in package.loaded
+  defp cache_module_result(state, modname, result) do
+    {:tref, loaded_id} = get_package_loaded_ref(state)
+
+    State.update_table(state, {:tref, loaded_id}, fn loaded_table ->
+      %{loaded_table | data: Map.put(loaded_table.data, modname, result)}
+    end)
+  end
+
+  # Get the package.loaded table reference
+  defp get_package_loaded_ref(state) do
+    with {:tref, pkg_id} <- Map.fetch!(state.globals, "package"),
+         package <- Map.fetch!(state.tables, pkg_id),
+         {:tref, _loaded_id} = loaded_ref <- Map.fetch!(package.data, "loaded") do
+      loaded_ref
     end
   end
 
