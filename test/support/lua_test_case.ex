@@ -50,63 +50,76 @@ defmodule Lua.TestCase do
     # In the future, we could capture this to test output
 
     # Add dostring helper (loads and executes Lua code)
-    lua = Lua.set!(lua, ["dostring"], fn [code], state ->
-      case Lua.Parser.parse(code) do
-        {:ok, ast} ->
-          case Lua.Compiler.compile(ast, source: "<dostring>") do
-            {:ok, proto} ->
-              {:ok, results, state} = Lua.VM.execute(proto, state)
-              {results, state}
-            {:error, error} ->
-              raise Lua.VM.RuntimeError, value: "compile error: #{inspect(error)}"
-          end
-        {:error, error} ->
-          raise Lua.VM.RuntimeError, value: "parse error: #{inspect(error)}"
-      end
-    end)
+    lua =
+      Lua.set!(lua, ["dostring"], fn [code], state ->
+        case Lua.Parser.parse(code) do
+          {:ok, ast} ->
+            case Lua.Compiler.compile(ast, source: "<dostring>") do
+              {:ok, proto} ->
+                {:ok, results, state} = Lua.VM.execute(proto, state)
+                {results, state}
+
+              {:error, error} ->
+                raise Lua.VM.RuntimeError, value: "compile error: #{inspect(error)}"
+            end
+
+          {:error, error} ->
+            raise Lua.VM.RuntimeError, value: "parse error: #{inspect(error)}"
+        end
+      end)
 
     # Add load function (returns a function that executes the code when called)
-    lua = Lua.set!(lua, ["load"], fn args, state ->
-      code = List.first(args)
-      chunk_name = Enum.at(args, 1, "<load>")
+    lua =
+      Lua.set!(lua, ["load"], fn args, state ->
+        code = List.first(args)
+        chunk_name = Enum.at(args, 1, "<load>")
 
-      case Lua.Parser.parse(code) do
-        {:ok, ast} ->
-          case Lua.Compiler.compile(ast, source: chunk_name) do
-            {:ok, proto} ->
-              # Return a closure that will execute the proto when called
-              closure = {:lua_closure, proto, []}
-              {[closure], state}
-            {:error, error} ->
-              {[nil, "compile error: #{inspect(error)}"], state}
-          end
-        {:error, error} ->
-          {[nil, "parse error: #{inspect(error)}"], state}
-      end
-    end)
+        case Lua.Parser.parse(code) do
+          {:ok, ast} ->
+            case Lua.Compiler.compile(ast, source: chunk_name) do
+              {:ok, proto} ->
+                # Return a closure that will execute the proto when called
+                closure = {:lua_closure, proto, []}
+                {[closure], state}
+
+              {:error, error} ->
+                {[nil, "compile error: #{inspect(error)}"], state}
+            end
+
+          {:error, error} ->
+            {[nil, "parse error: #{inspect(error)}"], state}
+        end
+      end)
 
     # Add checkerr helper (expects an error to be raised)
-    lua = Lua.set!(lua, ["checkerr"], fn [pattern, func | _], state ->
-      try do
-        Lua.VM.Executor.call_function(func, [], state)
-        raise Lua.VM.RuntimeError, value: "expected error matching '#{pattern}' but no error was raised"
-      rescue
-        e in [Lua.VM.RuntimeError, Lua.VM.TypeError, Lua.VM.AssertionError] ->
-          error_msg = extract_error_message(e)
-          if String.contains?(error_msg, pattern) do
-            {[true], state}
-          else
-            raise Lua.VM.RuntimeError,
-              value: "expected error matching '#{pattern}' but got: #{error_msg}"
-          end
-      end
-    end)
+    lua =
+      Lua.set!(lua, ["checkerr"], fn [pattern, func | _], state ->
+        try do
+          Lua.VM.Executor.call_function(func, [], state)
+
+          raise Lua.VM.RuntimeError,
+            value: "expected error matching '#{pattern}' but no error was raised"
+        rescue
+          e in [Lua.VM.RuntimeError, Lua.VM.TypeError, Lua.VM.AssertionError] ->
+            error_msg = extract_error_message(e)
+
+            if String.contains?(error_msg, pattern) do
+              {[true], state}
+            else
+              raise Lua.VM.RuntimeError,
+                value: "expected error matching '#{pattern}' but got: #{error_msg}"
+            end
+        end
+      end)
 
     lua
   end
 
   # Extract error message from exception
   defp extract_error_message(%{value: value}) when is_binary(value), do: value
-  defp extract_error_message(%{value: value}) when not is_nil(value), do: Lua.VM.Value.to_string(value)
+
+  defp extract_error_message(%{value: value}) when not is_nil(value),
+    do: Lua.VM.Value.to_string(value)
+
   defp extract_error_message(e), do: Exception.message(e)
 end
