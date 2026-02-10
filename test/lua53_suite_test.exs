@@ -6,125 +6,36 @@ defmodule Lua.Lua53SuiteTest do
 
   @test_dir "test/lua53_tests"
 
-  # Helper to check if test file exists, skip if not
-  defp run_test_file(filename) do
-    path = Path.join(@test_dir, filename)
+  # Dynamically generate test cases for all .lua files in the test directory
+  # This ensures we don't miss any tests as the suite evolves
+  @lua_files @test_dir
+             |> File.ls!()
+             |> Enum.filter(&String.ends_with?(&1, ".lua"))
+             |> Enum.sort()
 
-    if File.exists?(path) do
-      run_lua_file(path)
-    else
-      skip_message = """
-      Test file not found: #{filename}
+  # Tests that are ready to run (not skipped)
+  @ready_tests ["simple_test.lua"]
 
-      The Lua 5.3 test suite must be downloaded first.
-      Run: mix lua.get_tests
-      """
+  # Tests that require features not yet implemented
+  # As we implement features, move tests from here to @ready_tests
+  @skipped_tests @lua_files -- @ready_tests
 
-      ExUnit.Assertions.flunk(skip_message)
+  describe "Lua 5.3 Test Suite - Ready Tests" do
+    for test_file <- @ready_tests do
+      @test_file test_file
+      test test_file do
+        run_lua_file(Path.join(@test_dir, @test_file))
+      end
     end
   end
 
-  describe "Lua 5.3 Test Suite - Infrastructure Test" do
-    test "simple_test.lua" do
-      run_test_file("simple_test.lua")
-    end
-  end
-
-  describe "Lua 5.3 Test Suite - Basic Tests" do
-    @tag :skip
-    test "literals.lua" do
-      run_test_file("literals.lua")
-    end
-
-    @tag :skip
-    test "locals.lua" do
-      run_test_file("locals.lua")
-    end
-
-    @tag :skip
-    test "constructs.lua" do
-      run_test_file("constructs.lua")
-    end
-
-    @tag :skip
-    test "bitwise.lua" do
-      run_test_file("bitwise.lua")
-    end
-
-    @tag :skip
-    test "vararg.lua" do
-      run_test_file("vararg.lua")
-    end
-  end
-
-  describe "Lua 5.3 Test Suite - Standard Library Tests" do
-    @tag :skip
-    test "math.lua" do
-      run_test_file("math.lua")
-    end
-
-    @tag :skip
-    test "strings.lua" do
-      run_test_file("strings.lua")
-    end
-
-    @tag :skip
-    test "sort.lua" do
-      run_test_file("sort.lua")
-    end
-
-    @tag :skip
-    test "tpack.lua" do
-      run_test_file("tpack.lua")
-    end
-  end
-
-  describe "Lua 5.3 Test Suite - Metatable Tests" do
-    @tag :skip
-    test "events.lua" do
-      run_test_file("events.lua")
-    end
-
-    @tag :skip
-    test "closure.lua" do
-      run_test_file("closure.lua")
-    end
-
-    @tag :skip
-    test "calls.lua" do
-      run_test_file("calls.lua")
-    end
-  end
-
-  describe "Lua 5.3 Test Suite - Advanced Tests (Deferred)" do
-    @tag :skip
-    test "coroutine.lua - not yet supported" do
-      # Coroutines not implemented yet
-      run_test_file("coroutine.lua")
-    end
-
-    @tag :skip
-    test "goto.lua - not yet supported" do
-      # goto/labels not implemented yet
-      run_test_file("goto.lua")
-    end
-
-    @tag :skip
-    test "db.lua - not yet supported" do
-      # Full debug library not implemented yet
-      run_test_file("db.lua")
-    end
-
-    @tag :skip
-    test "files.lua - not yet supported" do
-      # Full io library not implemented yet
-      run_test_file("files.lua")
-    end
-
-    @tag :skip
-    test "gc.lua - not yet supported" do
-      # GC metamethods not fully supported yet
-      run_test_file("gc.lua")
+  describe "Lua 5.3 Test Suite - Skipped Tests (Missing Features)" do
+    for test_file <- @skipped_tests do
+      @test_file test_file
+      @tag :skip
+      test test_file do
+        run_lua_file(Path.join(@test_dir, @test_file))
+      end
     end
   end
 end

@@ -25,10 +25,4 @@ lua-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 
-# Lua 5.3 test suite (downloaded via mix lua.get_tests)
-/test/lua53_tests/
-# But keep our custom test files
-!/test/lua53_tests/simple_test.lua
-!/test/lua53_tests/README.md
-
 .claude
