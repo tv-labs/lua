@@ -143,22 +143,13 @@ defmodule Lua do
   > * `[:require]`
   >
   > By default these are sandboxed, see the `:exclude` option in `Lua.new/1` to allow them.
-
-  > #### Not Yet Implemented {: .warning}
-  > `require` and `package` support is not yet implemented in the new VM.
-  > This function will raise an error until support is added.
   """
-  # TODO: Restore original implementation once require/package support is added:
-  #
-  #   def set_lua_paths(%__MODULE__{} = lua, paths) when is_list(paths) do
-  #     set_lua_paths(lua, Enum.join(paths, ";"))
-  #   end
-  #
-  #   def set_lua_paths(%__MODULE__{} = lua, paths) when is_binary(paths) do
-  #     set!(lua, ["package", "path"], paths)
-  #   end
-  def set_lua_paths(%__MODULE__{} = _lua, _paths) do
-    raise Lua.RuntimeException, "set_lua_paths is not yet supported in the new VM"
+  def set_lua_paths(%__MODULE__{} = lua, paths) when is_list(paths) do
+    set_lua_paths(lua, Enum.join(paths, ";"))
+  end
+
+  def set_lua_paths(%__MODULE__{} = lua, paths) when is_binary(paths) do
+    set!(lua, ["package", "path"], paths)
   end
 
   @doc """

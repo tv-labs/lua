@@ -31,6 +31,8 @@ defmodule Lua.VM.Stdlib do
     |> State.register_function("ipairs", &lua_ipairs/2)
     |> State.register_function("setmetatable", &lua_setmetatable/2)
     |> State.register_function("getmetatable", &lua_getmetatable/2)
+    |> State.register_function("require", &lua_require/2)
+    |> install_package_table()
     |> Lua.VM.Stdlib.String.install()
     |> Lua.VM.Stdlib.Math.install()
     |> Lua.VM.Stdlib.Table.install()
@@ -319,5 +321,117 @@ defmodule Lua.VM.Stdlib do
 
   defp lua_getmetatable([], state) do
     {[nil], state}
+  end
+
+  # Install package table with loaded and path fields
+  defp install_package_table(state) do
+    # Create package.loaded table (initially empty)
+    {loaded_tref, state} = State.alloc_table(state)
+
+    # Create package table with loaded and path fields
+    package_data = %{
+      "loaded" => loaded_tref,
+      "path" => "?.lua;?/init.lua"
+    }
+
+    {package_tref, state} = State.alloc_table(state, package_data)
+
+    State.set_global(state, "package", package_tref)
+  end
+
+  # require(modname) — loads a Lua module
+  defp lua_require([modname | _], state) when is_binary(modname) do
+    # Get package table
+    {:tref, pkg_id} = Map.fetch!(state.globals, "package")
+    package = Map.fetch!(state.tables, pkg_id)
+
+    # Get package.loaded table
+    {:tref, loaded_id} = Map.fetch!(package.data, "loaded")
+    loaded_table = Map.fetch!(state.tables, loaded_id)
+
+    # Check if already loaded
+    case Map.get(loaded_table.data, modname) do
+      nil ->
+        # Not loaded, need to search and load
+        search_path = Map.get(package.data, "path", "?.lua")
+        load_module(modname, search_path, state)
+
+      result ->
+        # Already loaded, return cached result
+        {[result], state}
+    end
+  end
+
+  defp lua_require([non_string | _], _state) do
+    raise Lua.VM.ArgumentError,
+      function_name: "require",
+      arg_num: 1,
+      expected: "string",
+      got: Value.type_name(non_string)
+  end
+
+  defp lua_require([], _state) do
+    raise Lua.VM.ArgumentError.value_expected("require", 1)
+  end
+
+  # Load a module by searching the path
+  defp load_module(modname, search_path, state) do
+    patterns = String.split(search_path, ";", trim: true)
+
+    case find_module_file(modname, patterns) do
+      {:ok, file_path, content} ->
+        # Parse and compile the module
+        case Lua.Parser.parse(content) do
+          {:ok, ast} ->
+            case Lua.Compiler.compile(ast) do
+              {:ok, proto} ->
+                # Execute the module
+                {:ok, results, state} = Lua.VM.execute(proto, state)
+
+                # Get the return value (or true if no return value)
+                result =
+                  case results do
+                    [value | _] -> value
+                    [] -> true
+                  end
+
+                # Store in package.loaded
+                {:tref, pkg_id} = Map.fetch!(state.globals, "package")
+                package = Map.fetch!(state.tables, pkg_id)
+                {:tref, loaded_id} = Map.fetch!(package.data, "loaded")
+
+                state =
+                  State.update_table(state, {:tref, loaded_id}, fn loaded_table ->
+                    %{loaded_table | data: Map.put(loaded_table.data, modname, result)}
+                  end)
+
+                {[result], state}
+
+              {:error, msg} ->
+                raise Lua.VM.RuntimeError,
+                  value: "error loading module '#{modname}' from file '#{file_path}':\n#{msg}"
+            end
+
+          {:error, msg} ->
+            raise Lua.VM.RuntimeError,
+              value: "error loading module '#{modname}' from file '#{file_path}':\n#{msg}"
+        end
+
+      {:error, :not_found} ->
+        raise Lua.VM.RuntimeError,
+          value: "module '#{modname}' not found:\n\tno file '#{search_path}'"
+    end
+  end
+
+  # Find a module file by searching the patterns
+  defp find_module_file(modname, patterns) do
+    Enum.find_value(patterns, {:error, :not_found}, fn pattern ->
+      file_path = String.replace(pattern, "?", modname)
+
+      case File.read(file_path) do
+        {:ok, content} -> {:ok, file_path, content}
+        {:error, _} -> nil
+      end
+    end)
   end
 end

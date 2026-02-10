@@ -1321,49 +1321,36 @@ defmodule LuaTest do
   end
 
   describe "require" do
-    @tag :pending
     test "it can find lua code when modifying package.path" do
-      # Requires require/package support
-      # Original implementation:
-      # lua = Lua.new(sandboxed: [])
-      #
-      # assert {["required file successfully"], _} =
-      #          Lua.eval!(lua, """
-      #          package.path = "./test/fixtures/?.lua"
-      #
-      #          return require("test_require")
-      #          """)
+      lua = Lua.new(sandboxed: [])
+
+      assert {["required file successfully"], _} =
+               Lua.eval!(lua, """
+               package.path = "./test/fixtures/?.lua"
+
+               return require("test_require")
+               """)
     end
 
-    @tag :pending
     test "we can use set_lua_paths/2 to add the paths" do
-      # Requires require/package support
-      # Original implementation:
-      # lua = Lua.new(sandboxed: [])
-      #
-      # lua = Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
-      #
-      # assert {["required file successfully"], _} =
-      #          Lua.eval!(lua, """
-      #          return require("test_require")
-      #          """)
+      lua = Lua.new(sandboxed: [])
+
+      lua = Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
+
+      assert {["required file successfully"], _} =
+               Lua.eval!(lua, """
+               return require("test_require")
+               """)
     end
 
-    @tag :pending
     test "set_lua_paths/2 raises if package is sandboxed" do
-      # Requires require/package support
-      # Original implementation:
-      # lua = Lua.new()
-      #
-      # message = """
-      # Lua runtime error: invalid index "package.path"
-      #
-      #
-      # """
-      #
-      # assert_raise Lua.RuntimeException, message, fn ->
-      #   Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
-      # end
+      lua = Lua.new()
+
+      message = "Lua runtime error: invalid index \"package.path\""
+
+      assert_raise Lua.RuntimeException, message, fn ->
+        Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
+      end
     end
   end
 
