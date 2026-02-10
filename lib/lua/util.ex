@@ -17,6 +17,7 @@ defmodule Lua.Util do
   def encoded?({:tref, _}), do: true
   def encoded?({:lua_closure, _, _}), do: true
   def encoded?({:native_func, _}), do: true
+  def encoded?({:udref, _}), do: true
   def encoded?(_), do: false
 
   def format_error(error) do

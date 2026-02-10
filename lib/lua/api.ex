@@ -130,9 +130,11 @@ defmodule Lua.API do
   @doc """
   Is the value a reference to userdata?
 
-  Note: userdata is not yet supported in the new VM. This guard always returns false.
+  Userdata stores arbitrary Elixir terms that can be passed through Lua
+  but not directly manipulated by Lua code.
   """
-  defguard is_userdata(_value) when false
+  defguard is_userdata(value)
+           when is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :udref
 
   @doc """
   Is the value a reference to a Lua function?
