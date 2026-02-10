@@ -22,10 +22,6 @@ defmodule Mix.Tasks.Lua.GetTests do
 
   use Mix.Task
 
-  # Suppress dialyzer warnings for Mix module functions (compile-time only)
-  @dialyzer {:nowarn_function,
-             run: 1, download_file: 2, extract_tarball: 2, remove_unnecessary_files: 1}
-
   @shortdoc "Downloads the Lua 5.3 test suite"
   @default_version "5.3.4"
   @base_url "https://www.lua.org/tests"
