@@ -6,7 +6,7 @@ defmodule Lua.VM.Stdlib do
   scope when the standard library is installed.
   """
 
-  alias Lua.VM.{ArgumentError, AssertionError, State, Value}
+  alias Lua.VM.{AssertionError, State, Value}
 
   @doc """
   Installs the standard library into the given VM state.

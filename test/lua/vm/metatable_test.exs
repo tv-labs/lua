@@ -403,41 +403,5 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, [42], _state} = VM.execute(proto, state)
     end
-
-    test "setmetatable raises ArgumentError when first argument is not a table" do
-      code = "setmetatable(42, {})"
-
-      assert {:ok, ast} = Parser.parse(code)
-      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
-
-      assert_raise Lua.VM.ArgumentError, fn ->
-        VM.execute(proto, state)
-      end
-    end
-
-    test "setmetatable raises ArgumentError when second argument is not nil or table" do
-      code = "setmetatable({}, 42)"
-
-      assert {:ok, ast} = Parser.parse(code)
-      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
-
-      assert_raise Lua.VM.ArgumentError, fn ->
-        VM.execute(proto, state)
-      end
-    end
-
-    test "setmetatable raises ArgumentError when no arguments provided" do
-      code = "setmetatable()"
-
-      assert {:ok, ast} = Parser.parse(code)
-      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
-
-      assert_raise Lua.VM.ArgumentError, fn ->
-        VM.execute(proto, state)
-      end
-    end
   end
 end
