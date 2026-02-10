@@ -136,4 +136,90 @@ defmodule Lua.VM.MetatableTest do
       assert {:ok, [10, 25, nil, nil, 30], _state} = VM.execute(proto, state)
     end
   end
+
+  describe "arithmetic metamethods" do
+    test "__add metamethod" do
+      code = """
+      local a = {value = 10}
+      local b = {value = 20}
+      local mt = {
+        __add = function(x, y)
+          return {value = x.value + y.value}
+        end
+      }
+      setmetatable(a, mt)
+      setmetatable(b, mt)
+      local c = a + b
+      return c.value
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert {:ok, [30], _state} = VM.execute(proto, state)
+    end
+
+    test "__sub metamethod" do
+      code = """
+      local a = {value = 30}
+      local b = {value = 10}
+      local mt = {
+        __sub = function(x, y)
+          return {value = x.value - y.value}
+        end
+      }
+      setmetatable(a, mt)
+      local c = a - b
+      return c.value
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert {:ok, [20], _state} = VM.execute(proto, state)
+    end
+
+    test "__mul metamethod" do
+      code = """
+      local a = {value = 5}
+      local b = {value = 6}
+      local mt = {
+        __mul = function(x, y)
+          return {value = x.value * y.value}
+        end
+      }
+      setmetatable(a, mt)
+      local c = a * b
+      return c.value
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert {:ok, [30], _state} = VM.execute(proto, state)
+    end
+
+    test "__unm metamethod" do
+      code = """
+      local a = {value = 42}
+      local mt = {
+        __unm = function(x)
+          return {value = -x.value}
+        end
+      }
+      setmetatable(a, mt)
+      local b = -a
+      return b.value
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert {:ok, [-42], _state} = VM.execute(proto, state)
+    end
+  end
 end

@@ -542,45 +542,59 @@ defmodule Lua.VM.Executor do
 
   # Arithmetic operations
   defp do_execute([{:add, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = safe_add(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+    {result, new_state} = try_binary_metamethod("__add", val_a, val_b, state, fn -> safe_add(val_a, val_b) end)
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:subtract, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = safe_subtract(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+    {result, new_state} = try_binary_metamethod("__sub", val_a, val_b, state, fn -> safe_subtract(val_a, val_b) end)
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:multiply, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = safe_multiply(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+    {result, new_state} = try_binary_metamethod("__mul", val_a, val_b, state, fn -> safe_multiply(val_a, val_b) end)
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:divide, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = safe_divide(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+    {result, new_state} = try_binary_metamethod("__div", val_a, val_b, state, fn -> safe_divide(val_a, val_b) end)
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:floor_divide, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = safe_floor_divide(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+    {result, new_state} = try_binary_metamethod("__idiv", val_a, val_b, state, fn -> safe_floor_divide(val_a, val_b) end)
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:modulo, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = safe_modulo(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+    {result, new_state} = try_binary_metamethod("__mod", val_a, val_b, state, fn -> safe_modulo(val_a, val_b) end)
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:power, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = safe_power(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+    {result, new_state} = try_binary_metamethod("__pow", val_a, val_b, state, fn -> safe_power(val_a, val_b) end)
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   # String concatenation
@@ -668,9 +682,10 @@ defmodule Lua.VM.Executor do
 
   # Unary operations
   defp do_execute([{:negate, dest, source} | rest], regs, upvalues, proto, state) do
-    result = safe_negate(elem(regs, source))
+    val = elem(regs, source)
+    {result, new_state} = try_unary_metamethod("__unm", val, state, fn -> safe_negate(val) end)
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:not, dest, source} | rest], regs, upvalues, proto, state) do
@@ -1022,6 +1037,108 @@ defmodule Lua.VM.Executor do
       value: "attempt to concatenate a #{Value.type_name(value)} value",
       error_kind: :concatenate_type_error,
       value_type: value_type(value)
+  end
+
+  # Metamethod support
+  defp get_metatable({:tref, id}, state) do
+    table = Map.fetch!(state.tables, id)
+    table.metatable
+  end
+
+  defp get_metatable(_value, _state), do: nil
+
+  defp try_binary_metamethod(metamethod_name, a, b, state, default_fn) do
+    # Try a's metatable first
+    mt_a = get_metatable(a, state)
+    mt_b = get_metatable(b, state)
+
+    metamethod =
+      cond do
+        mt_a != nil ->
+          mt = Map.fetch!(state.tables, elem(mt_a, 1))
+          Map.get(mt.data, metamethod_name)
+
+        mt_b != nil ->
+          mt = Map.fetch!(state.tables, elem(mt_b, 1))
+          Map.get(mt.data, metamethod_name)
+
+        true ->
+          nil
+      end
+
+    case metamethod do
+      {:native_func, func} ->
+        {[result], new_state} = func.([a, b], state)
+        {result, new_state}
+
+      {:lua_closure, callee_proto, callee_upvalues} ->
+        # Call the Lua closure metamethod
+        # We need to execute the closure with the arguments
+        args = [a, b]
+
+        # Allocate enough registers for the function (Lua typically uses up to 250 registers)
+        # We need to pad the args to fill the register space the function expects
+        initial_regs = List.to_tuple(args ++ List.duplicate(nil, 248))
+
+        {results, _final_regs, new_state} =
+          do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto, state)
+
+        # Return first result and new state
+        result = case results do
+          [r | _] -> r
+          [] -> nil
+        end
+        {result, new_state}
+
+      nil ->
+        {default_fn.(), state}
+
+      _ ->
+        {default_fn.(), state}
+    end
+  end
+
+  defp try_unary_metamethod(metamethod_name, a, state, default_fn) do
+    mt = get_metatable(a, state)
+
+    metamethod =
+      case mt do
+        nil ->
+          nil
+
+        {:tref, mt_id} ->
+          mt_table = Map.fetch!(state.tables, mt_id)
+          Map.get(mt_table.data, metamethod_name)
+      end
+
+    case metamethod do
+      {:native_func, func} ->
+        {[result], new_state} = func.([a], state)
+        {result, new_state}
+
+      {:lua_closure, callee_proto, callee_upvalues} ->
+        # Call the Lua closure metamethod
+        args = [a]
+
+        # Allocate enough registers for the function (Lua typically uses up to 250 registers)
+        initial_regs = List.to_tuple(args ++ List.duplicate(nil, 249))
+
+        {results, _final_regs, new_state} =
+          do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto, state)
+
+        # Return first result and new state
+        result = case results do
+          [r | _] -> r
+          [] -> nil
+        end
+        {result, new_state}
+
+      nil ->
+        {default_fn.(), state}
+
+      _ ->
+        {default_fn.(), state}
+    end
   end
 
   # Type-safe arithmetic operations
