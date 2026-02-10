@@ -6,7 +6,7 @@ defmodule Lua.VM.Stdlib do
   scope when the standard library is installed.
   """
 
-  alias Lua.VM.{AssertionError, State, Value}
+  alias Lua.VM.{ArgumentError, AssertionError, State, Value}
 
   @doc """
   Installs the standard library into the given VM state.
@@ -283,18 +283,18 @@ defmodule Lua.VM.Stdlib do
         {[tref], state}
 
       _ ->
-        raise Lua.VM.RuntimeError,
+        raise ArgumentError,
           value: "bad argument #2 to 'setmetatable' (nil or table expected)"
     end
   end
 
   defp lua_setmetatable([non_table | _], _state) do
-    raise Lua.VM.RuntimeError,
+    raise ArgumentError,
       value: "bad argument #1 to 'setmetatable' (table expected, got #{Value.type_name(non_table)})"
   end
 
   defp lua_setmetatable([], _state) do
-    raise Lua.VM.RuntimeError, value: "bad argument #1 to 'setmetatable' (table expected)"
+    raise ArgumentError, value: "bad argument #1 to 'setmetatable' (table expected)"
   end
 
   # getmetatable(object) — returns the metatable of an object
