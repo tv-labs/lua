@@ -290,7 +290,8 @@ defmodule Lua.VM.Stdlib do
 
   defp lua_setmetatable([non_table | _], _state) do
     raise Lua.VM.RuntimeError,
-      value: "bad argument #1 to 'setmetatable' (table expected, got #{Value.type_name(non_table)})"
+      value:
+        "bad argument #1 to 'setmetatable' (table expected, got #{Value.type_name(non_table)})"
   end
 
   defp lua_setmetatable([], _state) do

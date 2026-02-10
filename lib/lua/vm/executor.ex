@@ -544,7 +544,10 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:add, dest, a, b} | rest], regs, upvalues, proto, state) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    {result, new_state} = try_binary_metamethod("__add", val_a, val_b, state, fn -> safe_add(val_a, val_b) end)
+
+    {result, new_state} =
+      try_binary_metamethod("__add", val_a, val_b, state, fn -> safe_add(val_a, val_b) end)
+
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state)
   end
@@ -552,7 +555,10 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:subtract, dest, a, b} | rest], regs, upvalues, proto, state) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    {result, new_state} = try_binary_metamethod("__sub", val_a, val_b, state, fn -> safe_subtract(val_a, val_b) end)
+
+    {result, new_state} =
+      try_binary_metamethod("__sub", val_a, val_b, state, fn -> safe_subtract(val_a, val_b) end)
+
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state)
   end
@@ -560,7 +566,10 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:multiply, dest, a, b} | rest], regs, upvalues, proto, state) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    {result, new_state} = try_binary_metamethod("__mul", val_a, val_b, state, fn -> safe_multiply(val_a, val_b) end)
+
+    {result, new_state} =
+      try_binary_metamethod("__mul", val_a, val_b, state, fn -> safe_multiply(val_a, val_b) end)
+
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state)
   end
@@ -568,7 +577,10 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:divide, dest, a, b} | rest], regs, upvalues, proto, state) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    {result, new_state} = try_binary_metamethod("__div", val_a, val_b, state, fn -> safe_divide(val_a, val_b) end)
+
+    {result, new_state} =
+      try_binary_metamethod("__div", val_a, val_b, state, fn -> safe_divide(val_a, val_b) end)
+
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state)
   end
@@ -576,7 +588,12 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:floor_divide, dest, a, b} | rest], regs, upvalues, proto, state) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    {result, new_state} = try_binary_metamethod("__idiv", val_a, val_b, state, fn -> safe_floor_divide(val_a, val_b) end)
+
+    {result, new_state} =
+      try_binary_metamethod("__idiv", val_a, val_b, state, fn ->
+        safe_floor_divide(val_a, val_b)
+      end)
+
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state)
   end
@@ -584,7 +601,10 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:modulo, dest, a, b} | rest], regs, upvalues, proto, state) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    {result, new_state} = try_binary_metamethod("__mod", val_a, val_b, state, fn -> safe_modulo(val_a, val_b) end)
+
+    {result, new_state} =
+      try_binary_metamethod("__mod", val_a, val_b, state, fn -> safe_modulo(val_a, val_b) end)
+
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state)
   end
@@ -592,7 +612,10 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:power, dest, a, b} | rest], regs, upvalues, proto, state) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    {result, new_state} = try_binary_metamethod("__pow", val_a, val_b, state, fn -> safe_power(val_a, val_b) end)
+
+    {result, new_state} =
+      try_binary_metamethod("__pow", val_a, val_b, state, fn -> safe_power(val_a, val_b) end)
+
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state)
   end
@@ -1081,13 +1104,21 @@ defmodule Lua.VM.Executor do
         initial_regs = List.to_tuple(args ++ List.duplicate(nil, 248))
 
         {results, _final_regs, new_state} =
-          do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto, state)
+          do_execute(
+            callee_proto.instructions,
+            initial_regs,
+            callee_upvalues,
+            callee_proto,
+            state
+          )
 
         # Return first result and new state
-        result = case results do
-          [r | _] -> r
-          [] -> nil
-        end
+        result =
+          case results do
+            [r | _] -> r
+            [] -> nil
+          end
+
         {result, new_state}
 
       nil ->
@@ -1124,13 +1155,21 @@ defmodule Lua.VM.Executor do
         initial_regs = List.to_tuple(args ++ List.duplicate(nil, 249))
 
         {results, _final_regs, new_state} =
-          do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto, state)
+          do_execute(
+            callee_proto.instructions,
+            initial_regs,
+            callee_upvalues,
+            callee_proto,
+            state
+          )
 
         # Return first result and new state
-        result = case results do
-          [r | _] -> r
-          [] -> nil
-        end
+        result =
+          case results do
+            [r | _] -> r
+            [] -> nil
+          end
+
         {result, new_state}
 
       nil ->
