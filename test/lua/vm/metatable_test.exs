@@ -97,6 +97,49 @@ defmodule Lua.VM.MetatableTest do
       assert {:ok, [10, nil], _state} = VM.execute(proto, state)
     end
 
+    test "setmetatable raises ArgumentError for non-table first argument" do
+      code = """
+      setmetatable(42, {})
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert_raise Lua.VM.ArgumentError, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
+    test "setmetatable raises ArgumentError for invalid metatable type" do
+      code = """
+      local t = {}
+      setmetatable(t, 42)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert_raise Lua.VM.ArgumentError, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
+    test "setmetatable raises ArgumentError when called with no arguments" do
+      code = """
+      setmetatable()
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert_raise Lua.VM.ArgumentError, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
     test "__newindex metamethod with table" do
       code = """
       local t = {x = 10}
@@ -220,6 +263,145 @@ defmodule Lua.VM.MetatableTest do
       state = State.new() |> Lua.VM.Stdlib.install()
 
       assert {:ok, [-42], _state} = VM.execute(proto, state)
+    end
+  end
+
+  describe "comparison metamethods" do
+    test "__eq metamethod" do
+      code = """
+      local a = {value = 10}
+      local b = {value = 10}
+      local c = {value = 20}
+      local mt = {
+        __eq = function(x, y)
+          return x.value == y.value
+        end
+      }
+      setmetatable(a, mt)
+      setmetatable(b, mt)
+      setmetatable(c, mt)
+      return a == b, a == c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert {:ok, [true, false], _state} = VM.execute(proto, state)
+    end
+
+    test "__eq only triggers if both have same metamethod" do
+      code = """
+      local a = {value = 10}
+      local b = {value = 10}
+      local mt1 = {
+        __eq = function(x, y)
+          return x.value == y.value
+        end
+      }
+      local mt2 = {
+        __eq = function(x, y)
+          return x.value == y.value
+        end
+      }
+      setmetatable(a, mt1)
+      setmetatable(b, mt2)
+      return a == b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      # Different metamethods, so falls back to reference equality (false)
+      assert {:ok, [false], _state} = VM.execute(proto, state)
+    end
+
+    test "__lt metamethod" do
+      code = """
+      local a = {value = 5}
+      local b = {value = 10}
+      local mt = {
+        __lt = function(x, y)
+          return x.value < y.value
+        end
+      }
+      setmetatable(a, mt)
+      setmetatable(b, mt)
+      return a < b, b < a
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert {:ok, [true, false], _state} = VM.execute(proto, state)
+    end
+
+    test "__le metamethod" do
+      code = """
+      local a = {value = 10}
+      local b = {value = 10}
+      local c = {value = 5}
+      local mt = {
+        __le = function(x, y)
+          return x.value <= y.value
+        end
+      }
+      setmetatable(a, mt)
+      setmetatable(b, mt)
+      setmetatable(c, mt)
+      return a <= b, c <= a, a <= c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert {:ok, [true, true, false], _state} = VM.execute(proto, state)
+    end
+  end
+
+  describe "other metamethods" do
+    test "__concat metamethod" do
+      code = """
+      local a = {value = "Hello"}
+      local b = {value = "World"}
+      local mt = {
+        __concat = function(x, y)
+          return {value = x.value .. " " .. y.value}
+        end
+      }
+      setmetatable(a, mt)
+      setmetatable(b, mt)
+      local c = a .. b
+      return c.value
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert {:ok, ["Hello World"], _state} = VM.execute(proto, state)
+    end
+
+    test "__len metamethod" do
+      code = """
+      local a = {x = 1, y = 2, z = 3}
+      local mt = {
+        __len = function(t)
+          return 42
+        end
+      }
+      setmetatable(a, mt)
+      return #a
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new() |> Lua.VM.Stdlib.install()
+
+      assert {:ok, [42], _state} = VM.execute(proto, state)
     end
   end
 end

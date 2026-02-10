@@ -624,9 +624,14 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:concatenate, dest, a, b} | rest], regs, upvalues, proto, state) do
     left = elem(regs, a)
     right = elem(regs, b)
-    result = concat_coerce(left) <> concat_coerce(right)
+
+    {result, new_state} =
+      try_binary_metamethod("__concat", left, right, state, fn ->
+        concat_coerce(left) <> concat_coerce(right)
+      end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   # Bitwise operations
@@ -668,21 +673,36 @@ defmodule Lua.VM.Executor do
 
   # Comparison operations
   defp do_execute([{:equal, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = elem(regs, a) == elem(regs, b)
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    {result, new_state} =
+      try_equality_metamethod(val_a, val_b, state, fn -> val_a == val_b end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:less_than, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = safe_compare_lt(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    {result, new_state} =
+      try_binary_metamethod("__lt", val_a, val_b, state, fn -> safe_compare_lt(val_a, val_b) end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:less_equal, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = safe_compare_le(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    {result, new_state} =
+      try_binary_metamethod("__le", val_a, val_b, state, fn -> safe_compare_le(val_a, val_b) end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:greater_than, dest, a, b} | rest], regs, upvalues, proto, state) do
@@ -720,24 +740,26 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:length, dest, source} | rest], regs, upvalues, proto, state) do
     value = elem(regs, source)
 
-    result =
-      case value do
-        {:tref, id} ->
-          table = Map.fetch!(state.tables, id)
-          Value.sequence_length(table.data)
+    {result, new_state} =
+      try_unary_metamethod("__len", value, state, fn ->
+        case value do
+          {:tref, id} ->
+            table = Map.fetch!(state.tables, id)
+            Value.sequence_length(table.data)
 
-        v when is_binary(v) ->
-          byte_size(v)
+          v when is_binary(v) ->
+            byte_size(v)
 
-        v when is_list(v) ->
-          length(v)
+          v when is_list(v) ->
+            length(v)
 
-        _ ->
-          0
-      end
+          _ ->
+            0
+        end
+      end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   # new_table
@@ -1177,6 +1199,62 @@ defmodule Lua.VM.Executor do
 
       _ ->
         {default_fn.(), state}
+    end
+  end
+
+  # Special handling for __eq metamethod
+  # In Lua, __eq only triggers if both operands have the exact same __eq metamethod
+  defp try_equality_metamethod(a, b, state, default_fn) do
+    mt_a = get_metatable(a, state)
+    mt_b = get_metatable(b, state)
+
+    # Get __eq from both metatables
+    eq_a =
+      case mt_a do
+        nil -> nil
+        {:tref, mt_id} -> Map.get(Map.fetch!(state.tables, mt_id).data, "__eq")
+      end
+
+    eq_b =
+      case mt_b do
+        nil -> nil
+        {:tref, mt_id} -> Map.get(Map.fetch!(state.tables, mt_id).data, "__eq")
+      end
+
+    # Only use metamethod if both have the SAME __eq metamethod
+    if eq_a != nil and eq_a == eq_b do
+      case eq_a do
+        {:native_func, func} ->
+          {[result], new_state} = func.([a, b], state)
+          {result, new_state}
+
+        {:lua_closure, callee_proto, callee_upvalues} ->
+          args = [a, b]
+          initial_regs = List.to_tuple(args ++ List.duplicate(nil, 248))
+
+          {results, _final_regs, new_state} =
+            do_execute(
+              callee_proto.instructions,
+              initial_regs,
+              callee_upvalues,
+              callee_proto,
+              state
+            )
+
+          result =
+            case results do
+              [r | _] -> r
+              [] -> nil
+            end
+
+          {result, new_state}
+
+        _ ->
+          {default_fn.(), state}
+      end
+    else
+      # No metamethod or different metamethods, use default comparison
+      {default_fn.(), state}
     end
   end
 
