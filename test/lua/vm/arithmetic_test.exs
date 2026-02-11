@@ -106,28 +106,30 @@ defmodule Lua.VM.ArithmeticTest do
   end
 
   describe "division by zero" do
-    test "float division by zero raises error" do
+    test "float division by zero returns very large positive number" do
       code = "return 5 / 0"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      # Note: Standard Lua 5.3 returns inf for this case, but we raise an error
-      # because Elixir doesn't easily support creating inf/nan values
-      assert_raise Lua.VM.RuntimeError, ~r/divide by zero/, fn ->
-        VM.execute(proto, state)
-      end
+      # Note: Lua 5.3 returns inf, but Elixir doesn't easily support infinity
+      # We return a very large positive number (1.0e308) as an approximation
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      assert is_float(result)
+      assert result > 1.0e307
     end
 
-    test "float division of negative by zero raises error" do
+    test "float division of negative by zero returns very large negative number" do
       code = "return -5 / 0"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.RuntimeError, ~r/divide by zero/, fn ->
-        VM.execute(proto, state)
-      end
+      # Note: Lua 5.3 returns -inf, but Elixir doesn't easily support infinity
+      # We return a very large negative number (-1.0e308) as an approximation
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      assert is_float(result)
+      assert result < -1.0e307
     end
 
     test "floor division by zero raises error" do
