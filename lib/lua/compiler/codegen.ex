@@ -147,8 +147,7 @@ defmodule Lua.Compiler.Codegen do
             vararg_instruction = Instruction.vararg(vararg_base, 0)
 
             # Return with -1 to indicate variable number of results
-            {init_instructions ++ [vararg_instruction, Instruction.return_instr(base_reg, -1)],
-             ctx}
+            {init_instructions ++ [vararg_instruction, Instruction.return_instr(base_reg, -1)], ctx}
 
           _ ->
             # Normal multi-value return
