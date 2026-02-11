@@ -111,23 +111,64 @@ defmodule Lua.Compiler.Codegen do
         {value_instructions, result_reg, ctx} = gen_expr(value, ctx)
         {value_instructions ++ [Instruction.return_instr(result_reg, 1)], ctx}
 
-      multiple ->
-        base_reg = ctx.next_reg
+      [_, _ | _] = multiple ->
+        # Check if last value is vararg - needs special handling
+        {init_values, last_value} = Enum.split(multiple, -1)
+        [last] = last_value
 
-        {all_instructions, ctx} =
-          multiple
-          |> Enum.with_index()
-          |> Enum.reduce({[], ctx}, fn {value, i}, {instructions, ctx} ->
-            target_reg = base_reg + i
-            {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
+        case last do
+          %Expr.Vararg{} when init_values != [] ->
+            # return a, b, ... - load a,b then all varargs
+            base_reg = ctx.next_reg
 
-            move =
-              if value_reg == target_reg, do: [], else: [Instruction.move(target_reg, value_reg)]
+            {init_instructions, ctx} =
+              init_values
+              |> Enum.with_index()
+              |> Enum.reduce({[], ctx}, fn {value, i}, {instructions, ctx} ->
+                target_reg = base_reg + i
+                {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
 
-            {instructions ++ value_instructions ++ move, ctx}
-          end)
+                move =
+                  if value_reg == target_reg do
+                    []
+                  else
+                    [Instruction.move(target_reg, value_reg)]
+                  end
 
-        {all_instructions ++ [Instruction.return_instr(base_reg, length(multiple))], ctx}
+                {instructions ++ value_instructions ++ move, ctx}
+              end)
+
+            # Load all varargs starting after the init values
+            vararg_base = base_reg + length(init_values)
+            vararg_instruction = Instruction.vararg(vararg_base, 0)
+
+            # Return with -1 to indicate variable number of results
+            {init_instructions ++ [vararg_instruction, Instruction.return_instr(base_reg, -1)],
+             ctx}
+
+          _ ->
+            # Normal multi-value return
+            base_reg = ctx.next_reg
+
+            {all_instructions, ctx} =
+              multiple
+              |> Enum.with_index()
+              |> Enum.reduce({[], ctx}, fn {value, i}, {instructions, ctx} ->
+                target_reg = base_reg + i
+                {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
+
+                move =
+                  if value_reg == target_reg do
+                    []
+                  else
+                    [Instruction.move(target_reg, value_reg)]
+                  end
+
+                {instructions ++ value_instructions ++ move, ctx}
+              end)
+
+            {all_instructions ++ [Instruction.return_instr(base_reg, length(multiple))], ctx}
+        end
     end
   end
 
@@ -676,40 +717,92 @@ defmodule Lua.Compiler.Codegen do
 
     ctx = %{ctx | next_reg: base_reg + 1}
 
-    # Generate code for arguments into temp registers above the arg window.
-    # We skip over the arg slots (base+1..base+arg_count) so temps don't clobber them.
-    arg_count = length(args)
-    ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
+    # Check if last arg is vararg - needs special handling
+    {has_vararg_last, init_args} =
+      if length(args) > 0 do
+        [last | _] = Enum.reverse(args)
 
-    {arg_instructions, arg_regs, ctx} =
-      Enum.reduce(args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
-        {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
-        {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
-      end)
-
-    # Move each arg result to its expected position (base+1+i)
-    move_instructions =
-      arg_regs
-      |> Enum.with_index()
-      |> Enum.flat_map(fn {arg_reg, i} ->
-        expected_reg = base_reg + 1 + i
-
-        if arg_reg == expected_reg do
-          []
-        else
-          [Instruction.move(expected_reg, arg_reg)]
+        case last do
+          %Expr.Vararg{} -> {true, Enum.slice(args, 0..-2//1)}
+          _ -> {false, args}
         end
-      end)
+      else
+        {false, []}
+      end
 
-    # Generate call instruction (single return value for now)
-    call_instruction = Instruction.call(base_reg, arg_count, 1)
+    if has_vararg_last do
+      # f(a, b, ...) - load a, b then all varargs
+      arg_count = length(init_args)
+      ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
 
-    # Result will be in base_reg
-    {function_instructions ++
-       move_function ++
-       arg_instructions ++
-       move_instructions ++
-       [call_instruction], base_reg, ctx}
+      {arg_instructions, arg_regs, ctx} =
+        Enum.reduce(init_args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
+          {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
+          {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
+        end)
+
+      # Move each arg result to its expected position (base+1+i)
+      move_instructions =
+        arg_regs
+        |> Enum.with_index()
+        |> Enum.flat_map(fn {arg_reg, i} ->
+          expected_reg = base_reg + 1 + i
+
+          if arg_reg == expected_reg do
+            []
+          else
+            [Instruction.move(expected_reg, arg_reg)]
+          end
+        end)
+
+      # Load all varargs starting after init args
+      vararg_base = base_reg + 1 + arg_count
+      vararg_instruction = Instruction.vararg(vararg_base, 0)
+
+      # Call with -(init_args+1) to encode both varargs and fixed arg count
+      # Negative values encode: -1 means 0 fixed + varargs, -2 means 1 fixed + varargs, etc.
+      call_instruction = Instruction.call(base_reg, -(arg_count + 1), 1)
+
+      {function_instructions ++
+         move_function ++
+         arg_instructions ++
+         move_instructions ++
+         [vararg_instruction, call_instruction], base_reg, ctx}
+    else
+      # Normal function call without varargs
+      arg_count = length(args)
+      ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
+
+      {arg_instructions, arg_regs, ctx} =
+        Enum.reduce(args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
+          {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
+          {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
+        end)
+
+      # Move each arg result to its expected position (base+1+i)
+      move_instructions =
+        arg_regs
+        |> Enum.with_index()
+        |> Enum.flat_map(fn {arg_reg, i} ->
+          expected_reg = base_reg + 1 + i
+
+          if arg_reg == expected_reg do
+            []
+          else
+            [Instruction.move(expected_reg, arg_reg)]
+          end
+        end)
+
+      # Generate call instruction (single return value for now)
+      call_instruction = Instruction.call(base_reg, arg_count, 1)
+
+      # Result will be in base_reg
+      {function_instructions ++
+         move_function ++
+         arg_instructions ++
+         move_instructions ++
+         [call_instruction], base_reg, ctx}
+    end
   end
 
   defp gen_expr(%Expr.Table{fields: fields}, ctx) do
@@ -730,25 +823,80 @@ defmodule Lua.Compiler.Codegen do
       if list_fields == [] do
         {[], ctx}
       else
-        # Reserve contiguous slots for the list values
-        start_reg = ctx.next_reg
-        ctx = %{ctx | next_reg: start_reg + array_hint}
+        # Check if last field is vararg
+        {init_fields, last_field} =
+          if length(list_fields) > 0 do
+            Enum.split(list_fields, -1)
+          else
+            {[], []}
+          end
 
-        {value_instructions, ctx} =
-          list_fields
-          |> Enum.with_index()
-          |> Enum.reduce({[], ctx}, fn {val_expr, i}, {instructions, ctx} ->
-            target_reg = start_reg + i
-            {value_instructions, val_reg, ctx} = gen_expr(val_expr, ctx)
+        [last | _] = last_field
 
-            move =
-              if val_reg == target_reg, do: [], else: [Instruction.move(target_reg, val_reg)]
+        case last do
+          %Expr.Vararg{} when init_fields != [] ->
+            # Table with {a, b, ...}
+            # Reserve contiguous slots for the init values
+            start_reg = ctx.next_reg
+            ctx = %{ctx | next_reg: start_reg + length(init_fields)}
 
-            {instructions ++ value_instructions ++ move, ctx}
-          end)
+            {init_instructions, ctx} =
+              init_fields
+              |> Enum.with_index()
+              |> Enum.reduce({[], ctx}, fn {val_expr, i}, {instructions, ctx} ->
+                target_reg = start_reg + i
+                {value_instructions, val_reg, ctx} = gen_expr(val_expr, ctx)
 
-        set_list_instruction = Instruction.set_list(dest, start_reg, array_hint, 0)
-        {value_instructions ++ [set_list_instruction], ctx}
+                move =
+                  if val_reg == target_reg do
+                    []
+                  else
+                    [Instruction.move(target_reg, val_reg)]
+                  end
+
+                {instructions ++ value_instructions ++ move, ctx}
+              end)
+
+            # Load all varargs starting after init values
+            vararg_base = start_reg + length(init_fields)
+            vararg_instruction = Instruction.vararg(vararg_base, 0)
+
+            # set_list with count 0 means variable number of values
+            set_list_instruction = Instruction.set_list(dest, start_reg, 0, 0)
+            {init_instructions ++ [vararg_instruction, set_list_instruction], ctx}
+
+          %Expr.Vararg{} ->
+            # Table with just {...}
+            start_reg = ctx.next_reg
+            vararg_instruction = Instruction.vararg(start_reg, 0)
+            set_list_instruction = Instruction.set_list(dest, start_reg, 0, 0)
+            {[vararg_instruction, set_list_instruction], ctx}
+
+          _ ->
+            # Normal list fields (no vararg)
+            start_reg = ctx.next_reg
+            ctx = %{ctx | next_reg: start_reg + array_hint}
+
+            {value_instructions, ctx} =
+              list_fields
+              |> Enum.with_index()
+              |> Enum.reduce({[], ctx}, fn {val_expr, i}, {instructions, ctx} ->
+                target_reg = start_reg + i
+                {value_instructions, val_reg, ctx} = gen_expr(val_expr, ctx)
+
+                move =
+                  if val_reg == target_reg do
+                    []
+                  else
+                    [Instruction.move(target_reg, val_reg)]
+                  end
+
+                {instructions ++ value_instructions ++ move, ctx}
+              end)
+
+            set_list_instruction = Instruction.set_list(dest, start_reg, array_hint, 0)
+            {value_instructions ++ [set_list_instruction], ctx}
+        end
       end
 
     # Compile record fields
