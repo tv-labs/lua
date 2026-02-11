@@ -13,6 +13,11 @@ defmodule Lua.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
 
+      # Dialyzer
+      dialyzer: [
+        plt_add_apps: [:ex_unit, :mix]
+      ],
+
       # Docs
       name: "Lua",
       description: "A Lua VM implementation in Elixir",
