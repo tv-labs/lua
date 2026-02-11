@@ -1,4 +1,5 @@
 defmodule Mix.Tasks.Lua.GetTests do
+  @shortdoc "Downloads the Lua 5.3 test suite"
   @moduledoc """
   Downloads the official Lua 5.3 test suite.
 
@@ -22,7 +23,6 @@ defmodule Mix.Tasks.Lua.GetTests do
 
   use Mix.Task
 
-  @shortdoc "Downloads the Lua 5.3 test suite"
   @default_version "5.3.4"
   @base_url "https://www.lua.org/tests"
 
@@ -79,7 +79,8 @@ defmodule Mix.Tasks.Lua.GetTests do
     case System.cmd("tar", ["-xzf", tarball_path, "-C", dest_dir], stderr_to_stdout: true) do
       {_output, 0} ->
         # Move files from extracted directory to test_dir
-        File.ls!(extracted_dir)
+        extracted_dir
+        |> File.ls!()
         |> Enum.each(fn file ->
           src = Path.join(extracted_dir, file)
           dest = Path.join(dest_dir, file)
@@ -101,8 +102,7 @@ defmodule Mix.Tasks.Lua.GetTests do
 
   defp remove_unnecessary_files(test_dir) do
     # Remove C code directories - we don't need them for testing our Elixir implementation
-    ["libs", "ltests"]
-    |> Enum.each(fn dir ->
+    Enum.each(["libs", "ltests"], fn dir ->
       path = Path.join(test_dir, dir)
       if File.exists?(path), do: File.rm_rf!(path)
     end)

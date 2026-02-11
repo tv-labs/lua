@@ -2,7 +2,11 @@ defmodule Lua.AST.WalkerTest do
   use ExUnit.Case, async: true
 
   import Lua.AST.Builder
-  alias Lua.AST.{Walker, Expr, Statement}
+
+  alias Lua.AST.Chunk
+  alias Lua.AST.Expr
+  alias Lua.AST.Statement
+  alias Lua.AST.Walker
 
   describe "walk/2" do
     test "visits all nodes in pre-order" do
@@ -23,7 +27,7 @@ defmodule Lua.AST.WalkerTest do
 
       # Should visit in pre-order: Chunk, Block, Local, BinOp, Number(2), Number(3)
       assert length(visited) == 6
-      assert hd(visited).__struct__ == Lua.AST.Chunk
+      assert hd(visited).__struct__ == Chunk
     end
 
     test "visits all nodes in post-order" do
@@ -48,7 +52,7 @@ defmodule Lua.AST.WalkerTest do
       # Should visit in post-order: children before parents
       # Last visited should be Chunk
       assert length(visited) == 6
-      assert List.last(visited).__struct__ == Lua.AST.Chunk
+      assert List.last(visited).__struct__ == Chunk
     end
 
     test "walks through if statement with all branches" do
@@ -699,9 +703,7 @@ defmodule Lua.AST.WalkerTest do
       # for i = 1, 10, 2 do print(i) end
       ast =
         chunk([
-          for_num("i", number(1), number(10), [call_stmt(call(var("print"), [var("i")]))],
-            step: number(2)
-          )
+          for_num("i", number(1), number(10), [call_stmt(call(var("print"), [var("i")]))], step: number(2))
         ])
 
       # Count numbers (start, limit, step)

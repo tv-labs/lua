@@ -1,15 +1,18 @@
 defmodule Lua.VM.Stdlib.MathTest do
   use ExUnit.Case, async: true
 
-  alias Lua.{Compiler, Parser, VM}
+  alias Lua.Compiler
+  alias Lua.Parser
+  alias Lua.VM
   alias Lua.VM.State
+  alias Lua.VM.Stdlib
 
   describe "math library" do
     test "math.abs returns absolute value" do
       code = "return math.abs(-5), math.abs(3.5), math.abs(0)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [5, 3.5, 0], _state} = VM.execute(proto, state)
     end
@@ -18,7 +21,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.ceil(3.2), math.ceil(-3.8), math.ceil(5)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [4.0, -3.0, 5.0], _state} = VM.execute(proto, state)
     end
@@ -27,7 +30,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.floor(3.8), math.floor(-3.2), math.floor(5)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [3.0, -4.0, 5.0], _state} = VM.execute(proto, state)
     end
@@ -36,7 +39,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.max(1, 5, 3), math.max(-2, -8)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [5, -2], _state} = VM.execute(proto, state)
     end
@@ -45,7 +48,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.min(1, 5, 3), math.min(-2, -8)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [1, -8], _state} = VM.execute(proto, state)
     end
@@ -54,7 +57,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.sqrt(16), math.sqrt(2)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [result1, result2], _state} = VM.execute(proto, state)
       assert result1 == 4.0
@@ -65,7 +68,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.pi"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [pi], _state} = VM.execute(proto, state)
       assert_in_delta pi, 3.14159265, 0.00001
@@ -75,7 +78,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.sin(0), math.sin(math.pi / 2)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [sin0, sin_pi_2], _state} = VM.execute(proto, state)
       assert_in_delta sin0, 0.0, 0.00001
@@ -86,7 +89,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.cos(0), math.cos(math.pi)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [cos0, cos_pi], _state} = VM.execute(proto, state)
       assert_in_delta cos0, 1.0, 0.00001
@@ -97,7 +100,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.tan(0), math.tan(math.pi / 4)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [tan0, tan_pi_4], _state} = VM.execute(proto, state)
       assert_in_delta tan0, 0.0, 0.00001
@@ -108,7 +111,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.exp(0), math.exp(1)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [exp0, exp1], _state} = VM.execute(proto, state)
       assert_in_delta exp0, 1.0, 0.00001
@@ -119,7 +122,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.log(1), math.log(10, 10), math.log(8, 2)"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [log1, log10, log8], _state} = VM.execute(proto, state)
       assert_in_delta log1, 0.0, 0.00001
@@ -133,7 +136,7 @@ defmodule Lua.VM.Stdlib.MathTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [5, 5, nil, nil], _state} = VM.execute(proto, state)
     end
@@ -142,7 +145,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.type(5), math.type(5.5), math.type('str')"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, ["integer", "float", nil], _state} = VM.execute(proto, state)
     end
@@ -151,7 +154,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.huge > 1e100"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [true], _state} = VM.execute(proto, state)
     end
@@ -160,7 +163,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       code = "return math.maxinteger, math.mininteger"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [9_223_372_036_854_775_807, -9_223_372_036_854_775_808], _state} =
                VM.execute(proto, state)
@@ -177,7 +180,7 @@ defmodule Lua.VM.Stdlib.MathTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [r1, r2, r3], _state} = VM.execute(proto, state)
       # r1 should be in [0, 1)

@@ -1,5 +1,6 @@
 defmodule Lua.Lua53SuiteTest do
   use ExUnit.Case, async: true
+
   import Lua.TestCase
 
   @moduletag :lua53

@@ -1,7 +1,9 @@
 defmodule Lua.VM.CallStackTest do
   use ExUnit.Case, async: true
 
-  alias Lua.{Parser, Compiler, VM}
+  alias Lua.Compiler
+  alias Lua.Parser
+  alias Lua.VM
   alias Lua.VM.State
 
   describe "call stack tracking" do

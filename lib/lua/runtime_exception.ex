@@ -1,7 +1,8 @@
 defmodule Lua.RuntimeException do
-  defexception [:message, :original, :state]
-
+  @moduledoc false
   alias Lua.Util
+
+  defexception [:message, :original, :state]
 
   @impl true
   def exception({:lua_error, error, _state}) do

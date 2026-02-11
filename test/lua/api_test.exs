@@ -1,8 +1,6 @@
 defmodule Lua.APITest do
   use ExUnit.Case, async: true
 
-  alias Lua
-
   describe "install/3 callback" do
     test "it can modify global lua state" do
       assert [{module, _}] =

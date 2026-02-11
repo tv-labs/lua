@@ -1,8 +1,11 @@
 defmodule Lua.VM.PcallTest do
   use ExUnit.Case, async: true
 
-  alias Lua.{Parser, Compiler, VM}
+  alias Lua.Compiler
+  alias Lua.Parser
+  alias Lua.VM
   alias Lua.VM.State
+  alias Lua.VM.Stdlib
 
   describe "pcall and xpcall" do
     test "pcall success - return entire result table" do
@@ -17,7 +20,7 @@ defmodule Lua.VM.PcallTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
 
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
       assert {:ok, results, _state} = VM.execute(proto, state)
 
       # Should return [true, 42]
@@ -36,7 +39,7 @@ defmodule Lua.VM.PcallTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
 
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
       assert {:ok, results, _state} = VM.execute(proto, state)
 
       assert [false, err] = results
@@ -56,7 +59,7 @@ defmodule Lua.VM.PcallTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
 
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
       assert {:ok, results, _state} = VM.execute(proto, state)
 
       assert [true, 30] = results
@@ -75,7 +78,7 @@ defmodule Lua.VM.PcallTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
 
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
       assert {:ok, results, _state} = VM.execute(proto, state)
 
       assert [false, err] = results
@@ -99,7 +102,7 @@ defmodule Lua.VM.PcallTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
 
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
       assert {:ok, results, _state} = VM.execute(proto, state)
 
       assert [false, handled] = results

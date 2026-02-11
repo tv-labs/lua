@@ -96,7 +96,7 @@ defmodule Lua.VM.Stdlib.String do
     i = Enum.at(rest, 0)
     j = Enum.at(rest, 1)
 
-    unless is_integer(i) do
+    if !is_integer(i) do
       raise ArgumentError,
         function_name: "string.sub",
         arg_num: 2,
@@ -133,7 +133,7 @@ defmodule Lua.VM.Stdlib.String do
   defp string_rep([str, n | rest], state) when is_binary(str) and is_integer(n) do
     sep = Enum.at(rest, 0, "")
 
-    unless is_binary(sep) do
+    if !is_binary(sep) do
       raise ArgumentError,
         function_name: "string.rep",
         arg_num: 3,
@@ -145,9 +145,7 @@ defmodule Lua.VM.Stdlib.String do
       if n <= 0 do
         ""
       else
-        1..n
-        |> Enum.map(fn _ -> str end)
-        |> Enum.join(sep)
+        Enum.map_join(1..n, sep, fn _ -> str end)
       end
 
     {[result], state}
@@ -194,14 +192,14 @@ defmodule Lua.VM.Stdlib.String do
     i = Enum.at(rest, 0, 1)
     j = Enum.at(rest, 1, i)
 
-    unless is_integer(i) do
+    if !is_integer(i) do
       raise ArgumentError,
         function_name: "string.byte",
         arg_num: 2,
         expected: "number"
     end
 
-    unless is_integer(j) do
+    if !is_integer(j) do
       raise ArgumentError,
         function_name: "string.byte",
         arg_num: 3,
@@ -219,8 +217,7 @@ defmodule Lua.VM.Stdlib.String do
         start_byte = max(0, start_idx)
         end_byte = min(len - 1, end_idx)
 
-        start_byte..end_byte
-        |> Enum.map(fn idx -> :binary.at(str, idx) end)
+        Enum.map(start_byte..end_byte, fn idx -> :binary.at(str, idx) end)
       end
 
     {bytes, state}
@@ -362,7 +359,7 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   defp format_float(val) when is_number(val) do
-    :io_lib.format("~.6f", [val / 1]) |> IO.iodata_to_binary()
+    "~.6f" |> :io_lib.format([val / 1]) |> IO.iodata_to_binary()
   end
 
   defp format_float(_) do

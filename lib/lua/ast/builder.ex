@@ -25,7 +25,11 @@ defmodule Lua.AST.Builder do
       ])
   """
 
-  alias Lua.AST.{Chunk, Block, Meta, Expr, Statement}
+  alias Lua.AST.Block
+  alias Lua.AST.Chunk
+  alias Lua.AST.Expr
+  alias Lua.AST.Meta
+  alias Lua.AST.Statement
 
   # Chunk and Block
 
@@ -425,7 +429,7 @@ defmodule Lua.AST.Builder do
     %Statement.If{
       condition: condition,
       then_block: block(then_stmts),
-      elseifs: Keyword.get(opts, :elseif, []) |> Enum.map(fn {c, s} -> {c, block(s)} end),
+      elseifs: opts |> Keyword.get(:elseif, []) |> Enum.map(fn {c, s} -> {c, block(s)} end),
       else_block: if(else_stmts = Keyword.get(opts, :else), do: block(else_stmts)),
       meta: Keyword.get(opts, :meta)
     }

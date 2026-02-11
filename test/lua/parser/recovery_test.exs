@@ -1,8 +1,8 @@
 defmodule Lua.Parser.RecoveryTest do
   use ExUnit.Case, async: true
 
-  alias Lua.Parser.Recovery
   alias Lua.Parser.Error
+  alias Lua.Parser.Recovery
 
   describe "recover_at_statement/2" do
     test "recovers at semicolon" do

@@ -335,7 +335,7 @@ defmodule Lua.Parser.ErrorUnitTest do
       assert String.contains?(error.message, "Unexpected end of input")
       assert String.contains?(error.message, "while parsing expression")
       assert error.position == nil
-      assert error.suggestion != nil
+      assert error.suggestion
     end
   end
 
@@ -441,9 +441,7 @@ defmodule Lua.Parser.ErrorUnitTest do
       position = %{line: 1, column: 5, byte_offset: 0}
 
       error =
-        Error.new(:expected_token, "Expected something", position,
-          suggestion: "Try adding a semicolon"
-        )
+        Error.new(:expected_token, "Expected something", position, suggestion: "Try adding a semicolon")
 
       formatted = Error.format(error, source_code)
 

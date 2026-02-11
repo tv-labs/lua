@@ -6,7 +6,8 @@ defmodule Lua.AST.Block do
   Blocks create a new scope for local variables.
   """
 
-  alias Lua.AST.{Meta, Statement}
+  alias Lua.AST.Meta
+  alias Lua.AST.Statement
 
   @type t :: %__MODULE__{
           stmts: [Statement.t()],
@@ -39,7 +40,8 @@ defmodule Lua.AST.Chunk do
   A chunk is essentially a block that represents a complete unit of Lua code.
   """
 
-  alias Lua.AST.{Meta, Block}
+  alias Lua.AST.Block
+  alias Lua.AST.Meta
 
   @type t :: %__MODULE__{
           block: Block.t(),

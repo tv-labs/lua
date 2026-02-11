@@ -8,6 +8,8 @@ defmodule Lua.TestCase do
 
   use ExUnit.CaseTemplate
 
+  alias Lua.VM.RuntimeError
+
   @doc """
   Runs a .lua file, treating Lua assert() failures as ExUnit failures.
 
@@ -60,11 +62,11 @@ defmodule Lua.TestCase do
                 {results, state}
 
               {:error, error} ->
-                raise Lua.VM.RuntimeError, value: "compile error: #{inspect(error)}"
+                raise RuntimeError, value: "compile error: #{inspect(error)}"
             end
 
           {:error, error} ->
-            raise Lua.VM.RuntimeError, value: "parse error: #{inspect(error)}"
+            raise RuntimeError, value: "parse error: #{inspect(error)}"
         end
       end)
 
@@ -97,16 +99,16 @@ defmodule Lua.TestCase do
         try do
           Lua.VM.Executor.call_function(func, [], state)
 
-          raise Lua.VM.RuntimeError,
+          raise RuntimeError,
             value: "expected error matching '#{pattern}' but no error was raised"
         rescue
-          e in [Lua.VM.RuntimeError, Lua.VM.TypeError, Lua.VM.AssertionError] ->
+          e in [RuntimeError, Lua.VM.TypeError, Lua.VM.AssertionError] ->
             error_msg = extract_error_message(e)
 
             if String.contains?(error_msg, pattern) do
               {[true], state}
             else
-              raise Lua.VM.RuntimeError,
+              raise RuntimeError,
                 value: "expected error matching '#{pattern}' but got: #{error_msg}"
             end
         end
@@ -118,8 +120,7 @@ defmodule Lua.TestCase do
   # Extract error message from exception
   defp extract_error_message(%{value: value}) when is_binary(value), do: value
 
-  defp extract_error_message(%{value: value}) when not is_nil(value),
-    do: Lua.VM.Value.to_string(value)
+  defp extract_error_message(%{value: value}) when not is_nil(value), do: Lua.VM.Value.to_string(value)
 
   defp extract_error_message(e), do: Exception.message(e)
 end

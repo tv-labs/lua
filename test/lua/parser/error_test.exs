@@ -3,6 +3,7 @@ defmodule Lua.Parser.ErrorTest do
   Tests for parser error messages, including formatting and suggestions.
   """
   use ExUnit.Case, async: true
+
   alias Lua.Parser
 
   describe "syntax errors" do

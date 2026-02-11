@@ -2,7 +2,12 @@ defmodule Lua.AST.PrettyPrinterTest do
   use ExUnit.Case, async: true
 
   import Lua.AST.Builder
-  alias Lua.{Parser, AST.PrettyPrinter, AST.Meta}
+
+  alias Lua.AST.Block
+  alias Lua.AST.Chunk
+  alias Lua.AST.Meta
+  alias Lua.AST.PrettyPrinter
+  alias Lua.Parser
 
   describe "literals" do
     test "prints nil" do
@@ -469,14 +474,14 @@ defmodule Lua.AST.PrettyPrinterTest do
   describe "round-trip" do
     test "can round-trip simple expressions" do
       original = "return 2 + 3\n"
-      {:ok, ast} = Lua.Parser.parse(original)
+      {:ok, ast} = Parser.parse(original)
       printed = PrettyPrinter.print(ast)
       assert printed == original
     end
 
     test "can round-trip local assignments" do
       original = "local x = 42\n"
-      {:ok, ast} = Lua.Parser.parse(original)
+      {:ok, ast} = Parser.parse(original)
       printed = PrettyPrinter.print(ast)
       assert printed == original
     end
@@ -488,14 +493,14 @@ defmodule Lua.AST.PrettyPrinterTest do
       end
       """
 
-      {:ok, ast} = Lua.Parser.parse(code)
+      {:ok, ast} = Parser.parse(code)
       printed = PrettyPrinter.print(ast)
 
       # Parse again to verify structure matches
-      {:ok, ast2} = Lua.Parser.parse(printed)
+      {:ok, ast2} = Parser.parse(printed)
 
       # Compare AST structures (ignoring meta)
-      assert ast.block.stmts |> length() == ast2.block.stmts |> length()
+      assert length(ast.block.stmts) == length(ast2.block.stmts)
     end
   end
 
@@ -509,7 +514,7 @@ defmodule Lua.AST.PrettyPrinterTest do
     test "escapes double quotes" do
       ast = chunk([return_stmt([string("say \"hello\"")])])
       result = PrettyPrinter.print(ast)
-      assert result == "return \"say \\\"hello\\\"\"\n"
+      assert result == ~s(return "say \\"hello\\""\n)
     end
 
     test "escapes tab character" do
@@ -521,7 +526,7 @@ defmodule Lua.AST.PrettyPrinterTest do
     test "escapes all special characters together" do
       ast = chunk([return_stmt([string("line1\n\"quote\"\ttab\\back")])])
       result = PrettyPrinter.print(ast)
-      assert result == "return \"line1\\n\\\"quote\\\"\\ttab\\\\back\"\n"
+      assert result == ~s(return "line1\\n\\"quote\\"\\ttab\\\\back"\n)
     end
   end
 
@@ -538,7 +543,7 @@ defmodule Lua.AST.PrettyPrinterTest do
 
     test "prints concatenation" do
       ast = chunk([return_stmt([binop(:concat, string("hello"), string("world"))])])
-      assert PrettyPrinter.print(ast) == "return \"hello\" .. \"world\"\n"
+      assert PrettyPrinter.print(ast) == ~s(return "hello" .. "world"\n)
     end
 
     test "prints equality" do
@@ -582,7 +587,7 @@ defmodule Lua.AST.PrettyPrinterTest do
           ])
         ])
 
-      assert PrettyPrinter.print(ast) == "return \"a\" .. \"b\" .. \"c\"\n"
+      assert PrettyPrinter.print(ast) == ~s(return "a" .. "b" .. "c"\n)
 
       # ("a" .. "b") .. "c" should have parentheses
       ast =
@@ -592,7 +597,7 @@ defmodule Lua.AST.PrettyPrinterTest do
           ])
         ])
 
-      assert PrettyPrinter.print(ast) == "return (\"a\" .. \"b\") .. \"c\"\n"
+      assert PrettyPrinter.print(ast) == ~s{return ("a" .. "b") .. "c"\n}
     end
 
     test "handles subtraction left-associativity" do
@@ -1076,13 +1081,13 @@ defmodule Lua.AST.PrettyPrinterTest do
       # When passing a simple string name (not a list)
       alias Lua.AST.Statement
 
-      ast = %Lua.AST.Chunk{
-        block: %Lua.AST.Block{
+      ast = %Chunk{
+        block: %Block{
           stmts: [
             %Statement.FuncDecl{
               name: "simple",
               params: [],
-              body: %Lua.AST.Block{stmts: [return_stmt([])]},
+              body: %Block{stmts: [return_stmt([])]},
               is_method: false,
               meta: nil
             }
@@ -1100,8 +1105,8 @@ defmodule Lua.AST.PrettyPrinterTest do
       # Create a BinOp with an invalid operator to test the default case
       alias Lua.AST.Expr
 
-      ast = %Lua.AST.Chunk{
-        block: %Lua.AST.Block{
+      ast = %Chunk{
+        block: %Block{
           stmts: [
             return_stmt([
               %Expr.BinOp{
@@ -1123,8 +1128,8 @@ defmodule Lua.AST.PrettyPrinterTest do
       # Create a UnOp with an invalid operator to test the default case
       alias Lua.AST.Expr
 
-      ast = %Lua.AST.Chunk{
-        block: %Lua.AST.Block{
+      ast = %Chunk{
+        block: %Block{
           stmts: [
             return_stmt([
               %Expr.UnOp{
@@ -1467,7 +1472,7 @@ defmodule Lua.AST.PrettyPrinterTest do
       [stmt | _] = ast.block.stmts
 
       comment = Meta.get_trailing_comment(stmt.meta)
-      assert comment != nil
+      assert comment
       assert comment.position.line == 1
       assert comment.text == " inline"
     end
@@ -1530,8 +1535,8 @@ defmodule Lua.AST.PrettyPrinterTest do
     comments2 = extract_all_comments(ast2)
 
     # Compare comment text (positions may differ due to formatting)
-    texts1 = Enum.map(comments1, & &1.text) |> Enum.sort()
-    texts2 = Enum.map(comments2, & &1.text) |> Enum.sort()
+    texts1 = comments1 |> Enum.map(& &1.text) |> Enum.sort()
+    texts2 = comments2 |> Enum.map(& &1.text) |> Enum.sort()
 
     assert texts1 == texts2, """
     Comments not preserved through round-trip
@@ -1544,8 +1549,7 @@ defmodule Lua.AST.PrettyPrinterTest do
   # Extract all comments from an AST
   defp extract_all_comments(node, acc \\ [])
 
-  defp extract_all_comments(%{meta: meta} = node, acc)
-       when is_struct(node) and not is_nil(meta) do
+  defp extract_all_comments(%{meta: meta} = node, acc) when is_struct(node) and not is_nil(meta) do
     leading = Meta.get_leading_comments(meta)
     trailing = Meta.get_trailing_comment(meta)
     trailing_list = if trailing, do: [trailing], else: []

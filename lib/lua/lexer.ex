@@ -187,8 +187,7 @@ defmodule Lua.Lexer do
   end
 
   # Single-character operators and delimiters
-  defp do_tokenize(<<c, rest::binary>>, acc, pos)
-       when c in [?+, ?-, ?*, ?/, ?%, ?^, ?#, ?&, ?|, ?~] do
+  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in [?+, ?-, ?*, ?/, ?%, ?^, ?#, ?&, ?|, ?~] do
     op =
       case c do
         ?+ -> :add
@@ -219,8 +218,7 @@ defmodule Lua.Lexer do
     do_tokenize(rest, [token | acc], advance_column(pos, 1))
   end
 
-  defp do_tokenize(<<c, rest::binary>>, acc, pos)
-       when c in [?(, ?), ?{, ?}, ?], ?;, ?,, ?., ?:] do
+  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in [?(, ?), ?{, ?}, ?], ?;, ?,, ?., ?:] do
     delim =
       case c do
         ?( -> :lparen
@@ -239,8 +237,7 @@ defmodule Lua.Lexer do
   end
 
   # Identifiers and keywords
-  defp do_tokenize(<<c, rest::binary>>, acc, pos)
-       when c in ?a..?z or c in ?A..?Z or c == ?_ do
+  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in ?a..?z or c in ?A..?Z or c == ?_ do
     scan_identifier(<<c, rest::binary>>, "", acc, pos, pos)
   end
 
@@ -485,8 +482,7 @@ defmodule Lua.Lexer do
   end
 
   # Scan decimal number
-  defp scan_number(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
-       when c in ?0..?9 do
+  defp scan_number(<<c, rest::binary>>, num_acc, acc, pos, start_pos) when c in ?0..?9 do
     scan_number(rest, num_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
   end
 
@@ -495,8 +491,7 @@ defmodule Lua.Lexer do
     finalize_number(num_acc, <<".">>, acc, pos, start_pos)
   end
 
-  defp scan_number(<<".", c, rest::binary>>, num_acc, acc, pos, start_pos)
-       when c in ?0..?9 do
+  defp scan_number(<<".", c, rest::binary>>, num_acc, acc, pos, start_pos) when c in ?0..?9 do
     # Decimal point with digit following
     scan_float(rest, num_acc <> "." <> <<c>>, acc, advance_column(pos, 2), start_pos)
   end
@@ -506,8 +501,7 @@ defmodule Lua.Lexer do
     finalize_number(num_acc, <<".", rest::binary>>, acc, pos, start_pos)
   end
 
-  defp scan_number(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
-       when c in [?e, ?E] do
+  defp scan_number(<<c, rest::binary>>, num_acc, acc, pos, start_pos) when c in [?e, ?E] do
     # Scientific notation
     scan_exponent(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
   end
@@ -517,13 +511,11 @@ defmodule Lua.Lexer do
   end
 
   # Scan float part (after decimal point)
-  defp scan_float(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
-       when c in ?0..?9 do
+  defp scan_float(<<c, rest::binary>>, num_acc, acc, pos, start_pos) when c in ?0..?9 do
     scan_float(rest, num_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
   end
 
-  defp scan_float(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
-       when c in [?e, ?E] do
+  defp scan_float(<<c, rest::binary>>, num_acc, acc, pos, start_pos) when c in [?e, ?E] do
     scan_exponent(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
   end
 
@@ -532,18 +524,15 @@ defmodule Lua.Lexer do
   end
 
   # Scan scientific notation exponent
-  defp scan_exponent(<<c, sign, rest::binary>>, num_acc, acc, pos, start_pos)
-       when c in [?e, ?E] and sign in [?+, ?-] do
+  defp scan_exponent(<<c, sign, rest::binary>>, num_acc, acc, pos, start_pos) when c in [?e, ?E] and sign in [?+, ?-] do
     scan_exponent_digits(rest, num_acc <> <<c, sign>>, acc, advance_column(pos, 2), start_pos)
   end
 
-  defp scan_exponent(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
-       when c in [?e, ?E] do
+  defp scan_exponent(<<c, rest::binary>>, num_acc, acc, pos, start_pos) when c in [?e, ?E] do
     scan_exponent_digits(rest, num_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
   end
 
-  defp scan_exponent_digits(<<c, rest::binary>>, num_acc, acc, pos, start_pos)
-       when c in ?0..?9 do
+  defp scan_exponent_digits(<<c, rest::binary>>, num_acc, acc, pos, start_pos) when c in ?0..?9 do
     scan_exponent_digits(rest, num_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
   end
 
@@ -582,17 +571,15 @@ defmodule Lua.Lexer do
 
   # Parse number string to integer or float
   defp parse_number(num_str) do
-    cond do
-      String.contains?(num_str, ".") or String.contains?(num_str, "e") or
-          String.contains?(num_str, "E") ->
-        case Float.parse(num_str) do
-          {num, ""} -> {:ok, num}
-          _ -> {:error, :invalid_number}
-        end
-
-      true ->
-        {num, ""} = Integer.parse(num_str)
-        {:ok, num}
+    if String.contains?(num_str, ".") or String.contains?(num_str, "e") or
+         String.contains?(num_str, "E") do
+      case Float.parse(num_str) do
+        {num, ""} -> {:ok, num}
+        _ -> {:error, :invalid_number}
+      end
+    else
+      {num, ""} = Integer.parse(num_str)
+      {:ok, num}
     end
   end
 

@@ -1,8 +1,13 @@
 defmodule Lua.VM.ArithmeticTest do
   use ExUnit.Case, async: true
 
-  alias Lua.{Parser, Compiler, VM}
+  alias Lua.Compiler
+  alias Lua.Parser
+  alias Lua.VM
+  alias Lua.VM.RuntimeError
   alias Lua.VM.State
+  alias Lua.VM.Stdlib
+  alias Lua.VM.TypeError
 
   describe "arithmetic type checking" do
     test "addition with numbers works" do
@@ -14,7 +19,7 @@ defmodule Lua.VM.ArithmeticTest do
     end
 
     test "addition with string numbers coerces" do
-      code = "return \"5\" + \"3\""
+      code = ~s(return "5" + "3")
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
@@ -27,7 +32,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, fn ->
+      assert_raise TypeError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -38,7 +43,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, fn ->
+      assert_raise TypeError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -49,7 +54,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, fn ->
+      assert_raise TypeError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -64,7 +69,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, fn ->
+      assert_raise TypeError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -75,7 +80,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, fn ->
+      assert_raise TypeError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -99,7 +104,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, fn ->
+      assert_raise TypeError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -114,7 +119,7 @@ defmodule Lua.VM.ArithmeticTest do
 
       # Note: Standard Lua 5.3 returns inf for this case, but we raise an error
       # because Elixir doesn't easily support creating inf/nan values
-      assert_raise Lua.VM.RuntimeError, ~r/divide by zero/, fn ->
+      assert_raise RuntimeError, ~r/divide by zero/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -125,7 +130,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.RuntimeError, ~r/divide by zero/, fn ->
+      assert_raise RuntimeError, ~r/divide by zero/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -136,7 +141,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.RuntimeError, ~r/divide by zero/, fn ->
+      assert_raise RuntimeError, ~r/divide by zero/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -147,7 +152,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.RuntimeError, ~r/modulo by zero/, fn ->
+      assert_raise RuntimeError, ~r/modulo by zero/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -163,7 +168,7 @@ defmodule Lua.VM.ArithmeticTest do
     end
 
     test "comparing strings works" do
-      code = "return \"abc\" < \"def\", \"abc\" <= \"abc\", \"xyz\" > \"abc\""
+      code = ~s(return "abc" < "def", "abc" <= "abc", "xyz" > "abc")
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
@@ -176,7 +181,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, fn ->
+      assert_raise TypeError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -187,7 +192,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, fn ->
+      assert_raise TypeError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -202,7 +207,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, fn ->
+      assert_raise TypeError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -231,7 +236,7 @@ defmodule Lua.VM.ArithmeticTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
       assert {:ok, [false, err], _state} = VM.execute(proto, state)
       assert is_binary(err)
       assert err =~ "arithmetic"
@@ -248,7 +253,7 @@ defmodule Lua.VM.ArithmeticTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
       assert {:ok, [false, err], _state} = VM.execute(proto, state)
       assert is_binary(err)
       assert err =~ "divide by zero"
@@ -265,7 +270,7 @@ defmodule Lua.VM.ArithmeticTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
       assert {:ok, [false, err], _state} = VM.execute(proto, state)
       assert is_binary(err)
       assert err =~ "compare"

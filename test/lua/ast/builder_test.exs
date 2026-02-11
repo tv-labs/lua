@@ -2,7 +2,11 @@ defmodule Lua.AST.BuilderTest do
   use ExUnit.Case, async: true
 
   import Lua.AST.Builder
-  alias Lua.AST.{Chunk, Block, Expr, Statement}
+
+  alias Lua.AST.Block
+  alias Lua.AST.Chunk
+  alias Lua.AST.Expr
+  alias Lua.AST.Statement
 
   describe "chunk and block" do
     test "creates a chunk" do

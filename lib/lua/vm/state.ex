@@ -54,8 +54,7 @@ defmodule Lua.VM.State do
   where `args` is a list of Lua values and `results` is a list of return values.
   """
   @spec register_function(t(), binary(), (list(), t() -> {list(), t()})) :: t()
-  def register_function(%__MODULE__{} = state, name, fun)
-      when is_binary(name) and is_function(fun) do
+  def register_function(%__MODULE__{} = state, name, fun) when is_binary(name) and is_function(fun) do
     set_global(state, name, {:native_func, fun})
   end
 

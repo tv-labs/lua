@@ -1,6 +1,8 @@
 defmodule Lua.RuntimeExceptionTest do
   use ExUnit.Case, async: true
+
   alias Lua.RuntimeException
+  alias Lua.VM.State
 
   describe "exception/1 with {:lua_error, error, state}" do
     test "formats simple lua error with stacktrace" do
@@ -77,7 +79,7 @@ defmodule Lua.RuntimeExceptionTest do
 
   describe "exception/1 with {:api_error, details, state}" do
     test "creates exception with api error message" do
-      state = Lua.VM.State.new()
+      state = State.new()
       details = "invalid function call"
 
       exception = RuntimeException.exception({:api_error, details, state})
@@ -88,7 +90,7 @@ defmodule Lua.RuntimeExceptionTest do
     end
 
     test "handles complex api error details" do
-      state = Lua.VM.State.new()
+      state = State.new()
       details = "function returned invalid type: expected table, got nil"
 
       exception = RuntimeException.exception({:api_error, details, state})

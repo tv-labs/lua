@@ -92,8 +92,6 @@ defmodule Lua.API do
 
     quote do
       @behaviour Lua.API
-      Module.register_attribute(__MODULE__, :lua_function, accumulate: true)
-      @before_compile Lua.API
 
       import Lua.API,
         only: [
@@ -107,6 +105,9 @@ defmodule Lua.API do
           is_erl_func: 1,
           is_mfa: 1
         ]
+
+      Module.register_attribute(__MODULE__, :lua_function, accumulate: true)
+      @before_compile Lua.API
 
       @impl Lua.API
       def scope do
@@ -161,7 +162,7 @@ defmodule Lua.API do
   """
   defmacro runtime_exception!(message) do
     quote do
-      unless function_exported?(__MODULE__, :scope, 0) do
+      if !function_exported?(__MODULE__, :scope, 0) do
         raise "runtime_exception!/1 can only be called on modules implementing Lua.API"
       end
 
@@ -248,8 +249,7 @@ defmodule Lua.API do
 
     quote do
       @lua_function validate_func!(
-                      {unquote(name), true,
-                       Module.delete_attribute(__MODULE__, :variadic) || false},
+                      {unquote(name), true, Module.delete_attribute(__MODULE__, :variadic) || false},
                       __MODULE__,
                       @lua_function
                     )
@@ -265,8 +265,7 @@ defmodule Lua.API do
 
     quote do
       @lua_function validate_func!(
-                      {unquote(name), false,
-                       Module.delete_attribute(__MODULE__, :variadic) || false},
+                      {unquote(name), false, Module.delete_attribute(__MODULE__, :variadic) || false},
                       __MODULE__,
                       @lua_function
                     )

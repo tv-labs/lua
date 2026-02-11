@@ -5,7 +5,11 @@ defmodule Lua.VM.Executor do
   Tail-recursive dispatch loop that executes instructions.
   """
 
-  alias Lua.VM.{InternalError, State, TypeError, Value}
+  alias Lua.VM.InternalError
+  alias Lua.VM.RuntimeError
+  alias Lua.VM.State
+  alias Lua.VM.TypeError
+  alias Lua.VM.Value
 
   @doc """
   Executes instructions with the given register file and state.
@@ -111,13 +115,7 @@ defmodule Lua.VM.Executor do
   end
 
   # get_upvalue
-  defp do_execute(
-         [{:get_upvalue, dest, index} | rest],
-         regs,
-         {upvalues, _} = upvalue_context,
-         proto,
-         state
-       ) do
+  defp do_execute([{:get_upvalue, dest, index} | rest], regs, {upvalues, _} = upvalue_context, proto, state) do
     cell_ref = Enum.at(upvalues, index)
     value = Map.get(state.upvalue_cells, cell_ref)
     regs = put_elem(regs, dest, value)
@@ -125,13 +123,7 @@ defmodule Lua.VM.Executor do
   end
 
   # set_upvalue
-  defp do_execute(
-         [{:set_upvalue, index, source} | rest],
-         regs,
-         {upvalues, _} = upvalue_context,
-         proto,
-         state
-       ) do
+  defp do_execute([{:set_upvalue, index, source} | rest], regs, {upvalues, _} = upvalue_context, proto, state) do
     cell_ref = Enum.at(upvalues, index)
     value = elem(regs, source)
     state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
@@ -214,13 +206,7 @@ defmodule Lua.VM.Executor do
   end
 
   # while_loop
-  defp do_execute(
-         [{:while_loop, cond_body, test_reg, loop_body} | rest],
-         regs,
-         upvalues,
-         proto,
-         state
-       ) do
+  defp do_execute([{:while_loop, cond_body, test_reg, loop_body} | rest], regs, upvalues, proto, state) do
     # Execute condition
     {_results, regs, state} = do_execute(cond_body, regs, upvalues, proto, state)
 
@@ -243,13 +229,7 @@ defmodule Lua.VM.Executor do
   end
 
   # repeat_loop
-  defp do_execute(
-         [{:repeat_loop, loop_body, cond_body, test_reg} | rest],
-         regs,
-         upvalues,
-         proto,
-         state
-       ) do
+  defp do_execute([{:repeat_loop, loop_body, cond_body, test_reg} | rest], regs, upvalues, proto, state) do
     # Execute body
     {_results, regs, state} = do_execute(loop_body, regs, upvalues, proto, state)
 
@@ -307,13 +287,7 @@ defmodule Lua.VM.Executor do
   end
 
   # generic_for - generic for loop (for k, v in iterator do ... end)
-  defp do_execute(
-         [{:generic_for, base, var_regs, body} | rest],
-         regs,
-         upvalues,
-         proto,
-         state
-       ) do
+  defp do_execute([{:generic_for, base, var_regs, body} | rest], regs, upvalues, proto, state) do
     # Read iterator function, invariant state, control from internal registers
     iter_func = elem(regs, base)
     invariant_state = elem(regs, base + 1)
@@ -354,13 +328,7 @@ defmodule Lua.VM.Executor do
   end
 
   # closure - create a closure value from a prototype, capturing upvalues
-  defp do_execute(
-         [{:closure, dest, proto_index} | rest],
-         regs,
-         {upvalues, open_upvalues},
-         proto,
-         state
-       ) do
+  defp do_execute([{:closure, dest, proto_index} | rest], regs, {upvalues, open_upvalues}, proto, state) do
     nested_proto = Enum.at(proto.prototypes, proto_index)
 
     # Capture upvalues based on descriptors, reusing open upvalue cells when available
@@ -392,13 +360,7 @@ defmodule Lua.VM.Executor do
   end
 
   # call - invoke a function value
-  defp do_execute(
-         [{:call, base, arg_count, result_count} | rest],
-         regs,
-         upvalue_context,
-         proto,
-         state
-       ) do
+  defp do_execute([{:call, base, arg_count, result_count} | rest], regs, upvalue_context, proto, state) do
     func_value = elem(regs, base)
 
     # Collect arguments from registers base+1..base+arg_count
@@ -483,8 +445,7 @@ defmodule Lua.VM.Executor do
 
             other ->
               raise InternalError,
-                value:
-                  "native function returned invalid result: #{inspect(other)}, expected {results, state}"
+                value: "native function returned invalid result: #{inspect(other)}, expected {results, state}"
           end
 
         nil ->
@@ -807,13 +768,7 @@ defmodule Lua.VM.Executor do
   end
 
   # new_table
-  defp do_execute(
-         [{:new_table, dest, _array_hint, _hash_hint} | rest],
-         regs,
-         upvalues,
-         proto,
-         state
-       ) do
+  defp do_execute([{:new_table, dest, _array_hint, _hash_hint} | rest], regs, upvalues, proto, state) do
     {tref, state} = State.alloc_table(state)
     regs = put_elem(regs, dest, tref)
     do_execute(rest, regs, upvalues, proto, state)
@@ -859,13 +814,7 @@ defmodule Lua.VM.Executor do
   end
 
   # set_table — table[R[key_reg]] = R[value_reg]
-  defp do_execute(
-         [{:set_table, table_reg, key_reg, value_reg} | rest],
-         regs,
-         upvalues,
-         proto,
-         state
-       ) do
+  defp do_execute([{:set_table, table_reg, key_reg, value_reg} | rest], regs, upvalues, proto, state) do
     {:tref, id} = elem(regs, table_reg)
     key = elem(regs, key_reg)
     value = elem(regs, value_reg)
@@ -954,13 +903,7 @@ defmodule Lua.VM.Executor do
   end
 
   # set_field — table[name] = R[value_reg]
-  defp do_execute(
-         [{:set_field, table_reg, name, value_reg} | rest],
-         regs,
-         upvalues,
-         proto,
-         state
-       ) do
+  defp do_execute([{:set_field, table_reg, name, value_reg} | rest], regs, upvalues, proto, state) do
     {:tref, id} = elem(regs, table_reg)
     value = elem(regs, value_reg)
     table = Map.fetch!(state.tables, id)
@@ -1011,13 +954,7 @@ defmodule Lua.VM.Executor do
 
   # set_list — bulk store: table[offset+i] = R[start+i-1] for i in 1..count
   # count == 0 means store all values from start until nil or end of tuple
-  defp do_execute(
-         [{:set_list, table_reg, start, count, offset} | rest],
-         regs,
-         upvalues,
-         proto,
-         state
-       ) do
+  defp do_execute([{:set_list, table_reg, start, count, offset} | rest], regs, upvalues, proto, state) do
     {:tref, id} = elem(regs, table_reg)
 
     state =
@@ -1066,13 +1003,7 @@ defmodule Lua.VM.Executor do
   end
 
   # self — R[base+1] = R[obj_reg], R[base] = R[obj_reg]["method"]
-  defp do_execute(
-         [{:self, base, obj_reg, method_name} | rest],
-         regs,
-         upvalues,
-         proto,
-         state
-       ) do
+  defp do_execute([{:self, base, obj_reg, method_name} | rest], regs, upvalues, proto, state) do
     obj = elem(regs, obj_reg)
     {:tref, id} = obj
     table = Map.fetch!(state.tables, id)
@@ -1381,7 +1312,7 @@ defmodule Lua.VM.Executor do
       # Note: Standard Lua 5.3 returns inf/-inf/nan for float division by zero,
       # but Elixir doesn't support creating these values easily, so we raise an error
       if nb == 0 or nb == 0.0 do
-        raise Lua.VM.RuntimeError, value: "attempt to divide by zero"
+        raise RuntimeError, value: "attempt to divide by zero"
       else
         na / nb
       end
@@ -1398,7 +1329,7 @@ defmodule Lua.VM.Executor do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
       if trunc(nb) == 0 do
-        raise Lua.VM.RuntimeError, value: "attempt to divide by zero"
+        raise RuntimeError, value: "attempt to divide by zero"
       else
         div(trunc(na), trunc(nb))
       end
@@ -1415,7 +1346,7 @@ defmodule Lua.VM.Executor do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
       if trunc(nb) == 0 do
-        raise Lua.VM.RuntimeError, value: "attempt to perform modulo by zero"
+        raise RuntimeError, value: "attempt to perform modulo by zero"
       else
         rem(trunc(na), trunc(nb))
       end

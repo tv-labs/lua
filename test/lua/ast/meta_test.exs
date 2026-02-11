@@ -245,7 +245,7 @@ defmodule Lua.AST.MetaTest do
 
     test "is a proper struct" do
       meta = %Meta{}
-      assert meta.__struct__ == Lua.AST.Meta
+      assert meta.__struct__ == Meta
     end
   end
 end

@@ -174,8 +174,7 @@ defmodule Lua.Parser.Error do
         []
       end
 
-    (header ++ message_lines ++ context_lines ++ suggestion_lines ++ related_lines)
-    |> Enum.join("\n")
+    Enum.join(header ++ message_lines ++ context_lines ++ suggestion_lines ++ related_lines, "\n")
   end
 
   @doc """
@@ -202,8 +201,7 @@ defmodule Lua.Parser.Error do
         ]
       end)
 
-    (header ++ error_lines)
-    |> Enum.join("\n")
+    Enum.join(header ++ error_lines, "\n")
   end
 
   # Private helpers
@@ -217,7 +215,8 @@ defmodule Lua.Parser.Error do
     end_line = min(length(lines), line_num + 2)
 
     context_lines =
-      Enum.slice(lines, (start_line - 1)..(end_line - 1))
+      lines
+      |> Enum.slice((start_line - 1)..(end_line - 1))
       |> Enum.with_index(start_line)
       |> Enum.flat_map(fn {line, num} ->
         line_str = format_line_number(num) <> " │ " <> line
@@ -339,7 +338,6 @@ defmodule Lua.Parser.Error do
 
     text
     |> String.split("\n")
-    |> Enum.map(&(prefix <> &1))
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", &(prefix <> &1))
   end
 end

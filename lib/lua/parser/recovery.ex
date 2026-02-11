@@ -6,9 +6,9 @@ defmodule Lua.Parser.Recovery do
   collecting multiple errors in a single parse pass.
   """
 
-  alias Lua.Parser.Error
-  alias Lua.Lexer
   alias Lua.AST.Meta
+  alias Lua.Lexer
+  alias Lua.Parser.Error
 
   @type token :: Lexer.token()
   @type recovery_result :: {:recovered, [token()], [Error.t()]} | {:failed, [Error.t()]}
@@ -153,8 +153,7 @@ defmodule Lua.Parser.Recovery do
 
   defp find_statement_boundary([]), do: :not_found
 
-  defp find_closing_delimiter([{:delimiter, delim, _} | rest], target, depth)
-       when delim == target do
+  defp find_closing_delimiter([{:delimiter, delim, _} | rest], target, depth) when delim == target do
     if depth == 1 do
       {:ok, rest}
     else
@@ -175,8 +174,7 @@ defmodule Lua.Parser.Recovery do
     end
   end
 
-  defp find_closing_delimiter([{:keyword, kw, _} | rest], :end, depth)
-       when kw in [:if, :while, :for, :function, :do] do
+  defp find_closing_delimiter([{:keyword, kw, _} | rest], :end, depth) when kw in [:if, :while, :for, :function, :do] do
     find_closing_delimiter(rest, :end, depth + 1)
   end
 

@@ -5,14 +5,18 @@ defmodule Lua.Parser do
   Uses Pratt parsing for operator precedence in expressions.
   """
 
-  alias Lua.AST.{Meta, Expr, Statement, Block, Chunk}
-  alias Lua.Parser.{Pratt, Comments}
+  alias Lua.AST.Block
+  alias Lua.AST.Chunk
+  alias Lua.AST.Expr
+  alias Lua.AST.Meta
+  alias Lua.AST.Statement
   alias Lua.Lexer
+  alias Lua.Parser.Comments
+  alias Lua.Parser.Error
+  alias Lua.Parser.Pratt
 
   @type token :: Lexer.token()
   @type parse_result(t) :: {:ok, t, [token()]} | {:error, term()}
-
-  alias Lua.Parser.Error
 
   @doc """
   Parses Lua source code into an AST.
@@ -244,9 +248,7 @@ defmodule Lua.Parser do
                  {:ok, _, rest6} <- expect(rest5, :delimiter, :rparen),
                  {:ok, body, rest7} <- parse_block(rest6),
                  {:ok, _, rest8} <- expect(rest7, :keyword, :end) do
-              {:ok,
-               %Statement.LocalFunc{name: name, params: params, body: body, meta: Meta.new(pos)},
-               rest8}
+              {:ok, %Statement.LocalFunc{name: name, params: params, body: body, meta: Meta.new(pos)}, rest8}
             end
 
           {:error, reason} ->
@@ -263,8 +265,7 @@ defmodule Lua.Parser do
 
                 case parse_expr_list(rest3) do
                   {:ok, values, rest4} ->
-                    {:ok, %Statement.Local{names: names, values: values, meta: Meta.new(pos)},
-                     rest4}
+                    {:ok, %Statement.Local{names: names, values: values, meta: Meta.new(pos)}, rest4}
 
                   {:error, reason} ->
                     {:error, reason}
@@ -280,8 +281,7 @@ defmodule Lua.Parser do
         end
 
       _ ->
-        {:error,
-         {:unexpected_token, peek(rest), "Expected identifier or 'function' after 'local'"}}
+        {:error, {:unexpected_token, peek(rest), "Expected identifier or 'function' after 'local'"}}
     end
   end
 
@@ -774,34 +774,32 @@ defmodule Lua.Parser do
         end
 
       {:operator, op, pos} ->
-        cond do
-          Pratt.is_binary_op?(op) ->
-            case Pratt.binding_power(op) do
-              {left_bp, right_bp} when left_bp >= min_prec ->
-                {_, rest} = consume(tokens)
-                binop = Pratt.token_to_binop(op)
+        if Pratt.is_binary_op?(op) do
+          case Pratt.binding_power(op) do
+            {left_bp, right_bp} when left_bp >= min_prec ->
+              {_, rest} = consume(tokens)
+              binop = Pratt.token_to_binop(op)
 
-                case parse_expr(rest, right_bp) do
-                  {:ok, right, rest2} ->
-                    new_left = %Expr.BinOp{
-                      op: binop,
-                      left: left,
-                      right: right,
-                      meta: Meta.new(pos)
-                    }
+              case parse_expr(rest, right_bp) do
+                {:ok, right, rest2} ->
+                  new_left = %Expr.BinOp{
+                    op: binop,
+                    left: left,
+                    right: right,
+                    meta: Meta.new(pos)
+                  }
 
-                    parse_infix(new_left, rest2, min_prec)
+                  parse_infix(new_left, rest2, min_prec)
 
-                  {:error, reason} ->
-                    {:error, reason}
-                end
+                {:error, reason} ->
+                  {:error, reason}
+              end
 
-              _ ->
-                {:ok, left, tokens}
-            end
-
-          true ->
-            {:ok, left, tokens}
+            _ ->
+              {:ok, left, tokens}
+          end
+        else
+          {:ok, left, tokens}
         end
 
       # Postfix: function call
@@ -1107,15 +1105,11 @@ defmodule Lua.Parser do
         {:ok, token, rest}
 
       {type, _, pos} when type != nil ->
-        {:error,
-         {:unexpected_token, type, pos,
-          "Expected #{inspect(expected_type)}, got #{inspect(type)}"}}
+        {:error, {:unexpected_token, type, pos, "Expected #{inspect(expected_type)}, got #{inspect(type)}"}}
 
       {type, pos} when is_map(pos) ->
         # Token without value (like :eof)
-        {:error,
-         {:unexpected_token, type, pos,
-          "Expected #{inspect(expected_type)}, got #{inspect(type)}"}}
+        {:error, {:unexpected_token, type, pos, "Expected #{inspect(expected_type)}, got #{inspect(type)}"}}
 
       nil ->
         {:error, {:unexpected_end, "Expected #{inspect(expected_type)}"}}
@@ -1141,8 +1135,7 @@ defmodule Lua.Parser do
           "Expected #{inspect(expected_type)}:#{inspect(expected_value)}, got #{inspect(type)}"}}
 
       nil ->
-        {:error,
-         {:unexpected_end, "Expected #{inspect(expected_type)}:#{inspect(expected_value)}"}}
+        {:error, {:unexpected_end, "Expected #{inspect(expected_type)}:#{inspect(expected_value)}"}}
     end
   end
 
