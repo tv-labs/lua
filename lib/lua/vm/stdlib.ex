@@ -362,7 +362,6 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp format_parse_error(error) when is_binary(error), do: error
-  defp format_parse_error(error), do: inspect(error)
 
   # setmetatable(table, metatable) — sets the metatable for a table
   defp lua_setmetatable([{:tref, _} = tref, metatable], state) do
