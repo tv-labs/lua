@@ -224,6 +224,26 @@ defmodule Lua.Compiler.Scope do
     resolve_block(body, state)
   end
 
+  defp resolve_statement(%Statement.LocalFunc{name: name, params: params, body: body} = local_func, state) do
+    # First, allocate a register for the local function name
+    reg = state.next_register
+    state = %{state | locals: Map.put(state.locals, name, reg)}
+    state = %{state | next_register: reg + 1}
+
+    # Update max_register in current function scope
+    func_scope = state.functions[state.current_function]
+    func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
+    state = %{state | functions: Map.put(state.functions, state.current_function, func_scope)}
+
+    # Then resolve the function body scope (like FuncDecl)
+    resolve_function_scope(local_func, params, body, state)
+  end
+
+  defp resolve_statement(%Statement.Do{body: body}, state) do
+    # Do blocks just resolve their inner body
+    resolve_block(body, state)
+  end
+
   # For now, stub out other statement types - we'll implement them incrementally
   defp resolve_statement(_stmt, state), do: state
 
