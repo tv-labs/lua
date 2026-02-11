@@ -105,9 +105,14 @@ defmodule Lua.Parser do
       {:eof, _} ->
         {:ok, Block.new(Enum.reverse(stmts)), tokens}
 
+      # Skip empty statements (semicolons)
+      {:delimiter, :semicolon, _} ->
+        {_, rest} = consume(tokens)
+        parse_block_acc(rest, stmts)
+
       # Skip orphaned comments at end of block (before terminator)
       {:comment, _, _, _} ->
-        # Check if comments are orphaned (followed only by terminator/EOF)
+        # Check if comments are orphaned (followed only by terminator/EOF/semicolon)
         tokens_after_comments = skip_orphaned_comments(tokens)
 
         case peek(tokens_after_comments) do
@@ -116,6 +121,11 @@ defmodule Lua.Parser do
 
           {:eof, _} ->
             {:ok, Block.new(Enum.reverse(stmts)), tokens_after_comments}
+
+          # Comments followed by semicolons - skip both and continue
+          {:delimiter, :semicolon, _} ->
+            {_, rest} = consume(tokens_after_comments)
+            parse_block_acc(rest, stmts)
 
           _ ->
             # Not orphaned, parse as normal statement (comments will be collected)
@@ -198,11 +208,6 @@ defmodule Lua.Parser do
 
       {:delimiter, :double_colon, _} ->
         parse_label(tokens)
-
-      # Semicolon (statement separator, optional)
-      {:delimiter, :semicolon, _} ->
-        {_, rest} = consume(tokens)
-        parse_stmt(rest)
 
       _ ->
         # Try to parse as assignment or function call
@@ -657,6 +662,11 @@ defmodule Lua.Parser do
   # Parse prefix expressions (primary expressions and unary operators)
   defp parse_prefix(tokens) do
     case peek(tokens) do
+      # Skip comments in expressions
+      {:comment, _, _, _} ->
+        {_, rest} = consume(tokens)
+        parse_prefix(rest)
+
       # Literals
       {:keyword, nil, pos} ->
         {_, rest} = consume(tokens)
@@ -813,6 +823,24 @@ defmodule Lua.Parser do
             {:error, reason}
         end
 
+      # Postfix: function call with string literal (syntactic sugar)
+      {:string, value, pos} ->
+        string_arg = %Expr.String{value: value, meta: Meta.new(pos)}
+        {_, rest} = consume(tokens)
+        new_left = %Expr.Call{func: left, args: [string_arg], meta: nil}
+        parse_infix(new_left, rest, min_prec)
+
+      # Postfix: function call with table constructor (syntactic sugar)
+      {:delimiter, :lbrace, _} ->
+        case parse_table(tokens) do
+          {:ok, table, rest} ->
+            new_left = %Expr.Call{func: left, args: [table], meta: nil}
+            parse_infix(new_left, rest, min_prec)
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
       # Postfix: indexing
       {:delimiter, :lbracket, _} ->
         case parse_index(tokens) do
@@ -842,13 +870,38 @@ defmodule Lua.Parser do
 
         case expect(rest, :identifier) do
           {:ok, {_, method, _}, rest2} ->
-            case parse_call_args(rest2) do
-              {:ok, args, rest3} ->
-                new_left = %Expr.MethodCall{object: left, method: method, args: args, meta: nil}
+            # Method calls support syntactic sugar: obj:method"str" or obj:method{...}
+            case rest2 do
+              # Regular method call with parentheses
+              [{:delimiter, :lparen, _} | _] ->
+                case parse_call_args(rest2) do
+                  {:ok, args, rest3} ->
+                    new_left = %Expr.MethodCall{object: left, method: method, args: args, meta: nil}
+                    parse_infix(new_left, rest3, min_prec)
+
+                  {:error, reason} ->
+                    {:error, reason}
+                end
+
+              # Method call with string literal (syntactic sugar)
+              [{:string, value, pos} | rest3] ->
+                string_arg = %Expr.String{value: value, meta: Meta.new(pos)}
+                new_left = %Expr.MethodCall{object: left, method: method, args: [string_arg], meta: nil}
                 parse_infix(new_left, rest3, min_prec)
 
-              {:error, reason} ->
-                {:error, reason}
+              # Method call with table constructor (syntactic sugar)
+              [{:delimiter, :lbrace, _} | _] ->
+                case parse_table(rest2) do
+                  {:ok, table, rest3} ->
+                    new_left = %Expr.MethodCall{object: left, method: method, args: [table], meta: nil}
+                    parse_infix(new_left, rest3, min_prec)
+
+                  {:error, reason} ->
+                    {:error, reason}
+                end
+
+              _ ->
+                {:error, "Expected '(', string, or table after method name"}
             end
 
           {:error, reason} ->

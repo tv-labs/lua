@@ -590,4 +590,78 @@ defmodule Lua.Parser.StatementTest do
                """)
     end
   end
+
+  describe "empty statements (semicolons)" do
+    test "parses multiple semicolons at start of code" do
+      assert {:ok, chunk} = Parser.parse(~s(;;print "hi";;))
+      assert %{block: %{stmts: [%Statement.CallStmt{}]}} = chunk
+    end
+
+    test "parses semicolons in do-end blocks" do
+      assert {:ok, _chunk} = Parser.parse("do ;;; end")
+      assert {:ok, _chunk} = Parser.parse("do ; a = 3; assert(a == 3) end")
+    end
+
+    test "parses semicolons after comments" do
+      assert {:ok, chunk} = Parser.parse("-- comment\n\n;;print \"hi\"")
+      assert %{block: %{stmts: [%Statement.CallStmt{}]}} = chunk
+    end
+
+    test "parses semicolons between statements" do
+      assert {:ok, chunk} = Parser.parse("a = 1; b = 2; c = 3")
+
+      assert %{
+               block: %{
+                 stmts: [
+                   %Statement.Assign{},
+                   %Statement.Assign{},
+                   %Statement.Assign{}
+                 ]
+               }
+             } = chunk
+    end
+
+    test "parses multiple consecutive semicolons between statements" do
+      assert {:ok, chunk} = Parser.parse("a = 1;; b = 2;;; c = 3")
+
+      assert %{
+               block: %{
+                 stmts: [
+                   %Statement.Assign{},
+                   %Statement.Assign{},
+                   %Statement.Assign{}
+                 ]
+               }
+             } = chunk
+    end
+
+    test "parses semicolons at end of file" do
+      assert {:ok, chunk} = Parser.parse("print \"test\";;")
+      assert %{block: %{stmts: [%Statement.CallStmt{}]}} = chunk
+    end
+
+    test "parses only semicolons as empty program" do
+      assert {:ok, chunk} = Parser.parse(";;;")
+      assert %{block: %{stmts: []}} = chunk
+    end
+
+    test "parses semicolons with various statement types" do
+      code = """
+      ;local x = 1;
+      ;if x then; return x; end;
+      ;
+      """
+
+      assert {:ok, chunk} = Parser.parse(code)
+
+      assert %{
+               block: %{
+                 stmts: [
+                   %Statement.Local{},
+                   %Statement.If{}
+                 ]
+               }
+             } = chunk
+    end
+  end
 end
