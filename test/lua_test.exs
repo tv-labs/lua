@@ -1557,6 +1557,51 @@ defmodule LuaTest do
     end
   end
 
+  describe "load function" do
+    setup do
+      %{lua: Lua.new(sandboxed: [])}
+    end
+
+    test "load compiles and returns a function", %{lua: lua} do
+      code = """
+      f = load("return 1 + 2")
+      return f()
+      """
+
+      assert {[3], _} = Lua.eval!(lua, code)
+    end
+
+    test "load with syntax error returns nil", %{lua: lua} do
+      # Note: Multi-assignment and table constructors don't capture multiple return values yet
+      # So we just test that load returns nil on error
+      code = """
+      f = load("return 1 +")
+      return f == nil
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "loaded function can access upvalues", %{lua: lua} do
+      code = """
+      x = 10
+      f = load("return x + 5")
+      return f()
+      """
+
+      assert {[15], _} = Lua.eval!(lua, code)
+    end
+
+    test "load can compile complex code", %{lua: lua} do
+      code = """
+      f = load("function add(a, b) return a + b end; return add(3, 4)")
+      return f()
+      """
+
+      assert {[7], _} = Lua.eval!(lua, code)
+    end
+  end
+
   defp test_file(name) do
     Path.join(["test", "fixtures", name])
   end

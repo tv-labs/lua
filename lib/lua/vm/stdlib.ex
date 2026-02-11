@@ -38,6 +38,7 @@ defmodule Lua.VM.Stdlib do
     |> State.register_function("setmetatable", &lua_setmetatable/2)
     |> State.register_function("getmetatable", &lua_getmetatable/2)
     |> State.register_function("select", &lua_select/2)
+    |> State.register_function("load", &lua_load/2)
     |> State.register_function("require", &lua_require/2)
     |> install_package_table()
     |> Lua.VM.Stdlib.String.install()
@@ -331,6 +332,45 @@ defmodule Lua.VM.Stdlib do
   defp lua_select([], _state) do
     raise ArgumentError.value_expected("select", 1)
   end
+
+  # load(chunk, chunkname, mode, env) — loads a Lua chunk
+  # chunk can be a string
+  # Returns compiled function or (nil, error message)
+  defp lua_load([chunk | _rest], state) when is_binary(chunk) do
+    case Lua.Parser.parse(chunk) do
+      {:ok, ast} ->
+        case Lua.Compiler.compile(ast) do
+          {:ok, prototype} ->
+            # Create a closure from the compiled prototype
+            closure = {:lua_closure, prototype, %{}}
+            {[closure], state}
+
+          {:error, reason} ->
+            error_msg = format_compile_error(reason)
+            {[nil, error_msg], state}
+        end
+
+      {:error, reason} ->
+        error_msg = format_parse_error(reason)
+        {[nil, error_msg], state}
+    end
+  end
+
+  defp lua_load([non_string | _], state) when not is_binary(non_string) do
+    # For now, only support string chunks
+    # TODO: Support function chunks and reader functions
+    {[nil, "load only supports string chunks currently"], state}
+  end
+
+  defp lua_load([], _state) do
+    raise ArgumentError.value_expected("load", 1)
+  end
+
+  defp format_parse_error(error) when is_binary(error), do: error
+  defp format_parse_error(error), do: inspect(error)
+
+  defp format_compile_error(error) when is_binary(error), do: error
+  defp format_compile_error(error), do: inspect(error)
 
   # setmetatable(table, metatable) — sets the metatable for a table
   defp lua_setmetatable([{:tref, _} = tref, metatable], state) do
