@@ -23,6 +23,22 @@ defmodule LuaTest do
       assert {["nested"], _lua} =
                lua |> Lua.set!([:a, :b, :c], "nested") |> Lua.eval!("return a.b.c")
     end
+
+    test "table constructors with semicolons", %{lua: lua} do
+      # Can retrieve values from tables with explicit fields using semicolons
+      code = """
+      t = {1, 2; n=2}
+      return t[1], t[2], t.n
+      """
+      assert {[1, 2, 2], _lua} = Lua.eval!(lua, code)
+
+      # Mixed commas and semicolons
+      code = """
+      t = {1; 2, 3}
+      return t[1], t[2], t[3]
+      """
+      assert {[1, 2, 3], _lua} = Lua.eval!(lua, code)
+    end
   end
 
   describe "inspect" do
