@@ -46,7 +46,7 @@ defmodule Lua.Lexer do
   # Strip shebang (#!) if it's the first line
   defp strip_shebang(<<"#!", rest::binary>>) do
     # Skip until newline
-    case :binary.split(rest, ["\n", "\r\n", "\r"]) do
+    case String.split(rest, ~r/\r\n|\r|\n/, parts: 2) do
       [_shebang_line, remaining] -> remaining
       [_only_shebang] -> ""
     end
