@@ -111,7 +111,7 @@ defmodule Lua.Compiler.Codegen do
         {value_instructions, result_reg, ctx} = gen_expr(value, ctx)
         {value_instructions ++ [Instruction.return_instr(result_reg, 1)], ctx}
 
-      multiple when length(multiple) > 1 ->
+      [_, _ | _] = multiple ->
         # Check if last value is vararg - needs special handling
         {init_values, last_value} = Enum.split(multiple, -1)
         [last] = last_value
@@ -129,9 +129,11 @@ defmodule Lua.Compiler.Codegen do
                 {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
 
                 move =
-                  if value_reg == target_reg,
-                    do: [],
-                    else: [Instruction.move(target_reg, value_reg)]
+                  if value_reg == target_reg do
+                    []
+                  else
+                    [Instruction.move(target_reg, value_reg)]
+                  end
 
                 {instructions ++ value_instructions ++ move, ctx}
               end)
@@ -156,9 +158,11 @@ defmodule Lua.Compiler.Codegen do
                 {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
 
                 move =
-                  if value_reg == target_reg,
-                    do: [],
-                    else: [Instruction.move(target_reg, value_reg)]
+                  if value_reg == target_reg do
+                    []
+                  else
+                    [Instruction.move(target_reg, value_reg)]
+                  end
 
                 {instructions ++ value_instructions ++ move, ctx}
               end)
@@ -844,9 +848,11 @@ defmodule Lua.Compiler.Codegen do
                 {value_instructions, val_reg, ctx} = gen_expr(val_expr, ctx)
 
                 move =
-                  if val_reg == target_reg,
-                    do: [],
-                    else: [Instruction.move(target_reg, val_reg)]
+                  if val_reg == target_reg do
+                    []
+                  else
+                    [Instruction.move(target_reg, val_reg)]
+                  end
 
                 {instructions ++ value_instructions ++ move, ctx}
               end)
@@ -879,9 +885,11 @@ defmodule Lua.Compiler.Codegen do
                 {value_instructions, val_reg, ctx} = gen_expr(val_expr, ctx)
 
                 move =
-                  if val_reg == target_reg,
-                    do: [],
-                    else: [Instruction.move(target_reg, val_reg)]
+                  if val_reg == target_reg do
+                    []
+                  else
+                    [Instruction.move(target_reg, val_reg)]
+                  end
 
                 {instructions ++ value_instructions ++ move, ctx}
               end)
