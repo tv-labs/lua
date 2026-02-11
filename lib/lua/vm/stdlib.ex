@@ -339,16 +339,11 @@ defmodule Lua.VM.Stdlib do
   defp lua_load([chunk | _rest], state) when is_binary(chunk) do
     case Lua.Parser.parse(chunk) do
       {:ok, ast} ->
-        case Lua.Compiler.compile(ast) do
-          {:ok, prototype} ->
-            # Create a closure from the compiled prototype
-            closure = {:lua_closure, prototype, %{}}
-            {[closure], state}
-
-          {:error, reason} ->
-            error_msg = format_compile_error(reason)
-            {[nil, error_msg], state}
-        end
+        # Compiler currently never returns errors, always succeeds
+        {:ok, prototype} = Lua.Compiler.compile(ast)
+        # Create a closure from the compiled prototype
+        closure = {:lua_closure, prototype, %{}}
+        {[closure], state}
 
       {:error, reason} ->
         error_msg = format_parse_error(reason)
@@ -367,10 +362,6 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp format_parse_error(error) when is_binary(error), do: error
-  defp format_parse_error(error), do: inspect(error)
-
-  defp format_compile_error(error) when is_binary(error), do: error
-  defp format_compile_error(error), do: inspect(error)
 
   # setmetatable(table, metatable) — sets the metatable for a table
   defp lua_setmetatable([{:tref, _} = tref, metatable], state) do
