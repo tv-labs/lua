@@ -31,6 +31,7 @@ defmodule Lua.VM.Stdlib do
     |> State.register_function("ipairs", &lua_ipairs/2)
     |> State.register_function("setmetatable", &lua_setmetatable/2)
     |> State.register_function("getmetatable", &lua_getmetatable/2)
+    |> State.register_function("select", &lua_select/2)
     |> State.register_function("require", &lua_require/2)
     |> install_package_table()
     |> Lua.VM.Stdlib.String.install()
@@ -270,6 +271,42 @@ defmodule Lua.VM.Stdlib do
        end}
 
     {[iterator, tref, 0], state}
+  end
+
+  # select(index, ...) — returns arguments starting from index
+  # select('#', ...) — returns count of arguments
+  defp lua_select(["#" | args], state) do
+    {[length(args)], state}
+  end
+
+  defp lua_select([index | args], state) when is_integer(index) do
+    cond do
+      # Positive index: return from that position onward
+      index > 0 ->
+        selected = Enum.drop(args, index - 1)
+        {selected, state}
+
+      # Negative index: count from end (take last n elements)
+      index < 0 ->
+        selected = Enum.take(args, index)
+        {selected, state}
+
+      # Index 0 is invalid
+      true ->
+        raise Lua.VM.RuntimeError, value: "bad argument #1 to 'select' (index out of range)"
+    end
+  end
+
+  defp lua_select([non_valid | _], _state) do
+    raise Lua.VM.ArgumentError,
+      function_name: "select",
+      arg_num: 1,
+      expected: "number or '#'",
+      got: Value.type_name(non_valid)
+  end
+
+  defp lua_select([], _state) do
+    raise Lua.VM.ArgumentError.value_expected("select", 1)
   end
 
   # setmetatable(table, metatable) — sets the metatable for a table
