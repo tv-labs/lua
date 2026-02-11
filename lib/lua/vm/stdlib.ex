@@ -52,9 +52,10 @@ defmodule Lua.VM.Stdlib do
     state = State.set_global(state, "_G", g_ref)
 
     # Also add _G to itself so _G._G == _G
-    state = State.update_table(state, g_ref, fn table ->
-      %{table | data: Map.put(table.data, "_G", g_ref)}
-    end)
+    state =
+      State.update_table(state, g_ref, fn table ->
+        %{table | data: Map.put(table.data, "_G", g_ref)}
+      end)
 
     state
   end
