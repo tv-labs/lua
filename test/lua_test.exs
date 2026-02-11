@@ -1376,6 +1376,48 @@ defmodule LuaTest do
     end
   end
 
+  describe "select() function" do
+    setup do
+      %{lua: Lua.new(sandboxed: [])}
+    end
+
+    @tag :pending
+    test "select('#', ...) returns count of arguments", %{lua: lua} do
+      assert {[3], _} = Lua.eval!(lua, "return select('#', 1, 2, 3)")
+      assert {[0], _} = Lua.eval!(lua, "return select('#')")
+      assert {[5], _} = Lua.eval!(lua, "return select('#', nil, nil, 1, nil, 2)")
+    end
+
+    @tag :pending
+    test "select(n, ...) returns arguments starting from index n", %{lua: lua} do
+      code = """
+      local a, b, c = select(2, 10, 20, 30)
+      return a, b, c
+      """
+
+      assert {[20, 30, nil], _} = Lua.eval!(lua, code)
+    end
+
+    @tag :pending
+    test "select with negative index counts from end", %{lua: lua} do
+      assert {[30], _} = Lua.eval!(lua, "return select(-1, 10, 20, 30)")
+      assert {[20, 30], _} = Lua.eval!(lua, "local a, b = select(-2, 10, 20, 30); return a, b")
+    end
+
+    @tag :pending
+    test "select works with varargs in functions", %{lua: lua} do
+      code = """
+      function vararg(...)
+        return {n = select('#', ...), ...}
+      end
+      local t = vararg(1, 2, 3)
+      return t.n, t[1], t[2], t[3]
+      """
+
+      assert {[3, 1, 2, 3], _} = Lua.eval!(lua, code)
+    end
+  end
+
   defp test_file(name) do
     Path.join(["test", "fixtures", name])
   end
