@@ -334,6 +334,12 @@ defmodule Lua.Lexer do
     do_tokenize(rest, [token | acc], pos)
   end
 
+  # \z escape: skip all following whitespace
+  defp scan_string(<<?\\, ?z, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
+    {remaining, new_pos} = skip_whitespace_in_string(rest, advance_column(pos, 2))
+    scan_string(remaining, str_acc, acc, new_pos, start_pos, quote)
+  end
+
   defp scan_string(<<?\\, esc, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
     # Escape sequence
     case escape_char(esc) do
@@ -370,6 +376,34 @@ defmodule Lua.Lexer do
   defp escape_char(?"), do: {:ok, ?"}
   defp escape_char(?'), do: {:ok, ?'}
   defp escape_char(_), do: :error
+
+  # Helper for \z escape: skip all whitespace characters
+  defp skip_whitespace_in_string(<<?\s, rest::binary>>, pos) do
+    skip_whitespace_in_string(rest, advance_column(pos, 1))
+  end
+
+  defp skip_whitespace_in_string(<<?\t, rest::binary>>, pos) do
+    skip_whitespace_in_string(rest, advance_column(pos, 1))
+  end
+
+  defp skip_whitespace_in_string(<<?\n, rest::binary>>, pos) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
+    skip_whitespace_in_string(rest, new_pos)
+  end
+
+  defp skip_whitespace_in_string(<<?\r, ?\n, rest::binary>>, pos) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 2}
+    skip_whitespace_in_string(rest, new_pos)
+  end
+
+  defp skip_whitespace_in_string(<<?\r, rest::binary>>, pos) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
+    skip_whitespace_in_string(rest, new_pos)
+  end
+
+  defp skip_whitespace_in_string(rest, pos) do
+    {rest, pos}
+  end
 
   # Scan long bracket for level: [[ or [=[ or [==[ etc.
   defp scan_long_bracket(rest, equals) do

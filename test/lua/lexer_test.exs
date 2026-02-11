@@ -213,6 +213,21 @@ defmodule Lua.LexerTest do
       assert {:error, {:unclosed_long_string, _}} = Lexer.tokenize("[[hello")
       assert {:error, {:unclosed_long_string, _}} = Lexer.tokenize("[=[test")
     end
+
+    test "handles \\z escape sequence (skip whitespace)" do
+      # \z skips all following whitespace including newlines
+      assert {:ok, [{:string, "abcdef", _}, {:eof, _}]} = Lexer.tokenize("\"abc\\z  \n   def\"")
+
+      # Multiple spaces and tabs - \z skips them all
+      assert {:ok, [{:string, "helloworld", _}, {:eof, _}]} =
+               Lexer.tokenize("\"hello\\z \t  world\"")
+
+      # Multiple newlines
+      assert {:ok, [{:string, "abc", _}, {:eof, _}]} = Lexer.tokenize("\"abc\\z  \n\n\n\"")
+
+      # With CRLF
+      assert {:ok, [{:string, "test", _}, {:eof, _}]} = Lexer.tokenize("\"test\\z\r\n\"")
+    end
   end
 
   describe "operators" do
@@ -553,7 +568,6 @@ defmodule Lua.LexerTest do
     test "handles invalid escape sequences in strings" do
       # Invalid escape sequences should be included as-is
       assert {:ok, [{:string, "\\x", _}, {:eof, _}]} = Lexer.tokenize(~s("\\x"))
-      assert {:ok, [{:string, "\\z", _}, {:eof, _}]} = Lexer.tokenize(~s("\\z"))
       assert {:ok, [{:string, "\\1", _}, {:eof, _}]} = Lexer.tokenize(~s("\\1"))
     end
 
