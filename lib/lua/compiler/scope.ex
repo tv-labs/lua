@@ -5,7 +5,10 @@ defmodule Lua.Compiler.Scope do
   Assigns registers to local variables and identifies upvalues and globals.
   """
 
-  alias Lua.AST.{Chunk, Block, Statement, Expr}
+  alias Lua.AST.Block
+  alias Lua.AST.Chunk
+  alias Lua.AST.Expr
+  alias Lua.AST.Statement
 
   @type var_ref ::
           {:register, index :: non_neg_integer()}
@@ -125,12 +128,7 @@ defmodule Lua.Compiler.Scope do
   end
 
   defp resolve_statement(
-         %Statement.If{
-           condition: condition,
-           then_block: then_block,
-           elseifs: elseifs,
-           else_block: else_block
-         },
+         %Statement.If{condition: condition, then_block: then_block, elseifs: elseifs, else_block: else_block},
          state
        ) do
     # Resolve the main condition
@@ -169,13 +167,7 @@ defmodule Lua.Compiler.Scope do
   end
 
   defp resolve_statement(
-         %Statement.ForNum{
-           var: var,
-           start: start_expr,
-           limit: limit_expr,
-           step: step_expr,
-           body: body
-         },
+         %Statement.ForNum{var: var, start: start_expr, limit: limit_expr, step: step_expr, body: body},
          state
        ) do
     # Resolve start, limit, and step expressions with current scope
@@ -202,10 +194,7 @@ defmodule Lua.Compiler.Scope do
     state
   end
 
-  defp resolve_statement(
-         %Statement.FuncDecl{params: params, body: body, is_method: is_method} = decl,
-         state
-       ) do
+  defp resolve_statement(%Statement.FuncDecl{params: params, body: body, is_method: is_method} = decl, state) do
     all_params = if is_method, do: ["self" | params], else: params
     resolve_function_scope(decl, all_params, body, state)
   end
@@ -214,10 +203,7 @@ defmodule Lua.Compiler.Scope do
     resolve_expr(call, state)
   end
 
-  defp resolve_statement(
-         %Statement.ForIn{vars: vars, iterators: iterators, body: body},
-         state
-       ) do
+  defp resolve_statement(%Statement.ForIn{vars: vars, iterators: iterators, body: body}, state) do
     # Resolve iterator expressions with current scope
     state = Enum.reduce(iterators, state, &resolve_expr/2)
 
@@ -479,8 +465,7 @@ defmodule Lua.Compiler.Scope do
     newly_captured =
       func_scope_final.upvalue_descriptors
       |> Enum.filter(fn {type, _, _} -> type == :parent_local end)
-      |> Enum.map(fn {:parent_local, _reg, name} -> name end)
-      |> MapSet.new()
+      |> MapSet.new(fn {:parent_local, _reg, name} -> name end)
 
     # Restore previous scope, merging newly captured locals
     %{

@@ -1,7 +1,8 @@
 defmodule Lua.Compiler.SourceLineTest do
   use ExUnit.Case, async: true
 
-  alias Lua.{Parser, Compiler}
+  alias Lua.Compiler
+  alias Lua.Parser
 
   describe "source line tracking" do
     test "emits source_line instructions before statements" do
@@ -16,8 +17,7 @@ defmodule Lua.Compiler.SourceLineTest do
 
       # Check that source_line instructions are present
       source_line_instructions =
-        proto.instructions
-        |> Enum.filter(fn
+        Enum.filter(proto.instructions, fn
           {:source_line, _, _} -> true
           _ -> false
         end)

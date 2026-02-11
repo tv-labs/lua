@@ -1,8 +1,11 @@
 defmodule Lua.VM.Stdlib.TableTest do
   use ExUnit.Case, async: true
 
-  alias Lua.{Compiler, Parser, VM}
+  alias Lua.Compiler
+  alias Lua.Parser
+  alias Lua.VM
   alias Lua.VM.State
+  alias Lua.VM.Stdlib
 
   describe "table library" do
     test "table.insert appends to end" do
@@ -14,7 +17,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [1, 2, 3, 4], _state} = VM.execute(proto, state)
     end
@@ -28,7 +31,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [1, 2, 3, 4], _state} = VM.execute(proto, state)
     end
@@ -43,7 +46,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [1, 2, 3, nil], _state} = VM.execute(proto, state)
     end
@@ -57,7 +60,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [1, 3, 4, nil], _state} = VM.execute(proto, state)
     end
@@ -70,7 +73,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, ["1, 2, 3, 4"], _state} = VM.execute(proto, state)
     end
@@ -83,7 +86,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, ["2-3-4"], _state} = VM.execute(proto, state)
     end
@@ -96,7 +99,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [1, 2, 3, 3], _state} = VM.execute(proto, state)
     end
@@ -109,7 +112,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [10, 20, 30, 40], _state} = VM.execute(proto, state)
     end
@@ -122,7 +125,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [20, 30, 40], _state} = VM.execute(proto, state)
     end
@@ -136,7 +139,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [1, 1, 2, 3], _state} = VM.execute(proto, state)
     end
@@ -151,7 +154,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [2, 3, 4], _state} = VM.execute(proto, state)
     end
@@ -165,7 +168,7 @@ defmodule Lua.VM.Stdlib.TableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [1, 2, 1, 2, 3], _state} = VM.execute(proto, state)
     end

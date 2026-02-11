@@ -3,8 +3,13 @@ defmodule Lua.Compiler.Codegen do
   Code generation - transforms AST into instructions.
   """
 
-  alias Lua.AST.{Chunk, Block, Statement, Expr}
-  alias Lua.Compiler.{Prototype, Instruction, Scope}
+  alias Lua.AST.Block
+  alias Lua.AST.Chunk
+  alias Lua.AST.Expr
+  alias Lua.AST.Statement
+  alias Lua.Compiler.Instruction
+  alias Lua.Compiler.Prototype
+  alias Lua.Compiler.Scope
 
   @doc """
   Generates instructions from a scope-resolved AST.
@@ -57,8 +62,7 @@ defmodule Lua.Compiler.Codegen do
 
   defp compute_line_range(%Block{stmts: stmts}) do
     lines =
-      stmts
-      |> Enum.flat_map(fn
+      Enum.flat_map(stmts, fn
         %{meta: %{start: %{line: start_line}, stop: %{line: stop_line}}} ->
           [start_line, stop_line]
 
@@ -143,8 +147,7 @@ defmodule Lua.Compiler.Codegen do
             vararg_instruction = Instruction.vararg(vararg_base, 0)
 
             # Return with -1 to indicate variable number of results
-            {init_instructions ++ [vararg_instruction, Instruction.return_instr(base_reg, -1)],
-             ctx}
+            {init_instructions ++ [vararg_instruction, Instruction.return_instr(base_reg, -1)], ctx}
 
           _ ->
             # Normal multi-value return
@@ -226,12 +229,7 @@ defmodule Lua.Compiler.Codegen do
   end
 
   defp gen_statement(
-         %Statement.If{
-           condition: condition,
-           then_block: then_block,
-           elseifs: elseifs,
-           else_block: else_block
-         },
+         %Statement.If{condition: condition, then_block: then_block, elseifs: elseifs, else_block: else_block},
          ctx
        ) do
     # Generate code for the condition
@@ -276,16 +274,7 @@ defmodule Lua.Compiler.Codegen do
     {[loop_instruction], ctx}
   end
 
-  defp gen_statement(
-         %Statement.ForNum{
-           var: var,
-           start: start_expr,
-           limit: limit_expr,
-           step: step_expr,
-           body: body
-         },
-         ctx
-       ) do
+  defp gen_statement(%Statement.ForNum{var: var, start: start_expr, limit: limit_expr, step: step_expr, body: body}, ctx) do
     # Get the loop variable's register from scope
     loop_var_reg = ctx.scope.locals[var]
 
@@ -331,10 +320,7 @@ defmodule Lua.Compiler.Codegen do
        [loop_instruction], ctx}
   end
 
-  defp gen_statement(
-         %Statement.ForIn{vars: vars, iterators: iterators, body: body},
-         ctx
-       ) do
+  defp gen_statement(%Statement.ForIn{vars: vars, iterators: iterators, body: body}, ctx) do
     # Look up loop variable registers from scope
     var_regs = Enum.map(vars, fn name -> ctx.scope.locals[name] end)
 
@@ -442,10 +428,7 @@ defmodule Lua.Compiler.Codegen do
         {get_instructions, table_reg, ctx} = gen_expr(%Expr.Var{name: first}, ctx)
 
         {final_instructions, final_table_reg, ctx} =
-          Enum.reduce(Enum.slice(rest, 0..-2//1), {get_instructions, table_reg, ctx}, fn field,
-                                                                                         {instrs,
-                                                                                          reg,
-                                                                                          ctx} ->
+          Enum.reduce(Enum.slice(rest, 0..-2//1), {get_instructions, table_reg, ctx}, fn field, {instrs, reg, ctx} ->
             field_reg = ctx.next_reg
             ctx = %{ctx | next_reg: field_reg + 1}
             {instrs ++ [Instruction.get_field(field_reg, reg, field)], field_reg, ctx}
@@ -453,8 +436,7 @@ defmodule Lua.Compiler.Codegen do
 
         last_field = List.last(rest)
 
-        {final_instructions ++ [Instruction.set_field(final_table_reg, last_field, closure_reg)],
-         ctx}
+        {final_instructions ++ [Instruction.set_field(final_table_reg, last_field, closure_reg)], ctx}
     end
   end
 
@@ -906,8 +888,7 @@ defmodule Lua.Compiler.Codegen do
 
         case key_expr do
           %Expr.String{value: name} ->
-            {instructions ++ value_instructions ++ [Instruction.set_field(dest, name, val_reg)],
-             ctx}
+            {instructions ++ value_instructions ++ [Instruction.set_field(dest, name, val_reg)], ctx}
 
           _ ->
             {key_instructions, key_reg, ctx} = gen_expr(key_expr, ctx)
@@ -935,8 +916,7 @@ defmodule Lua.Compiler.Codegen do
     dest = ctx.next_reg
     ctx = %{ctx | next_reg: dest + 1}
 
-    {table_instructions ++ key_instructions ++ [Instruction.get_table(dest, table_reg, key_reg)],
-     dest, ctx}
+    {table_instructions ++ key_instructions ++ [Instruction.get_table(dest, table_reg, key_reg)], dest, ctx}
   end
 
   defp gen_expr(%Expr.MethodCall{object: obj_expr, method: method, args: args}, ctx) do

@@ -1,5 +1,6 @@
 defmodule Lua.Parser.PrattTest do
   use ExUnit.Case, async: true
+
   alias Lua.Parser.Pratt
 
   describe "binding_power/1" do

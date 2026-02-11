@@ -21,8 +21,7 @@ defmodule Lua.Compiler.Instruction do
   def set_global(name, source), do: {:set_global, name, source}
 
   # Table operations
-  def new_table(dest, array_hint \\ 0, hash_hint \\ 0),
-    do: {:new_table, dest, array_hint, hash_hint}
+  def new_table(dest, array_hint \\ 0, hash_hint \\ 0), do: {:new_table, dest, array_hint, hash_hint}
 
   def get_table(dest, table, key), do: {:get_table, dest, table, key}
   def set_table(table, key, value), do: {:set_table, table, key, value}
@@ -64,11 +63,9 @@ defmodule Lua.Compiler.Instruction do
   def test_and(dest, source, rest_body), do: {:test_and, dest, source, rest_body}
   def test_or(dest, source, rest_body), do: {:test_or, dest, source, rest_body}
 
-  def while_loop(condition_body, test_reg, loop_body),
-    do: {:while_loop, condition_body, test_reg, loop_body}
+  def while_loop(condition_body, test_reg, loop_body), do: {:while_loop, condition_body, test_reg, loop_body}
 
-  def repeat_loop(loop_body, condition_body, test_reg),
-    do: {:repeat_loop, loop_body, condition_body, test_reg}
+  def repeat_loop(loop_body, condition_body, test_reg), do: {:repeat_loop, loop_body, condition_body, test_reg}
 
   def numeric_for(base, loop_var, body), do: {:numeric_for, base, loop_var, body}
   def generic_for(base, var_count, body), do: {:generic_for, base, var_count, body}

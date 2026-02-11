@@ -5,6 +5,7 @@ defmodule Lua.AST.Expr do
   All expression nodes include a `meta` field for position tracking.
   """
 
+  alias Lua.AST.Expr
   alias Lua.AST.Meta
 
   defmodule Nil do
@@ -74,8 +75,8 @@ defmodule Lua.AST.Expr do
 
     @type t :: %__MODULE__{
             op: op(),
-            left: Lua.AST.Expr.t(),
-            right: Lua.AST.Expr.t(),
+            left: Expr.t(),
+            right: Expr.t(),
             meta: Meta.t() | nil
           }
   end
@@ -95,7 +96,7 @@ defmodule Lua.AST.Expr do
 
     @type t :: %__MODULE__{
             op: op(),
-            operand: Lua.AST.Expr.t(),
+            operand: Expr.t(),
             meta: Meta.t() | nil
           }
   end
@@ -112,8 +113,8 @@ defmodule Lua.AST.Expr do
     defstruct [:fields, :meta]
 
     @type field ::
-            {:list, Lua.AST.Expr.t()}
-            | {:record, Lua.AST.Expr.t(), Lua.AST.Expr.t()}
+            {:list, Expr.t()}
+            | {:record, Expr.t(), Expr.t()}
 
     @type t :: %__MODULE__{
             fields: [field()],
@@ -128,8 +129,8 @@ defmodule Lua.AST.Expr do
     defstruct [:func, :args, :meta]
 
     @type t :: %__MODULE__{
-            func: Lua.AST.Expr.t(),
-            args: [Lua.AST.Expr.t()],
+            func: Expr.t(),
+            args: [Expr.t()],
             meta: Meta.t() | nil
           }
   end
@@ -143,9 +144,9 @@ defmodule Lua.AST.Expr do
     defstruct [:object, :method, :args, :meta]
 
     @type t :: %__MODULE__{
-            object: Lua.AST.Expr.t(),
+            object: Expr.t(),
             method: String.t(),
-            args: [Lua.AST.Expr.t()],
+            args: [Expr.t()],
             meta: Meta.t() | nil
           }
   end
@@ -157,8 +158,8 @@ defmodule Lua.AST.Expr do
     defstruct [:table, :key, :meta]
 
     @type t :: %__MODULE__{
-            table: Lua.AST.Expr.t(),
-            key: Lua.AST.Expr.t(),
+            table: Expr.t(),
+            key: Expr.t(),
             meta: Meta.t() | nil
           }
   end
@@ -172,7 +173,7 @@ defmodule Lua.AST.Expr do
     defstruct [:table, :field, :meta]
 
     @type t :: %__MODULE__{
-            table: Lua.AST.Expr.t(),
+            table: Expr.t(),
             field: String.t(),
             meta: Meta.t() | nil
           }

@@ -1,10 +1,19 @@
+external_resource = "README.md"
+
 defmodule Lua do
-  @external_resource "README.md"
-  @moduledoc @external_resource
+  @moduledoc external_resource
              |> File.read!()
              |> String.split("<!-- MDOC !-->")
              |> Enum.fetch!(1)
 
+  alias Lua.Util
+  alias Lua.VM.AssertionError
+  alias Lua.VM.RuntimeError
+  alias Lua.VM.State
+  alias Lua.VM.TypeError
+  alias Lua.VM.Value
+
+  @external_resource external_resource
   @type t :: %__MODULE__{}
 
   # Compiler.compile/1 currently always succeeds but the spec allows {:error, _}
@@ -12,9 +21,6 @@ defmodule Lua do
   @dialyzer {:no_match, eval!: 2, eval!: 3, parse_chunk: 1}
 
   defstruct [:state]
-
-  alias Lua.Util
-  alias Lua.VM.{State, Value}
 
   @default_sandbox [
     [:io],
@@ -66,7 +72,7 @@ defmodule Lua do
     opts = Keyword.validate!(opts, sandboxed: @default_sandbox, exclude: [])
     exclude = Keyword.fetch!(opts, :exclude)
 
-    state = State.new() |> Lua.VM.Stdlib.install()
+    state = Lua.VM.Stdlib.install(State.new())
 
     opts
     |> Keyword.fetch!(:sandboxed)
@@ -123,7 +129,7 @@ defmodule Lua do
   def sandbox(lua, path) do
     set!(lua, path, fn args ->
       raise Lua.RuntimeException,
-            "#{Lua.Util.format_function(path, Enum.count(args))} is sandboxed"
+            "#{Util.format_function(path, Enum.count(args))} is sandboxed"
     end)
   end
 
@@ -222,7 +228,7 @@ defmodule Lua do
 
          case func.(args, wrap(state)) do
            {:error, reason, %__MODULE__{}} ->
-             raise Lua.VM.RuntimeError, value: reason
+             raise RuntimeError, value: reason
 
            {value, %__MODULE__{} = lua} ->
              value = List.wrap(value)
@@ -457,13 +463,13 @@ defmodule Lua do
     e in [Lua.RuntimeException, Lua.CompilerException] ->
       reraise e, __STACKTRACE__
 
-    e in [Lua.VM.RuntimeError] ->
+    e in [RuntimeError] ->
       reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
 
-    e in [Lua.VM.TypeError] ->
+    e in [TypeError] ->
       reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
 
-    e in [Lua.VM.AssertionError] ->
+    e in [AssertionError] ->
       reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
 
     e ->
@@ -487,13 +493,13 @@ defmodule Lua do
     e in [Lua.RuntimeException, Lua.CompilerException] ->
       reraise e, __STACKTRACE__
 
-    e in [Lua.VM.RuntimeError] ->
+    e in [RuntimeError] ->
       reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
 
-    e in [Lua.VM.TypeError] ->
+    e in [TypeError] ->
       reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
 
-    e in [Lua.VM.AssertionError] ->
+    e in [AssertionError] ->
       reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
 
     e ->
@@ -586,8 +592,7 @@ defmodule Lua do
       42
 
   """
-  def call_function(%__MODULE__{state: state} = lua, func, args)
-      when is_tuple(func) do
+  def call_function(%__MODULE__{state: state} = lua, func, args) when is_tuple(func) do
     case do_call_function(func, args, state) do
       {:ok, results, new_state} -> {:ok, results, %{lua | state: new_state}}
       {:error, reason, new_state} -> {:error, reason, %{lua | state: new_state}}
@@ -785,8 +790,7 @@ defmodule Lua do
     lua = ensure_scope!(lua, scope)
 
     lua =
-      module.__lua_functions__()
-      |> Enum.reduce(lua, fn {name, with_state?, variadic?}, lua ->
+      Enum.reduce(module.__lua_functions__(), lua, fn {name, with_state?, variadic?}, lua ->
         arities = Map.get(funcs, name)
 
         func =
@@ -911,10 +915,10 @@ defmodule Lua do
           message: "maps must be explicitly encoded to tables using Lua.encode!/2"
 
       {:error, reason} ->
-        raise Lua.VM.RuntimeError, value: reason
+        raise RuntimeError, value: reason
 
       {:error, reason, %Lua{}} ->
-        raise Lua.VM.RuntimeError, value: reason
+        raise RuntimeError, value: reason
 
       {data, %Lua{} = returned_lua} ->
         data = List.wrap(data)
@@ -942,8 +946,7 @@ defmodule Lua do
     end
   catch
     thrown_value ->
-      {:error,
-       "Value thrown during function '#{function_name}' execution: #{inspect(thrown_value)}"}
+      {:error, "Value thrown during function '#{function_name}' execution: #{inspect(thrown_value)}"}
   end
 
   defp ensure_scope!(lua, []) do

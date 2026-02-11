@@ -1,8 +1,12 @@
 defmodule Lua.VM.MetatableTest do
   use ExUnit.Case, async: true
 
-  alias Lua.{Compiler, Parser, VM}
+  alias Lua.Compiler
+  alias Lua.Parser
+  alias Lua.VM
+  alias Lua.VM.ArgumentError
   alias Lua.VM.State
+  alias Lua.VM.Stdlib
 
   describe "metatable basics" do
     test "setmetatable and getmetatable" do
@@ -16,7 +20,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [20], _state} = VM.execute(proto, state)
     end
@@ -29,7 +33,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [nil], _state} = VM.execute(proto, state)
     end
@@ -44,7 +48,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [10, 20, 30], _state} = VM.execute(proto, state)
     end
@@ -59,7 +63,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       # t.y should be 15 (from t), not 20 (from __index)
       assert {:ok, [10, 15, 30], _state} = VM.execute(proto, state)
@@ -75,7 +79,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [10], _state} = VM.execute(proto, state)
     end
@@ -91,7 +95,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       # After setting metatable to nil, t.y should be nil
       assert {:ok, [10, nil], _state} = VM.execute(proto, state)
@@ -104,9 +108,9 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
-      assert_raise Lua.VM.ArgumentError, fn ->
+      assert_raise ArgumentError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -119,9 +123,9 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
-      assert_raise Lua.VM.ArgumentError, fn ->
+      assert_raise ArgumentError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -133,9 +137,9 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
-      assert_raise Lua.VM.ArgumentError, fn ->
+      assert_raise ArgumentError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -153,7 +157,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       # t.y and t.z should go to storage, not t
       assert {:ok, [10, nil, 20, 30], _state} = VM.execute(proto, state)
@@ -172,7 +176,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       # t.y already exists, so it gets updated in t (not storage)
       # t.z doesn't exist, so it goes to storage
@@ -198,7 +202,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [30], _state} = VM.execute(proto, state)
     end
@@ -219,7 +223,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [20], _state} = VM.execute(proto, state)
     end
@@ -240,7 +244,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [30], _state} = VM.execute(proto, state)
     end
@@ -260,7 +264,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [-42], _state} = VM.execute(proto, state)
     end
@@ -285,7 +289,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [true, false], _state} = VM.execute(proto, state)
     end
@@ -311,7 +315,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       # Different metamethods, so falls back to reference equality (false)
       assert {:ok, [false], _state} = VM.execute(proto, state)
@@ -333,7 +337,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [true, false], _state} = VM.execute(proto, state)
     end
@@ -356,7 +360,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [true, true, false], _state} = VM.execute(proto, state)
     end
@@ -380,7 +384,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, ["Hello World"], _state} = VM.execute(proto, state)
     end
@@ -399,7 +403,7 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
       assert {:ok, [42], _state} = VM.execute(proto, state)
     end
@@ -409,9 +413,9 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
-      assert_raise Lua.VM.ArgumentError, fn ->
+      assert_raise ArgumentError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -421,9 +425,9 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
-      assert_raise Lua.VM.ArgumentError, fn ->
+      assert_raise ArgumentError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -433,9 +437,9 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = State.new() |> Lua.VM.Stdlib.install()
+      state = Stdlib.install(State.new())
 
-      assert_raise Lua.VM.ArgumentError, fn ->
+      assert_raise ArgumentError, fn ->
         VM.execute(proto, state)
       end
     end

@@ -1,7 +1,9 @@
 defmodule Lua.Parser.CommentTest do
   use ExUnit.Case, async: true
+
+  alias Lua.AST.Meta
+  alias Lua.AST.Statement
   alias Lua.Parser
-  alias Lua.AST.{Meta, Statement}
 
   describe "single-line comments as leading comments" do
     test "attaches comment before local statement" do
@@ -82,7 +84,7 @@ defmodule Lua.Parser.CommentTest do
 
       assert %Statement.Local{meta: meta} = stmt
       comment = Meta.get_trailing_comment(meta)
-      assert comment != nil
+      assert comment
       assert comment.text == " The answer"
       assert comment.type == :single
     end
@@ -159,7 +161,7 @@ defmodule Lua.Parser.CommentTest do
       assert hd(leading).text == " Leading comment"
 
       trailing = Meta.get_trailing_comment(stmt.meta)
-      assert trailing != nil
+      assert trailing
       assert trailing.text == " Trailing comment"
     end
   end

@@ -1,8 +1,11 @@
 defmodule Lua.ErrorMessagesTest do
   use ExUnit.Case, async: true
 
-  alias Lua.{Parser, Compiler, VM}
+  alias Lua.Compiler
+  alias Lua.Parser
+  alias Lua.VM
   alias Lua.VM.State
+  alias Lua.VM.TypeError
 
   describe "beautiful error messages" do
     test "calling nil value shows helpful error" do
@@ -16,7 +19,7 @@ defmodule Lua.ErrorMessagesTest do
 
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, fn ->
+      assert_raise TypeError, fn ->
         VM.execute(proto, state)
       end
     end
@@ -33,7 +36,7 @@ defmodule Lua.ErrorMessagesTest do
       state = State.new()
 
       error =
-        assert_raise Lua.VM.TypeError, fn ->
+        assert_raise TypeError, fn ->
           VM.execute(proto, state)
         end
 
@@ -52,7 +55,7 @@ defmodule Lua.ErrorMessagesTest do
       state = State.new()
 
       error =
-        assert_raise Lua.VM.TypeError, fn ->
+        assert_raise TypeError, fn ->
           VM.execute(proto, state)
         end
 
@@ -79,7 +82,7 @@ defmodule Lua.ErrorMessagesTest do
       state = State.new()
 
       error =
-        assert_raise Lua.VM.TypeError, fn ->
+        assert_raise TypeError, fn ->
           VM.execute(proto, state)
         end
 
@@ -99,7 +102,7 @@ defmodule Lua.ErrorMessagesTest do
 
       state = State.new()
 
-      assert_raise Lua.VM.TypeError, ~r/concatenate/, fn ->
+      assert_raise TypeError, ~r/concatenate/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -120,7 +123,7 @@ defmodule Lua.ErrorMessagesTest do
       state = State.new()
 
       error =
-        assert_raise Lua.VM.TypeError, fn ->
+        assert_raise TypeError, fn ->
           VM.execute(proto, state)
         end
 
@@ -146,12 +149,12 @@ defmodule Lua.ErrorMessagesTest do
       state = State.new()
 
       error =
-        assert_raise Lua.VM.TypeError, fn ->
+        assert_raise TypeError, fn ->
           VM.execute(proto, state)
         end
 
       # Should have line information
-      assert error.line != nil
+      assert error.line
       assert error.line > 0
     end
 
@@ -179,7 +182,7 @@ defmodule Lua.ErrorMessagesTest do
       state = State.new()
 
       error =
-        assert_raise Lua.VM.TypeError, fn ->
+        assert_raise TypeError, fn ->
           VM.execute(proto, state)
         end
 

@@ -6,7 +6,13 @@ defmodule Lua.VM.Stdlib do
   scope when the standard library is installed.
   """
 
-  alias Lua.VM.{AssertionError, State, Value}
+  alias Lua.VM.ArgumentError
+  alias Lua.VM.AssertionError
+  alias Lua.VM.Executor
+  alias Lua.VM.RuntimeError
+  alias Lua.VM.State
+  alias Lua.VM.TypeError
+  alias Lua.VM.Value
 
   @doc """
   Installs the standard library into the given VM state.
@@ -104,11 +110,11 @@ defmodule Lua.VM.Stdlib do
 
   # error(message) — raises a Lua runtime error
   defp lua_error([message | _], _state) do
-    raise Lua.VM.RuntimeError, value: message
+    raise RuntimeError, value: message
   end
 
   defp lua_error([], _state) do
-    raise Lua.VM.RuntimeError, value: nil
+    raise RuntimeError, value: nil
   end
 
   # assert(v [, message]) — raises if v is falsy
@@ -133,18 +139,16 @@ defmodule Lua.VM.Stdlib do
   # pcall(f [, arg1, ...]) — calls function in protected mode
   # Returns true, result(s) on success or false, error_message on error
   defp lua_pcall([func | args], state) do
-    try do
-      {results, state} = Lua.VM.Executor.call_function(func, args, state)
-      {[true | results], state}
-    rescue
-      e in [Lua.VM.RuntimeError, AssertionError, Lua.VM.TypeError] ->
-        error_msg = extract_error_message(e)
-        {[false, error_msg], state}
+    {results, state} = Executor.call_function(func, args, state)
+    {[true | results], state}
+  rescue
+    e in [RuntimeError, AssertionError, TypeError] ->
+      error_msg = extract_error_message(e)
+      {[false, error_msg], state}
 
-      e ->
-        # Catch any other error
-        {[false, Exception.message(e)], state}
-    end
+    e ->
+      # Catch any other error
+      {[false, Exception.message(e)], state}
   end
 
   defp lua_pcall([], state), do: {[false, "bad argument #1 to 'pcall' (value expected)"], state}
@@ -152,35 +156,33 @@ defmodule Lua.VM.Stdlib do
   # xpcall(f, msgh [, arg1, ...]) — calls function with message handler
   # Returns true, result(s) on success or false, handler_result on error
   defp lua_xpcall([func, handler | args], state) do
-    try do
-      {results, state} = Lua.VM.Executor.call_function(func, args, state)
-      {[true | results], state}
-    rescue
-      e in [Lua.VM.RuntimeError, AssertionError, Lua.VM.TypeError] ->
-        error_msg = extract_error_message(e)
+    {results, state} = Executor.call_function(func, args, state)
+    {[true | results], state}
+  rescue
+    e in [RuntimeError, AssertionError, TypeError] ->
+      error_msg = extract_error_message(e)
 
-        # Call the error handler
-        try do
-          {handler_results, state} = Lua.VM.Executor.call_function(handler, [error_msg], state)
-          {[false | handler_results], state}
-        rescue
-          _ ->
-            # If handler fails, return original error
-            {[false, error_msg], state}
-        end
+      # Call the error handler
+      try do
+        {handler_results, state} = Executor.call_function(handler, [error_msg], state)
+        {[false | handler_results], state}
+      rescue
+        _ ->
+          # If handler fails, return original error
+          {[false, error_msg], state}
+      end
 
-      e ->
-        # Catch any other error
-        error_msg = Exception.message(e)
+    e ->
+      # Catch any other error
+      error_msg = Exception.message(e)
 
-        try do
-          {handler_results, state} = Lua.VM.Executor.call_function(handler, [error_msg], state)
-          {[false | handler_results], state}
-        rescue
-          _ ->
-            {[false, error_msg], state}
-        end
-    end
+      try do
+        {handler_results, state} = Executor.call_function(handler, [error_msg], state)
+        {[false | handler_results], state}
+      rescue
+        _ ->
+          {[false, error_msg], state}
+      end
   end
 
   defp lua_xpcall(_, state), do: {[false, "bad argument to 'xpcall'"], state}
@@ -314,12 +316,12 @@ defmodule Lua.VM.Stdlib do
 
       # Index 0 is invalid
       true ->
-        raise Lua.VM.RuntimeError, value: "bad argument #1 to 'select' (index out of range)"
+        raise RuntimeError, value: "bad argument #1 to 'select' (index out of range)"
     end
   end
 
   defp lua_select([non_valid | _], _state) do
-    raise Lua.VM.ArgumentError,
+    raise ArgumentError,
       function_name: "select",
       arg_num: 1,
       expected: "number or '#'",
@@ -327,7 +329,7 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp lua_select([], _state) do
-    raise Lua.VM.ArgumentError.value_expected("select", 1)
+    raise ArgumentError.value_expected("select", 1)
   end
 
   # setmetatable(table, metatable) — sets the metatable for a table
@@ -343,7 +345,7 @@ defmodule Lua.VM.Stdlib do
         {[tref], state}
 
       _ ->
-        raise Lua.VM.ArgumentError,
+        raise ArgumentError,
           function_name: "setmetatable",
           arg_num: 2,
           expected: "nil or table"
@@ -351,7 +353,7 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp lua_setmetatable([non_table | _], _state) do
-    raise Lua.VM.ArgumentError,
+    raise ArgumentError,
       function_name: "setmetatable",
       arg_num: 1,
       expected: "table",
@@ -359,7 +361,7 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp lua_setmetatable([], _state) do
-    raise Lua.VM.ArgumentError.value_expected("setmetatable", 1)
+    raise ArgumentError.value_expected("setmetatable", 1)
   end
 
   # getmetatable(object) — returns the metatable of an object
@@ -421,7 +423,7 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp lua_require([non_string | _], _state) do
-    raise Lua.VM.ArgumentError,
+    raise ArgumentError,
       function_name: "require",
       arg_num: 1,
       expected: "string",
@@ -429,7 +431,7 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp lua_require([], _state) do
-    raise Lua.VM.ArgumentError.value_expected("require", 1)
+    raise ArgumentError.value_expected("require", 1)
   end
 
   # Load a module by searching the path
@@ -441,7 +443,7 @@ defmodule Lua.VM.Stdlib do
         parse_and_execute_module(modname, file_path, content, state)
 
       {:error, :not_found} ->
-        raise Lua.VM.RuntimeError,
+        raise RuntimeError,
           value: "module '#{modname}' not found:\n\tno file '#{search_path}'"
     end
   end
@@ -463,7 +465,7 @@ defmodule Lua.VM.Stdlib do
       {[result], state}
     else
       {:error, msg} ->
-        raise Lua.VM.RuntimeError,
+        raise RuntimeError,
           value: "error loading module '#{modname}' from file '#{file_path}':\n#{msg}"
     end
   end
@@ -480,7 +482,7 @@ defmodule Lua.VM.Stdlib do
   # Get the package.loaded table reference
   defp get_package_loaded_ref(state) do
     with {:tref, pkg_id} <- Map.fetch!(state.globals, "package"),
-         package <- Map.fetch!(state.tables, pkg_id),
+         package = Map.fetch!(state.tables, pkg_id),
          {:tref, _loaded_id} = loaded_ref <- Map.fetch!(package.data, "loaded") do
       loaded_ref
     end

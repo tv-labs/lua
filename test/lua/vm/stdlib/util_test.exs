@@ -2,8 +2,8 @@ defmodule Lua.VM.Stdlib.UtilTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Lua.VM.Stdlib.Util
   alias Lua.VM.State
+  alias Lua.VM.Stdlib.Util
 
   describe "typeof/1" do
     test "returns 'nil' for nil" do

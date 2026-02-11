@@ -1,8 +1,9 @@
 defmodule Lua.LexerTest do
   use ExUnit.Case, async: true
+
   alias Lua.Lexer
 
-  doctest Lua.Lexer
+  doctest Lexer
 
   describe "keywords" do
     test "tokenizes all Lua keywords" do
@@ -67,7 +68,7 @@ defmodule Lua.LexerTest do
     test "tokenizes integers" do
       assert {:ok, [{:number, 0, _}, {:eof, _}]} = Lexer.tokenize("0")
       assert {:ok, [{:number, 42, _}, {:eof, _}]} = Lexer.tokenize("42")
-      assert {:ok, [{:number, 12345, _}, {:eof, _}]} = Lexer.tokenize("12345")
+      assert {:ok, [{:number, 12_345, _}, {:eof, _}]} = Lexer.tokenize("12345")
     end
 
     test "tokenizes floating point numbers" do
@@ -292,8 +293,7 @@ defmodule Lua.LexerTest do
       assert {:ok, [{:comment, :single, " this is a comment", _}, {:eof, _}]} =
                Lexer.tokenize("-- this is a comment")
 
-      assert {:ok,
-              [{:identifier, "x", _}, {:comment, :single, " comment after code", _}, {:eof, _}]} =
+      assert {:ok, [{:identifier, "x", _}, {:comment, :single, " comment after code", _}, {:eof, _}]} =
                Lexer.tokenize("x -- comment after code")
     end
 

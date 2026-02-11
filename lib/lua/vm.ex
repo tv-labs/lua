@@ -6,7 +6,8 @@ defmodule Lua.VM do
   """
 
   alias Lua.Compiler.Prototype
-  alias Lua.VM.{State, Executor}
+  alias Lua.VM.Executor
+  alias Lua.VM.State
 
   @doc """
   Executes a compiled prototype.

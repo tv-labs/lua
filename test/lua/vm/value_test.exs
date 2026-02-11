@@ -1,7 +1,8 @@
 defmodule Lua.VM.ValueTest do
   use ExUnit.Case, async: true
 
-  alias Lua.VM.{State, Value}
+  alias Lua.VM.State
+  alias Lua.VM.Value
 
   defp new_state, do: State.new()
 

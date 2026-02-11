@@ -487,7 +487,7 @@ defmodule LuaTest do
       # assert chunk.ref
 
       assert {%Lua.Chunk{} = chunk, %Lua{}} = Lua.load_chunk!(Lua.new(), ~S[print("hello")])
-      assert chunk.prototype != nil
+      assert chunk.prototype
     end
 
     test "invalid strings raise Lua.CompilerException" do
@@ -571,6 +571,7 @@ defmodule LuaTest do
       # assert {[[{"a", 1}]], _lua} = Lua.eval!(lua, "return single.bar({ a = 1 })")
 
       defmodule SingleValueState do
+        @moduledoc false
         use Lua.API, scope: "single"
 
         deflua foo(value), _state do
@@ -647,6 +648,7 @@ defmodule LuaTest do
       # (same pattern for keyword_table_with_state, map_table, map_table_with_state)
 
       defmodule TableFunctions do
+        @moduledoc false
         use Lua.API, scope: "tables"
 
         deflua keyword_table do
@@ -1041,6 +1043,7 @@ defmodule LuaTest do
 
   describe "load_api/2 and load_api/3" do
     defmodule TestModule do
+      @moduledoc false
       use Lua.API
 
       deflua(foo(arg), do: arg)
@@ -1059,14 +1062,17 @@ defmodule LuaTest do
     end
 
     defmodule NoFuncsScope do
+      @moduledoc false
       use Lua.API, scope: "scope"
     end
 
     defmodule NoFuncsGlobal do
+      @moduledoc false
       use Lua.API
     end
 
     defmodule WithInstall do
+      @moduledoc false
       use Lua.API
 
       @impl Lua.API
@@ -1107,7 +1113,7 @@ defmodule LuaTest do
       lua = Lua.load_api(lua, TestModule, scope: ["scope"])
 
       assert {["a default"], _} = Lua.eval!(lua, "return scope.test(\"a\")")
-      assert {["a b"], _} = Lua.eval!(lua, "return scope.test(\"a\", \"b\")")
+      assert {["a b"], _} = Lua.eval!(lua, ~s{return scope.test("a", "b")})
     end
 
     test "if no functions are exposed, it still creates the scope", %{lua: lua} do
@@ -1145,6 +1151,7 @@ defmodule LuaTest do
       #          """)
 
       defmodule GlobalVar do
+        @moduledoc false
         use Lua.API, scope: "gv"
 
         deflua get(name), state do
@@ -1168,6 +1175,7 @@ defmodule LuaTest do
 
   describe "examples" do
     defmodule Examples do
+      @moduledoc false
       use Lua.API
 
       deflua double(x) do
@@ -1207,7 +1215,7 @@ defmodule LuaTest do
     end
 
     setup do
-      %{lua: Lua.new() |> Lua.load_api(Examples, scope: ["example"])}
+      %{lua: Lua.load_api(Lua.new(), Examples, scope: ["example"])}
     end
 
     test "can work with numbers", %{lua: lua} do

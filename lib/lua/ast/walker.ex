@@ -27,7 +27,10 @@ defmodule Lua.AST.Walker do
       Walker.walk(ast, fn node -> ... end, order: :post)
   """
 
-  alias Lua.AST.{Chunk, Block, Expr, Statement}
+  alias Lua.AST.Block
+  alias Lua.AST.Chunk
+  alias Lua.AST.Expr
+  alias Lua.AST.Statement
 
   @type ast_node ::
           Chunk.t()
@@ -119,7 +122,8 @@ defmodule Lua.AST.Walker do
   end
 
   defp walk_children(node, visitor, order) do
-    children(node)
+    node
+    |> children()
     |> Enum.each(fn child -> do_walk(child, visitor, order) end)
   end
 
@@ -198,7 +202,7 @@ defmodule Lua.AST.Walker do
           mapped_elseifs =
             Enum.map(elseifs, fn {c, b} -> {do_map(c, mapper), do_map(b, mapper)} end)
 
-          mapped_else = if else_block, do: do_map(else_block, mapper), else: nil
+          mapped_else = if else_block, do: do_map(else_block, mapper)
 
           %{
             stmt
@@ -215,7 +219,7 @@ defmodule Lua.AST.Walker do
           %{stmt | body: do_map(body, mapper), condition: do_map(cond, mapper)}
 
         %Statement.ForNum{var: _var, start: start, limit: limit, step: step, body: body} = stmt ->
-          mapped_step = if step, do: do_map(step, mapper), else: nil
+          mapped_step = if step, do: do_map(step, mapper)
 
           %{
             stmt
@@ -250,7 +254,8 @@ defmodule Lua.AST.Walker do
   defp do_reduce(node, acc, reducer) do
     acc = reducer.(node, acc)
 
-    children(node)
+    node
+    |> children()
     |> Enum.reduce(acc, fn child, acc -> do_reduce(child, acc, reducer) end)
   end
 

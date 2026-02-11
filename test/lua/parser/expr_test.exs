@@ -1,7 +1,9 @@
 defmodule Lua.Parser.ExprTest do
   use ExUnit.Case, async: true
+
+  alias Lua.AST.Expr
+  alias Lua.AST.Statement
   alias Lua.Parser
-  alias Lua.AST.{Expr, Statement}
 
   # Helper to extract the returned expression from "return expr"
   defp parse_return_expr(code) do

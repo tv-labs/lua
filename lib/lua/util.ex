@@ -23,7 +23,7 @@ defmodule Lua.Util do
   def format_error(error) do
     case error do
       {:badarith, operator, values} ->
-        expression = values |> Enum.map(&to_string/1) |> Enum.join(" #{operator} ")
+        expression = Enum.map_join(values, " #{operator} ", &to_string/1)
         "bad arithmetic #{expression}"
 
       {:illegal_index, _type, message} ->
@@ -59,10 +59,7 @@ defmodule Lua.Util do
   def format_stacktrace([], _, _), do: ""
 
   def format_stacktrace(stack, _, _) when is_list(stack) do
-    frames =
-      stack
-      |> Enum.map(&format_stack_frame/1)
-      |> Enum.join("\n")
+    frames = Enum.map_join(stack, "\n", &format_stack_frame/1)
 
     "stack traceback:\n" <> frames
   end
@@ -119,7 +116,7 @@ defmodule Lua.Util do
   end
 
   defp format_args(arity) when is_integer(arity) do
-    underscores = List.duplicate("_", arity) |> Enum.join(", ")
+    underscores = "_" |> List.duplicate(arity) |> Enum.join(", ")
     "(" <> underscores <> ")"
   end
 

@@ -1,7 +1,13 @@
 defmodule Lua.Compiler.IntegrationTest do
   use ExUnit.Case, async: true
 
-  alias Lua.{Parser, Compiler, VM}
+  alias Lua.Compiler
+  alias Lua.Parser
+  alias Lua.VM
+  alias Lua.VM.AssertionError
+  alias Lua.VM.Stdlib
+  alias Lua.VM.TypeError
+  alias Lua.VM.Value
 
   describe "end-to-end compilation and execution" do
     test "return 42" do
@@ -1174,8 +1180,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.new()
-        |> VM.State.register_function("double", fn [n], state -> {[n * 2], state} end)
+        VM.State.register_function(VM.State.new(), "double", fn [n], state -> {[n * 2], state} end)
 
       assert {:ok, [42], _state} = VM.execute(proto, state)
     end
@@ -1187,8 +1192,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.new()
-        |> VM.State.register_function("add", fn args, state ->
+        VM.State.register_function(VM.State.new(), "add", fn args, state ->
           {[Enum.sum(args)], state}
         end)
 
@@ -1202,8 +1206,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.new()
-        |> VM.State.register_function("get_answer", fn _args, state -> {[42], state} end)
+        VM.State.register_function(VM.State.new(), "get_answer", fn _args, state -> {[42], state} end)
 
       assert {:ok, [42], _state} = VM.execute(proto, state)
     end
@@ -1218,8 +1221,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.new()
-        |> VM.State.register_function("set_x", fn [val], state ->
+        VM.State.register_function(VM.State.new(), "set_x", fn [val], state ->
           {[], VM.State.set_global(state, "x", val)}
         end)
 
@@ -1236,8 +1238,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.new()
-        |> VM.State.register_function("get_field", fn [{:tref, id}, key], state ->
+        VM.State.register_function(VM.State.new(), "get_field", fn [{:tref, id}, key], state ->
           table = Map.fetch!(state.tables, id)
           {[Map.get(table.data, key)], state}
         end)
@@ -1255,8 +1256,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.new()
-        |> VM.State.register_function("make_table", fn _args, state ->
+        VM.State.register_function(VM.State.new(), "make_table", fn _args, state ->
           {tref, state} = VM.State.alloc_table(state, %{"x" => 100})
           {[tref], state}
         end)
@@ -1270,7 +1270,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast)
 
-      assert_raise Lua.VM.TypeError, ~r/attempt to call a nil value/, fn ->
+      assert_raise TypeError, ~r/attempt to call a nil value/, fn ->
         VM.execute(proto)
       end
     end
@@ -1284,7 +1284,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast)
 
-      assert_raise Lua.VM.TypeError, ~r/attempt to call a number value/, fn ->
+      assert_raise TypeError, ~r/attempt to call a number value/, fn ->
         VM.execute(proto)
       end
     end
@@ -1292,7 +1292,7 @@ defmodule Lua.Compiler.IntegrationTest do
 
   describe "standard library" do
     setup do
-      state = Lua.VM.Stdlib.install(VM.State.new())
+      state = Stdlib.install(VM.State.new())
       {:ok, state: state}
     end
 
@@ -1397,7 +1397,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast)
 
-      assert_raise Lua.VM.AssertionError, ~r/assertion failed: expected true/, fn ->
+      assert_raise AssertionError, ~r/assertion failed: expected true/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -1408,7 +1408,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast)
 
-      assert_raise Lua.VM.AssertionError, ~r/assertion failed: assertion failed!/, fn ->
+      assert_raise AssertionError, ~r/assertion failed: assertion failed!/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -1624,7 +1624,7 @@ defmodule Lua.Compiler.IntegrationTest do
 
   describe "generic for loops" do
     setup do
-      state = Lua.VM.Stdlib.install(VM.State.new())
+      state = Stdlib.install(VM.State.new())
       {:ok, state: state}
     end
 
@@ -1704,8 +1704,8 @@ defmodule Lua.Compiler.IntegrationTest do
   describe "value encode/decode round-trip" do
     test "encode Elixir map as global, execute Lua, decode result" do
       # Encode an Elixir map into state as a global
-      state = Lua.VM.Stdlib.install(VM.State.new())
-      {tref, state} = Lua.VM.Value.encode(%{x: 10, y: 20}, state)
+      state = Stdlib.install(VM.State.new())
+      {tref, state} = Value.encode(%{x: 10, y: 20}, state)
       state = VM.State.set_global(state, "config", tref)
 
       # Execute Lua code that reads from the encoded table
@@ -1716,8 +1716,8 @@ defmodule Lua.Compiler.IntegrationTest do
     end
 
     test "encode list as global, iterate in Lua, decode result" do
-      state = Lua.VM.Stdlib.install(VM.State.new())
-      {tref, state} = Lua.VM.Value.encode([10, 20, 30], state)
+      state = Stdlib.install(VM.State.new())
+      {tref, state} = Value.encode([10, 20, 30], state)
       state = VM.State.set_global(state, "items", tref)
 
       code = """
@@ -1734,7 +1734,7 @@ defmodule Lua.Compiler.IntegrationTest do
     end
 
     test "Lua produces table, decode to Elixir" do
-      state = Lua.VM.Stdlib.install(VM.State.new())
+      state = Stdlib.install(VM.State.new())
 
       code = """
       local t = {a = 1, b = 2}
@@ -1745,7 +1745,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
       assert {:ok, [tref], state} = VM.execute(proto, state)
 
-      decoded = Lua.VM.Value.decode(tref, state)
+      decoded = Value.decode(tref, state)
       assert Enum.sort(decoded) == [{"a", 1}, {"b", 2}]
     end
   end

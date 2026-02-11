@@ -1,7 +1,9 @@
 defmodule Lua.Parser.StatementTest do
   use ExUnit.Case, async: true
+
+  alias Lua.AST.Expr
+  alias Lua.AST.Statement
   alias Lua.Parser
-  alias Lua.AST.{Statement, Expr}
 
   describe "local variable declarations" do
     test "parses local without initialization" do

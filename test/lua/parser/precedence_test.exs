@@ -1,7 +1,8 @@
 defmodule Lua.Parser.PrecedenceTest do
   use ExUnit.Case, async: true
-  alias Lua.Parser
+
   alias Lua.AST.Expr
+  alias Lua.Parser
 
   describe "operator precedence" do
     test "or has lowest precedence" do

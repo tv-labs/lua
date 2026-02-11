@@ -5,7 +5,9 @@ defmodule Lua.AST.Statement do
   All statement nodes include a `meta` field for position tracking.
   """
 
-  alias Lua.AST.{Meta, Expr, Block}
+  alias Lua.AST.Block
+  alias Lua.AST.Expr
+  alias Lua.AST.Meta
 
   defmodule Assign do
     @moduledoc """

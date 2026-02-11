@@ -61,7 +61,8 @@ defmodule Lua.VM.Stdlib.Table do
 
     # Shift elements from pos to len one position up
     new_data =
-      Enum.reduce(len..pos, table.data, fn i, acc ->
+      len..pos
+      |> Enum.reduce(table.data, fn i, acc ->
         case Map.get(acc, i) do
           nil -> acc
           val -> Map.put(acc, i + 1, val)
@@ -113,7 +114,8 @@ defmodule Lua.VM.Stdlib.Table do
 
       # Shift elements from pos+1 to len one position down
       new_data =
-        Enum.reduce((pos + 1)..len, Map.delete(table.data, pos), fn i, acc ->
+        (pos + 1)..len
+        |> Enum.reduce(Map.delete(table.data, pos), fn i, acc ->
           case Map.get(acc, i) do
             nil -> Map.delete(acc, i)
             val -> Map.put(Map.delete(acc, i), i - 1, val)
@@ -145,7 +147,7 @@ defmodule Lua.VM.Stdlib.Table do
     i = Enum.at(rest, 1, 1)
     j = Enum.at(rest, 2, get_table_length(table))
 
-    unless is_binary(sep) do
+    if !is_binary(sep) do
       raise ArgumentError,
         function_name: "table.concat",
         arg_num: 2,
@@ -153,7 +155,7 @@ defmodule Lua.VM.Stdlib.Table do
         got: Util.typeof(sep)
     end
 
-    unless is_integer(i) do
+    if !is_integer(i) do
       raise ArgumentError,
         function_name: "table.concat",
         arg_num: 3,
@@ -161,7 +163,7 @@ defmodule Lua.VM.Stdlib.Table do
         got: Util.typeof(i)
     end
 
-    unless is_integer(j) do
+    if !is_integer(j) do
       raise ArgumentError,
         function_name: "table.concat",
         arg_num: 4,
@@ -243,7 +245,7 @@ defmodule Lua.VM.Stdlib.Table do
     data =
       args
       |> Enum.with_index(1)
-      |> Enum.into(%{}, fn {val, idx} -> {idx, val} end)
+      |> Map.new(fn {val, idx} -> {idx, val} end)
       |> Map.put("n", length(args))
 
     {tref, state} = State.alloc_table(state, data)
@@ -256,7 +258,7 @@ defmodule Lua.VM.Stdlib.Table do
     i = Enum.at(rest, 0, 1)
     j = Enum.at(rest, 1, get_table_length(table))
 
-    unless is_integer(i) do
+    if !is_integer(i) do
       raise ArgumentError,
         function_name: "table.unpack",
         arg_num: 2,
@@ -264,7 +266,7 @@ defmodule Lua.VM.Stdlib.Table do
         got: Util.typeof(i)
     end
 
-    unless is_integer(j) do
+    if !is_integer(j) do
       raise ArgumentError,
         function_name: "table.unpack",
         arg_num: 3,
@@ -293,11 +295,10 @@ defmodule Lua.VM.Stdlib.Table do
   end
 
   # table.move(a1, f, e, t [, a2])
-  defp table_move([{:tref, _} = tref1, f, e, t | rest], state)
-       when is_integer(f) and is_integer(e) and is_integer(t) do
+  defp table_move([{:tref, _} = tref1, f, e, t | rest], state) when is_integer(f) and is_integer(e) and is_integer(t) do
     tref2 = List.first(rest) || tref1
 
-    unless match?({:tref, _}, tref2) do
+    if !match?({:tref, _}, tref2) do
       raise ArgumentError,
         function_name: "table.move",
         arg_num: 5,
@@ -327,8 +328,7 @@ defmodule Lua.VM.Stdlib.Table do
     {[tref2], state}
   end
 
-  defp table_move([_tref1, f, e, t | _rest], _state)
-       when is_integer(f) and is_integer(e) do
+  defp table_move([_tref1, f, e, t | _rest], _state) when is_integer(f) and is_integer(e) do
     raise ArgumentError,
       function_name: "table.move",
       arg_num: 4,

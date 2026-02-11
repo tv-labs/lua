@@ -56,13 +56,7 @@ defmodule Lua.VM.ArgumentError do
   end
 
   @impl true
-  def message(%__MODULE__{
-        function_name: function_name,
-        arg_num: arg_num,
-        expected: expected,
-        got: got,
-        details: details
-      }) do
+  def message(%__MODULE__{function_name: function_name, arg_num: arg_num, expected: expected, got: got, details: details}) do
     build_message(function_name, arg_num, expected, got, details)
   end
 

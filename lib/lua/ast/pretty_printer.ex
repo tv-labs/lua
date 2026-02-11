@@ -18,7 +18,10 @@ defmodule Lua.AST.PrettyPrinter do
       PrettyPrinter.print(ast, indent: 4)
   """
 
-  alias Lua.AST.{Chunk, Block, Expr, Statement}
+  alias Lua.AST.Block
+  alias Lua.AST.Chunk
+  alias Lua.AST.Expr
+  alias Lua.AST.Statement
 
   @type ast_node ::
           Chunk.t()
@@ -56,8 +59,7 @@ defmodule Lua.AST.PrettyPrinter do
   # Block
   defp do_print(%Block{stmts: stmts}, level, indent_size) do
     stmts
-    |> Enum.map(&do_print(&1, level, indent_size))
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", &do_print(&1, level, indent_size))
     |> Kernel.<>("\n")
   end
 
@@ -129,14 +131,14 @@ defmodule Lua.AST.PrettyPrinter do
 
   defp do_print(%Expr.Call{func: func, args: args}, level, indent_size) do
     func_str = do_print(func, level, indent_size)
-    args_str = Enum.map(args, &do_print(&1, level, indent_size)) |> Enum.join(", ")
+    args_str = Enum.map_join(args, ", ", &do_print(&1, level, indent_size))
 
     "#{func_str}(#{args_str})"
   end
 
   defp do_print(%Expr.MethodCall{object: obj, method: method, args: args}, level, indent_size) do
     obj_str = do_print(obj, level, indent_size)
-    args_str = Enum.map(args, &do_print(&1, level, indent_size)) |> Enum.join(", ")
+    args_str = Enum.map_join(args, ", ", &do_print(&1, level, indent_size))
 
     "#{obj_str}:#{method}(#{args_str})"
   end
@@ -155,12 +157,10 @@ defmodule Lua.AST.PrettyPrinter do
 
   defp do_print(%Expr.Function{params: params, body: body}, level, indent_size) do
     params_str =
-      params
-      |> Enum.map(fn
+      Enum.map_join(params, ", ", fn
         :vararg -> "..."
         name -> name
       end)
-      |> Enum.join(", ")
 
     body_str = print_block_body(body, level + 1, indent_size)
 
@@ -170,8 +170,8 @@ defmodule Lua.AST.PrettyPrinter do
   # Statements
 
   defp do_print(%Statement.Assign{targets: targets, values: values} = stmt, level, indent_size) do
-    targets_str = Enum.map(targets, &do_print(&1, level, indent_size)) |> Enum.join(", ")
-    values_str = Enum.map(values, &do_print(&1, level, indent_size)) |> Enum.join(", ")
+    targets_str = Enum.map_join(targets, ", ", &do_print(&1, level, indent_size))
+    values_str = Enum.map_join(values, ", ", &do_print(&1, level, indent_size))
 
     stmt_line = "#{indent(level, indent_size)}#{targets_str} = #{values_str}"
     print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
@@ -182,7 +182,7 @@ defmodule Lua.AST.PrettyPrinter do
 
     stmt_line =
       if values && values != [] do
-        values_str = Enum.map(values, &do_print(&1, level, indent_size)) |> Enum.join(", ")
+        values_str = Enum.map_join(values, ", ", &do_print(&1, level, indent_size))
         "#{indent(level, indent_size)}local #{names_str} = #{values_str}"
       else
         "#{indent(level, indent_size)}local #{names_str}"
@@ -191,18 +191,12 @@ defmodule Lua.AST.PrettyPrinter do
     print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(
-         %Statement.LocalFunc{name: name, params: params, body: body} = stmt,
-         level,
-         indent_size
-       ) do
+  defp do_print(%Statement.LocalFunc{name: name, params: params, body: body} = stmt, level, indent_size) do
     params_str =
-      params
-      |> Enum.map(fn
+      Enum.map_join(params, ", ", fn
         :vararg -> "..."
         name -> name
       end)
-      |> Enum.join(", ")
 
     body_str = print_block_body(body, level + 1, indent_size)
 
@@ -212,18 +206,12 @@ defmodule Lua.AST.PrettyPrinter do
     print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(
-         %Statement.FuncDecl{name: name, params: params, body: body} = stmt,
-         level,
-         indent_size
-       ) do
+  defp do_print(%Statement.FuncDecl{name: name, params: params, body: body} = stmt, level, indent_size) do
     params_str =
-      params
-      |> Enum.map(fn
+      Enum.map_join(params, ", ", fn
         :vararg -> "..."
         param_name -> param_name
       end)
-      |> Enum.join(", ")
 
     body_str = print_block_body(body, level + 1, indent_size)
 
@@ -239,12 +227,7 @@ defmodule Lua.AST.PrettyPrinter do
   end
 
   defp do_print(
-         %Statement.If{
-           condition: cond,
-           then_block: then_block,
-           elseifs: elseifs,
-           else_block: else_block
-         } = stmt,
+         %Statement.If{condition: cond, then_block: then_block, elseifs: elseifs, else_block: else_block} = stmt,
          level,
          indent_size
        ) do
@@ -262,8 +245,6 @@ defmodule Lua.AST.PrettyPrinter do
       if else_block do
         b_str = print_block_body(else_block, level + 1, indent_size)
         "#{indent(level, indent_size)}else\n#{b_str}"
-      else
-        nil
       end
 
     parts = ["#{indent(level, indent_size)}if #{cond_str} then\n#{then_str}"] ++ elseif_strs
@@ -321,13 +302,9 @@ defmodule Lua.AST.PrettyPrinter do
     print_with_comments(stmt, level, indent_size, fn -> stmt_line end)
   end
 
-  defp do_print(
-         %Statement.ForIn{vars: vars, iterators: iterators, body: body} = stmt,
-         level,
-         indent_size
-       ) do
+  defp do_print(%Statement.ForIn{vars: vars, iterators: iterators, body: body} = stmt, level, indent_size) do
     vars_str = Enum.join(vars, ", ")
-    iterators_str = Enum.map(iterators, &do_print(&1, level, indent_size)) |> Enum.join(", ")
+    iterators_str = Enum.map_join(iterators, ", ", &do_print(&1, level, indent_size))
     body_str = print_block_body(body, level + 1, indent_size)
 
     stmt_line =
@@ -348,7 +325,7 @@ defmodule Lua.AST.PrettyPrinter do
       if values == [] do
         "#{indent(level, indent_size)}return"
       else
-        values_str = Enum.map(values, &do_print(&1, level, indent_size)) |> Enum.join(", ")
+        values_str = Enum.map_join(values, ", ", &do_print(&1, level, indent_size))
         "#{indent(level, indent_size)}return #{values_str}"
       end
 
@@ -378,8 +355,7 @@ defmodule Lua.AST.PrettyPrinter do
 
   defp print_block_body(%Block{stmts: stmts}, level, indent_size) do
     stmts
-    |> Enum.map(&do_print(&1, level, indent_size))
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", &do_print(&1, level, indent_size))
     |> Kernel.<>("\n")
   end
 
@@ -563,8 +539,7 @@ defmodule Lua.AST.PrettyPrinter do
       ""
     else
       comments
-      |> Enum.map(&format_comment(&1, level, indent_size))
-      |> Enum.join("\n")
+      |> Enum.map_join("\n", &format_comment(&1, level, indent_size))
       |> Kernel.<>("\n")
     end
   end

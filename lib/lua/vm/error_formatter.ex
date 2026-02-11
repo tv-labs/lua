@@ -78,7 +78,8 @@ defmodule Lua.VM.ErrorFormatter do
       end_line = min(length(lines), line + 2)
 
       context_lines =
-        Enum.slice(lines, (start_line - 1)..(end_line - 1))
+        lines
+        |> Enum.slice((start_line - 1)..(end_line - 1))
         |> Enum.with_index(start_line)
         |> Enum.flat_map(fn {line_text, num} ->
           line_str = format_line_number(num) <> " │ " <> line_text
@@ -101,8 +102,6 @@ defmodule Lua.VM.ErrorFormatter do
         end)
 
       "\n" <> Enum.join(context_lines)
-    else
-      nil
     end
   end
 
@@ -115,10 +114,7 @@ defmodule Lua.VM.ErrorFormatter do
   defp format_stack_trace([]), do: nil
 
   defp format_stack_trace(call_stack) when is_list(call_stack) do
-    frames =
-      call_stack
-      |> Enum.map(&format_frame/1)
-      |> Enum.join("\n")
+    frames = Enum.map_join(call_stack, "\n", &format_frame/1)
 
     "\n\n" <> IO.ANSI.cyan() <> "Stack trace:" <> IO.ANSI.reset() <> "\n" <> frames
   end
@@ -145,16 +141,12 @@ defmodule Lua.VM.ErrorFormatter do
       :call_non_function ->
         type_name = format_type_name(value_type)
 
-        suggestion(
-          "You can only call function values. Check that you're calling a function, not a #{type_name}."
-        )
+        suggestion("You can only call function values. Check that you're calling a function, not a #{type_name}.")
 
       :index_non_table ->
         type_name = format_type_name(value_type)
 
-        suggestion(
-          "You can only index tables. Make sure the value you're indexing is a table, not a #{type_name}."
-        )
+        suggestion("You can only index tables. Make sure the value you're indexing is a table, not a #{type_name}.")
 
       :arithmetic_type_error ->
         suggestion(

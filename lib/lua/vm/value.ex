@@ -54,8 +54,7 @@ defmodule Lua.VM.Value do
 
   def to_string(v) when is_binary(v), do: v
 
-  def to_string({:tref, id}),
-    do: "table: 0x#{String.pad_leading(Integer.to_string(id, 16), 14, "0")}"
+  def to_string({:tref, id}), do: "table: 0x#{String.pad_leading(Integer.to_string(id, 16), 14, "0")}"
 
   def to_string({:lua_closure, _, _}), do: "function"
   def to_string({:native_func, _}), do: "function"
@@ -70,24 +69,22 @@ defmodule Lua.VM.Value do
   def parse_number(str) do
     str = String.trim(str)
 
-    cond do
-      String.starts_with?(str, "0x") or String.starts_with?(str, "0X") ->
-        case Integer.parse(String.slice(str, 2..-1//1), 16) do
-          {n, ""} -> n
-          _ -> nil
-        end
+    if String.starts_with?(str, "0x") or String.starts_with?(str, "0X") do
+      case Integer.parse(String.slice(str, 2..-1//1), 16) do
+        {n, ""} -> n
+        _ -> nil
+      end
+    else
+      case Integer.parse(str) do
+        {n, ""} ->
+          n
 
-      true ->
-        case Integer.parse(str) do
-          {n, ""} ->
-            n
-
-          _ ->
-            case Float.parse(str) do
-              {f, ""} -> f
-              _ -> nil
-            end
-        end
+        _ ->
+          case Float.parse(str) do
+            {f, ""} -> f
+            _ -> nil
+          end
+      end
     end
   end
 
