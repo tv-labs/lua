@@ -402,11 +402,28 @@ defmodule Lua.VM.Executor do
     func_value = elem(regs, base)
 
     # Collect arguments from registers base+1..base+arg_count
+    # arg_count < 0 encodes fixed args + varargs:
+    # -1 means 0 fixed + varargs, -2 means 1 fixed + varargs, etc.
     args =
-      if arg_count > 0 do
-        for i <- 1..arg_count, do: elem(regs, base + i)
-      else
-        []
+      cond do
+        arg_count > 0 ->
+          for i <- 1..arg_count, do: elem(regs, base + i)
+
+        arg_count < 0 ->
+          # Collect fixed args + all varargs
+          # Decode: -1 => 0 fixed, -2 => 1 fixed, -3 => 2 fixed, etc.
+          fixed_arg_count = -(arg_count + 1)
+          varargs = Map.get(proto, :varargs, [])
+          total_args = fixed_arg_count + length(varargs)
+
+          if total_args > 0 do
+            for i <- 1..total_args, do: elem(regs, base + i)
+          else
+            []
+          end
+
+        true ->
+          []
       end
 
     {results, state} =
@@ -511,13 +528,22 @@ defmodule Lua.VM.Executor do
   end
 
   # vararg - load vararg values into registers
+  # count == 0 means load all varargs, count > 0 means load exactly count values
   defp do_execute([{:vararg, base, count} | rest], regs, upvalues, proto, state) do
     varargs = Map.get(proto, :varargs, [])
 
     regs =
-      Enum.reduce(0..(count - 1), regs, fn i, regs ->
-        put_elem(regs, base + i, Enum.at(varargs, i))
-      end)
+      if count == 0 do
+        # Load all varargs
+        Enum.reduce(Enum.with_index(varargs), regs, fn {val, i}, regs ->
+          put_elem(regs, base + i, val)
+        end)
+      else
+        # Load exactly count values
+        Enum.reduce(0..(count - 1), regs, fn i, regs ->
+          put_elem(regs, base + i, Enum.at(varargs, i))
+        end)
+      end
 
     do_execute(rest, regs, upvalues, proto, state)
   end
@@ -529,12 +555,30 @@ defmodule Lua.VM.Executor do
   end
 
   # return
-  defp do_execute([{:return, base, count} | _rest], regs, _upvalues, _proto, state) do
+  # count == -1 means return from base including all varargs
+  # count == 0 means return nil
+  # count > 0 means return exactly count values
+  defp do_execute([{:return, base, count} | _rest], regs, _upvalues, proto, state) do
     results =
-      if count == 0 do
-        [nil]
-      else
-        for i <- 0..(count - 1), do: elem(regs, base + i)
+      cond do
+        count == 0 ->
+          [nil]
+
+        count == -1 ->
+          # Return values from base including varargs
+          # We need to collect values until we've covered the vararg range
+          varargs = Map.get(proto, :varargs, [])
+          tuple_size = tuple_size(regs)
+          max_index = min(tuple_size - 1, base + length(varargs) + proto.param_count - 1)
+
+          if max_index < base do
+            []
+          else
+            for i <- base..max_index, do: elem(regs, i)
+          end
+
+        count > 0 ->
+          for i <- 0..(count - 1), do: elem(regs, base + i)
       end
 
     {results, regs, state}
@@ -966,6 +1010,7 @@ defmodule Lua.VM.Executor do
   end
 
   # set_list — bulk store: table[offset+i] = R[start+i-1] for i in 1..count
+  # count == 0 means store all values from start until nil or end of tuple
   defp do_execute(
          [{:set_list, table_reg, start, count, offset} | rest],
          regs,
@@ -978,10 +1023,41 @@ defmodule Lua.VM.Executor do
     state =
       State.update_table(state, {:tref, id}, fn table ->
         new_data =
-          Enum.reduce(1..count, table.data, fn i, data ->
-            value = elem(regs, start + i - 1)
-            Map.put(data, offset + i, value)
-          end)
+          if count == 0 do
+            # Variable number of values - collect from start register onwards
+            # This happens with varargs in table constructors like {a, b, ...}
+            # The previous vararg instruction loaded all varargs into registers,
+            # so we need to collect values until we've collected all of them
+
+            # Count how many values to collect by checking registers
+            tuple_size = tuple_size(regs)
+
+            # Collect values from start until we reach a nil or end of data
+            # We know varargs were just loaded, so collect until we see
+            # consecutive nils or reach tuple end
+            values_to_collect =
+              start..(tuple_size - 1)
+              |> Enum.take_while(fn reg_idx ->
+                reg_idx < tuple_size && elem(regs, reg_idx) != nil
+              end)
+              |> length()
+
+            # Now collect those values
+            if values_to_collect > 0 do
+              Enum.reduce(0..(values_to_collect - 1), table.data, fn i, data ->
+                value = elem(regs, start + i)
+                Map.put(data, offset + i + 1, value)
+              end)
+            else
+              table.data
+            end
+          else
+            # Fixed number of values
+            Enum.reduce(1..count, table.data, fn i, data ->
+              value = elem(regs, start + i - 1)
+              Map.put(data, offset + i, value)
+            end)
+          end
 
         %{table | data: new_data}
       end)

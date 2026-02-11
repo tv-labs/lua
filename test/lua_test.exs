@@ -1461,6 +1461,94 @@ defmodule LuaTest do
     end
   end
 
+  describe "varargs" do
+    setup do
+      %{lua: Lua.new(sandboxed: [])}
+    end
+
+    test "simple varargs function", %{lua: lua} do
+      code = """
+      function f(...)
+        return ...
+      end
+      return f(1, 2, 3)
+      """
+
+      assert {[1, 2, 3], _} = Lua.eval!(lua, code)
+    end
+
+    test "varargs with regular parameters", %{lua: lua} do
+      code = """
+      function f(a, b, ...)
+        return a, b, ...
+      end
+      return f(1, 2, 3, 4, 5)
+      """
+
+      assert {[1, 2, 3, 4, 5], _} = Lua.eval!(lua, code)
+    end
+
+    test "varargs in table constructor", %{lua: lua} do
+      code = """
+      function f(...)
+        return {...}
+      end
+      t = f(1, 2, 3)
+      return t[1], t[2], t[3]
+      """
+
+      assert {[1, 2, 3], _} = Lua.eval!(lua, code)
+    end
+
+    test "mixed values and varargs in table", %{lua: lua} do
+      code = """
+      function f(...)
+        local t = {10, 20, ...}
+        return t[1], t[2], t[3], t[4]
+      end
+      return f(30, 40)
+      """
+
+      assert {[10, 20, 30, 40], _} = Lua.eval!(lua, code)
+    end
+
+    test "varargs with select", %{lua: lua} do
+      code = """
+      function f(...)
+        return select('#', ...), select(2, ...)
+      end
+      return f(10, 20, 30)
+      """
+
+      assert {[3, 20], _} = Lua.eval!(lua, code)
+    end
+
+    test "varargs in function call", %{lua: lua} do
+      code = """
+      function g(a, b, c)
+        return a + b + c
+      end
+      function f(...)
+        return g(...)
+      end
+      return f(1, 2, 3)
+      """
+
+      assert {[6], _} = Lua.eval!(lua, code)
+    end
+
+    test "empty varargs", %{lua: lua} do
+      code = """
+      function f(...)
+        return select('#', ...)
+      end
+      return f()
+      """
+
+      assert {[0], _} = Lua.eval!(lua, code)
+    end
+  end
+
   defp test_file(name) do
     Path.join(["test", "fixtures", name])
   end
