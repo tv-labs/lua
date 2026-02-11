@@ -37,9 +37,22 @@ defmodule Lua.Lexer do
   """
   @spec tokenize(String.t()) :: {:ok, [token()]} | {:error, term()}
   def tokenize(code) when is_binary(code) do
+    # Handle shebang on first line (Unix convention: #! means interpreter directive)
+    code = strip_shebang(code)
     pos = %{line: 1, column: 1, byte_offset: 0}
     do_tokenize(code, [], pos)
   end
+
+  # Strip shebang (#!) if it's the first line
+  defp strip_shebang(<<"#!", rest::binary>>) do
+    # Skip until newline
+    case :binary.split(rest, ["\n", "\r\n", "\r"]) do
+      [_shebang_line, remaining] -> remaining
+      [_only_shebang] -> ""
+    end
+  end
+
+  defp strip_shebang(code), do: code
 
   # End of input
   defp do_tokenize(<<>>, acc, pos) do

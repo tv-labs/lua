@@ -340,6 +340,28 @@ defmodule Lua.LexerTest do
       assert {:ok, [{:comment, :multi, " comment ", _}, {:identifier, "x", _}, {:eof, _}]} =
                Lexer.tokenize("--[[ comment ]]x")
     end
+
+    test "ignores shebang on first line" do
+      # Lua ignores the first line if it starts with #
+      code = """
+      #!/usr/bin/env lua
+      local x = 1
+      return x
+      """
+
+      assert {:ok, tokens} = Lexer.tokenize(code)
+      # Shebang should be treated as a comment and stripped
+      assert [{:keyword, :local, _} | _] = tokens
+
+      # Shebang only on first line
+      code2 = """
+      local x = 1
+      #!/usr/bin/env lua
+      """
+
+      # Second line with # should cause error (not a shebang)
+      assert {:error, _} = Lexer.tokenize(code2)
+    end
   end
 
   describe "whitespace" do
