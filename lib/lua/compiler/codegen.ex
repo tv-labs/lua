@@ -440,6 +440,31 @@ defmodule Lua.Compiler.Codegen do
     end
   end
 
+  # LocalFunc: local function name(params) body end
+  defp gen_statement(%Statement.LocalFunc{name: name} = local_func, ctx) do
+    # Generate closure for the function
+    {closure_instructions, closure_reg, ctx} = gen_closure_from_node(local_func, ctx)
+
+    # Get the local variable's register from scope
+    dest_reg = ctx.scope.locals[name]
+
+    # Move closure to the local's register if needed
+    move_instructions =
+      if closure_reg == dest_reg do
+        []
+      else
+        [Instruction.move(dest_reg, closure_reg)]
+      end
+
+    {closure_instructions ++ move_instructions, ctx}
+  end
+
+  # Do: do...end block
+  defp gen_statement(%Statement.Do{body: body}, ctx) do
+    # Simply generate code for the inner block
+    gen_block(body, ctx)
+  end
+
   # Stub for other statements
   defp gen_statement(_stmt, ctx), do: {[], ctx}
 

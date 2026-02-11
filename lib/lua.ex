@@ -569,10 +569,9 @@ defmodule Lua do
   @doc """
   Calls a function in Lua's state
 
-      # TODO: Restore once string stdlib is implemented
-      #iex> {:ok, [ret], _lua} = Lua.call_function(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
-      #iex> ret
-      #"hello robert"
+      iex> {:ok, [ret], _lua} = Lua.call_function(Lua.new(), [:string, :lower], ["HELLO ROBERT"])
+      iex> ret
+      "hello robert"
 
       iex> lua = Lua.new()
       iex> lua = Lua.set!(lua, [:double], fn [val] -> [val * 2] end)
@@ -580,11 +579,10 @@ defmodule Lua do
 
   References to functions can also be passed
 
-      # TODO: Restore once string stdlib is implemented
-      #iex> {[ref], lua} = Lua.eval!("return string.lower", decode: false)
-      #iex> {:ok, [ret], _lua} = Lua.call_function(lua, ref, ["FUNCTION REF"])
-      #iex> ret
-      #"function ref"
+      iex> {[ref], lua} = Lua.eval!(Lua.new(), "return string.lower", decode: false)
+      iex> {:ok, [ret], _lua} = Lua.call_function(lua, ref, ["FUNCTION REF"])
+      iex> ret
+      "function ref"
 
       iex> {[ref], lua} = Lua.eval!(Lua.new(), "return function(x) return x end", decode: false)
       iex> {:ok, [ret], _lua} = Lua.call_function(lua, ref, [42])
@@ -660,12 +658,8 @@ defmodule Lua do
   defmodule MyAPI do
     use Lua.API, scope: "example"
 
-    # TODO: Restore once string stdlib is implemented
-    # deflua foo(value), state do
-    #   Lua.call_function!(state, [:string, :lower], [value])
-    # end
     deflua foo(value), state do
-      Lua.call_function!(state, [:my_func], [value])
+      Lua.call_function!(state, [:string, :lower], [value])
     end
   end
   ```
