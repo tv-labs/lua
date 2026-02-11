@@ -37,6 +37,27 @@ defmodule Lua.VM.Stdlib do
     |> Lua.VM.Stdlib.String.install()
     |> Lua.VM.Stdlib.Math.install()
     |> Lua.VM.Stdlib.Table.install()
+    |> install_global_g()
+  end
+
+  # Install _G global table - a table that references the global environment
+  defp install_global_g(state) do
+    # Create a table containing all current globals
+    # Copy all globals into the _G table
+    g_data = state.globals
+
+    {{:tref, _id} = g_ref, state} = State.alloc_table(state, g_data)
+
+    # Set _G to point to this table
+    state = State.set_global(state, "_G", g_ref)
+
+    # Also add _G to itself so _G._G == _G
+    state =
+      State.update_table(state, g_ref, fn table ->
+        %{table | data: Map.put(table.data, "_G", g_ref)}
+      end)
+
+    state
   end
 
   # type(v) — returns the type of v as a string
