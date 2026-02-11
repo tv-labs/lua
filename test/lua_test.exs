@@ -30,6 +30,7 @@ defmodule LuaTest do
       t = {1, 2; n=2}
       return t[1], t[2], t.n
       """
+
       assert {[1, 2, 2], _lua} = Lua.eval!(lua, code)
 
       # Mixed commas and semicolons
@@ -37,6 +38,7 @@ defmodule LuaTest do
       t = {1; 2, 3}
       return t[1], t[2], t[3]
       """
+
       assert {[1, 2, 3], _lua} = Lua.eval!(lua, code)
     end
   end
