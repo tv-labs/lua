@@ -27,6 +27,9 @@ defmodule Lua.VM.Stdlib.Debug do
   alias Lua.VM.Value
 
   @impl true
+  def lib_name, do: "debug"
+
+  @impl true
   def install(state) do
     debug_table = %{
       "getinfo" => {:native_func, &debug_getinfo/2},

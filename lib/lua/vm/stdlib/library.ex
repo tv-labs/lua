@@ -38,4 +38,12 @@ defmodule Lua.VM.Stdlib.Library do
     The updated VM state with the library installed
   """
   @callback install(State.t()) :: State.t()
+
+  @doc """
+  Returns the Lua global name for this library (e.g., "string", "math").
+
+  Used to register the library in `package.loaded` so that
+  `require("string")` etc. works.
+  """
+  @callback lib_name() :: String.t()
 end

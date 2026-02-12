@@ -55,17 +55,10 @@ defmodule Lua.VM.Stdlib do
   # Install a stdlib library module and register it in package.loaded
   defp install_library(state, module) do
     state = module.install(state)
+    name = module.lib_name()
 
-    # Derive the library name from the module (e.g., Lua.VM.Stdlib.Math -> "math")
-    lib_name =
-      module
-      |> Module.split()
-      |> List.last()
-      |> String.downcase()
-
-    # Register in package.loaded so require("math") etc. works
-    case Map.get(state.globals, lib_name) do
-      {:tref, _} = tref -> cache_module_result(state, lib_name, tref)
+    case Map.get(state.globals, name) do
+      {:tref, _} = tref -> cache_module_result(state, name, tref)
       _ -> state
     end
   end

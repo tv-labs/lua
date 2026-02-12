@@ -38,6 +38,9 @@ defmodule Lua.VM.Stdlib.Math do
   alias Lua.VM.Stdlib.Util
 
   @impl true
+  def lib_name, do: "math"
+
+  @impl true
   def install(state) do
     math_table = %{
       "abs" => {:native_func, &math_abs/2},
