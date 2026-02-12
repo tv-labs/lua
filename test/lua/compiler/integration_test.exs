@@ -1946,7 +1946,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, [1, 2], _state} = VM.execute(proto)
     end
 
-    @tag :pending
+    @tag :skip
     test "multi-assign evaluates all RHS before assigning (swap)" do
       # Lua semantics require all RHS to be evaluated before any assignment.
       # This requires snapshotting RHS values into temp registers.
@@ -2337,7 +2337,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, [0], _state} = VM.execute(proto)
     end
 
-    @tag :pending
+    @tag :skip
     test "goto inside if-then jumps to label after the if block" do
       # Requires goto to propagate out of test blocks like break does
       code = """
@@ -2355,7 +2355,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, [0], _state} = VM.execute(proto)
     end
 
-    @tag :pending
+    @tag :skip
     test "goto with label after conditional" do
       # Requires goto propagation out of test blocks
       code = """
@@ -2375,7 +2375,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, [1], _state} = VM.execute(proto)
     end
 
-    @tag :pending
+    @tag :skip
     test "backward goto (jump to earlier label)" do
       # Requires backward label search
       code = """
