@@ -47,18 +47,45 @@ defmodule Lua.VM.Stdlib do
     |> install_global_g()
   end
 
-  # Install _G global table - a table that references the global environment
+  # Install _G global table as a proxy with __index/__newindex metamethods
   defp install_global_g(state) do
-    # Create a table containing all current globals
-    # Copy all globals into the _G table
-    g_data = state.globals
+    # Create empty proxy table for _G
+    {g_ref, state} = State.alloc_table(state)
 
-    {{:tref, _id} = g_ref, state} = State.alloc_table(state, g_data)
+    # Create __index function that reads from globals
+    index_fn =
+      {:native_func,
+       fn [_table, key], st ->
+         value = Map.get(st.globals, key)
+         {[value], st}
+       end}
 
-    # Set _G to point to this table
+    # Create __newindex function that writes to globals
+    newindex_fn =
+      {:native_func,
+       fn [_table, key, value], st ->
+         st = %{st | globals: Map.put(st.globals, key, value)}
+         {[], st}
+       end}
+
+    # Create metatable with __index and __newindex
+    mt_data = %{
+      "__index" => index_fn,
+      "__newindex" => newindex_fn
+    }
+
+    {mt_ref, state} = State.alloc_table(state, mt_data)
+
+    # Set the metatable on the _G proxy
+    state =
+      State.update_table(state, g_ref, fn table ->
+        %{table | metatable: mt_ref}
+      end)
+
+    # Set _G global (the proxy table itself is stored in the raw data for _G._G == _G)
     state = State.set_global(state, "_G", g_ref)
 
-    # Also add _G to itself so _G._G == _G
+    # Store _G in the proxy's raw data so _G._G == _G works without hitting __index
     state =
       State.update_table(state, g_ref, fn table ->
         %{table | data: Map.put(table.data, "_G", g_ref)}
@@ -72,7 +99,11 @@ defmodule Lua.VM.Stdlib do
   defp lua_type([], state), do: {["nil"], state}
 
   # tostring(v) — converts a value to its string representation
-  defp lua_tostring([value | _], state), do: {[Value.to_string(value)], state}
+  defp lua_tostring([value | _], state) do
+    {str, state} = value_to_string_with_mt(value, state)
+    {[str], state}
+  end
+
   defp lua_tostring([], state), do: {["nil"], state}
 
   # tonumber(v [, base]) — converts a string to a number
@@ -104,7 +135,13 @@ defmodule Lua.VM.Stdlib do
 
   # print(...) — prints values separated by tabs, followed by a newline
   defp lua_print(args, state) do
-    output = Enum.map_join(args, "\t", &Value.to_string/1)
+    {strings, state} =
+      Enum.reduce(args, {[], state}, fn val, {acc, st} ->
+        {str, st} = value_to_string_with_mt(val, st)
+        {[str | acc], st}
+      end)
+
+    output = strings |> Enum.reverse() |> Enum.join("\t")
     IO.puts(output)
     {[], state}
   end
@@ -365,6 +402,21 @@ defmodule Lua.VM.Stdlib do
 
   # setmetatable(table, metatable) — sets the metatable for a table
   defp lua_setmetatable([{:tref, _} = tref, metatable], state) do
+    # Check for __metatable protection on existing metatable
+    table = State.get_table(state, tref)
+
+    case table.metatable do
+      {:tref, mt_id} ->
+        mt = Map.fetch!(state.tables, mt_id)
+
+        if Map.has_key?(mt.data, "__metatable") do
+          raise RuntimeError, value: "cannot change a protected metatable"
+        end
+
+      _ ->
+        :ok
+    end
+
     # Validate metatable is nil or a table
     case metatable do
       nil ->
@@ -396,17 +448,33 @@ defmodule Lua.VM.Stdlib do
   end
 
   # getmetatable(object) — returns the metatable of an object
-  defp lua_getmetatable([{:tref, _} = tref], state) do
+  defp lua_getmetatable([{:tref, _} = tref | _], state) do
     table = State.get_table(state, tref)
 
     case table.metatable do
+      nil ->
+        {[nil], state}
+
+      {:tref, mt_id} = mt_ref ->
+        mt = Map.fetch!(state.tables, mt_id)
+
+        # If metatable has __metatable field, return that instead
+        case Map.get(mt.data, "__metatable") do
+          nil -> {[mt_ref], state}
+          sentinel -> {[sentinel], state}
+        end
+    end
+  end
+
+  defp lua_getmetatable([value | _], state) when is_binary(value) do
+    # For strings, return the string metatable if set
+    case Map.get(state.metatables, "string") do
       nil -> {[nil], state}
       mt_ref -> {[mt_ref], state}
     end
   end
 
-  defp lua_getmetatable([_other], state) do
-    # For non-tables, Lua returns nil (or the metatable set for that type, but we don't support that yet)
+  defp lua_getmetatable([_other | _], state) do
     {[nil], state}
   end
 
@@ -529,5 +597,33 @@ defmodule Lua.VM.Stdlib do
         {:error, _} -> nil
       end
     end)
+  end
+
+  # Convert a value to string, checking for __tostring metamethod
+  defp value_to_string_with_mt(value, state) do
+    case value do
+      {:tref, id} ->
+        table = Map.fetch!(state.tables, id)
+
+        case table.metatable do
+          {:tref, mt_id} ->
+            mt = Map.fetch!(state.tables, mt_id)
+
+            case Map.get(mt.data, "__tostring") do
+              nil ->
+                {Value.to_string(value), state}
+
+              tostring_fn ->
+                {results, state} = Executor.call_function(tostring_fn, [value], state)
+                {List.first(results) || "nil", state}
+            end
+
+          _ ->
+            {Value.to_string(value), state}
+        end
+
+      _ ->
+        {Value.to_string(value), state}
+    end
   end
 end

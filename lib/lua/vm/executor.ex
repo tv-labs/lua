@@ -76,11 +76,29 @@ defmodule Lua.VM.Executor do
       value_type: nil
   end
 
-  def call_function(other, _args, _state) do
-    raise TypeError,
-      value: "attempt to call a #{Value.type_name(other)} value",
-      error_kind: :call_non_function,
-      value_type: value_type(other)
+  def call_function(other, args, state) do
+    # Check for __call metamethod
+    case get_metatable(other, state) do
+      nil ->
+        raise TypeError,
+          value: "attempt to call a #{Value.type_name(other)} value",
+          error_kind: :call_non_function,
+          value_type: value_type(other)
+
+      {:tref, mt_id} ->
+        mt = Map.fetch!(state.tables, mt_id)
+
+        case Map.get(mt.data, "__call") do
+          nil ->
+            raise TypeError,
+              value: "attempt to call a #{Value.type_name(other)} value",
+              error_kind: :call_non_function,
+              value_type: value_type(other)
+
+          call_mm ->
+            call_function(call_mm, [other | args], state)
+        end
+    end
   end
 
   # Break instruction - signal to exit loop
@@ -513,13 +531,34 @@ defmodule Lua.VM.Executor do
             value_type: nil
 
         other ->
-          raise TypeError,
-            value: "attempt to call a #{Value.type_name(other)} value",
-            source: proto.source,
-            call_stack: state.call_stack,
-            line: Map.get(state, :current_line),
-            error_kind: :call_non_function,
-            value_type: value_type(other)
+          # Check for __call metamethod
+          case get_metatable(other, state) do
+            nil ->
+              raise TypeError,
+                value: "attempt to call a #{Value.type_name(other)} value",
+                source: proto.source,
+                call_stack: state.call_stack,
+                line: Map.get(state, :current_line),
+                error_kind: :call_non_function,
+                value_type: value_type(other)
+
+            {:tref, mt_id} ->
+              mt = Map.fetch!(state.tables, mt_id)
+
+              case Map.get(mt.data, "__call") do
+                nil ->
+                  raise TypeError,
+                    value: "attempt to call a #{Value.type_name(other)} value",
+                    source: proto.source,
+                    call_stack: state.call_stack,
+                    line: Map.get(state, :current_line),
+                    error_kind: :call_non_function,
+                    value_type: value_type(other)
+
+                call_mm ->
+                  call_function(call_mm, [other | args], state)
+              end
+          end
       end
 
     # result_count == -1 means "return all results" (used in return f() position)
@@ -831,38 +870,10 @@ defmodule Lua.VM.Executor do
 
   # get_table — R[dest] = table[R[key_reg]]
   defp do_execute([{:get_table, dest, table_reg, key_reg} | rest], regs, upvalues, proto, state) do
-    {:tref, id} = elem(regs, table_reg)
+    table_val = elem(regs, table_reg)
     key = elem(regs, key_reg)
-    table = Map.fetch!(state.tables, id)
 
-    value =
-      case Map.get(table.data, key) do
-        nil ->
-          # Key not found, check for __index metamethod
-          case table.metatable do
-            nil ->
-              nil
-
-            {:tref, mt_id} ->
-              mt = Map.fetch!(state.tables, mt_id)
-
-              case Map.get(mt.data, "__index") do
-                nil ->
-                  nil
-
-                {:tref, _} = index_table ->
-                  index_table_data = State.get_table(state, index_table).data
-                  Map.get(index_table_data, key)
-
-                _other ->
-                  # __index can also be a function, but we don't support that yet
-                  nil
-              end
-          end
-
-        v ->
-          v
-      end
+    {value, state} = index_value(table_val, key, state)
 
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state)
@@ -870,88 +881,19 @@ defmodule Lua.VM.Executor do
 
   # set_table — table[R[key_reg]] = R[value_reg]
   defp do_execute([{:set_table, table_reg, key_reg, value_reg} | rest], regs, upvalues, proto, state) do
-    {:tref, id} = elem(regs, table_reg)
+    {:tref, _} = elem(regs, table_reg)
     key = elem(regs, key_reg)
     value = elem(regs, value_reg)
-    table = Map.fetch!(state.tables, id)
 
-    state =
-      if Map.has_key?(table.data, key) do
-        # Key exists, update directly
-        State.update_table(state, {:tref, id}, fn table ->
-          %{table | data: Map.put(table.data, key, value)}
-        end)
-      else
-        # Key doesn't exist, check for __newindex metamethod
-        case table.metatable do
-          nil ->
-            # No metatable, just set the value
-            State.update_table(state, {:tref, id}, fn table ->
-              %{table | data: Map.put(table.data, key, value)}
-            end)
-
-          {:tref, mt_id} ->
-            mt = Map.fetch!(state.tables, mt_id)
-
-            case Map.get(mt.data, "__newindex") do
-              nil ->
-                # No __newindex, just set the value
-                State.update_table(state, {:tref, id}, fn table ->
-                  %{table | data: Map.put(table.data, key, value)}
-                end)
-
-              {:tref, _} = newindex_table ->
-                # __newindex is a table, set the value in that table
-                State.update_table(state, newindex_table, fn table ->
-                  %{table | data: Map.put(table.data, key, value)}
-                end)
-
-              _other ->
-                # __newindex can also be a function, but we don't support that yet
-                # For now, just set the value directly
-                State.update_table(state, {:tref, id}, fn table ->
-                  %{table | data: Map.put(table.data, key, value)}
-                end)
-            end
-        end
-      end
-
+    state = table_newindex(elem(regs, table_reg), key, value, state)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
   # get_field — R[dest] = table[name] (string key literal)
   defp do_execute([{:get_field, dest, table_reg, name} | rest], regs, upvalues, proto, state) do
-    {:tref, id} = elem(regs, table_reg)
-    table = Map.fetch!(state.tables, id)
+    table_val = elem(regs, table_reg)
 
-    value =
-      case Map.get(table.data, name) do
-        nil ->
-          # Key not found, check for __index metamethod
-          case table.metatable do
-            nil ->
-              nil
-
-            {:tref, mt_id} ->
-              mt = Map.fetch!(state.tables, mt_id)
-
-              case Map.get(mt.data, "__index") do
-                nil ->
-                  nil
-
-                {:tref, _} = index_table ->
-                  index_table_data = State.get_table(state, index_table).data
-                  Map.get(index_table_data, name)
-
-                _other ->
-                  # __index can also be a function, but we don't support that yet
-                  nil
-              end
-          end
-
-        v ->
-          v
-      end
+    {value, state} = index_value(table_val, name, state)
 
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state)
@@ -959,51 +901,10 @@ defmodule Lua.VM.Executor do
 
   # set_field — table[name] = R[value_reg]
   defp do_execute([{:set_field, table_reg, name, value_reg} | rest], regs, upvalues, proto, state) do
-    {:tref, id} = elem(regs, table_reg)
+    {:tref, _} = elem(regs, table_reg)
     value = elem(regs, value_reg)
-    table = Map.fetch!(state.tables, id)
 
-    state =
-      if Map.has_key?(table.data, name) do
-        # Key exists, update directly
-        State.update_table(state, {:tref, id}, fn table ->
-          %{table | data: Map.put(table.data, name, value)}
-        end)
-      else
-        # Key doesn't exist, check for __newindex metamethod
-        case table.metatable do
-          nil ->
-            # No metatable, just set the value
-            State.update_table(state, {:tref, id}, fn table ->
-              %{table | data: Map.put(table.data, name, value)}
-            end)
-
-          {:tref, mt_id} ->
-            mt = Map.fetch!(state.tables, mt_id)
-
-            case Map.get(mt.data, "__newindex") do
-              nil ->
-                # No __newindex, just set the value
-                State.update_table(state, {:tref, id}, fn table ->
-                  %{table | data: Map.put(table.data, name, value)}
-                end)
-
-              {:tref, _} = newindex_table ->
-                # __newindex is a table, set the value in that table
-                State.update_table(state, newindex_table, fn table ->
-                  %{table | data: Map.put(table.data, name, value)}
-                end)
-
-              _other ->
-                # __newindex can also be a function, but we don't support that yet
-                # For now, just set the value directly
-                State.update_table(state, {:tref, id}, fn table ->
-                  %{table | data: Map.put(table.data, name, value)}
-                end)
-            end
-        end
-      end
-
+    state = table_newindex(elem(regs, table_reg), name, value, state)
     do_execute(rest, regs, upvalues, proto, state)
   end
 
@@ -1060,9 +961,8 @@ defmodule Lua.VM.Executor do
   # self — R[base+1] = R[obj_reg], R[base] = R[obj_reg]["method"]
   defp do_execute([{:self, base, obj_reg, method_name} | rest], regs, upvalues, proto, state) do
     obj = elem(regs, obj_reg)
-    {:tref, id} = obj
-    table = Map.fetch!(state.tables, id)
-    func = Map.get(table.data, method_name)
+    {func, state} = index_value(obj, method_name, state)
+
     regs = put_elem(regs, base + 1, obj)
     regs = put_elem(regs, base, func)
     do_execute(rest, regs, upvalues, proto, state)
@@ -1147,14 +1047,35 @@ defmodule Lua.VM.Executor do
       value_type: nil
   end
 
-  defp call_value(other, _args, proto, state) do
-    raise TypeError,
-      value: "attempt to call a #{Value.type_name(other)} value",
-      source: proto.source,
-      call_stack: state.call_stack,
-      line: Map.get(state, :current_line),
-      error_kind: :call_non_function,
-      value_type: value_type(other)
+  defp call_value(other, args, proto, state) do
+    # Check for __call metamethod
+    case get_metatable(other, state) do
+      nil ->
+        raise TypeError,
+          value: "attempt to call a #{Value.type_name(other)} value",
+          source: proto.source,
+          call_stack: state.call_stack,
+          line: Map.get(state, :current_line),
+          error_kind: :call_non_function,
+          value_type: value_type(other)
+
+      {:tref, mt_id} ->
+        mt = Map.fetch!(state.tables, mt_id)
+
+        case Map.get(mt.data, "__call") do
+          nil ->
+            raise TypeError,
+              value: "attempt to call a #{Value.type_name(other)} value",
+              source: proto.source,
+              call_stack: state.call_stack,
+              line: Map.get(state, :current_line),
+              error_kind: :call_non_function,
+              value_type: value_type(other)
+
+          call_mm ->
+            call_value(call_mm, [other | args], proto, state)
+        end
+    end
   end
 
   # Coerce a value to a string for concatenation (Lua semantics: numbers become strings)
@@ -1170,12 +1091,136 @@ defmodule Lua.VM.Executor do
   end
 
   # Metamethod support
+
+  # Depth limit for metamethod chains (prevents infinite loops)
+  @metamethod_chain_limit 200
+
   defp get_metatable({:tref, id}, state) do
     table = Map.fetch!(state.tables, id)
     table.metatable
   end
 
+  defp get_metatable(value, state) when is_binary(value) do
+    Map.get(state.metatables, "string")
+  end
+
   defp get_metatable(_value, _state), do: nil
+
+  # Index any value — dispatches to table_index or type metatable __index, or raises
+  defp index_value({:tref, _} = tref, key, state) do
+    table_index(tref, key, state)
+  end
+
+  defp index_value(value, key, state) do
+    case get_metatable(value, state) do
+      nil ->
+        raise TypeError,
+          value: "attempt to index a #{Value.type_name(value)} value",
+          error_kind: :index_non_table,
+          value_type: value_type(value)
+
+      {:tref, mt_id} ->
+        mt = Map.fetch!(state.tables, mt_id)
+
+        case Map.get(mt.data, "__index") do
+          nil ->
+            raise TypeError,
+              value: "attempt to index a #{Value.type_name(value)} value",
+              error_kind: :index_non_table,
+              value_type: value_type(value)
+
+          {:tref, _} = idx_tbl ->
+            table_index(idx_tbl, key, state)
+
+          func when is_tuple(func) ->
+            {results, state} = call_function(func, [value, key], state)
+            {List.first(results), state}
+        end
+    end
+  end
+
+  # Resolve table[key] with __index metamethod chain support
+  defp table_index({:tref, id}, key, state, depth \\ 0) do
+    if depth >= @metamethod_chain_limit do
+      raise RuntimeError, value: "'__index' chain too long; possible loop"
+    end
+
+    table = Map.fetch!(state.tables, id)
+
+    case Map.get(table.data, key) do
+      nil ->
+        # Key not found, check for __index metamethod
+        case table.metatable do
+          nil ->
+            {nil, state}
+
+          {:tref, mt_id} ->
+            mt = Map.fetch!(state.tables, mt_id)
+
+            case Map.get(mt.data, "__index") do
+              nil ->
+                {nil, state}
+
+              {:tref, _} = index_table ->
+                # __index is a table, recursively look up in it
+                table_index(index_table, key, state, depth + 1)
+
+              func when is_tuple(func) ->
+                # __index is a function, call it with (table, key)
+                {results, state} = call_function(func, [{:tref, id}, key], state)
+                {List.first(results), state}
+            end
+        end
+
+      v ->
+        {v, state}
+    end
+  end
+
+  # Resolve table[key] = value with __newindex metamethod chain support
+  defp table_newindex({:tref, id}, key, value, state, depth \\ 0) do
+    if depth >= @metamethod_chain_limit do
+      raise RuntimeError, value: "'__newindex' chain too long; possible loop"
+    end
+
+    table = Map.fetch!(state.tables, id)
+
+    if Map.has_key?(table.data, key) do
+      # Key exists, update directly (rawset)
+      State.update_table(state, {:tref, id}, fn t ->
+        %{t | data: Map.put(t.data, key, value)}
+      end)
+    else
+      # Key doesn't exist, check for __newindex metamethod
+      case table.metatable do
+        nil ->
+          # No metatable, just set the value
+          State.update_table(state, {:tref, id}, fn t ->
+            %{t | data: Map.put(t.data, key, value)}
+          end)
+
+        {:tref, mt_id} ->
+          mt = Map.fetch!(state.tables, mt_id)
+
+          case Map.get(mt.data, "__newindex") do
+            nil ->
+              # No __newindex, just set the value
+              State.update_table(state, {:tref, id}, fn t ->
+                %{t | data: Map.put(t.data, key, value)}
+              end)
+
+            {:tref, _} = newindex_table ->
+              # __newindex is a table, set in that table (with chaining)
+              table_newindex(newindex_table, key, value, state, depth + 1)
+
+            func when is_tuple(func) ->
+              # __newindex is a function, call it with (table, key, value)
+              {_results, state} = call_function(func, [{:tref, id}, key, value], state)
+              state
+          end
+      end
+    end
+  end
 
   defp try_binary_metamethod(metamethod_name, a, b, state, default_fn) do
     # Try a's metatable first
