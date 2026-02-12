@@ -23,7 +23,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = Stdlib.install(State.new())
 
-      assert {:ok, [4.0, -3.0, 5.0], _state} = VM.execute(proto, state)
+      assert {:ok, [4, -3, 5], _state} = VM.execute(proto, state)
     end
 
     test "math.floor rounds down" do
@@ -32,7 +32,7 @@ defmodule Lua.VM.Stdlib.MathTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = Stdlib.install(State.new())
 
-      assert {:ok, [3.0, -4.0, 5.0], _state} = VM.execute(proto, state)
+      assert {:ok, [3, -4, 5], _state} = VM.execute(proto, state)
     end
 
     test "math.max returns maximum" do
