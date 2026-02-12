@@ -414,6 +414,325 @@ defmodule Lua.VM.StringTest do
     end
   end
 
+  describe "string.find" do
+    test "string.find with plain text" do
+      code = ~s{return string.find("hello world", "world")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [7, 11], _state} = VM.execute(proto, state)
+    end
+
+    test "string.find with plain flag" do
+      code = ~s{return string.find("hello.world", ".", 1, true)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [6, 6], _state} = VM.execute(proto, state)
+    end
+
+    test "string.find returns nil on no match" do
+      code = ~s{return string.find("hello", "xyz")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [nil], _state} = VM.execute(proto, state)
+    end
+
+    test "string.find with character class pattern" do
+      code = ~s{return string.find("abc123", "%d+")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [4, 6], _state} = VM.execute(proto, state)
+    end
+
+    test "string.find with init position" do
+      code = ~s{return string.find("hello hello", "hello", 2)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [7, 11], _state} = VM.execute(proto, state)
+    end
+
+    test "string.find with captures" do
+      code = ~s{return string.find("2025-01-15", "(%d+)-(%d+)-(%d+)")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [1, 10, "2025", "01", "15"], _state} = VM.execute(proto, state)
+    end
+
+    test "string.find with anchored pattern" do
+      code = ~s{return string.find("hello world", "^hello")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [1, 5], _state} = VM.execute(proto, state)
+    end
+
+    test "string.find with end anchor" do
+      code = ~s{return string.find("hello world", "world$")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [7, 11], _state} = VM.execute(proto, state)
+    end
+  end
+
+  describe "string.match" do
+    test "string.match returns whole match without captures" do
+      code = ~s{return string.match("hello", "%a+")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["hello"], _state} = VM.execute(proto, state)
+    end
+
+    test "string.match returns captures" do
+      code = ~s{return string.match("2025-01-15", "(%d+)-(%d+)-(%d+)")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["2025", "01", "15"], _state} = VM.execute(proto, state)
+    end
+
+    test "string.match returns nil on no match" do
+      code = ~s{return string.match("hello", "%d+")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [nil], _state} = VM.execute(proto, state)
+    end
+
+    test "string.match with init position" do
+      code = ~s{return string.match("abc123def456", "%d+", 7)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["456"], _state} = VM.execute(proto, state)
+    end
+
+    test "string.match with character class set" do
+      code = ~s{return string.match("hello world", "[%a]+")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["hello"], _state} = VM.execute(proto, state)
+    end
+  end
+
+  describe "string.gmatch" do
+    test "string.gmatch iterates over matches" do
+      code = """
+      local result = ""
+      for w in string.gmatch("hello world foo", "%a+") do
+        result = result .. w .. ","
+      end
+      return result
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["hello,world,foo,"], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gmatch with captures" do
+      code = """
+      local keys = ""
+      local vals = ""
+      for k, v in string.gmatch("a=1&b=2&c=3", "(%a+)=(%d+)") do
+        keys = keys .. k
+        vals = vals .. v
+      end
+      return keys, vals
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["abc", "123"], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gmatch with no matches" do
+      code = """
+      local count = 0
+      for w in string.gmatch("hello", "%d+") do
+        count = count + 1
+      end
+      return count
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [0], _state} = VM.execute(proto, state)
+    end
+  end
+
+  describe "string.gsub" do
+    test "string.gsub with string replacement" do
+      code = ~s{return string.gsub("hello world", "world", "lua")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["hello lua", 1], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub replaces all occurrences" do
+      code = ~s{return string.gsub("aaa", "a", "b")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["bbb", 3], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub with max replacements" do
+      code = ~s{return string.gsub("aaa", "a", "b", 2)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["bba", 2], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub with capture references" do
+      code = ~s{return string.gsub("hello world", "(%a+)", "<%1>")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["<hello> <world>", 2], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub with pattern" do
+      code = ~s{return string.gsub("abc123def", "%d+", "NUM")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["abcNUMdef", 1], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub with function replacement" do
+      code = """
+      local result = string.gsub("abc", ".", function(c)
+        return string.upper(c)
+      end)
+      return result
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["ABC"], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub returns count with no matches" do
+      code = ~s{return string.gsub("hello", "%d", "x")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["hello", 0], _state} = VM.execute(proto, state)
+    end
+  end
+
+  describe "pattern matching features" do
+    test "dot matches any character" do
+      code = ~s{return string.match("abc", "a.c")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["abc"], _state} = VM.execute(proto, state)
+    end
+
+    test "character class %a matches letters" do
+      code = ~s{return string.match("hello123", "%a+")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["hello"], _state} = VM.execute(proto, state)
+    end
+
+    test "character class %d matches digits" do
+      code = ~s{return string.match("hello123", "%d+")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["123"], _state} = VM.execute(proto, state)
+    end
+
+    test "character class %s matches whitespace" do
+      code = ~s{return string.find("hello world", "%s")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [6, 6], _state} = VM.execute(proto, state)
+    end
+
+    test "character class %w matches alphanumeric" do
+      code = ~s{return string.match("abc123!@#", "%w+")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["abc123"], _state} = VM.execute(proto, state)
+    end
+
+    test "negated class %D matches non-digits" do
+      code = ~s{return string.match("abc123", "%D+")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["abc"], _state} = VM.execute(proto, state)
+    end
+
+    test "character set [abc]" do
+      code = ~s{return string.match("xbz", "[abc]")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["b"], _state} = VM.execute(proto, state)
+    end
+
+    test "negated set [^abc]" do
+      code = ~s{return string.match("abc xyz", "[^abc ]+")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["xyz"], _state} = VM.execute(proto, state)
+    end
+
+    test "range in set [a-z]" do
+      code = ~s{return string.match("Hello", "[a-z]+")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["ello"], _state} = VM.execute(proto, state)
+    end
+
+    test "lazy quantifier -" do
+      code = ~s{return string.match("<tag>content</tag>", "<(.-)>")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["tag"], _state} = VM.execute(proto, state)
+    end
+
+    test "optional quantifier ?" do
+      code = ~s{return string.match("colour", "colou?r")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["colour"], _state} = VM.execute(proto, state)
+    end
+
+    test "escaped special character %." do
+      code = ~s{return string.find("file.txt", "%.")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [5, 5], _state} = VM.execute(proto, state)
+    end
+  end
+
   # Helper to escape strings for Lua code
   defp escape_string(str) do
     str

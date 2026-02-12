@@ -18,16 +18,20 @@ defmodule Lua.VM.Stdlib.String do
   - `string.char(...)` - creates string from byte values
   - `string.format(fmt, ...)` - C-style string formatting
 
-  ## Pattern Matching (Not Yet Implemented)
+  ## Pattern Matching
 
-  The following functions require Lua's pattern matching engine and are deferred:
-  - `string.find/4`, `string.match/3`, `string.gmatch/2`, `string.gsub/4`
+  - `string.find(s, pattern [, init [, plain]])` - find pattern in string
+  - `string.match(s, pattern [, init])` - match pattern and return captures
+  - `string.gmatch(s, pattern)` - iterate over all matches
+  - `string.gsub(s, pattern, repl [, n])` - global substitution
   """
 
   @behaviour Lua.VM.Stdlib.Library
 
   alias Lua.VM.ArgumentError
+  alias Lua.VM.Executor
   alias Lua.VM.State
+  alias Lua.VM.Stdlib.Pattern
   alias Lua.VM.Stdlib.Util
 
   @impl true
@@ -42,7 +46,11 @@ defmodule Lua.VM.Stdlib.String do
       "reverse" => {:native_func, &string_reverse/2},
       "byte" => {:native_func, &string_byte/2},
       "char" => {:native_func, &string_char/2},
-      "format" => {:native_func, &string_format/2}
+      "format" => {:native_func, &string_format/2},
+      "find" => {:native_func, &string_find/2},
+      "match" => {:native_func, &string_match/2},
+      "gmatch" => {:native_func, &string_gmatch/2},
+      "gsub" => {:native_func, &string_gsub/2}
     }
 
     # Create the string table in VM state
@@ -418,6 +426,140 @@ defmodule Lua.VM.Stdlib.String do
       expected: "string",
       details: "for %q"
   end
+
+  # string.find(s, pattern [, init [, plain]])
+  defp string_find([s, pattern | rest], state) when is_binary(s) and is_binary(pattern) do
+    init = Enum.at(rest, 0, 1)
+    plain = Enum.at(rest, 1, false)
+
+    init = if is_number(init), do: trunc(init), else: 1
+
+    if plain == true do
+      # Plain substring search
+      search_pos = max(init - 1, 0)
+
+      case :binary.match(s, pattern, scope: {search_pos, byte_size(s) - search_pos}) do
+        {start, len} ->
+          {[start + 1, start + len], state}
+
+        :nomatch ->
+          {[nil], state}
+      end
+    else
+      case Pattern.find(s, pattern, init) do
+        {start, stop, captures} ->
+          {[start, stop | captures], state}
+
+        :nomatch ->
+          {[nil], state}
+      end
+    end
+  end
+
+  defp string_find([other | _], _state) when not is_binary(other) do
+    raise_string_expected(1, "find", other)
+  end
+
+  defp string_find([], _state), do: raise_arg_expected(1, "find")
+
+  # string.match(s, pattern [, init])
+  defp string_match([s, pattern | rest], state) when is_binary(s) and is_binary(pattern) do
+    init = Enum.at(rest, 0, 1)
+    init = if is_number(init), do: trunc(init), else: 1
+
+    case Pattern.match(s, pattern, init) do
+      {:match, captures} -> {captures, state}
+      :nomatch -> {[nil], state}
+    end
+  end
+
+  defp string_match([other | _], _state) when not is_binary(other) do
+    raise_string_expected(1, "match", other)
+  end
+
+  defp string_match([], _state), do: raise_arg_expected(1, "match")
+
+  # string.gmatch(s, pattern) - returns iterator function
+  defp string_gmatch([s, pattern | _], state) when is_binary(s) and is_binary(pattern) do
+    # Pre-compute all matches, return an iterator that yields them one by one
+    matches = Pattern.gmatch(s, pattern)
+    idx_ref = make_ref()
+    state = %{state | private: Map.put(state.private, idx_ref, {matches, 0})}
+
+    iter_func =
+      {:native_func,
+       fn _args, st ->
+         {match_list, current_idx} = Map.get(st.private, idx_ref)
+
+         if current_idx >= length(match_list) do
+           {[nil], st}
+         else
+           result = Enum.at(match_list, current_idx)
+           st = %{st | private: Map.put(st.private, idx_ref, {match_list, current_idx + 1})}
+           {result, st}
+         end
+       end}
+
+    {[iter_func], state}
+  end
+
+  defp string_gmatch([other | _], _state) when not is_binary(other) do
+    raise_string_expected(1, "gmatch", other)
+  end
+
+  defp string_gmatch([], _state), do: raise_arg_expected(1, "gmatch")
+
+  # string.gsub(s, pattern, repl [, n])
+  defp string_gsub([s, pattern, repl | rest], state) when is_binary(s) and is_binary(pattern) do
+    max_n = Enum.at(rest, 0)
+    max_n = if is_number(max_n), do: trunc(max_n)
+
+    # Determine replacement function
+    repl_fn =
+      cond do
+        is_binary(repl) ->
+          repl
+
+        is_function(repl, 1) ->
+          repl
+
+        match?({:tref, _}, repl) ->
+          # Table replacement: look up match in table
+          fn [match | _] ->
+            table = State.get_table(state, repl)
+            Map.get(table.data, match, match)
+          end
+
+        match?({:lua_closure, _, _}, repl) ->
+          fn args ->
+            {results, _state} = Executor.call_function(repl, args, state)
+            result = List.first(results)
+            if result == nil or result == false, do: false, else: result
+          end
+
+        match?({:native_func, _}, repl) ->
+          fn args ->
+            {results, _state} = Executor.call_function(repl, args, state)
+            result = List.first(results)
+            if result == nil or result == false, do: false, else: result
+          end
+
+        true ->
+          raise ArgumentError,
+            function_name: "string.gsub",
+            arg_num: 3,
+            expected: "string/function/table"
+      end
+
+    {result, count} = Pattern.gsub(s, pattern, repl_fn, max_n)
+    {[result, count], state}
+  end
+
+  defp string_gsub([other | _], _state) when not is_binary(other) do
+    raise_string_expected(1, "gsub", other)
+  end
+
+  defp string_gsub([], _state), do: raise_arg_expected(1, "gsub")
 
   # Helper: convert Lua 1-based index to 0-based, handle negative indices
   defp normalize_index(idx, _len) when idx > 0, do: idx - 1
