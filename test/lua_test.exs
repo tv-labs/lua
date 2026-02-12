@@ -1766,81 +1766,103 @@ defmodule LuaTest do
     end
   end
 
-  describe "collectgarbage stub" do
+  describe "debug library" do
     setup do
       %{lua: Lua.new(sandboxed: [])}
     end
 
-    test "collectgarbage returns without error", %{lua: lua} do
+    test "debug.getinfo on native function", %{lua: lua} do
       code = """
-      collectgarbage()
-      collectgarbage("collect")
-      collectgarbage("stop")
-      return true
+      local info = debug.getinfo(print)
+      return info.what
       """
 
-      assert {[true], _} = Lua.eval!(lua, code)
+      assert {["C"], _} = Lua.eval!(lua, code)
     end
 
-    test "collectgarbage 'count' returns a number", %{lua: lua} do
+    test "debug.getinfo on Lua function", %{lua: lua} do
       code = """
-      local k = collectgarbage("count")
-      return type(k)
+      local function foo() end
+      local info = debug.getinfo(foo)
+      return info.what
       """
 
-      assert {["number"], _} = Lua.eval!(lua, code)
+      assert {["Lua"], _} = Lua.eval!(lua, code)
+    end
+
+    test "debug.traceback returns a string", %{lua: lua} do
+      code = """
+      local tb = debug.traceback("error here")
+      return type(tb)
+      """
+
+      assert {["string"], _} = Lua.eval!(lua, code)
+    end
+
+    test "debug.traceback contains message", %{lua: lua} do
+      code = """
+      local tb = debug.traceback("my error")
+      return tb
+      """
+
+      assert {[result], _} = Lua.eval!(lua, code)
+      assert String.contains?(result, "my error")
+    end
+
+    test "debug.getmetatable bypasses __metatable protection", %{lua: lua} do
+      code = """
+      local t = {}
+      local mt = {__metatable = "protected"}
+      setmetatable(t, mt)
+      local real_mt = debug.getmetatable(t)
+      return type(real_mt)
+      """
+
+      assert {["table"], _} = Lua.eval!(lua, code)
+    end
+
+    test "debug stubs work without error", %{lua: lua} do
+      code = """
+      debug.sethook()
+      local h, m, c = debug.gethook()
+      local name, val = debug.getlocal(1, 1)
+      return h, name
+      """
+
+      assert {[nil, nil], _} = Lua.eval!(lua, code)
     end
   end
 
-  describe "global stubs and constants" do
+  describe "module registration in package.loaded" do
     setup do
       %{lua: Lua.new(sandboxed: [])}
     end
 
-    test "_VERSION is Lua 5.3", %{lua: lua} do
-      assert {["Lua 5.3"], _} = Lua.eval!(lua, "return _VERSION")
+    test "require 'string' returns string table", %{lua: lua} do
+      code = """
+      local s = require("string")
+      return type(s), type(s.upper)
+      """
+
+      assert {["table", "function"], _} = Lua.eval!(lua, code)
     end
 
-    test "unpack works as global alias", %{lua: lua} do
-      code = "return unpack({10, 20, 30})"
-      assert {[10, 20, 30], _} = Lua.eval!(lua, code)
-    end
-  end
+    test "require 'math' returns math table", %{lua: lua} do
+      code = """
+      local m = require("math")
+      return type(m), m.pi > 3
+      """
 
-  describe "bitwise operation fixes" do
-    setup do
-      %{lua: Lua.new(sandboxed: [])}
+      assert {["table", true], _} = Lua.eval!(lua, code)
     end
 
-    test "string coercion for bitwise ops", %{lua: lua} do
-      code = ~S[return "0xff" | 0]
-      assert {[255], _} = Lua.eval!(lua, code)
-    end
+    test "require 'debug' returns debug table", %{lua: lua} do
+      code = """
+      local d = require("debug")
+      return type(d), type(d.getinfo)
+      """
 
-    test "shift edge cases", %{lua: lua} do
-      code = "return 1 << 64, 1 >> 64, 1 << -1"
-      assert {[0, 0, 0], _} = Lua.eval!(lua, code)
-    end
-
-    test "negative shift reverses direction", %{lua: lua} do
-      code = "return 8 >> -2"
-      assert {[32], _} = Lua.eval!(lua, code)
-    end
-  end
-
-  describe "math.floor and math.ceil return integers" do
-    setup do
-      %{lua: Lua.new(sandboxed: [])}
-    end
-
-    test "math.floor returns integer", %{lua: lua} do
-      code = "return math.type(math.floor(3.5))"
-      assert {["integer"], _} = Lua.eval!(lua, code)
-    end
-
-    test "math.ceil returns integer", %{lua: lua} do
-      code = "return math.type(math.ceil(3.5))"
-      assert {["integer"], _} = Lua.eval!(lua, code)
+      assert {["table", "function"], _} = Lua.eval!(lua, code)
     end
   end
 

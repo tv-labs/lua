@@ -35,6 +35,9 @@ defmodule Lua.VM.Stdlib.String do
   alias Lua.VM.Stdlib.Util
 
   @impl true
+  def lib_name, do: "string"
+
+  @impl true
   def install(%State{} = state) do
     # Create string table with all functions
     string_table = %{

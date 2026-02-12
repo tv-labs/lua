@@ -44,11 +44,23 @@ defmodule Lua.VM.Stdlib do
     |> State.register_function("dofile", &lua_dofile/2)
     |> State.set_global("_VERSION", "Lua 5.3")
     |> install_package_table()
-    |> Lua.VM.Stdlib.String.install()
-    |> Lua.VM.Stdlib.Math.install()
-    |> Lua.VM.Stdlib.Table.install()
+    |> install_library(Lua.VM.Stdlib.String)
+    |> install_library(Lua.VM.Stdlib.Math)
+    |> install_library(Lua.VM.Stdlib.Table)
+    |> install_library(Lua.VM.Stdlib.Debug)
     |> install_unpack_alias()
     |> install_global_g()
+  end
+
+  # Install a stdlib library module and register it in package.loaded
+  defp install_library(state, module) do
+    state = module.install(state)
+    name = module.lib_name()
+
+    case Map.get(state.globals, name) do
+      {:tref, _} = tref -> cache_module_result(state, name, tref)
+      _ -> state
+    end
   end
 
   # Install _G global table as a proxy with __index/__newindex metamethods

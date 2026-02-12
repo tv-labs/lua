@@ -23,6 +23,9 @@ defmodule Lua.VM.Stdlib.Table do
   alias Lua.VM.Stdlib.Util
 
   @impl true
+  def lib_name, do: "table"
+
+  @impl true
   def install(state) do
     table_table = %{
       "insert" => {:native_func, &table_insert/2},
