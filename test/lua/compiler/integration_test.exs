@@ -1908,4 +1908,543 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [42]
     end
   end
+
+  describe "multi-assignment" do
+    test "basic multi-assignment" do
+      code = """
+      local a, b, c
+      a, b, c = 1, 2, 3
+      return a, b, c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1, 2, 3], _state} = VM.execute(proto)
+    end
+
+    test "more targets than values fills with nil" do
+      code = """
+      local a, b, c
+      a, b, c = 1, 2
+      return a, b, c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1, 2, nil], _state} = VM.execute(proto)
+    end
+
+    test "more values than targets discards extras" do
+      code = """
+      local a, b
+      a, b = 1, 2, 3
+      return a, b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1, 2], _state} = VM.execute(proto)
+    end
+
+    @tag :pending
+    test "multi-assign evaluates all RHS before assigning (swap)" do
+      # Lua semantics require all RHS to be evaluated before any assignment.
+      # This requires snapshotting RHS values into temp registers.
+      code = """
+      local a, b = 10, 20
+      a, b = b, a
+      return a, b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [20, 10], _state} = VM.execute(proto)
+    end
+
+    test "multi-assign with global variables" do
+      code = """
+      a, b = 10, 20
+      return a, b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [10, 20], _state} = VM.execute(proto)
+    end
+
+    test "multi-assign to table fields" do
+      code = """
+      local t = {}
+      t.x, t.y = 1, 2
+      return t.x, t.y
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1, 2], _state} = VM.execute(proto)
+    end
+
+    test "multi-assign to table indices" do
+      code = """
+      local t = {}
+      t[1], t[2], t[3] = 10, 20, 30
+      return t[1], t[2], t[3]
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [10, 20, 30], _state} = VM.execute(proto)
+    end
+
+    test "multi-assign with function call expanding multiple returns" do
+      code = """
+      local function two_vals()
+        return 10, 20
+      end
+      local a, b
+      a, b = two_vals()
+      return a, b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [10, 20], _state} = VM.execute(proto)
+    end
+
+    test "multi-assign with call expansion fills remaining targets" do
+      code = """
+      local function three_vals()
+        return 1, 2, 3
+      end
+      local a, b, c
+      a, b, c = three_vals()
+      return a, b, c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1, 2, 3], _state} = VM.execute(proto)
+    end
+
+    test "multi-assign with call in last position and preceding values" do
+      code = """
+      local function two_vals()
+        return 20, 30
+      end
+      local a, b, c
+      a, b, c = 10, two_vals()
+      return a, b, c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [10, 20, 30], _state} = VM.execute(proto)
+    end
+
+    test "multi-assign with single value to multiple targets" do
+      code = """
+      local a, b, c
+      a, b, c = 42
+      return a, b, c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [42, nil, nil], _state} = VM.execute(proto)
+    end
+  end
+
+  describe "local multi-assignment with multiple returns" do
+    test "local multi-assign with function returning multiple values" do
+      code = """
+      local function two_vals()
+        return 10, 20
+      end
+      local a, b = two_vals()
+      return a, b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [10, 20], _state} = VM.execute(proto)
+    end
+
+    test "local multi-assign with call expanding to fill all names" do
+      code = """
+      local function three_vals()
+        return 1, 2, 3
+      end
+      local a, b, c = three_vals()
+      return a, b, c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1, 2, 3], _state} = VM.execute(proto)
+    end
+
+    test "local multi-assign: preceding values plus call expansion" do
+      code = """
+      local function two_vals()
+        return 20, 30
+      end
+      local a, b, c = 10, two_vals()
+      return a, b, c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [10, 20, 30], _state} = VM.execute(proto)
+    end
+
+    test "local multi-assign: call returns fewer than needed fills nil" do
+      code = """
+      local function one_val()
+        return 42
+      end
+      local a, b, c = one_val()
+      return a, b, c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [42, nil, nil], _state} = VM.execute(proto)
+    end
+
+    test "local multi-assign: call not in last position is truncated to one" do
+      code = """
+      local function two_vals()
+        return 10, 20
+      end
+      local a, b = two_vals(), 99
+      return a, b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [10, 99], _state} = VM.execute(proto)
+    end
+
+    test "local multi-assign: excess return values are discarded" do
+      code = """
+      local function three_vals()
+        return 1, 2, 3
+      end
+      local a, b = three_vals()
+      return a, b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1, 2], _state} = VM.execute(proto)
+    end
+
+    test "local multi-assign followed by more code" do
+      code = """
+      local function vals()
+        return 10, 20
+      end
+      local a, b = vals()
+      local c = a + b
+      return c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [30], _state} = VM.execute(proto)
+    end
+  end
+
+  describe "break statement" do
+    test "break exits while loop" do
+      code = """
+      local i = 0
+      while true do
+        i = i + 1
+        if i == 5 then break end
+      end
+      return i
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [5], _state} = VM.execute(proto)
+    end
+
+    test "break exits repeat loop" do
+      code = """
+      local i = 0
+      repeat
+        i = i + 1
+        if i == 3 then break end
+      until false
+      return i
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [3], _state} = VM.execute(proto)
+    end
+
+    test "break exits numeric for loop" do
+      code = """
+      local last = 0
+      for i = 1, 100 do
+        last = i
+        if i == 7 then break end
+      end
+      return last
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [7], _state} = VM.execute(proto)
+    end
+
+    test "break exits generic for loop", %{} do
+      state = Stdlib.install(VM.State.new())
+
+      code = """
+      local sum = 0
+      for i, v in ipairs({10, 20, 30, 40, 50}) do
+        sum = sum + v
+        if i == 3 then break end
+      end
+      return sum
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [60], _state} = VM.execute(proto, state)
+    end
+
+    test "break only exits innermost loop" do
+      code = """
+      local total = 0
+      for i = 1, 3 do
+        for j = 1, 10 do
+          if j > 2 then break end
+          total = total + 1
+        end
+      end
+      return total
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [6], _state} = VM.execute(proto)
+    end
+
+    test "break inside if-else within loop" do
+      code = """
+      local x = 0
+      for i = 1, 10 do
+        if i > 5 then
+          break
+        else
+          x = x + i
+        end
+      end
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      # 1+2+3+4+5 = 15
+      assert {:ok, [15], _state} = VM.execute(proto)
+    end
+
+    test "break inside elseif within loop" do
+      code = """
+      local result = 0
+      for i = 1, 100 do
+        if i == 3 then
+          result = result + 100
+        elseif i == 5 then
+          break
+        else
+          result = result + i
+        end
+      end
+      return result
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      # i=1: +1, i=2: +2, i=3: +100, i=4: +4, i=5: break
+      assert {:ok, [107], _state} = VM.execute(proto)
+    end
+
+    test "break with code after loop continues normally" do
+      code = """
+      local x = 0
+      while true do
+        x = 10
+        break
+      end
+      x = x + 5
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [15], _state} = VM.execute(proto)
+    end
+
+    test "immediate break in loop body" do
+      code = """
+      local x = 0
+      for i = 1, 1000 do
+        break
+      end
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [0], _state} = VM.execute(proto)
+    end
+  end
+
+  describe "goto and label" do
+    test "simple forward goto" do
+      code = """
+      local x = 1
+      goto skip
+      x = 2
+      ::skip::
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1], _state} = VM.execute(proto)
+    end
+
+    test "goto skips multiple statements" do
+      code = """
+      local a = 0
+      goto done
+      a = a + 1
+      a = a + 2
+      a = a + 3
+      ::done::
+      return a
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [0], _state} = VM.execute(proto)
+    end
+
+    @tag :pending
+    test "goto inside if-then jumps to label after the if block" do
+      # Requires goto to propagate out of test blocks like break does
+      code = """
+      local x = 0
+      if true then
+        goto skip
+      end
+      x = 99
+      ::skip::
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [0], _state} = VM.execute(proto)
+    end
+
+    @tag :pending
+    test "goto with label after conditional" do
+      # Requires goto propagation out of test blocks
+      code = """
+      local x = 0
+      local flag = true
+      if flag then
+        goto found
+      end
+      x = -1
+      ::found::
+      x = x + 1
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [1], _state} = VM.execute(proto)
+    end
+
+    @tag :pending
+    test "backward goto (jump to earlier label)" do
+      # Requires backward label search
+      code = """
+      local x = 0
+      goto second
+      ::first::
+      x = x + 1
+      goto done
+      ::second::
+      x = x + 10
+      goto first
+      ::done::
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [11], _state} = VM.execute(proto)
+    end
+
+    test "goto used for simple state machine" do
+      code = """
+      local result = ""
+      goto state_a
+      ::state_a::
+      result = result .. "a"
+      goto state_b
+      ::state_b::
+      result = result .. "b"
+      goto state_c
+      ::state_c::
+      result = result .. "c"
+      return result
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, ["abc"], _state} = VM.execute(proto)
+    end
+
+    test "goto label inside conditional branch" do
+      code = """
+      local x = 0
+      local cond = false
+      if cond then
+        ::target::
+        x = x + 1
+      end
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      # cond is false, so we don't enter the if branch, x stays 0
+      assert {:ok, [0], _state} = VM.execute(proto)
+    end
+
+    test "label at end of block" do
+      code = """
+      local x = 10
+      goto finish
+      x = 20
+      ::finish::
+      return x
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast)
+      assert {:ok, [10], _state} = VM.execute(proto)
+    end
+  end
 end
