@@ -281,6 +281,128 @@ defmodule Lua.VM.StringTest do
     end
   end
 
+  describe "string.format with width/precision" do
+    setup do
+      %{state: Stdlib.install(State.new())}
+    end
+
+    test "width specifier right-justifies", %{state: state} do
+      code = ~s{return string.format("%5d", 42)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["   42"], _state} = VM.execute(proto, state)
+    end
+
+    test "width specifier with left-justify flag", %{state: state} do
+      code = ~s{return string.format("%-5d", 42)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["42   "], _state} = VM.execute(proto, state)
+    end
+
+    test "width specifier with zero-pad flag", %{state: state} do
+      code = ~s{return string.format("%05d", 42)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["00042"], _state} = VM.execute(proto, state)
+    end
+
+    test "precision for floats", %{state: state} do
+      code = ~s{return string.format("%.2f", 3.14159)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["3.14"], _state} = VM.execute(proto, state)
+    end
+
+    test "precision 0 for floats", %{state: state} do
+      code = ~s{return string.format("%.0f", 3.14)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["3"], _state} = VM.execute(proto, state)
+    end
+
+    test "string precision truncation", %{state: state} do
+      code = ~s{return string.format("%.3s", "hello")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["hel"], _state} = VM.execute(proto, state)
+    end
+
+    test "%g format with fixed notation", %{state: state} do
+      code = ~s{return string.format("%g", 100000)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["100000"], _state} = VM.execute(proto, state)
+    end
+
+    test "%g format with scientific notation", %{state: state} do
+      code = ~s{return string.format("%g", 1000000)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["1e+06"], _state} = VM.execute(proto, state)
+    end
+
+    test "%e format", %{state: state} do
+      code = ~s{return string.format("%e", 100000)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      assert String.starts_with?(result, "1.0")
+      assert String.contains?(result, "e+")
+    end
+
+    test "%E format", %{state: state} do
+      code = ~s{return string.format("%E", 100000)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      assert String.starts_with?(result, "1.0")
+      assert String.contains?(result, "E+")
+    end
+
+    test "%u format for positive integer", %{state: state} do
+      code = ~s{return string.format("%u", 42)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["42"], _state} = VM.execute(proto, state)
+    end
+
+    test "zero-pad with negative number", %{state: state} do
+      code = ~s{return string.format("%06d", -42)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["-00042"], _state} = VM.execute(proto, state)
+    end
+
+    test "width with string", %{state: state} do
+      code = ~s{return string.format("%10s", "hello")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["     hello"], _state} = VM.execute(proto, state)
+    end
+
+    test "left-justify with string", %{state: state} do
+      code = ~s{return string.format("%-10s", "hello")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["hello     "], _state} = VM.execute(proto, state)
+    end
+
+    test "width and precision combined for float", %{state: state} do
+      code = ~s{return string.format("%8.2f", 3.14159)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["    3.14"], _state} = VM.execute(proto, state)
+    end
+
+    test "%02x for hex with zero padding", %{state: state} do
+      code = ~s{return string.format("%02x", 10)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["0a"], _state} = VM.execute(proto, state)
+    end
+  end
+
   describe "string table access" do
     test "string functions are accessible via string table" do
       code = """
@@ -991,6 +1113,161 @@ defmodule Lua.VM.StringTest do
     # Escape Lua pattern magic characters
     defp escape_pattern(str) do
       String.replace(str, ~r/([%^$().\[\]*+\-?])/, "%\\1")
+    end
+  end
+
+  describe "string.format property tests" do
+    setup do
+      %{state: Stdlib.install(State.new())}
+    end
+
+    defp run_format(code, state) do
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      {:ok, [result], _state} = VM.execute(proto, state)
+      result
+    end
+
+    property "%d always produces a valid integer string", %{state: state} do
+      check all(int <- integer(-10_000..10_000)) do
+        result = run_format("return string.format(\"%d\", #{int})", state)
+        assert result == Integer.to_string(int)
+      end
+    end
+
+    property "%d truncates floats to integers", %{state: state} do
+      check all(
+              int_part <- integer(-100..100),
+              frac <- integer(1..99)
+            ) do
+        float_val = int_part + frac / 100
+        result = run_format("return string.format(\"%d\", #{float_val})", state)
+        assert result == Integer.to_string(trunc(float_val))
+      end
+    end
+
+    property "%x produces valid lowercase hex", %{state: state} do
+      check all(int <- integer(0..65_535)) do
+        result = run_format("return string.format(\"%x\", #{int})", state)
+        assert Regex.match?(~r/^[0-9a-f]+$/, result)
+        {parsed, ""} = Integer.parse(result, 16)
+        assert parsed == int
+      end
+    end
+
+    property "%X produces valid uppercase hex", %{state: state} do
+      check all(int <- integer(0..65_535)) do
+        result = run_format("return string.format(\"%X\", #{int})", state)
+        assert Regex.match?(~r/^[0-9A-F]+$/, result)
+        {parsed, ""} = Integer.parse(String.downcase(result), 16)
+        assert parsed == int
+      end
+    end
+
+    property "%o produces valid octal", %{state: state} do
+      check all(int <- integer(0..10_000)) do
+        result = run_format("return string.format(\"%o\", #{int})", state)
+        assert Regex.match?(~r/^[0-7]+$/, result)
+        {parsed, ""} = Integer.parse(result, 8)
+        assert parsed == int
+      end
+    end
+
+    property "%s always returns a string containing the argument", %{state: state} do
+      check all(str <- string(:ascii, min_length: 1, max_length: 10)) do
+        escaped = escape_string(str)
+        result = run_format("return string.format(\"%s\", \"#{escaped}\")", state)
+        assert result == str
+      end
+    end
+
+    property "%c produces single byte for values 0-127", %{state: state} do
+      check all(byte <- integer(1..127)) do
+        result = run_format("return string.format(\"%c\", #{byte})", state)
+        assert byte_size(result) == 1
+        assert :binary.first(result) == byte
+      end
+    end
+
+    property "%% always produces literal percent", %{state: state} do
+      check all(int <- integer(0..100)) do
+        result = run_format("return string.format(\"#{int}%%\")", state)
+        assert result == "#{int}%"
+      end
+    end
+
+    property "width specifier pads to at least width characters", %{state: state} do
+      check all(
+              int <- integer(-999..999),
+              width <- integer(1..15)
+            ) do
+        result = run_format("return string.format(\"%#{width}d\", #{int})", state)
+        assert String.length(result) >= width
+        assert String.trim(result) == Integer.to_string(int)
+      end
+    end
+
+    property "left-justify flag makes result left-aligned", %{state: state} do
+      check all(
+              int <- integer(0..999),
+              width <- integer(5..12)
+            ) do
+        result = run_format("return string.format(\"%-#{width}d\", #{int})", state)
+        assert String.length(result) >= width
+        # Left-justified: no leading spaces, trailing spaces
+        refute String.starts_with?(result, " ")
+      end
+    end
+
+    property "zero-pad flag fills with zeros", %{state: state} do
+      check all(
+              int <- integer(0..999),
+              width <- integer(5..10)
+            ) do
+        result = run_format("return string.format(\"%0#{width}d\", #{int})", state)
+        assert String.length(result) == width
+        assert Regex.match?(~r/^[0-9]+$/, result)
+        assert String.to_integer(result) == int
+      end
+    end
+
+    property "%.nf produces exactly n decimal places", %{state: state} do
+      check all(
+              int_part <- integer(-50..50),
+              precision <- integer(1..6)
+            ) do
+        float_val = int_part + 0.5
+        result = run_format("return string.format(\"%.#{precision}f\", #{float_val})", state)
+        [_int, frac] = String.split(result, ".")
+        assert String.length(frac) == precision
+      end
+    end
+
+    property "%.ns truncates string to at most n characters", %{state: state} do
+      check all(
+              str <- string(:ascii, min_length: 1, max_length: 20),
+              precision <- integer(1..10)
+            ) do
+        escaped = escape_string(str)
+        result = run_format("return string.format(\"%.#{precision}s\", \"#{escaped}\")", state)
+        assert String.length(result) <= precision
+        # Result should be a prefix of the original
+        assert String.starts_with?(str, result)
+      end
+    end
+
+    property "%e always contains e+/e- notation", %{state: state} do
+      check all(val <- one_of([integer(1..10_000), float(min: 0.001, max: 10_000.0)])) do
+        result = run_format("return string.format(\"%e\", #{val})", state)
+        assert String.contains?(result, "e+") or String.contains?(result, "e-")
+      end
+    end
+
+    property "%E always contains E+/E- notation", %{state: state} do
+      check all(val <- one_of([integer(1..10_000), float(min: 0.001, max: 10_000.0)])) do
+        result = run_format("return string.format(\"%E\", #{val})", state)
+        assert String.contains?(result, "E+") or String.contains?(result, "E-")
+      end
     end
   end
 
