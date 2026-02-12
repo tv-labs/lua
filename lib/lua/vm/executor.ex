@@ -735,39 +735,80 @@ defmodule Lua.VM.Executor do
 
   # Bitwise operations
   defp do_execute([{:bitwise_and, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = Bitwise.band(trunc(elem(regs, a)), trunc(elem(regs, b)))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    {result, new_state} =
+      try_binary_metamethod("__band", val_a, val_b, state, fn ->
+        Bitwise.band(to_integer!(val_a), to_integer!(val_b))
+      end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:bitwise_or, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = Bitwise.bor(trunc(elem(regs, a)), trunc(elem(regs, b)))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    {result, new_state} =
+      try_binary_metamethod("__bor", val_a, val_b, state, fn ->
+        Bitwise.bor(to_integer!(val_a), to_integer!(val_b))
+      end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:bitwise_xor, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = Bitwise.bxor(trunc(elem(regs, a)), trunc(elem(regs, b)))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    {result, new_state} =
+      try_binary_metamethod("__bxor", val_a, val_b, state, fn ->
+        Bitwise.bxor(to_integer!(val_a), to_integer!(val_b))
+      end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:shift_left, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = Bitwise.bsl(trunc(elem(regs, a)), trunc(elem(regs, b)))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    {result, new_state} =
+      try_binary_metamethod("__shl", val_a, val_b, state, fn ->
+        lua_shift_left(to_integer!(val_a), to_integer!(val_b))
+      end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:shift_right, dest, a, b} | rest], regs, upvalues, proto, state) do
-    result = Bitwise.bsr(trunc(elem(regs, a)), trunc(elem(regs, b)))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    {result, new_state} =
+      try_binary_metamethod("__shr", val_a, val_b, state, fn ->
+        lua_shift_right(to_integer!(val_a), to_integer!(val_b))
+      end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   defp do_execute([{:bitwise_not, dest, source} | rest], regs, upvalues, proto, state) do
-    result = Bitwise.bnot(trunc(elem(regs, source)))
+    val = elem(regs, source)
+
+    {result, new_state} =
+      try_unary_metamethod("__bnot", val, state, fn ->
+        Bitwise.bnot(to_integer!(val))
+      end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state)
+    do_execute(rest, regs, upvalues, proto, new_state)
   end
 
   # Comparison operations
@@ -1584,6 +1625,49 @@ defmodule Lua.VM.Executor do
   end
 
   defp to_number(v), do: {:error, v}
+
+  # Convert value to integer for bitwise operations (with string coercion)
+  defp to_integer!(v) when is_integer(v), do: v
+  defp to_integer!(v) when is_float(v), do: trunc(v)
+
+  defp to_integer!(v) when is_binary(v) do
+    case Value.parse_number(v) do
+      nil ->
+        raise TypeError,
+          value: "attempt to perform bitwise operation on a string value",
+          error_kind: :bitwise_on_non_integer,
+          value_type: :string
+
+      n ->
+        trunc(n)
+    end
+  end
+
+  defp to_integer!(v) do
+    raise TypeError,
+      value: "attempt to perform bitwise operation on a #{Value.type_name(v)} value",
+      error_kind: :bitwise_on_non_integer,
+      value_type: value_type(v)
+  end
+
+  # Lua 5.3 shift semantics: negative shift reverses direction, shift >= 64 yields 0
+  defp lua_shift_left(_val, shift) when shift >= 64, do: 0
+  defp lua_shift_left(_val, shift) when shift <= -64, do: 0
+  defp lua_shift_left(val, shift) when shift < 0, do: lua_shift_right(val, -shift)
+
+  defp lua_shift_left(val, shift) do
+    Bitwise.band(Bitwise.bsl(val, shift), 0xFFFFFFFFFFFFFFFF)
+  end
+
+  defp lua_shift_right(_val, shift) when shift >= 64, do: 0
+  defp lua_shift_right(_val, shift) when shift <= -64, do: 0
+  defp lua_shift_right(val, shift) when shift < 0, do: lua_shift_left(val, -shift)
+
+  defp lua_shift_right(val, shift) do
+    # Unsigned right shift - mask to 64-bit first
+    unsigned_val = Bitwise.band(val, 0xFFFFFFFFFFFFFFFF)
+    Bitwise.bsr(unsigned_val, shift)
+  end
 
   # Helper to determine Lua type from Elixir value
   defp value_type(nil), do: nil

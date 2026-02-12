@@ -40,10 +40,14 @@ defmodule Lua.VM.Stdlib do
     |> State.register_function("select", &lua_select/2)
     |> State.register_function("load", &lua_load/2)
     |> State.register_function("require", &lua_require/2)
+    |> State.register_function("collectgarbage", &lua_collectgarbage/2)
+    |> State.register_function("dofile", &lua_dofile/2)
+    |> State.set_global("_VERSION", "Lua 5.3")
     |> install_package_table()
     |> Lua.VM.Stdlib.String.install()
     |> Lua.VM.Stdlib.Math.install()
     |> Lua.VM.Stdlib.Table.install()
+    |> install_unpack_alias()
     |> install_global_g()
   end
 
@@ -624,6 +628,45 @@ defmodule Lua.VM.Stdlib do
 
       _ ->
         {Value.to_string(value), state}
+    end
+  end
+
+  # collectgarbage stub — no-op accepting all standard modes
+  defp lua_collectgarbage(args, state) do
+    mode = List.first(args) || "collect"
+
+    case mode do
+      "count" ->
+        # Return plausible memory usage in KB and remainder bytes
+        {[0.0, 0], state}
+
+      "isrunning" ->
+        {[true], state}
+
+      _ ->
+        # "collect", "stop", "restart", "step", "setpause", "setstepmul", "generational", "incremental"
+        {[0], state}
+    end
+  end
+
+  # dofile stub — not supported in embedded mode
+  defp lua_dofile(_args, _state) do
+    raise RuntimeError, value: "dofile not supported in embedded mode"
+  end
+
+  # Install global 'unpack' as alias for table.unpack
+  defp install_unpack_alias(state) do
+    case Map.get(state.globals, "table") do
+      {:tref, id} ->
+        table = Map.fetch!(state.tables, id)
+
+        case Map.get(table.data, "unpack") do
+          nil -> state
+          unpack_fn -> State.set_global(state, "unpack", unpack_fn)
+        end
+
+      _ ->
+        state
     end
   end
 end

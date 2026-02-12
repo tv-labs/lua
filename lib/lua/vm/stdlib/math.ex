@@ -150,7 +150,7 @@ defmodule Lua.VM.Stdlib.Math do
 
   # math.ceil(x)
   defp math_ceil([x], state) when is_number(x) do
-    {[Float.ceil(x / 1)], state}
+    {[trunc(Float.ceil(x / 1))], state}
   end
 
   defp math_ceil([x | _], _state) do
@@ -201,7 +201,7 @@ defmodule Lua.VM.Stdlib.Math do
 
   # math.floor(x)
   defp math_floor([x], state) when is_number(x) do
-    {[Float.floor(x / 1)], state}
+    {[trunc(Float.floor(x / 1))], state}
   end
 
   defp math_floor([x | _], _state) do
