@@ -1787,7 +1787,6 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [1, 2, 3]
     end
 
-    @tag :skip
     test "local function recursive (requires self-reference upvalue support)" do
       code = """
       local function factorial(n)
@@ -1844,7 +1843,6 @@ defmodule Lua.Compiler.IntegrationTest do
       assert results == [3]
     end
 
-    @tag :skip
     test "do block creates new scope (requires proper scope cleanup)" do
       code = """
       local x = 1

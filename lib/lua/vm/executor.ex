@@ -83,6 +83,28 @@ defmodule Lua.VM.Executor do
       value_type: value_type(other)
   end
 
+  # Break instruction - signal to exit loop
+  defp do_execute([:break | _rest], regs, _upvalues, _proto, state) do
+    {:break, regs, state}
+  end
+
+  # Goto instruction - find the label and jump to it
+  defp do_execute([{:goto, label} | rest], regs, upvalues, proto, state) do
+    # Search in the remaining instructions for the label
+    case find_label(rest, label) do
+      {:found, after_label} ->
+        do_execute(after_label, regs, upvalues, proto, state)
+
+      :not_found ->
+        raise InternalError, value: "goto target '#{label}' not found"
+    end
+  end
+
+  # Label instruction - just a marker, skip it
+  defp do_execute([{:label, _name} | rest], regs, upvalues, proto, state) do
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
   # Empty instruction list - implicit return (no values)
   defp do_execute([], regs, _upvalues, _proto, state) do
     {[], regs, state}
@@ -174,7 +196,19 @@ defmodule Lua.VM.Executor do
   # test - conditional execution
   defp do_execute([{:test, reg, then_body, else_body} | rest], regs, upvalues, proto, state) do
     body = if Value.truthy?(elem(regs, reg)), do: then_body, else: else_body
-    do_execute(body ++ rest, regs, upvalues, proto, state)
+
+    case do_execute(body, regs, upvalues, proto, state) do
+      {:break, regs, state} ->
+        # Propagate break through conditionals to enclosing loop
+        {:break, regs, state}
+
+      {results, regs, state} when results != [] ->
+        # Body had a return statement — propagate the return
+        {results, regs, state}
+
+      {_results, regs, state} ->
+        do_execute(rest, regs, upvalues, proto, state)
+    end
   end
 
   # test_and - short-circuit AND
@@ -213,15 +247,21 @@ defmodule Lua.VM.Executor do
     # Check condition
     if Value.truthy?(elem(regs, test_reg)) do
       # Execute body
-      {_results, regs, state} = do_execute(loop_body, regs, upvalues, proto, state)
-      # Loop again
-      do_execute(
-        [{:while_loop, cond_body, test_reg, loop_body} | rest],
-        regs,
-        upvalues,
-        proto,
-        state
-      )
+      case do_execute(loop_body, regs, upvalues, proto, state) do
+        {:break, regs, state} ->
+          # Break exits the loop
+          do_execute(rest, regs, upvalues, proto, state)
+
+        {_results, regs, state} ->
+          # Loop again
+          do_execute(
+            [{:while_loop, cond_body, test_reg, loop_body} | rest],
+            regs,
+            upvalues,
+            proto,
+            state
+          )
+      end
     else
       # Condition false, continue after loop
       do_execute(rest, regs, upvalues, proto, state)
@@ -231,24 +271,29 @@ defmodule Lua.VM.Executor do
   # repeat_loop
   defp do_execute([{:repeat_loop, loop_body, cond_body, test_reg} | rest], regs, upvalues, proto, state) do
     # Execute body
-    {_results, regs, state} = do_execute(loop_body, regs, upvalues, proto, state)
+    case do_execute(loop_body, regs, upvalues, proto, state) do
+      {:break, regs, state} ->
+        # Break exits the loop
+        do_execute(rest, regs, upvalues, proto, state)
 
-    # Execute condition
-    {_results, regs, state} = do_execute(cond_body, regs, upvalues, proto, state)
+      {_results, regs, state} ->
+        # Execute condition
+        {_results, regs, state} = do_execute(cond_body, regs, upvalues, proto, state)
 
-    # Check condition (repeat UNTIL condition is true)
-    if Value.truthy?(elem(regs, test_reg)) do
-      # Condition true, exit loop
-      do_execute(rest, regs, upvalues, proto, state)
-    else
-      # Condition false, loop again
-      do_execute(
-        [{:repeat_loop, loop_body, cond_body, test_reg} | rest],
-        regs,
-        upvalues,
-        proto,
-        state
-      )
+        # Check condition (repeat UNTIL condition is true)
+        if Value.truthy?(elem(regs, test_reg)) do
+          # Condition true, exit loop
+          do_execute(rest, regs, upvalues, proto, state)
+        else
+          # Condition false, loop again
+          do_execute(
+            [{:repeat_loop, loop_body, cond_body, test_reg} | rest],
+            regs,
+            upvalues,
+            proto,
+            state
+          )
+        end
     end
   end
 
@@ -272,14 +317,19 @@ defmodule Lua.VM.Executor do
       regs = put_elem(regs, loop_var, counter)
 
       # Execute body
-      {_results, regs, state} = do_execute(body, regs, upvalues, proto, state)
+      case do_execute(body, regs, upvalues, proto, state) do
+        {:break, regs, state} ->
+          # Break exits the loop
+          do_execute(rest, regs, upvalues, proto, state)
 
-      # Increment counter
-      new_counter = counter + step
-      regs = put_elem(regs, base, new_counter)
+        {_results, regs, state} ->
+          # Increment counter
+          new_counter = counter + step
+          regs = put_elem(regs, base, new_counter)
 
-      # Loop again
-      do_execute([{:numeric_for, base, loop_var, body} | rest], regs, upvalues, proto, state)
+          # Loop again
+          do_execute([{:numeric_for, base, loop_var, body} | rest], regs, upvalues, proto, state)
+      end
     else
       # Loop finished
       do_execute(rest, regs, upvalues, proto, state)
@@ -314,16 +364,21 @@ defmodule Lua.VM.Executor do
         end)
 
       # Execute body
-      {_results, regs, state} = do_execute(body, regs, upvalues, proto, state)
+      case do_execute(body, regs, upvalues, proto, state) do
+        {:break, regs, state} ->
+          # Break exits the loop
+          do_execute(rest, regs, upvalues, proto, state)
 
-      # Loop again
-      do_execute(
-        [{:generic_for, base, var_regs, body} | rest],
-        regs,
-        upvalues,
-        proto,
-        state
-      )
+        {_results, regs, state} ->
+          # Loop again
+          do_execute(
+            [{:generic_for, base, var_regs, body} | rest],
+            regs,
+            upvalues,
+            proto,
+            state
+          )
+      end
     end
   end
 
@@ -1017,6 +1072,29 @@ defmodule Lua.VM.Executor do
   defp do_execute([instr | _rest], _regs, _upvalues, _proto, _state) do
     raise InternalError, value: "unimplemented instruction: #{inspect(instr)}"
   end
+
+  # Find a label in the instruction list (scanning forward and into nested blocks)
+  defp find_label([], _label), do: :not_found
+
+  defp find_label([{:label, name} | rest], label) when name == label do
+    {:found, rest}
+  end
+
+  defp find_label([{:test, _reg, then_body, else_body} | rest], label) do
+    # Search in then_body and else_body, and also after the test
+    case find_label(then_body, label) do
+      {:found, _} = found ->
+        found
+
+      :not_found ->
+        case find_label(else_body, label) do
+          {:found, _} = found -> found
+          :not_found -> find_label(rest, label)
+        end
+    end
+  end
+
+  defp find_label([_ | rest], label), do: find_label(rest, label)
 
   # Helper: call a function value inline (used by generic_for)
   defp call_value({:lua_closure, callee_proto, callee_upvalues}, args, _proto, state) do

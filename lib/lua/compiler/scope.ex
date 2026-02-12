@@ -105,19 +105,23 @@ defmodule Lua.Compiler.Scope do
     end)
   end
 
-  defp resolve_statement(%Statement.Local{names: names, values: values}, state) do
+  defp resolve_statement(%Statement.Local{names: names, values: values} = local_stmt, state) do
     # First, resolve all the value expressions with current scope
     state = Enum.reduce(values, state, &resolve_expr/2)
 
     # Then assign registers to the new local variables
-    {state, _} =
-      Enum.reduce(names, {state, state.next_register}, fn name, {state, reg} ->
-        # Add to locals map
+    {state, reg_list} =
+      Enum.reduce(names, {state, []}, fn name, {state, regs} ->
+        reg = state.next_register
+        # Add to locals map (current scope visibility)
         state = %{state | locals: Map.put(state.locals, name, reg)}
         # Update next_register
         state = %{state | next_register: reg + 1}
-        {state, reg + 1}
+        {state, regs ++ [reg]}
       end)
+
+    # Store per-statement register assignments in var_map so codegen can find them
+    state = %{state | var_map: Map.put(state.var_map, local_stmt, reg_list)}
 
     # Update max_register in current function scope
     func_scope = state.functions[state.current_function]
@@ -240,8 +244,14 @@ defmodule Lua.Compiler.Scope do
   end
 
   defp resolve_statement(%Statement.Do{body: body}, state) do
-    # Do blocks just resolve their inner body
-    resolve_block(body, state)
+    # Do blocks create a new scope - save and restore locals/next_register
+    saved_locals = state.locals
+    saved_next_register = state.next_register
+
+    state = resolve_block(body, state)
+
+    # Restore outer scope (inner locals don't leak out)
+    %{state | locals: saved_locals, next_register: saved_next_register}
   end
 
   # For now, stub out other statement types - we'll implement them incrementally

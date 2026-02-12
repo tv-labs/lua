@@ -185,47 +185,180 @@ defmodule Lua.Compiler.Codegen do
         {value_instructions ++ store_instructions, ctx}
 
       _ ->
-        # Unsupported pattern for now
-        {[], ctx}
+        # Multi-assignment: a, b, c = x, y, z
+        # Evaluate ALL right-hand values first into temp registers, then assign
+        num_targets = length(targets)
+        num_values = length(values)
+
+        # Check if last value is a call (for multiple-return expansion)
+        {init_values, last_value, last_is_call} =
+          if num_values > 0 do
+            [last | _] = Enum.reverse(values)
+
+            case last do
+              %Expr.Call{} -> {Enum.slice(values, 0..-2//1), last, true}
+              %Expr.MethodCall{} -> {Enum.slice(values, 0..-2//1), last, true}
+              _ -> {values, nil, false}
+            end
+          else
+            {[], nil, false}
+          end
+
+        # Evaluate init values into temp registers
+        {init_instructions, init_regs, ctx} =
+          Enum.reduce(init_values, {[], [], ctx}, fn value, {instructions, regs, ctx} ->
+            {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
+            {instructions ++ value_instructions, regs ++ [value_reg], ctx}
+          end)
+
+        # If last value is a call, expand multiple returns
+        {call_instructions, call_base, ctx} =
+          if last_is_call do
+            # Number of extra values we need from the call
+            needed_from_call = num_targets - length(init_values)
+            {call_instr, call_reg, ctx} = gen_expr(last_value, ctx)
+
+            # Patch the call to request needed_from_call results
+            call_instr =
+              case List.last(call_instr) do
+                {:call, cb, arg_count, _result_count} ->
+                  List.replace_at(
+                    call_instr,
+                    length(call_instr) - 1,
+                    {:call, cb, arg_count, max(needed_from_call, 1)}
+                  )
+
+                _ ->
+                  call_instr
+              end
+
+            {call_instr, call_reg, ctx}
+          else
+            {[], nil, ctx}
+          end
+
+        # Build the list of value registers for each target
+        value_regs =
+          Enum.map(0..(num_targets - 1), fn i ->
+            cond do
+              i < length(init_regs) ->
+                Enum.at(init_regs, i)
+
+              last_is_call ->
+                # Value comes from the multi-return call
+                call_result_offset = i - length(init_regs)
+                call_base + call_result_offset
+
+              true ->
+                nil
+            end
+          end)
+
+        # Generate assignment instructions for each target
+        {assign_instructions, ctx} =
+          targets
+          |> Enum.with_index()
+          |> Enum.reduce({[], ctx}, fn {target, i}, {instructions, ctx} ->
+            value_reg = Enum.at(value_regs, i)
+
+            if is_nil(value_reg) do
+              # No value for this target — assign nil
+              nil_reg = ctx.next_reg
+              ctx = %{ctx | next_reg: nil_reg + 1}
+              nil_instr = [Instruction.load_constant(nil_reg, nil)]
+              {store_instr, ctx} = gen_assign_target(target, nil_reg, ctx)
+              {instructions ++ nil_instr ++ store_instr, ctx}
+            else
+              {store_instr, ctx} = gen_assign_target(target, value_reg, ctx)
+              {instructions ++ store_instr, ctx}
+            end
+          end)
+
+        {init_instructions ++ call_instructions ++ assign_instructions, ctx}
     end
   end
 
-  defp gen_statement(%Statement.Local{names: names, values: values}, ctx) do
-    # Get register assignments from scope
-    scope = ctx.scope
-    locals = scope.locals
+  defp gen_statement(%Statement.Local{names: names, values: values} = local_stmt, ctx) do
+    # Get per-statement register assignments from var_map
+    reg_list = Map.get(ctx.scope.var_map, local_stmt, [])
+    num_names = length(names)
+    num_values = length(values)
 
-    # Generate code for all values
+    # Check if last value is a call (for multiple-return expansion)
+    {init_values, last_value, last_is_call} =
+      if num_values > 0 do
+        [last | _] = Enum.reverse(values)
+
+        case last do
+          %Expr.Call{} when num_names > num_values ->
+            {Enum.slice(values, 0..-2//1), last, true}
+
+          %Expr.MethodCall{} when num_names > num_values ->
+            {Enum.slice(values, 0..-2//1), last, true}
+
+          _ ->
+            {values, nil, false}
+        end
+      else
+        {[], nil, false}
+      end
+
+    # Generate code for init values
     {value_instructions, value_regs, ctx} =
-      Enum.reduce(values, {[], [], ctx}, fn value, {instructions, regs, ctx} ->
+      Enum.reduce(init_values, {[], [], ctx}, fn value, {instructions, regs, ctx} ->
         {new_instructions, reg, ctx} = gen_expr(value, ctx)
         {instructions ++ new_instructions, regs ++ [reg], ctx}
       end)
+
+    # If last value is a call, generate it requesting multiple returns
+    {call_instructions, call_base, ctx} =
+      if last_is_call do
+        needed = num_names - length(init_values)
+        {call_instr, call_reg, ctx} = gen_expr(last_value, ctx)
+
+        call_instr =
+          case List.last(call_instr) do
+            {:call, cb, arg_count, _result_count} ->
+              List.replace_at(
+                call_instr,
+                length(call_instr) - 1,
+                {:call, cb, arg_count, max(needed, 1)}
+              )
+
+            _ ->
+              call_instr
+          end
+
+        {call_instr, call_reg, ctx}
+      else
+        {[], nil, ctx}
+      end
 
     # Generate move instructions to copy values to their assigned registers
     move_instructions =
       names
       |> Enum.with_index()
-      |> Enum.flat_map(fn {name, index} ->
-        dest_reg = Map.get(locals, name)
-        source_reg = Enum.at(value_regs, index)
+      |> Enum.flat_map(fn {_name, index} ->
+        dest_reg = Enum.at(reg_list, index)
 
         cond do
-          # No value for this local - it's implicitly nil
-          is_nil(source_reg) ->
-            [Instruction.load_constant(dest_reg, nil)]
+          index < length(value_regs) ->
+            source_reg = Enum.at(value_regs, index)
+            if dest_reg == source_reg, do: [], else: [Instruction.move(dest_reg, source_reg)]
 
-          # Value is already in the right register
-          dest_reg == source_reg ->
-            []
+          last_is_call ->
+            # Value comes from multi-return call
+            call_offset = index - length(value_regs)
+            source_reg = call_base + call_offset
+            if dest_reg == source_reg, do: [], else: [Instruction.move(dest_reg, source_reg)]
 
-          # Need to move value to assigned register
           true ->
-            [Instruction.move(dest_reg, source_reg)]
+            # No value for this local - it's implicitly nil
+            [Instruction.load_constant(dest_reg, nil)]
         end
       end)
 
-    {value_instructions ++ move_instructions, ctx}
+    {value_instructions ++ call_instructions ++ move_instructions, ctx}
   end
 
   defp gen_statement(
@@ -448,7 +581,7 @@ defmodule Lua.Compiler.Codegen do
     # Get the local variable's register from scope
     dest_reg = ctx.scope.locals[name]
 
-    # Move closure to the local's register if needed
+    # Move closure to the local's register
     move_instructions =
       if closure_reg == dest_reg do
         []
@@ -456,13 +589,37 @@ defmodule Lua.Compiler.Codegen do
         [Instruction.move(dest_reg, closure_reg)]
       end
 
-    {closure_instructions ++ move_instructions, ctx}
+    # If this local is captured by the inner function (e.g., recursive local function),
+    # also update the open upvalue cell so the closure can reference itself
+    update_upvalue =
+      if MapSet.member?(ctx.scope.captured_locals, name) do
+        [Instruction.set_open_upvalue(dest_reg, closure_reg)]
+      else
+        []
+      end
+
+    {closure_instructions ++ move_instructions ++ update_upvalue, ctx}
   end
 
   # Do: do...end block
   defp gen_statement(%Statement.Do{body: body}, ctx) do
     # Simply generate code for the inner block
     gen_block(body, ctx)
+  end
+
+  # Break statement
+  defp gen_statement(%Statement.Break{}, ctx) do
+    {[Instruction.break_instr()], ctx}
+  end
+
+  # Goto statement
+  defp gen_statement(%Statement.Goto{label: label}, ctx) do
+    {[{:goto, label}], ctx}
+  end
+
+  # Label statement
+  defp gen_statement(%Statement.Label{name: name}, ctx) do
+    {[{:label, name}], ctx}
   end
 
   # Stub for other statements
