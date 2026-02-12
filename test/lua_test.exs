@@ -1409,7 +1409,6 @@ defmodule LuaTest do
       assert {[10, 20, 30], _} = Lua.eval!(lua, "return select(-3, 10, 20, 30)")
     end
 
-    @tag :skip
     test "select works with varargs passed to other functions", %{lua: lua} do
       # This requires proper varargs expansion in function calls (VM limitation)
       code = """
