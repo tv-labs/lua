@@ -57,7 +57,14 @@ defmodule Lua.VM.Stdlib.String do
     {tref, state} = State.alloc_table(state, string_table)
 
     # Register as global
-    State.set_global(state, "string", tref)
+    state = State.set_global(state, "string", tref)
+
+    # Create string metatable with __index = string table
+    # This enables ("hello"):upper() syntax
+    {mt_ref, state} = State.alloc_table(state, %{"__index" => tref})
+
+    # Store as the type metatable for strings
+    %{state | metatables: Map.put(state.metatables, "string", mt_ref)}
   end
 
   # string.lower(s) - converts string to lowercase
