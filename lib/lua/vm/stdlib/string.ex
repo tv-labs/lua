@@ -292,63 +292,19 @@ defmodule Lua.VM.Stdlib.String do
     raise_arg_expected(1, "format")
   end
 
-  # Format string parser
+  # Format string parser - supports full format specifiers: %[flags][width][.precision]specifier
   defp format_string("", _args, acc), do: acc
 
   defp format_string("%" <> rest, args, acc) do
     case rest do
-      "%" <> rest ->
-        format_string(rest, args, acc <> "%")
-
-      "s" <> rest ->
-        [arg | remaining_args] = args
-        str = Util.to_lua_string(arg)
-        format_string(rest, remaining_args, acc <> str)
-
-      "d" <> rest ->
-        [arg | remaining_args] = args
-        str = format_integer(arg)
-        format_string(rest, remaining_args, acc <> str)
-
-      "i" <> rest ->
-        [arg | remaining_args] = args
-        str = format_integer(arg)
-        format_string(rest, remaining_args, acc <> str)
-
-      "f" <> rest ->
-        [arg | remaining_args] = args
-        str = format_float(arg)
-        format_string(rest, remaining_args, acc <> str)
-
-      "x" <> rest ->
-        [arg | remaining_args] = args
-        str = format_hex(arg, :lower)
-        format_string(rest, remaining_args, acc <> str)
-
-      "X" <> rest ->
-        [arg | remaining_args] = args
-        str = format_hex(arg, :upper)
-        format_string(rest, remaining_args, acc <> str)
-
-      "o" <> rest ->
-        [arg | remaining_args] = args
-        str = format_octal(arg)
-        format_string(rest, remaining_args, acc <> str)
-
-      "c" <> rest ->
-        [arg | remaining_args] = args
-        str = format_char(arg)
-        format_string(rest, remaining_args, acc <> str)
-
-      "q" <> rest ->
-        [arg | remaining_args] = args
-        str = format_quoted(arg)
-        format_string(rest, remaining_args, acc <> str)
+      "%" <> rest2 ->
+        format_string(rest2, args, acc <> "%")
 
       _ ->
-        raise ArgumentError,
-          function_name: "string.format",
-          details: "invalid option '%#{String.first(rest)}'"
+        {spec, rest2} = parse_format_spec(rest)
+        [arg | remaining_args] = args
+        str = apply_format_spec(spec, arg)
+        format_string(rest2, remaining_args, acc <> str)
     end
   end
 
@@ -356,48 +312,300 @@ defmodule Lua.VM.Stdlib.String do
     format_string(rest, args, acc <> <<char::utf8>>)
   end
 
-  # Format helpers
-  defp format_integer(val) when is_integer(val), do: Integer.to_string(val)
-  defp format_integer(val) when is_float(val), do: Integer.to_string(trunc(val))
+  # Parse a format spec: [flags][width][.precision]specifier
+  defp parse_format_spec(str) do
+    {flags, str} = parse_flags(str, "")
+    {width, str} = parse_width(str)
+    {precision, str} = parse_precision(str)
+    {specifier, str} = parse_specifier(str)
+    {{flags, width, precision, specifier}, str}
+  end
 
-  defp format_integer(_) do
+  defp parse_flags(<<c, rest::binary>>, acc) when c in ~c(-+ 0#) do
+    parse_flags(rest, acc <> <<c>>)
+  end
+
+  defp parse_flags(str, acc), do: {acc, str}
+
+  defp parse_width(<<c, _::binary>> = str) when c in ?0..?9 do
+    parse_number(str, 0)
+  end
+
+  defp parse_width(str), do: {nil, str}
+
+  defp parse_precision("." <> rest) do
+    case rest do
+      <<c, _::binary>> when c in ?0..?9 ->
+        parse_number(rest, 0)
+
+      _ ->
+        {0, rest}
+    end
+  end
+
+  defp parse_precision(str), do: {nil, str}
+
+  defp parse_number(<<c, rest::binary>>, acc) when c in ?0..?9 do
+    parse_number(rest, acc * 10 + (c - ?0))
+  end
+
+  defp parse_number(str, acc), do: {acc, str}
+
+  defp parse_specifier(<<c, rest::binary>>), do: {<<c>>, rest}
+
+  defp parse_specifier("") do
     raise ArgumentError,
       function_name: "string.format",
-      expected: "number"
+      details: "invalid format string"
   end
 
-  defp format_float(val) when is_number(val) do
-    "~.6f" |> :io_lib.format([val / 1]) |> IO.iodata_to_binary()
+  # Apply a format spec to a value
+  defp apply_format_spec({flags, width, precision, specifier}, arg) do
+    raw =
+      case specifier do
+        "d" -> format_spec_integer(arg)
+        "i" -> format_spec_integer(arg)
+        "u" -> format_spec_unsigned(arg)
+        "f" -> format_spec_float(arg, precision || 6)
+        "e" -> format_spec_scientific(arg, precision || 6, :lower)
+        "E" -> format_spec_scientific(arg, precision || 6, :upper)
+        "g" -> format_spec_general(arg, precision || 6, :lower)
+        "G" -> format_spec_general(arg, precision || 6, :upper)
+        "x" -> format_spec_hex(arg, :lower)
+        "X" -> format_spec_hex(arg, :upper)
+        "o" -> format_spec_octal(arg)
+        "c" -> format_char(arg)
+        "s" -> format_spec_string(arg, precision)
+        "q" -> format_quoted(arg)
+        _ -> raise ArgumentError, function_name: "string.format", details: "invalid option '%#{specifier}'"
+      end
+
+    apply_width_flags(raw, flags, width)
   end
 
-  defp format_float(_) do
-    raise ArgumentError,
-      function_name: "string.format",
-      expected: "number"
+  defp format_spec_integer(val) when is_integer(val), do: Integer.to_string(val)
+  defp format_spec_integer(val) when is_float(val), do: Integer.to_string(trunc(val))
+
+  defp format_spec_integer(_) do
+    raise ArgumentError, function_name: "string.format", expected: "number"
   end
 
-  defp format_hex(val, case_style) when is_integer(val) do
+  defp format_spec_unsigned(val) when is_integer(val) and val >= 0, do: Integer.to_string(val)
+
+  # Wrap negative as unsigned 64-bit
+  defp format_spec_unsigned(val) when is_integer(val), do: Integer.to_string(val + 0x10000000000000000)
+
+  defp format_spec_unsigned(val) when is_float(val), do: format_spec_unsigned(trunc(val))
+
+  defp format_spec_unsigned(_) do
+    raise ArgumentError, function_name: "string.format", expected: "number"
+  end
+
+  defp format_spec_float(val, precision) when is_number(val) do
+    float_val = val / 1
+
+    float_val
+    |> :erlang.float_to_binary([{:decimals, precision}, :compact])
+    |> expand_float(precision)
+  end
+
+  defp format_spec_float(_, _) do
+    raise ArgumentError, function_name: "string.format", expected: "number"
+  end
+
+  # Ensure the float string has exactly `precision` decimal places
+  defp expand_float(str, precision) do
+    if precision == 0 do
+      # Remove the decimal point entirely for precision 0
+      case String.split(str, ".") do
+        [int_part, frac] ->
+          # Round: check first decimal digit
+          first_frac = String.first(frac)
+
+          if first_frac != nil and String.to_integer(first_frac) >= 5 do
+            # Need to round up
+            {int_val, _} = Integer.parse(int_part)
+
+            if int_val >= 0 do
+              Integer.to_string(int_val + 1)
+            else
+              Integer.to_string(int_val - 1)
+            end
+          else
+            int_part
+          end
+
+        _ ->
+          str
+      end
+    else
+      case String.split(str, ".") do
+        [int_part, frac] ->
+          padded_frac = String.pad_trailing(frac, precision, "0")
+          "#{int_part}.#{padded_frac}"
+
+        [int_part] ->
+          "#{int_part}.#{String.duplicate("0", precision)}"
+      end
+    end
+  end
+
+  defp format_spec_scientific(val, precision, case_style) when is_number(val) do
+    str = format_scientific_str(val / 1, precision)
+    if case_style == :upper, do: String.upcase(str), else: str
+  end
+
+  defp format_spec_scientific(_, _, _) do
+    raise ArgumentError, function_name: "string.format", expected: "number"
+  end
+
+  # Format a float in scientific notation: mantissa e+/-exp with at least 2 digit exponent
+  defp format_scientific_str(float_val, precision) do
+    if float_val == 0.0 do
+      mantissa = "0." <> String.duplicate("0", precision)
+      "#{mantissa}e+00"
+    else
+      exp = float_val |> abs() |> :math.log10() |> floor()
+      mantissa = float_val / :math.pow(10, exp)
+
+      # Format mantissa with the required precision
+      mantissa_str =
+        :erlang.float_to_binary(mantissa, [{:decimals, precision + 1}, :compact])
+
+      # Round to the requested precision
+      mantissa_str = round_mantissa(mantissa_str, precision)
+
+      # Check if rounding pushed mantissa to 10.0 (e.g., 9.999... -> 10.0)
+      {mantissa_str, exp} = normalize_mantissa(mantissa_str, exp)
+
+      exp_sign = if exp >= 0, do: "+", else: "-"
+      exp_str = exp |> abs() |> Integer.to_string() |> String.pad_leading(2, "0")
+      "#{mantissa_str}e#{exp_sign}#{exp_str}"
+    end
+  end
+
+  defp round_mantissa(str, precision) do
+    if precision == 0 do
+      case String.split(str, ".") do
+        [int_part, frac] ->
+          first = String.first(frac)
+
+          if first != nil and String.to_integer(first) >= 5 do
+            {n, _} = Integer.parse(int_part)
+            # Preserve sign for rounding
+            if n >= 0, do: Integer.to_string(n + 1), else: Integer.to_string(n - 1)
+          else
+            int_part
+          end
+
+        _ ->
+          str
+      end
+    else
+      expand_float(str, precision)
+    end
+  end
+
+  defp normalize_mantissa(mantissa_str, exp) do
+    # Parse the mantissa value to check if |mantissa| >= 10 after rounding
+    {mantissa_val, _} = Float.parse(mantissa_str)
+
+    if abs(mantissa_val) >= 10.0 do
+      new_mantissa = mantissa_val / 10.0
+      # Re-format the new mantissa - extract precision from the string
+      precision =
+        case String.split(mantissa_str, ".") do
+          [_, frac] -> String.length(frac)
+          _ -> 0
+        end
+
+      new_str =
+        expand_float(
+          :erlang.float_to_binary(new_mantissa, [{:decimals, precision + 1}, :compact]),
+          precision
+        )
+
+      {new_str, exp + 1}
+    else
+      {mantissa_str, exp}
+    end
+  end
+
+  defp format_spec_general(val, precision, case_style) when is_number(val) do
+    float_val = val / 1
+    precision = max(1, precision)
+
+    if float_val == 0.0 do
+      "0"
+    else
+      abs_val = abs(float_val)
+      exp = abs_val |> :math.log10() |> floor()
+
+      if exp < -4 or exp >= precision do
+        # Scientific notation with trailing zeros stripped
+        p = precision - 1
+        str = format_scientific_str(float_val, p)
+        str = strip_trailing_zeros_scientific(str)
+        if case_style == :upper, do: String.upcase(str), else: str
+      else
+        # Fixed notation with trailing zeros stripped
+        p = precision - exp - 1
+        p = max(0, p)
+        str = format_spec_float(float_val, p)
+        str = strip_trailing_zeros(str)
+        if case_style == :upper, do: String.upcase(str), else: str
+      end
+    end
+  end
+
+  defp format_spec_general(_, _, _) do
+    raise ArgumentError, function_name: "string.format", expected: "number"
+  end
+
+  defp strip_trailing_zeros(str) do
+    if String.contains?(str, ".") do
+      str |> String.trim_trailing("0") |> String.trim_trailing(".")
+    else
+      str
+    end
+  end
+
+  defp strip_trailing_zeros_scientific(str) do
+    case Regex.run(~r/^(.*?)([eE][+-]\d+)$/, str) do
+      [_, mantissa, exp_part] ->
+        mantissa = strip_trailing_zeros(mantissa)
+        "#{mantissa}#{exp_part}"
+
+      _ ->
+        str
+    end
+  end
+
+  defp format_spec_hex(val, case_style) when is_integer(val) do
     str = Integer.to_string(val, 16)
     if case_style == :lower, do: String.downcase(str), else: String.upcase(str)
   end
 
-  defp format_hex(val, case_style) when is_float(val) do
-    format_hex(trunc(val), case_style)
+  defp format_spec_hex(val, case_style) when is_float(val), do: format_spec_hex(trunc(val), case_style)
+
+  defp format_spec_hex(_, _) do
+    raise ArgumentError, function_name: "string.format", expected: "number"
   end
 
-  defp format_hex(_, _) do
-    raise ArgumentError,
-      function_name: "string.format",
-      expected: "number"
+  defp format_spec_octal(val) when is_integer(val), do: Integer.to_string(val, 8)
+  defp format_spec_octal(val) when is_float(val), do: Integer.to_string(trunc(val), 8)
+
+  defp format_spec_octal(_) do
+    raise ArgumentError, function_name: "string.format", expected: "number"
   end
 
-  defp format_octal(val) when is_integer(val), do: Integer.to_string(val, 8)
-  defp format_octal(val) when is_float(val), do: Integer.to_string(trunc(val), 8)
+  defp format_spec_string(arg, precision) do
+    str = Util.to_lua_string(arg)
 
-  defp format_octal(_) do
-    raise ArgumentError,
-      function_name: "string.format",
-      expected: "number"
+    case precision do
+      nil -> str
+      n -> String.slice(str, 0, n)
+    end
   end
 
   defp format_char(val) when is_integer(val) and val >= 0 and val <= 255, do: <<val>>
@@ -560,6 +768,30 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   defp string_gsub([], _state), do: raise_arg_expected(1, "gsub")
+
+  defp apply_width_flags(str, flags, width) do
+    width = width || 0
+
+    if String.length(str) >= width do
+      str
+    else
+      pad_char =
+        if String.contains?(flags, "0") and not String.contains?(flags, "-"), do: "0", else: " "
+
+      if String.contains?(flags, "-") do
+        # Left justify
+        String.pad_trailing(str, width, pad_char)
+      else
+        # Right justify (default)
+        # Handle zero-padding with sign
+        if pad_char == "0" and String.starts_with?(str, "-") do
+          "-" <> String.pad_leading(String.slice(str, 1..-1//1), width - 1, "0")
+        else
+          String.pad_leading(str, width, pad_char)
+        end
+      end
+    end
+  end
 
   # Helper: convert Lua 1-based index to 0-based, handle negative indices
   defp normalize_index(idx, _len) when idx > 0, do: idx - 1

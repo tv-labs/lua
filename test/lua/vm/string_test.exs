@@ -281,6 +281,128 @@ defmodule Lua.VM.StringTest do
     end
   end
 
+  describe "string.format with width/precision" do
+    setup do
+      %{state: Stdlib.install(State.new())}
+    end
+
+    test "width specifier right-justifies", %{state: state} do
+      code = ~s{return string.format("%5d", 42)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["   42"], _state} = VM.execute(proto, state)
+    end
+
+    test "width specifier with left-justify flag", %{state: state} do
+      code = ~s{return string.format("%-5d", 42)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["42   "], _state} = VM.execute(proto, state)
+    end
+
+    test "width specifier with zero-pad flag", %{state: state} do
+      code = ~s{return string.format("%05d", 42)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["00042"], _state} = VM.execute(proto, state)
+    end
+
+    test "precision for floats", %{state: state} do
+      code = ~s{return string.format("%.2f", 3.14159)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["3.14"], _state} = VM.execute(proto, state)
+    end
+
+    test "precision 0 for floats", %{state: state} do
+      code = ~s{return string.format("%.0f", 3.14)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["3"], _state} = VM.execute(proto, state)
+    end
+
+    test "string precision truncation", %{state: state} do
+      code = ~s{return string.format("%.3s", "hello")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["hel"], _state} = VM.execute(proto, state)
+    end
+
+    test "%g format with fixed notation", %{state: state} do
+      code = ~s{return string.format("%g", 100000)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["100000"], _state} = VM.execute(proto, state)
+    end
+
+    test "%g format with scientific notation", %{state: state} do
+      code = ~s{return string.format("%g", 1000000)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["1e+06"], _state} = VM.execute(proto, state)
+    end
+
+    test "%e format", %{state: state} do
+      code = ~s{return string.format("%e", 100000)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      assert String.starts_with?(result, "1.0")
+      assert String.contains?(result, "e+")
+    end
+
+    test "%E format", %{state: state} do
+      code = ~s{return string.format("%E", 100000)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      assert String.starts_with?(result, "1.0")
+      assert String.contains?(result, "E+")
+    end
+
+    test "%u format for positive integer", %{state: state} do
+      code = ~s{return string.format("%u", 42)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["42"], _state} = VM.execute(proto, state)
+    end
+
+    test "zero-pad with negative number", %{state: state} do
+      code = ~s{return string.format("%06d", -42)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["-00042"], _state} = VM.execute(proto, state)
+    end
+
+    test "width with string", %{state: state} do
+      code = ~s{return string.format("%10s", "hello")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["     hello"], _state} = VM.execute(proto, state)
+    end
+
+    test "left-justify with string", %{state: state} do
+      code = ~s{return string.format("%-10s", "hello")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["hello     "], _state} = VM.execute(proto, state)
+    end
+
+    test "width and precision combined for float", %{state: state} do
+      code = ~s{return string.format("%8.2f", 3.14159)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["    3.14"], _state} = VM.execute(proto, state)
+    end
+
+    test "%02x for hex with zero padding", %{state: state} do
+      code = ~s{return string.format("%02x", 10)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["0a"], _state} = VM.execute(proto, state)
+    end
+  end
+
   describe "string table access" do
     test "string functions are accessible via string table" do
       code = """
