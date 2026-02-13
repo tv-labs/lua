@@ -9,6 +9,7 @@ defmodule Lua.VM.State do
             call_stack: [],
             metatables: %{},
             upvalue_cells: %{},
+            open_upvalues: %{},
             tables: %{},
             table_next_id: 0,
             userdata: %{},

@@ -19,7 +19,8 @@ defmodule Lua.VM.Executor do
   @spec execute([tuple()], tuple(), list(), map(), State.t()) ::
           {list(), tuple(), State.t()}
   def execute(instructions, registers, upvalues, proto, state) do
-    do_execute(instructions, registers, {upvalues, %{}}, proto, state)
+    state = %{state | open_upvalues: %{}}
+    do_execute(instructions, registers, upvalues, proto, state)
   end
 
   @doc """
@@ -47,15 +48,19 @@ defmodule Lua.VM.Executor do
         callee_proto
       end
 
+    saved_open_upvalues = state.open_upvalues
+    state = %{state | open_upvalues: %{}}
+
     {results, _callee_regs, state} =
       do_execute(
         callee_proto.instructions,
         callee_regs,
-        {callee_upvalues, %{}},
+        callee_upvalues,
         callee_proto,
         state
       )
 
+    state = %{state | open_upvalues: saved_open_upvalues}
     {results, state}
   end
 
@@ -155,47 +160,35 @@ defmodule Lua.VM.Executor do
   end
 
   # get_upvalue
-  defp do_execute([{:get_upvalue, dest, index} | rest], regs, {upvalues, _} = upvalue_context, proto, state) do
+  defp do_execute([{:get_upvalue, dest, index} | rest], regs, upvalues, proto, state) do
     cell_ref = Enum.at(upvalues, index)
     value = Map.get(state.upvalue_cells, cell_ref)
     regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalue_context, proto, state)
+    do_execute(rest, regs, upvalues, proto, state)
   end
 
   # set_upvalue
-  defp do_execute([{:set_upvalue, index, source} | rest], regs, {upvalues, _} = upvalue_context, proto, state) do
+  defp do_execute([{:set_upvalue, index, source} | rest], regs, upvalues, proto, state) do
     cell_ref = Enum.at(upvalues, index)
     value = elem(regs, source)
     state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
-    do_execute(rest, regs, upvalue_context, proto, state)
+    do_execute(rest, regs, upvalues, proto, state)
   end
 
   # get_open_upvalue - read a captured local through its open upvalue cell
-  defp do_execute(
-         [{:get_open_upvalue, dest, reg} | rest],
-         regs,
-         {_upvalues, open_upvalues} = upvalue_context,
-         proto,
-         state
-       ) do
-    cell_ref = Map.fetch!(open_upvalues, reg)
+  defp do_execute([{:get_open_upvalue, dest, reg} | rest], regs, upvalues, proto, state) do
+    cell_ref = Map.fetch!(state.open_upvalues, reg)
     value = Map.get(state.upvalue_cells, cell_ref)
     regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalue_context, proto, state)
+    do_execute(rest, regs, upvalues, proto, state)
   end
 
   # set_open_upvalue - write a captured local through its open upvalue cell
-  defp do_execute(
-         [{:set_open_upvalue, reg, source} | rest],
-         regs,
-         {_upvalues, open_upvalues} = upvalue_context,
-         proto,
-         state
-       ) do
-    cell_ref = Map.fetch!(open_upvalues, reg)
+  defp do_execute([{:set_open_upvalue, reg, source} | rest], regs, upvalues, proto, state) do
+    cell_ref = Map.fetch!(state.open_upvalues, reg)
     value = elem(regs, source)
     state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
-    do_execute(rest, regs, upvalue_context, proto, state)
+    do_execute(rest, regs, upvalues, proto, state)
   end
 
   # source_line - track current source location
@@ -334,6 +327,14 @@ defmodule Lua.VM.Executor do
       # Copy counter to loop variable
       regs = put_elem(regs, loop_var, counter)
 
+      # Clear open upvalue cells for loop-local registers (loop var + body locals)
+      # so each iteration gets fresh upvalue cells for its own variables
+      state = %{
+        state
+        | open_upvalues:
+            Map.reject(state.open_upvalues, fn {reg, _} -> reg >= loop_var end)
+      }
+
       # Execute body
       case do_execute(body, regs, upvalues, proto, state) do
         {:break, regs, state} ->
@@ -381,6 +382,15 @@ defmodule Lua.VM.Executor do
           put_elem(regs, var_reg, Enum.at(results, i))
         end)
 
+      # Clear open upvalue cells for loop-local registers
+      first_var_reg = List.first(var_regs)
+
+      state = %{
+        state
+        | open_upvalues:
+            Map.reject(state.open_upvalues, fn {reg, _} -> reg >= first_var_reg end)
+      }
+
       # Execute body
       case do_execute(body, regs, upvalues, proto, state) do
         {:break, regs, state} ->
@@ -401,39 +411,44 @@ defmodule Lua.VM.Executor do
   end
 
   # closure - create a closure value from a prototype, capturing upvalues
-  defp do_execute([{:closure, dest, proto_index} | rest], regs, {upvalues, open_upvalues}, proto, state) do
+  defp do_execute([{:closure, dest, proto_index} | rest], regs, upvalues, proto, state) do
     nested_proto = Enum.at(proto.prototypes, proto_index)
 
     # Capture upvalues based on descriptors, reusing open upvalue cells when available
-    {captured_upvalues, state, open_upvalues} =
-      Enum.reduce(nested_proto.upvalue_descriptors, {[], state, open_upvalues}, fn
-        {:parent_local, reg, _name}, {cells, state, open_upvalues} ->
-          case Map.get(open_upvalues, reg) do
+    {captured_upvalues, state} =
+      Enum.reduce(nested_proto.upvalue_descriptors, {[], state}, fn
+        {:parent_local, reg, _name}, {cells, state} ->
+          case Map.get(state.open_upvalues, reg) do
             nil ->
               # Create a new cell for this local variable
               cell_ref = make_ref()
               value = elem(regs, reg)
-              state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
-              open_upvalues = Map.put(open_upvalues, reg, cell_ref)
-              {cells ++ [cell_ref], state, open_upvalues}
+
+              state = %{
+                state
+                | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value),
+                  open_upvalues: Map.put(state.open_upvalues, reg, cell_ref)
+              }
+
+              {cells ++ [cell_ref], state}
 
             existing_cell ->
               # Reuse existing open upvalue cell
-              {cells ++ [existing_cell], state, open_upvalues}
+              {cells ++ [existing_cell], state}
           end
 
-        {:parent_upvalue, index, _name}, {cells, state, open_upvalues} ->
+        {:parent_upvalue, index, _name}, {cells, state} ->
           # Share the parent's upvalue cell
-          {cells ++ [Enum.at(upvalues, index)], state, open_upvalues}
+          {cells ++ [Enum.at(upvalues, index)], state}
       end)
 
     closure = {:lua_closure, nested_proto, captured_upvalues}
     regs = put_elem(regs, dest, closure)
-    do_execute(rest, regs, {upvalues, open_upvalues}, proto, state)
+    do_execute(rest, regs, upvalues, proto, state)
   end
 
   # call - invoke a function value
-  defp do_execute([{:call, base, arg_count, result_count} | rest], regs, upvalue_context, proto, state) do
+  defp do_execute([{:call, base, arg_count, result_count} | rest], regs, upvalues, proto, state) do
     func_value = elem(regs, base)
 
     # Collect arguments from registers base+1..base+arg_count
@@ -505,17 +520,20 @@ defmodule Lua.VM.Executor do
             end
 
           # Execute the callee with fresh open_upvalues
+          saved_open_upvalues = state.open_upvalues
+          state = %{state | open_upvalues: %{}}
+
           {results, _callee_regs, state} =
             do_execute(
               callee_proto.instructions,
               callee_regs,
-              {callee_upvalues, %{}},
+              callee_upvalues,
               callee_proto,
               state
             )
 
-          # Pop call stack frame
-          state = %{state | call_stack: tl(state.call_stack)}
+          # Pop call stack frame, restore open_upvalues
+          state = %{state | call_stack: tl(state.call_stack), open_upvalues: saved_open_upvalues}
 
           {results, state}
 
@@ -590,7 +608,7 @@ defmodule Lua.VM.Executor do
           end)
 
         state = %{state | multi_return_count: length(results_list)}
-        do_execute(rest, regs, upvalue_context, proto, state)
+        do_execute(rest, regs, upvalues, proto, state)
 
       true ->
         # Place results into caller registers starting at base
@@ -606,7 +624,7 @@ defmodule Lua.VM.Executor do
             regs
           end
 
-        do_execute(rest, regs, upvalue_context, proto, state)
+        do_execute(rest, regs, upvalues, proto, state)
     end
   end
 
@@ -1104,15 +1122,19 @@ defmodule Lua.VM.Executor do
         callee_proto
       end
 
+    saved_open_upvalues = state.open_upvalues
+    state = %{state | open_upvalues: %{}}
+
     {results, _callee_regs, state} =
       do_execute(
         callee_proto.instructions,
         callee_regs,
-        {callee_upvalues, %{}},
+        callee_upvalues,
         callee_proto,
         state
       )
 
+    state = %{state | open_upvalues: saved_open_upvalues}
     {results, state}
   end
 
@@ -1337,12 +1359,10 @@ defmodule Lua.VM.Executor do
 
       {:lua_closure, callee_proto, callee_upvalues} ->
         # Call the Lua closure metamethod
-        # We need to execute the closure with the arguments
         args = [a, b]
-
-        # Allocate enough registers for the function (Lua typically uses up to 250 registers)
-        # We need to pad the args to fill the register space the function expects
         initial_regs = List.to_tuple(args ++ List.duplicate(nil, 248))
+        saved_open_upvalues = state.open_upvalues
+        state = %{state | open_upvalues: %{}}
 
         {results, _final_regs, new_state} =
           do_execute(
@@ -1353,7 +1373,8 @@ defmodule Lua.VM.Executor do
             state
           )
 
-        # Return first result and new state
+        new_state = %{new_state | open_upvalues: saved_open_upvalues}
+
         result =
           case results do
             [r | _] -> r
@@ -1391,9 +1412,9 @@ defmodule Lua.VM.Executor do
       {:lua_closure, callee_proto, callee_upvalues} ->
         # Call the Lua closure metamethod
         args = [a]
-
-        # Allocate enough registers for the function (Lua typically uses up to 250 registers)
         initial_regs = List.to_tuple(args ++ List.duplicate(nil, 249))
+        saved_open_upvalues = state.open_upvalues
+        state = %{state | open_upvalues: %{}}
 
         {results, _final_regs, new_state} =
           do_execute(
@@ -1404,7 +1425,8 @@ defmodule Lua.VM.Executor do
             state
           )
 
-        # Return first result and new state
+        new_state = %{new_state | open_upvalues: saved_open_upvalues}
+
         result =
           case results do
             [r | _] -> r
@@ -1450,6 +1472,8 @@ defmodule Lua.VM.Executor do
         {:lua_closure, callee_proto, callee_upvalues} ->
           args = [a, b]
           initial_regs = List.to_tuple(args ++ List.duplicate(nil, 248))
+          saved_open_upvalues = state.open_upvalues
+          state = %{state | open_upvalues: %{}}
 
           {results, _final_regs, new_state} =
             do_execute(
@@ -1459,6 +1483,8 @@ defmodule Lua.VM.Executor do
               callee_proto,
               state
             )
+
+          new_state = %{new_state | open_upvalues: saved_open_upvalues}
 
           result =
             case results do

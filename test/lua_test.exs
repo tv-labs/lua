@@ -2102,6 +2102,270 @@ defmodule LuaTest do
     end
   end
 
+  describe "suite triage - targeted fixes" do
+    setup do
+      %{lua: Lua.new(sandboxed: [])}
+    end
+
+    test "if false should not execute body", %{lua: lua} do
+      # constructs.lua line 20: dead code with division by zero
+      code = ~S"""
+      if false then a = 3 // 0; a = 0 % 0 end
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "semicolons as empty statements", %{lua: lua} do
+      # constructs.lua lines 13-16
+      code = ~S"""
+      do ;;; end
+      ; do ; a = 3; assert(a == 3) end;
+      ;
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "upvalue sharing between sibling closures", %{lua: lua} do
+      # closure.lua basic pattern - two closures sharing same upvalue
+      code = ~S"""
+      local a = 0
+      local function inc() a = a + 1 end
+      local function get() return a end
+      inc()
+      assert(get() == 1)
+      inc()
+      assert(get() == 2)
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "vararg table constructor with select", %{lua: lua} do
+      # vararg.lua line 7-8 pattern
+      code = ~S"""
+      function f(a, ...)
+        local arg = {n = select('#', ...), ...}
+        for i=1,arg.n do assert(a[i]==arg[i]) end
+        return arg.n
+      end
+
+      assert(f() == 0)
+      assert(f({1,2,3}, 1, 2, 3) == 3)
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "upvalue through nested scopes (3 levels)", %{lua: lua} do
+      # Simple: just one level of upvalue
+      code1 = ~S"""
+      local x = 10
+      local function f() return x end
+      return f()
+      """
+
+      assert {[10], _} = Lua.eval!(lua, code1)
+
+      # Two levels: variable captured through intermediate function's upvalue
+      code2 = ~S"""
+      local x = 10
+      local function outer()
+        local function inner()
+          return x
+        end
+        return inner()
+      end
+      return outer()
+      """
+
+      assert {[10], _} = Lua.eval!(lua, code2)
+
+      # Mutation through nested upvalue chain
+      code3 = ~S"""
+      local x = 10
+      local function outer()
+        local function inner()
+          x = x + 1
+          return x
+        end
+        return inner()
+      end
+      assert(outer() == 11)
+      assert(outer() == 12)
+      return x
+      """
+
+      assert {[12], _} = Lua.eval!(lua, code3)
+    end
+
+    test "closure in for loop captures loop variable", %{lua: lua} do
+      # closure.lua pattern - closures in loop body
+      code = ~S"""
+      local a = {}
+      for i = 1, 3 do
+        a[i] = function() return i end
+      end
+      assert(a[1]() == 1)
+      assert(a[2]() == 2)
+      assert(a[3]() == 3)
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "closure in loop accessing parameter through upvalue", %{lua: lua} do
+      code = ~S"""
+      function f(x)
+        local a = {}
+        for i=1,3 do
+          a[i] = function () return x end
+        end
+        return a[1](), a[2](), a[3]()
+      end
+      return f(10)
+      """
+
+      assert {[10, 10, 10], _} = Lua.eval!(lua, code)
+    end
+
+    test "closure in loop with local and param upvalues", %{lua: lua} do
+      # Step 1: Does having a local in loop body break things?
+      code1 = ~S"""
+      local function f(x)
+        local a = {}
+        for i=1,3 do
+          local y = 0
+          a[i] = function () return y end
+        end
+        return a[1](), a[2]()
+      end
+      return f(10)
+      """
+
+      assert {[0, 0], _} = Lua.eval!(lua, code1)
+    end
+
+    test "vararg expansion in local multi-assignment", %{lua: lua} do
+      code = ~S"""
+      function f(...)
+        local a, b, c = ...
+        return a, b, c
+      end
+      return f(10, 20, 30)
+      """
+
+      assert {[10, 20, 30], _} = Lua.eval!(lua, code)
+    end
+
+    test "vararg expansion in regular multi-assignment", %{lua: lua} do
+      code = ~S"""
+      function f(a, ...)
+        local b, c, d = ...
+        return a, b, c, d
+      end
+      return f(5, 4, 3, 2, 1)
+      """
+
+      assert {[5, 4, 3, 2], _} = Lua.eval!(lua, code)
+    end
+
+    test "vararg.lua new-style varargs", %{lua: lua} do
+      code = ~S"""
+      function oneless (a, ...) return ... end
+
+      function f (n, a, ...)
+        local b
+        if n == 0 then
+          local b, c, d = ...
+          return a, b, c, d, oneless(oneless(oneless(...)))
+        else
+          n, b, a = n-1, ..., a
+          assert(b == ...)
+          return f(n, a, ...)
+        end
+      end
+
+      a,b,c,d,e = assert(f(10,5,4,3,2,1))
+      assert(a==5 and b==4 and c==3 and d==2 and e==1)
+
+      a,b,c,d,e = f(4)
+      assert(a==nil and b==nil and c==nil and d==nil and e==nil)
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "float literal edge cases", %{lua: lua} do
+      code = ~S"""
+      assert(.0 == 0)
+      assert(0. == 0)
+      assert(.2e2 == 20)
+      assert(2.E-1 == 0.2)
+      assert(0e12 == 0)
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "priority: power is right-associative", %{lua: lua} do
+      # constructs.lua line 25
+      code = ~S"""
+      assert(2^3^2 == 2^(3^2))
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "priority: power vs multiply", %{lua: lua} do
+      # constructs.lua line 26
+      code = ~S"""
+      assert(2^3*4 == (2^3)*4)
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "string concat with shift operator priority", %{lua: lua} do
+      # constructs.lua line 35
+      code = ~S"""
+      assert("7" .. 3 << 1 == 146)
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "bitwise.lua early pattern - pcall catches bitwise error", %{lua: lua} do
+      # Test pcall catches bitwise error and the checkerror pattern works
+      code = ~S"""
+      local s, err = pcall(function() return 1 | nil end)
+      assert(not s)
+      assert(type(err) == "string")
+
+      -- Test the checkerror pattern used by many suite tests
+      local function checkerror(msg, f, ...)
+        local s, err = pcall(f, ...)
+        assert(not s and string.find(err, msg))
+      end
+      checkerror("nil", function() return 1 | nil end)
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+  end
+
   defp test_file(name) do
     Path.join(["test", "fixtures", name])
   end

@@ -133,6 +133,11 @@ defmodule Lua.Lexer do
     scan_number(<<c, rest::binary>>, "", acc, pos, pos)
   end
 
+  # Float starting with dot: .0, .5e3, etc.
+  defp do_tokenize(<<".", c, rest::binary>>, acc, pos) when c in ?0..?9 do
+    scan_float(rest, "0." <> <<c>>, acc, advance_column(pos, 2), pos)
+  end
+
   # Three-character operators
   defp do_tokenize(<<"...", rest::binary>>, acc, pos) do
     token = {:operator, :vararg, pos}
@@ -486,19 +491,24 @@ defmodule Lua.Lexer do
     scan_number(rest, num_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
   end
 
-  defp scan_number(<<?.>>, num_acc, acc, pos, start_pos) do
-    # Trailing dot is not part of the number
-    finalize_number(num_acc, <<".">>, acc, pos, start_pos)
-  end
-
   defp scan_number(<<".", c, rest::binary>>, num_acc, acc, pos, start_pos) when c in ?0..?9 do
-    # Decimal point with digit following
+    # Decimal point with digit following: 0.5
     scan_float(rest, num_acc <> "." <> <<c>>, acc, advance_column(pos, 2), start_pos)
   end
 
+  defp scan_number(<<"..", _rest::binary>> = rest, num_acc, acc, pos, start_pos) do
+    # ".." is concat operator, not a decimal point: 0..5 → 0 .. 5
+    finalize_number(num_acc, rest, acc, pos, start_pos)
+  end
+
+  defp scan_number(<<".", c, rest::binary>>, num_acc, acc, pos, start_pos) when c in [?e, ?E] do
+    # "0.e5" → float with exponent
+    scan_float(<<c, rest::binary>>, num_acc <> ".", acc, advance_column(pos, 1), start_pos)
+  end
+
   defp scan_number(<<".", rest::binary>>, num_acc, acc, pos, start_pos) do
-    # Decimal point but no digit following - finalize number, reprocess "."
-    finalize_number(num_acc, <<".", rest::binary>>, acc, pos, start_pos)
+    # Trailing dot makes it a float: 0. → 0.0
+    scan_float(rest, num_acc <> ".", acc, advance_column(pos, 1), start_pos)
   end
 
   defp scan_number(<<c, rest::binary>>, num_acc, acc, pos, start_pos) when c in [?e, ?E] do
@@ -636,7 +646,13 @@ defmodule Lua.Lexer do
   defp parse_number(num_str) do
     if String.contains?(num_str, ".") or String.contains?(num_str, "e") or
          String.contains?(num_str, "E") do
-      case Float.parse(num_str) do
+      # Normalize for Elixir's Float.parse which requires digits after dot
+      normalized = num_str
+      # "0." → "0.0"
+      normalized = if String.ends_with?(normalized, "."), do: normalized <> "0", else: normalized
+      # "2.E-1" → "2.0E-1"
+      normalized = String.replace(normalized, ~r/\.([eE])/, ".0\\1")
+      case Float.parse(normalized) do
         {num, ""} -> {:ok, num}
         _ -> {:error, :invalid_number}
       end
