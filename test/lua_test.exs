@@ -1523,7 +1523,9 @@ defmodule LuaTest do
       return f(10, 20, 30)
       """
 
-      assert {[3, 20], _} = Lua.eval!(lua, code)
+      # In Lua 5.3, the last call in a return list expands all its results.
+      # select(2, 10, 20, 30) returns 20, 30
+      assert {[3, 20, 30], _} = Lua.eval!(lua, code)
     end
 
     test "varargs in function call", %{lua: lua} do
@@ -1863,6 +1865,240 @@ defmodule LuaTest do
       """
 
       assert {["table", "function"], _} = Lua.eval!(lua, code)
+    end
+  end
+
+  describe "compiler fixes" do
+    setup do
+      %{lua: Lua.new(sandboxed: [])}
+    end
+
+    test "redefine local function with same name", %{lua: lua} do
+      code = """
+      local function f(x) return x + 1 end
+      assert(f(10) == 11)
+      local function f(x) return x + 2 end
+      assert(f(10) == 12)
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "hex float literals", %{lua: lua} do
+      assert {[240.0], _} = Lua.eval!(lua, "return 0xF0.0")
+      assert {[343.5], _} = Lua.eval!(lua, "return 0xABCp-3")
+      assert {[1.0], _} = Lua.eval!(lua, "return 0x1p0")
+      assert {[255], _} = Lua.eval!(lua, "return 0xFF")
+    end
+
+    test "assert returns all arguments", %{lua: lua} do
+      assert {[1, 2, 3], _} = Lua.eval!(lua, "return assert(1, 2, 3)")
+    end
+
+    test "multi-value return register corruption", %{lua: lua} do
+      assert {[55, 2], _} =
+               Lua.eval!(lua, ~S"""
+               function c12(...)
+                 local x = {...}; x.n = #x
+                 local res = (x.n==2 and x[1] == 1 and x[2] == 2)
+                 if res then res = 55 end
+                 return res, 2
+               end
+               return c12(1,2)
+               """)
+    end
+
+    test "table.unpack with nil third argument", %{lua: lua} do
+      assert {[1, 2], _} = Lua.eval!(lua, "return table.unpack({1,2}, 1, nil)")
+    end
+
+    test "string.find empty pattern", %{lua: lua} do
+      assert {[1, 0], _} = Lua.eval!(lua, "return string.find('', '')")
+      assert {[1, 0], _} = Lua.eval!(lua, "return string.find('alo', '')")
+    end
+
+    test "select with multi-return function", %{lua: lua} do
+      # select(2, load(invalid)) should get the error message from load's two return values
+      code = ~S"""
+      local function multi() return nil, "error msg" end
+      return select(2, multi())
+      """
+
+      assert {["error msg"], _} = Lua.eval!(lua, code)
+    end
+
+    test "load returns nil and error for bad code", %{lua: lua} do
+      code = ~S"""
+      local st, msg = load("invalid code $$$$")
+      return st, type(msg)
+      """
+
+      assert {[nil, "string"], _} = Lua.eval!(lua, code)
+    end
+
+    test "table constructor with vararg expansion", %{lua: lua} do
+      code = ~S"""
+      function f(a, ...)
+        local arg = {n = select('#', ...), ...}
+        return arg.n, arg[1], arg[2]
+      end
+      return f({}, 10, 20)
+      """
+
+      assert {[2, 10, 20], _} = Lua.eval!(lua, code)
+    end
+
+    test "closure upvalue mutation", %{lua: lua} do
+      code = ~S"""
+      local A = 0
+      local dummy = function () return A end
+      A = 1
+      assert(dummy() == 1)
+      A = 0
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    @tag :skip
+    test "closure upvalue mutation through nested scope", %{lua: lua} do
+      # Known limitation: upvalue mutation through nested function scopes
+      # doesn't propagate correctly yet (upvalue cell sharing)
+      code = ~S"""
+      local A = 0
+      function f()
+        local dummy = function () return A end
+        A = 1
+        local val = dummy()
+        A = 0
+        return val
+      end
+      return f()
+      """
+
+      assert {[1], _} = Lua.eval!(lua, code)
+    end
+
+    @tag :skip
+    test "goto scope validation in load", %{lua: lua} do
+      # Known limitation: compiler doesn't validate goto-label scope rules
+      code = ~S"""
+      local st, msg = load(" goto l1; do ::l1:: end ")
+      return st, msg
+      """
+
+      {[st, _msg], _} = Lua.eval!(lua, code)
+      assert st == nil
+    end
+
+    test "vararg.lua early lines", %{lua: lua} do
+      code = ~S"""
+      function f(a, ...)
+        local arg = {n = select('#', ...), ...}
+        for i=1,arg.n do assert(a[i]==arg[i]) end
+        return arg.n
+      end
+      assert(f() == 0)
+      assert(f({1,2,3}, 1, 2, 3) == 3)
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "constructs.lua priorities", %{lua: lua} do
+      assert {[true], _} = Lua.eval!(lua, "return 2^3^2 == 2^(3^2)")
+      assert {[true], _} = Lua.eval!(lua, "return 2^3*4 == (2^3)*4")
+      assert {[true], _} = Lua.eval!(lua, "return 2.0^-2 == 1/4")
+      assert {[true], _} = Lua.eval!(lua, "return -2^2 == -4 and (-2)^2 == 4")
+    end
+
+    test "constructs.lua checkload pattern", %{lua: lua} do
+      # checkload uses select(2, load(s)) to get the error message
+      code = ~S"""
+      local function checkload (s, msg)
+        local err = select(2, load(s))
+        assert(string.find(err, msg))
+      end
+      checkload("invalid $$", "invalid")
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "constructs.lua lines 14-33", %{lua: lua} do
+      # Each priority assert individually
+      assert {[true], _} = Lua.eval!(lua, "do end; return true")
+      assert {[true], _} = Lua.eval!(lua, "do a = 3; assert(a == 3) end; return true")
+      assert {[true], _} = Lua.eval!(lua, "if false then a = 3 // 0; a = 0 % 0 end; return true")
+      assert {[true], _} = Lua.eval!(lua, "return 2^3^2 == 2^(3^2)")
+      assert {[true], _} = Lua.eval!(lua, "return 2^3*4 == (2^3)*4")
+      assert {[true], _} = Lua.eval!(lua, "return 2.0^-2 == 1/4")
+      assert {[true], _} = Lua.eval!(lua, "return -2^- -2 == - - -4")
+      assert {[true], _} = Lua.eval!(lua, "return -3-1-5 == 0+0-9")
+      assert {[true], _} = Lua.eval!(lua, "return -2^2 == -4 and (-2)^2 == 4 and 2*2-3-1 == 0")
+      assert {[true], _} = Lua.eval!(lua, "return -3%5 == 2 and -3+5 == 2")
+      assert {[true], _} = Lua.eval!(lua, "return 2*1+3/3 == 3 and 1+2 .. 3*1 == '33'")
+      assert {[true], _} = Lua.eval!(lua, "return not(2+1 > 3*1) and 'a'..'b' > 'a'")
+    end
+
+    test "dead code not evaluated", %{lua: lua} do
+      assert {[true], _} = Lua.eval!(lua, "if false then a = 3 // 0 end; return true")
+    end
+
+    test "multi-return in table constructor", %{lua: lua} do
+      # Last expression in table constructor should expand
+      code = ~S"""
+      local function multi() return 10, 20, 30 end
+      local t = {multi()}
+      return t[1], t[2], t[3]
+      """
+
+      assert {[10, 20, 30], _} = Lua.eval!(lua, code)
+
+      # With init values before the call
+      code = ~S"""
+      local function multi() return 20, 30 end
+      local t = {10, multi()}
+      return t[1], t[2], t[3]
+      """
+
+      assert {[10, 20, 30], _} = Lua.eval!(lua, code)
+
+      # Call NOT in last position should only return first value
+      code = ~S"""
+      local function multi() return 10, 20, 30 end
+      local t = {multi(), 99}
+      return t[1], t[2]
+      """
+
+      assert {[10, 99], _} = Lua.eval!(lua, code)
+    end
+
+    test "pm.lua early lines", %{lua: lua} do
+      code = ~S"""
+      local function checkerror (msg, f, ...)
+        local s, err = pcall(f, ...)
+        assert(not s and string.find(err, msg))
+      end
+
+      function f(s, p)
+        local i,e = string.find(s, p)
+        if i then return string.sub(s, i, e) end
+      end
+
+      a,b = string.find('', '')
+      assert(a == 1 and b == 0)
+      a,b = string.find('alo', '')
+      assert(a == 1 and b == 0)
+      assert(f("alo", "al") == "al")
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
     end
   end
 

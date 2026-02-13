@@ -101,6 +101,9 @@ defmodule Lua.VM.Stdlib do
     # Set _G global (the proxy table itself is stored in the raw data for _G._G == _G)
     state = State.set_global(state, "_G", g_ref)
 
+    # _ENV is the environment table — equivalent to _G for top-level code
+    state = State.set_global(state, "_ENV", g_ref)
+
     # Store _G in the proxy's raw data so _G._G == _G works without hitting __index
     state =
       State.update_table(state, g_ref, fn table ->
@@ -177,12 +180,12 @@ defmodule Lua.VM.Stdlib do
       message =
         case rest do
           [msg | _] -> msg
-          [] -> "assertion failed!"
+          [] -> "assertion failed! (line #{state.current_line})"
         end
 
       raise AssertionError, value: message
     else
-      {[value], state}
+      {[value | rest], state}
     end
   end
 

@@ -234,6 +234,10 @@ defmodule Lua.Compiler.Scope do
     state = %{state | locals: Map.put(state.locals, name, reg)}
     state = %{state | next_register: reg + 1}
 
+    # Store the register assignment in var_map so codegen can find the correct
+    # register even when the same name is redefined later (e.g., two `local function f`)
+    state = %{state | var_map: Map.put(state.var_map, {:local_func_reg, local_func}, reg)}
+
     # Update max_register in current function scope
     func_scope = state.functions[state.current_function]
     func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}

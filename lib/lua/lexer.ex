@@ -540,10 +540,20 @@ defmodule Lua.Lexer do
     finalize_number(num_acc, rest, acc, pos, start_pos)
   end
 
-  # Scan hexadecimal number (0x...)
+  # Scan hexadecimal number (0x...) — supports integers, hex floats (0xF0.0), and exponents (0xABCp-3)
   defp scan_hex_number(<<c, rest::binary>>, hex_acc, acc, pos, start_pos)
        when c in ?0..?9 or c in ?a..?f or c in ?A..?F do
     scan_hex_number(rest, hex_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  # Hex float: dot followed by hex digits
+  defp scan_hex_number(<<".", rest::binary>>, hex_acc, acc, pos, start_pos) do
+    scan_hex_frac(rest, hex_acc, "", acc, advance_column(pos, 1), start_pos)
+  end
+
+  # Hex float: binary exponent (p/P)
+  defp scan_hex_number(<<p, rest::binary>>, hex_acc, acc, pos, start_pos) when p in [?p, ?P] do
+    scan_hex_exp(rest, hex_acc, "", acc, advance_column(pos, 1), start_pos)
   end
 
   defp scan_hex_number(rest, hex_acc, acc, pos, start_pos) do
@@ -555,6 +565,59 @@ defmodule Lua.Lexer do
       _ ->
         {:error, {:invalid_hex_number, start_pos}}
     end
+  end
+
+  # Scan hex fractional digits after the dot
+  defp scan_hex_frac(<<c, rest::binary>>, int_acc, frac_acc, acc, pos, start_pos)
+       when c in ?0..?9 or c in ?a..?f or c in ?A..?F do
+    scan_hex_frac(rest, int_acc, frac_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  # Hex float fractional part followed by exponent
+  defp scan_hex_frac(<<p, rest::binary>>, int_acc, frac_acc, acc, pos, start_pos) when p in [?p, ?P] do
+    scan_hex_exp(rest, int_acc, frac_acc, acc, advance_column(pos, 1), start_pos)
+  end
+
+  # Hex float fractional part without exponent
+  defp scan_hex_frac(rest, int_acc, frac_acc, acc, pos, start_pos) do
+    num = build_hex_float(int_acc, frac_acc, 0)
+    token = {:number, num, start_pos}
+    do_tokenize(rest, [token | acc], pos)
+  end
+
+  # Scan binary exponent (p/P followed by optional sign and decimal digits)
+  defp scan_hex_exp(<<sign, rest::binary>>, int_acc, frac_acc, acc, pos, start_pos) when sign in [?+, ?-] do
+    scan_hex_exp_digits(rest, int_acc, frac_acc, <<sign>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  defp scan_hex_exp(rest, int_acc, frac_acc, acc, pos, start_pos) do
+    scan_hex_exp_digits(rest, int_acc, frac_acc, "", acc, pos, start_pos)
+  end
+
+  defp scan_hex_exp_digits(<<c, rest::binary>>, int_acc, frac_acc, exp_acc, acc, pos, start_pos) when c in ?0..?9 do
+    scan_hex_exp_digits(rest, int_acc, frac_acc, exp_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  defp scan_hex_exp_digits(rest, int_acc, frac_acc, exp_acc, acc, pos, start_pos) do
+    exp = if exp_acc == "" or exp_acc == "+" or exp_acc == "-", do: 0, else: String.to_integer(exp_acc)
+    num = build_hex_float(int_acc, frac_acc, exp)
+    token = {:number, num, start_pos}
+    do_tokenize(rest, [token | acc], pos)
+  end
+
+  # Build a hex float value from integer hex digits, fractional hex digits, and binary exponent
+  defp build_hex_float(int_hex, frac_hex, exp) do
+    int_val = if int_hex == "", do: 0, else: String.to_integer(int_hex, 16)
+
+    frac_val =
+      if frac_hex == "" do
+        0.0
+      else
+        frac_int = String.to_integer(frac_hex, 16)
+        frac_int / :math.pow(16, String.length(frac_hex))
+      end
+
+    (int_val + frac_val) * :math.pow(2, exp)
   end
 
   # Finalize number token
