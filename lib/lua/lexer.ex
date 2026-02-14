@@ -652,6 +652,7 @@ defmodule Lua.Lexer do
       normalized = if String.ends_with?(normalized, "."), do: normalized <> "0", else: normalized
       # "2.E-1" → "2.0E-1"
       normalized = String.replace(normalized, ~r/\.([eE])/, ".0\\1")
+
       case Float.parse(normalized) do
         {num, ""} -> {:ok, num}
         _ -> {:error, :invalid_number}

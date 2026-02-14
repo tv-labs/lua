@@ -626,7 +626,8 @@ defmodule Lua.Compiler.Codegen do
 
         last_field = List.last(rest)
 
-        {closure_instructions ++ final_instructions ++ [Instruction.set_field(final_table_reg, last_field, closure_reg)], ctx}
+        {closure_instructions ++ final_instructions ++ [Instruction.set_field(final_table_reg, last_field, closure_reg)],
+         ctx}
     end
   end
 

@@ -331,8 +331,7 @@ defmodule Lua.VM.Executor do
       # so each iteration gets fresh upvalue cells for its own variables
       state = %{
         state
-        | open_upvalues:
-            Map.reject(state.open_upvalues, fn {reg, _} -> reg >= loop_var end)
+        | open_upvalues: Map.reject(state.open_upvalues, fn {reg, _} -> reg >= loop_var end)
       }
 
       # Execute body
@@ -387,8 +386,7 @@ defmodule Lua.VM.Executor do
 
       state = %{
         state
-        | open_upvalues:
-            Map.reject(state.open_upvalues, fn {reg, _} -> reg >= first_var_reg end)
+        | open_upvalues: Map.reject(state.open_upvalues, fn {reg, _} -> reg >= first_var_reg end)
       }
 
       # Execute body

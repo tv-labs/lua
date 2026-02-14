@@ -416,8 +416,7 @@ defmodule Lua.Compiler.Scope do
 
         func = %{
           func
-          | upvalue_descriptors:
-              func.upvalue_descriptors ++ [{:parent_local, reg, name}]
+          | upvalue_descriptors: func.upvalue_descriptors ++ [{:parent_local, reg, name}]
         }
 
         state = %{state | functions: Map.put(state.functions, for_function, func)}
