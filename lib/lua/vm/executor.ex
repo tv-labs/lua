@@ -796,7 +796,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__band", val_a, val_b, state, fn ->
-        Bitwise.band(to_integer!(val_a), to_integer!(val_b)) |> to_signed_int64()
+        val_a |> to_integer!() |> Bitwise.band(to_integer!(val_b)) |> to_signed_int64()
       end)
 
     regs = put_elem(regs, dest, result)
@@ -809,7 +809,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__bor", val_a, val_b, state, fn ->
-        Bitwise.bor(to_integer!(val_a), to_integer!(val_b)) |> to_signed_int64()
+        val_a |> to_integer!() |> Bitwise.bor(to_integer!(val_b)) |> to_signed_int64()
       end)
 
     regs = put_elem(regs, dest, result)
@@ -822,7 +822,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__bxor", val_a, val_b, state, fn ->
-        Bitwise.bxor(to_integer!(val_a), to_integer!(val_b)) |> to_signed_int64()
+        val_a |> to_integer!() |> Bitwise.bxor(to_integer!(val_b)) |> to_signed_int64()
       end)
 
     regs = put_elem(regs, dest, result)
@@ -860,7 +860,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_unary_metamethod("__bnot", val, state, fn ->
-        Bitwise.bnot(to_integer!(val)) |> to_signed_int64()
+        val |> to_integer!() |> Bitwise.bnot() |> to_signed_int64()
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1752,7 +1752,7 @@ defmodule Lua.VM.Executor do
   defp lua_shift_left(val, shift) when shift < 0, do: lua_shift_right(val, -shift)
 
   defp lua_shift_left(val, shift) do
-    Bitwise.bsl(val, shift) |> to_signed_int64()
+    val |> Bitwise.bsl(shift) |> to_signed_int64()
   end
 
   defp lua_shift_right(_val, shift) when shift >= 64, do: 0
@@ -1762,7 +1762,7 @@ defmodule Lua.VM.Executor do
   defp lua_shift_right(val, shift) do
     # Unsigned right shift - mask to 64-bit unsigned first
     unsigned_val = Bitwise.band(val, 0xFFFFFFFFFFFFFFFF)
-    Bitwise.bsr(unsigned_val, shift) |> to_signed_int64()
+    unsigned_val |> Bitwise.bsr(shift) |> to_signed_int64()
   end
 
   # Wrap an arbitrary-precision integer to a signed 64-bit integer
