@@ -464,9 +464,9 @@ defmodule Lua.Compiler.Codegen do
     {[loop_instruction], ctx}
   end
 
-  defp gen_statement(%Statement.ForNum{var: var, start: start_expr, limit: limit_expr, step: step_expr, body: body}, ctx) do
-    # Get the loop variable's register from scope
-    loop_var_reg = ctx.scope.locals[var]
+  defp gen_statement(%Statement.ForNum{start: start_expr, limit: limit_expr, step: step_expr, body: body} = node, ctx) do
+    # Get the loop variable's register from var_map (locals are restored after scope isolation)
+    loop_var_reg = Map.get(ctx.scope.var_map, {:for_var, node})
 
     # Allocate 3 internal registers for: counter, limit, step
     base = ctx.next_reg
@@ -510,9 +510,9 @@ defmodule Lua.Compiler.Codegen do
        [loop_instruction], ctx}
   end
 
-  defp gen_statement(%Statement.ForIn{vars: vars, iterators: iterators, body: body}, ctx) do
-    # Look up loop variable registers from scope
-    var_regs = Enum.map(vars, fn name -> ctx.scope.locals[name] end)
+  defp gen_statement(%Statement.ForIn{iterators: iterators, body: body} = node, ctx) do
+    # Look up loop variable registers from var_map (locals are restored after scope isolation)
+    var_regs = Map.get(ctx.scope.var_map, {:for_in_vars, node})
 
     # Allocate 3 internal registers for: iterator function, invariant state, control variable
     base = ctx.next_reg
@@ -611,7 +611,31 @@ defmodule Lua.Compiler.Codegen do
 
     case name do
       [single_name] ->
-        {closure_instructions ++ [Instruction.set_global(single_name, closure_reg)], ctx}
+        # Check if scope resolution determined this should assign to a local
+        case Map.get(ctx.scope.var_map, {:func_decl_target, decl}) do
+          {:local, local_reg, local_name} ->
+            # Assign to local variable
+            move_instructions =
+              if closure_reg == local_reg do
+                []
+              else
+                [Instruction.move(local_reg, closure_reg)]
+              end
+
+            # If the local is captured, also update its upvalue cell
+            update_upvalue =
+              if MapSet.member?(ctx.scope.captured_locals, local_name) do
+                [Instruction.set_open_upvalue(local_reg, closure_reg)]
+              else
+                []
+              end
+
+            {closure_instructions ++ move_instructions ++ update_upvalue, ctx}
+
+          nil ->
+            # No local in scope at this point, assign to global
+            {closure_instructions ++ [Instruction.set_global(single_name, closure_reg)], ctx}
+        end
 
       [first | rest] ->
         # Dotted name: get the table chain, then set the final field
