@@ -577,15 +577,15 @@ defmodule Lua.LexerTest do
     end
 
     test "handles trailing dot after number" do
-      # "42." should tokenize as number 42 followed by dot
+      # "42." is a valid float literal in Lua 5.3 (= 42.0)
       assert {:ok, tokens} = Lexer.tokenize("42.")
-      assert [{:number, 42, _}, {:delimiter, :dot, _}, {:eof, _}] = tokens
+      assert [{:number, 42.0, _}, {:eof, _}] = tokens
     end
 
     test "handles decimal point without following digit" do
-      # "42.x" should be number 42 followed by dot and identifier x
+      # "42.x" is float 42.0 followed by identifier x
       assert {:ok, tokens} = Lexer.tokenize("42.x")
-      assert [{:number, 42, _}, {:delimiter, :dot, _}, {:identifier, "x", _}, {:eof, _}] = tokens
+      assert [{:number, 42.0, _}, {:identifier, "x", _}, {:eof, _}] = tokens
     end
 
     test "reports error for invalid hex number" do

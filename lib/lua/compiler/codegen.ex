@@ -36,8 +36,8 @@ defmodule Lua.Compiler.Codegen do
       prototypes: Enum.reverse(ctx.prototypes),
       upvalue_descriptors: [],
       param_count: 0,
-      is_vararg: false,
-      max_registers: func_scope.max_register,
+      is_vararg: func_scope.is_vararg,
+      max_registers: Enum.max([func_scope.max_register, ctx.next_reg, Map.get(ctx, :peak_reg, 0)]),
       source: source,
       lines: lines
     }
@@ -47,9 +47,17 @@ defmodule Lua.Compiler.Codegen do
 
   defp gen_block(%Block{stmts: stmts}, ctx) do
     Enum.reduce(stmts, {[], ctx}, fn stmt, {instructions, ctx} ->
+      # Save next_reg before each statement so temp registers are recycled.
+      # Scope-assigned locals use fixed registers below this base; codegen temps
+      # are allocated above it and don't need to persist across statements.
+      saved_next_reg = ctx.next_reg
       # Emit source_line before each statement
       line_instr = emit_source_line(stmt, ctx)
       {new_instructions, ctx} = gen_statement(stmt, ctx)
+      # Track peak for max_registers, then reset for next statement
+      peak = max(Map.get(ctx, :peak_reg, 0), ctx.next_reg)
+      ctx = %{ctx | next_reg: saved_next_reg}
+      ctx = Map.put(ctx, :peak_reg, peak)
       {instructions ++ line_instr ++ new_instructions, ctx}
     end)
   end
@@ -86,21 +94,14 @@ defmodule Lua.Compiler.Codegen do
   defp gen_statement(%Statement.Return{values: [%Expr.Call{} = call]}, ctx) do
     # return f(...) — forward all results from the call
     {call_instructions, _result_reg, ctx} = gen_expr(call, ctx)
+    call_instructions = patch_call_result_count(call_instructions, -1)
+    {call_instructions, ctx}
+  end
 
-    # Patch the call to request all results (sentinel -1)
-    call_instructions =
-      case List.last(call_instructions) do
-        {:call, base, arg_count, _result_count} ->
-          List.replace_at(
-            call_instructions,
-            length(call_instructions) - 1,
-            {:call, base, arg_count, -1}
-          )
-
-        _ ->
-          call_instructions
-      end
-
+  defp gen_statement(%Statement.Return{values: [%Expr.MethodCall{} = call]}, ctx) do
+    # return obj:method(...) — forward all results
+    {call_instructions, _result_reg, ctx} = gen_expr(call, ctx)
+    call_instructions = patch_call_result_count(call_instructions, -1)
     {call_instructions, ctx}
   end
 
@@ -130,6 +131,8 @@ defmodule Lua.Compiler.Codegen do
               |> Enum.with_index()
               |> Enum.reduce({[], ctx}, fn {value, i}, {instructions, ctx} ->
                 target_reg = base_reg + i
+                # Ensure next_reg is past target so gen_expr doesn't overwrite previous results
+                ctx = %{ctx | next_reg: max(ctx.next_reg, target_reg + 1)}
                 {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
 
                 move =
@@ -146,8 +149,42 @@ defmodule Lua.Compiler.Codegen do
             vararg_base = base_reg + length(init_values)
             vararg_instruction = Instruction.vararg(vararg_base, 0)
 
-            # Return with -1 to indicate variable number of results
-            {init_instructions ++ [vararg_instruction, Instruction.return_instr(base_reg, -1)], ctx}
+            # Return with negative count: -(init_count + 1) to encode fixed + variable
+            init_count = length(init_values)
+            {init_instructions ++ [vararg_instruction, Instruction.return_instr(base_reg, -(init_count + 1))], ctx}
+
+          call_expr when is_struct(call_expr, Expr.Call) or is_struct(call_expr, Expr.MethodCall) ->
+            # return a, b, f() - load a,b then expand all results of f()
+            base_reg = ctx.next_reg
+            fixed_count = length(init_values)
+
+            {init_instructions, ctx} =
+              init_values
+              |> Enum.with_index()
+              |> Enum.reduce({[], ctx}, fn {value, i}, {instructions, ctx} ->
+                target_reg = base_reg + i
+                ctx = %{ctx | next_reg: max(ctx.next_reg, target_reg + 1)}
+                {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
+
+                move =
+                  if value_reg == target_reg do
+                    []
+                  else
+                    [Instruction.move(target_reg, value_reg)]
+                  end
+
+                {instructions ++ value_instructions ++ move, ctx}
+              end)
+
+            # Compile the tail call
+            ctx = %{ctx | next_reg: base_reg + fixed_count}
+            {call_instructions, _call_reg, ctx} = gen_expr(call_expr, ctx)
+            call_instructions = patch_call_result_count(call_instructions, -2)
+
+            # Return with {:multi_return, fixed_count} to indicate fixed + expanded results
+            {init_instructions ++
+               call_instructions ++
+               [Instruction.return_instr(base_reg, {:multi_return, fixed_count})], ctx}
 
           _ ->
             # Normal multi-value return
@@ -158,6 +195,8 @@ defmodule Lua.Compiler.Codegen do
               |> Enum.with_index()
               |> Enum.reduce({[], ctx}, fn {value, i}, {instructions, ctx} ->
                 target_reg = base_reg + i
+                # Ensure next_reg is past target so gen_expr doesn't overwrite previous results
+                ctx = %{ctx | next_reg: max(ctx.next_reg, target_reg + 1)}
                 {value_instructions, value_reg, ctx} = gen_expr(value, ctx)
 
                 move =
@@ -190,18 +229,19 @@ defmodule Lua.Compiler.Codegen do
         num_targets = length(targets)
         num_values = length(values)
 
-        # Check if last value is a call (for multiple-return expansion)
-        {init_values, last_value, last_is_call} =
+        # Check if last value is a call or vararg (for multiple-return expansion)
+        {init_values, last_value, last_kind} =
           if num_values > 0 do
             [last | _] = Enum.reverse(values)
 
             case last do
-              %Expr.Call{} -> {Enum.slice(values, 0..-2//1), last, true}
-              %Expr.MethodCall{} -> {Enum.slice(values, 0..-2//1), last, true}
-              _ -> {values, nil, false}
+              %Expr.Call{} -> {Enum.slice(values, 0..-2//1), last, :call}
+              %Expr.MethodCall{} -> {Enum.slice(values, 0..-2//1), last, :call}
+              %Expr.Vararg{} -> {Enum.slice(values, 0..-2//1), last, :vararg}
+              _ -> {values, nil, :none}
             end
           else
-            {[], nil, false}
+            {[], nil, :none}
           end
 
         # Evaluate init values into temp registers
@@ -211,30 +251,36 @@ defmodule Lua.Compiler.Codegen do
             {instructions ++ value_instructions, regs ++ [value_reg], ctx}
           end)
 
-        # If last value is a call, expand multiple returns
-        {call_instructions, call_base, ctx} =
-          if last_is_call do
-            # Number of extra values we need from the call
-            needed_from_call = num_targets - length(init_values)
-            {call_instr, call_reg, ctx} = gen_expr(last_value, ctx)
+        # If last value is a call or vararg, expand multiple returns
+        {multi_instructions, multi_base, ctx} =
+          case last_kind do
+            :call ->
+              needed = num_targets - length(init_values)
+              {call_instr, call_reg, ctx} = gen_expr(last_value, ctx)
 
-            # Patch the call to request needed_from_call results
-            call_instr =
-              case List.last(call_instr) do
-                {:call, cb, arg_count, _result_count} ->
-                  List.replace_at(
-                    call_instr,
-                    length(call_instr) - 1,
-                    {:call, cb, arg_count, max(needed_from_call, 1)}
-                  )
+              call_instr =
+                case List.last(call_instr) do
+                  {:call, cb, arg_count, _result_count} ->
+                    List.replace_at(
+                      call_instr,
+                      length(call_instr) - 1,
+                      {:call, cb, arg_count, max(needed, 1)}
+                    )
 
-                _ ->
-                  call_instr
-              end
+                  _ ->
+                    call_instr
+                end
 
-            {call_instr, call_reg, ctx}
-          else
-            {[], nil, ctx}
+              {call_instr, call_reg, ctx}
+
+            :vararg ->
+              needed = num_targets - length(init_values)
+              vararg_base = ctx.next_reg
+              ctx = %{ctx | next_reg: vararg_base + needed}
+              {[Instruction.vararg(vararg_base, needed)], vararg_base, ctx}
+
+            :none ->
+              {[], nil, ctx}
           end
 
         # Build the list of value registers for each target
@@ -244,10 +290,10 @@ defmodule Lua.Compiler.Codegen do
               i < length(init_regs) ->
                 Enum.at(init_regs, i)
 
-              last_is_call ->
-                # Value comes from the multi-return call
-                call_result_offset = i - length(init_regs)
-                call_base + call_result_offset
+              last_kind != :none ->
+                # Value comes from the multi-return call or vararg
+                multi_offset = i - length(init_regs)
+                multi_base + multi_offset
 
               true ->
                 nil
@@ -274,7 +320,7 @@ defmodule Lua.Compiler.Codegen do
             end
           end)
 
-        {init_instructions ++ call_instructions ++ assign_instructions, ctx}
+        {init_instructions ++ multi_instructions ++ assign_instructions, ctx}
     end
   end
 
@@ -284,23 +330,26 @@ defmodule Lua.Compiler.Codegen do
     num_names = length(names)
     num_values = length(values)
 
-    # Check if last value is a call (for multiple-return expansion)
-    {init_values, last_value, last_is_call} =
+    # Check if last value is a call or vararg (for multiple-return expansion)
+    {init_values, last_value, last_kind} =
       if num_values > 0 do
         [last | _] = Enum.reverse(values)
 
         case last do
           %Expr.Call{} when num_names > num_values ->
-            {Enum.slice(values, 0..-2//1), last, true}
+            {Enum.slice(values, 0..-2//1), last, :call}
 
           %Expr.MethodCall{} when num_names > num_values ->
-            {Enum.slice(values, 0..-2//1), last, true}
+            {Enum.slice(values, 0..-2//1), last, :call}
+
+          %Expr.Vararg{} when num_names > num_values ->
+            {Enum.slice(values, 0..-2//1), last, :vararg}
 
           _ ->
-            {values, nil, false}
+            {values, nil, :none}
         end
       else
-        {[], nil, false}
+        {[], nil, :none}
       end
 
     # Generate code for init values
@@ -310,28 +359,36 @@ defmodule Lua.Compiler.Codegen do
         {instructions ++ new_instructions, regs ++ [reg], ctx}
       end)
 
-    # If last value is a call, generate it requesting multiple returns
-    {call_instructions, call_base, ctx} =
-      if last_is_call do
-        needed = num_names - length(init_values)
-        {call_instr, call_reg, ctx} = gen_expr(last_value, ctx)
+    # If last value is a call or vararg, generate it requesting multiple returns
+    {multi_instructions, multi_base, ctx} =
+      case last_kind do
+        :call ->
+          needed = num_names - length(init_values)
+          {call_instr, call_reg, ctx} = gen_expr(last_value, ctx)
 
-        call_instr =
-          case List.last(call_instr) do
-            {:call, cb, arg_count, _result_count} ->
-              List.replace_at(
-                call_instr,
-                length(call_instr) - 1,
-                {:call, cb, arg_count, max(needed, 1)}
-              )
+          call_instr =
+            case List.last(call_instr) do
+              {:call, cb, arg_count, _result_count} ->
+                List.replace_at(
+                  call_instr,
+                  length(call_instr) - 1,
+                  {:call, cb, arg_count, max(needed, 1)}
+                )
 
-            _ ->
-              call_instr
-          end
+              _ ->
+                call_instr
+            end
 
-        {call_instr, call_reg, ctx}
-      else
-        {[], nil, ctx}
+          {call_instr, call_reg, ctx}
+
+        :vararg ->
+          needed = num_names - length(init_values)
+          vararg_base = ctx.next_reg
+          ctx = %{ctx | next_reg: vararg_base + needed}
+          {[Instruction.vararg(vararg_base, needed)], vararg_base, ctx}
+
+        :none ->
+          {[], nil, ctx}
       end
 
     # Generate move instructions to copy values to their assigned registers
@@ -346,10 +403,10 @@ defmodule Lua.Compiler.Codegen do
             source_reg = Enum.at(value_regs, index)
             if dest_reg == source_reg, do: [], else: [Instruction.move(dest_reg, source_reg)]
 
-          last_is_call ->
-            # Value comes from multi-return call
-            call_offset = index - length(value_regs)
-            source_reg = call_base + call_offset
+          last_kind != :none ->
+            # Value comes from multi-return call or vararg expansion
+            multi_offset = index - length(value_regs)
+            source_reg = multi_base + multi_offset
             if dest_reg == source_reg, do: [], else: [Instruction.move(dest_reg, source_reg)]
 
           true ->
@@ -358,7 +415,7 @@ defmodule Lua.Compiler.Codegen do
         end
       end)
 
-    {value_instructions ++ call_instructions ++ move_instructions, ctx}
+    {value_instructions ++ multi_instructions ++ move_instructions, ctx}
   end
 
   defp gen_statement(
@@ -558,7 +615,7 @@ defmodule Lua.Compiler.Codegen do
 
       [first | rest] ->
         # Dotted name: get the table chain, then set the final field
-        {get_instructions, table_reg, ctx} = gen_expr(%Expr.Var{name: first}, ctx)
+        {get_instructions, table_reg, ctx} = gen_var_by_name(first, ctx)
 
         {final_instructions, final_table_reg, ctx} =
           Enum.reduce(Enum.slice(rest, 0..-2//1), {get_instructions, table_reg, ctx}, fn field, {instrs, reg, ctx} ->
@@ -569,7 +626,8 @@ defmodule Lua.Compiler.Codegen do
 
         last_field = List.last(rest)
 
-        {final_instructions ++ [Instruction.set_field(final_table_reg, last_field, closure_reg)], ctx}
+        {closure_instructions ++ final_instructions ++ [Instruction.set_field(final_table_reg, last_field, closure_reg)],
+         ctx}
     end
   end
 
@@ -578,8 +636,8 @@ defmodule Lua.Compiler.Codegen do
     # Generate closure for the function
     {closure_instructions, closure_reg, ctx} = gen_closure_from_node(local_func, ctx)
 
-    # Get the local variable's register from scope
-    dest_reg = ctx.scope.locals[name]
+    # Get the local variable's register from var_map (per-statement, handles redefinitions)
+    dest_reg = Map.get(ctx.scope.var_map, {:local_func_reg, local_func}, ctx.scope.locals[name])
 
     # Move closure to the local's register
     move_instructions =
@@ -881,91 +939,101 @@ defmodule Lua.Compiler.Codegen do
 
     ctx = %{ctx | next_reg: base_reg + 1}
 
-    # Check if last arg is vararg - needs special handling
-    {has_vararg_last, init_args} =
-      if length(args) > 0 do
-        [last | _] = Enum.reverse(args)
+    # Check what the last argument is — determines calling convention
+    last_arg_type =
+      case args do
+        [] ->
+          :normal
 
-        case last do
-          %Expr.Vararg{} -> {true, Enum.slice(args, 0..-2//1)}
-          _ -> {false, args}
-        end
-      else
-        {false, []}
+        _ ->
+          case List.last(args) do
+            %Expr.Vararg{} -> :vararg
+            %Expr.Call{} -> :multi_call
+            %Expr.MethodCall{} -> :multi_call
+            _ -> :normal
+          end
       end
 
-    if has_vararg_last do
-      # f(a, b, ...) - load a, b then all varargs
-      arg_count = length(init_args)
-      ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
+    case last_arg_type do
+      :vararg ->
+        # f(a, b, ...) - load a, b then all varargs
+        init_args = Enum.slice(args, 0..-2//1)
+        arg_count = length(init_args)
+        ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
 
-      {arg_instructions, arg_regs, ctx} =
-        Enum.reduce(init_args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
-          {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
-          {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
-        end)
+        {arg_instructions, arg_regs, ctx} =
+          Enum.reduce(init_args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
+            {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
+            {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
+          end)
 
-      # Move each arg result to its expected position (base+1+i)
-      move_instructions =
-        arg_regs
-        |> Enum.with_index()
-        |> Enum.flat_map(fn {arg_reg, i} ->
-          expected_reg = base_reg + 1 + i
+        move_instructions = gen_move_args(arg_regs, base_reg + 1)
 
-          if arg_reg == expected_reg do
-            []
-          else
-            [Instruction.move(expected_reg, arg_reg)]
-          end
-        end)
+        vararg_base = base_reg + 1 + arg_count
+        vararg_instruction = Instruction.vararg(vararg_base, 0)
+        call_instruction = Instruction.call(base_reg, -(arg_count + 1), 1)
 
-      # Load all varargs starting after init args
-      vararg_base = base_reg + 1 + arg_count
-      vararg_instruction = Instruction.vararg(vararg_base, 0)
+        {function_instructions ++
+           move_function ++
+           arg_instructions ++
+           move_instructions ++
+           [vararg_instruction, call_instruction], base_reg, ctx}
 
-      # Call with -(init_args+1) to encode both varargs and fixed arg count
-      # Negative values encode: -1 means 0 fixed + varargs, -2 means 1 fixed + varargs, etc.
-      call_instruction = Instruction.call(base_reg, -(arg_count + 1), 1)
+      :multi_call ->
+        # f(a, b, g()) - load a, b then expand all results of g()
+        init_args = Enum.slice(args, 0..-2//1)
+        last_call = List.last(args)
+        fixed_count = length(init_args)
 
-      {function_instructions ++
-         move_function ++
-         arg_instructions ++
-         move_instructions ++
-         [vararg_instruction, call_instruction], base_reg, ctx}
-    else
-      # Normal function call without varargs
-      arg_count = length(args)
-      ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
+        ctx = %{ctx | next_reg: base_reg + 1 + fixed_count}
 
-      {arg_instructions, arg_regs, ctx} =
-        Enum.reduce(args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
-          {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
-          {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
-        end)
+        {arg_instructions, arg_regs, ctx} =
+          Enum.reduce(init_args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
+            {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
+            {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
+          end)
 
-      # Move each arg result to its expected position (base+1+i)
-      move_instructions =
-        arg_regs
-        |> Enum.with_index()
-        |> Enum.flat_map(fn {arg_reg, i} ->
-          expected_reg = base_reg + 1 + i
+        move_instructions = gen_move_args(arg_regs, base_reg + 1)
 
-          if arg_reg == expected_reg do
-            []
-          else
-            [Instruction.move(expected_reg, arg_reg)]
-          end
-        end)
+        # Ensure next_reg is positioned for the inner call
+        ctx = %{ctx | next_reg: base_reg + 1 + fixed_count}
 
-      # Generate call instruction (single return value for now)
-      call_instruction = Instruction.call(base_reg, arg_count, 1)
+        # Compile the inner call — its results will be placed at base+1+fixed_count
+        {inner_call_instructions, _inner_base, ctx} = gen_expr(last_call, ctx)
 
-      # Result will be in base_reg
-      {function_instructions ++
-         move_function ++
-         arg_instructions ++
-         move_instructions ++
-         [call_instruction], base_reg, ctx}
+        # Patch the inner call's result_count to -2 (expand all results)
+        inner_call_instructions = patch_call_result_count(inner_call_instructions, -2)
+
+        # Outer call uses {:multi, fixed_count} to collect fixed + expanded args
+        call_instruction = Instruction.call(base_reg, {:multi, fixed_count}, 1)
+
+        {function_instructions ++
+           move_function ++
+           arg_instructions ++
+           move_instructions ++
+           inner_call_instructions ++
+           [call_instruction], base_reg, ctx}
+
+      :normal ->
+        # Normal function call
+        arg_count = length(args)
+        ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
+
+        {arg_instructions, arg_regs, ctx} =
+          Enum.reduce(args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
+            {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
+            {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
+          end)
+
+        move_instructions = gen_move_args(arg_regs, base_reg + 1)
+
+        call_instruction = Instruction.call(base_reg, arg_count, 1)
+
+        {function_instructions ++
+           move_function ++
+           arg_instructions ++
+           move_instructions ++
+           [call_instruction], base_reg, ctx}
     end
   end
 
@@ -1002,7 +1070,8 @@ defmodule Lua.Compiler.Codegen do
             # Table with {a, b, ...}
             # Reserve contiguous slots for the init values
             start_reg = ctx.next_reg
-            ctx = %{ctx | next_reg: start_reg + length(init_fields)}
+            init_count = length(init_fields)
+            ctx = %{ctx | next_reg: start_reg + init_count}
 
             {init_instructions, ctx} =
               init_fields
@@ -1022,19 +1091,51 @@ defmodule Lua.Compiler.Codegen do
               end)
 
             # Load all varargs starting after init values
-            vararg_base = start_reg + length(init_fields)
+            vararg_base = start_reg + init_count
             vararg_instruction = Instruction.vararg(vararg_base, 0)
 
-            # set_list with count 0 means variable number of values
-            set_list_instruction = Instruction.set_list(dest, start_reg, 0, 0)
+            # {:multi, init_count} means init_count fixed + state.multi_return_count variable
+            set_list_instruction = Instruction.set_list(dest, start_reg, {:multi, init_count}, 0)
             {init_instructions ++ [vararg_instruction, set_list_instruction], ctx}
 
           %Expr.Vararg{} ->
             # Table with just {...}
             start_reg = ctx.next_reg
             vararg_instruction = Instruction.vararg(start_reg, 0)
-            set_list_instruction = Instruction.set_list(dest, start_reg, 0, 0)
+            set_list_instruction = Instruction.set_list(dest, start_reg, {:multi, 0}, 0)
             {[vararg_instruction, set_list_instruction], ctx}
+
+          call_expr when is_struct(call_expr, Expr.Call) or is_struct(call_expr, Expr.MethodCall) ->
+            # Table with {a, b, f()} - init values then multi-return expansion
+            start_reg = ctx.next_reg
+            init_count = length(init_fields)
+            ctx = %{ctx | next_reg: start_reg + init_count}
+
+            {init_instructions, ctx} =
+              init_fields
+              |> Enum.with_index()
+              |> Enum.reduce({[], ctx}, fn {val_expr, i}, {instructions, ctx} ->
+                target_reg = start_reg + i
+                {value_instructions, val_reg, ctx} = gen_expr(val_expr, ctx)
+
+                move =
+                  if val_reg == target_reg do
+                    []
+                  else
+                    [Instruction.move(target_reg, val_reg)]
+                  end
+
+                {instructions ++ value_instructions ++ move, ctx}
+              end)
+
+            # Compile the tail call — its results go after init values
+            ctx = %{ctx | next_reg: start_reg + init_count}
+            {call_instructions, _call_reg, ctx} = gen_expr(call_expr, ctx)
+            call_instructions = patch_call_result_count(call_instructions, -2)
+
+            # set_list with {:multi, init_count} to use multi_return_count from state
+            set_list_instruction = Instruction.set_list(dest, start_reg, {:multi, init_count}, 0)
+            {init_instructions ++ call_instructions ++ [set_list_instruction], ctx}
 
           _ ->
             # Normal list fields (no vararg)
@@ -1161,6 +1262,29 @@ defmodule Lua.Compiler.Codegen do
     {[Instruction.load_constant(reg, nil)], reg, ctx}
   end
 
+  # Look up a variable by name (not by AST node identity).
+  # Used when we need to resolve a variable name that doesn't have a corresponding
+  # scope-resolved Expr.Var node (e.g., FuncDecl table chain names).
+  defp gen_var_by_name(name, ctx) do
+    case Map.get(ctx.scope.locals, name) do
+      nil ->
+        # Not a local — treat as global
+        reg = ctx.next_reg
+        ctx = %{ctx | next_reg: reg + 1}
+        {[Instruction.get_global(reg, name)], reg, ctx}
+
+      local_reg ->
+        if MapSet.member?(ctx.scope.captured_locals, name) do
+          # Captured local — read from open upvalue cell
+          dest = ctx.next_reg
+          ctx = %{ctx | next_reg: dest + 1}
+          {[Instruction.get_open_upvalue(dest, local_reg)], dest, ctx}
+        else
+          {[], local_reg, ctx}
+        end
+    end
+  end
+
   # Shared helper: generates a closure from a function node (Expr.Function, Statement.FuncDecl, etc.)
   # Returns {instructions, dest_reg, ctx} like gen_expr.
   defp gen_closure_from_node(node, ctx) do
@@ -1172,7 +1296,7 @@ defmodule Lua.Compiler.Codegen do
 
     {body_instructions, body_ctx} =
       gen_block(node.body, %{
-        next_reg: func_scope.param_count,
+        next_reg: max(func_scope.param_count, func_scope.max_register),
         source: ctx.source,
         scope: func_locals_scope,
         prototypes: []
@@ -1188,7 +1312,7 @@ defmodule Lua.Compiler.Codegen do
       upvalue_descriptors: func_scope.upvalue_descriptors,
       param_count: func_scope.param_count,
       is_vararg: func_scope.is_vararg,
-      max_registers: func_scope.max_register,
+      max_registers: Enum.max([func_scope.max_register, body_ctx.next_reg, Map.get(body_ctx, :peak_reg, 0)]),
       source: ctx.source,
       lines: lines
     }
@@ -1202,5 +1326,35 @@ defmodule Lua.Compiler.Codegen do
     ctx = %{ctx | next_reg: dest_reg + 1}
 
     {[Instruction.closure(dest_reg, proto_index)], dest_reg, ctx}
+  end
+
+  # Move argument values to their expected contiguous positions (base_start+i)
+  defp gen_move_args(arg_regs, base_start) do
+    arg_regs
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {arg_reg, i} ->
+      expected_reg = base_start + i
+
+      if arg_reg == expected_reg do
+        []
+      else
+        [Instruction.move(expected_reg, arg_reg)]
+      end
+    end)
+  end
+
+  # Patch the last {:call, ...} instruction's result_count
+  defp patch_call_result_count(instructions, new_result_count) do
+    case List.last(instructions) do
+      {:call, base, arg_count, _old_result_count} ->
+        List.replace_at(
+          instructions,
+          length(instructions) - 1,
+          {:call, base, arg_count, new_result_count}
+        )
+
+      _ ->
+        instructions
+    end
   end
 end

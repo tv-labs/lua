@@ -258,8 +258,9 @@ defmodule Lua.VM.Stdlib.Table do
   # table.unpack(list [, i [, j]])
   defp table_unpack([{:tref, _} = tref | rest], state) do
     table = State.get_table(state, tref)
-    i = Enum.at(rest, 0, 1)
-    j = Enum.at(rest, 1, get_table_length(table))
+    # Treat nil as "not provided" — fall back to defaults
+    i = Enum.at(rest, 0) || 1
+    j = Enum.at(rest, 1) || get_table_length(table)
 
     if !is_integer(i) do
       raise ArgumentError,

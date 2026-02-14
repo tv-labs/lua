@@ -65,8 +65,8 @@ defmodule Lua.Compiler.Scope do
   def resolve(%Chunk{block: block}, _opts \\ []) do
     state = %State{}
 
-    # The chunk itself is an implicit function with no parameters
-    func_scope = %FunctionScope{}
+    # The chunk itself is an implicit vararg function (Lua 5.3 spec)
+    func_scope = %FunctionScope{is_vararg: true}
     state = %{state | current_function: :chunk, functions: %{chunk: func_scope}}
 
     # Resolve the chunk body
@@ -183,7 +183,9 @@ defmodule Lua.Compiler.Scope do
     # Assign it a register
     loop_var_reg = state.next_register
     state = %{state | locals: Map.put(state.locals, var, loop_var_reg)}
-    state = %{state | next_register: loop_var_reg + 1}
+    # Reserve 3 registers: the loop variable shares with the internal counter,
+    # plus limit and step registers (codegen allocates base, base+1, base+2)
+    state = %{state | next_register: loop_var_reg + 3}
 
     # Update max_register
     func_scope = state.functions[state.current_function]
@@ -233,6 +235,10 @@ defmodule Lua.Compiler.Scope do
     reg = state.next_register
     state = %{state | locals: Map.put(state.locals, name, reg)}
     state = %{state | next_register: reg + 1}
+
+    # Store the register assignment in var_map so codegen can find the correct
+    # register even when the same name is redefined later (e.g., two `local function f`)
+    state = %{state | var_map: Map.put(state.var_map, {:local_func_reg, local_func}, reg)}
 
     # Update max_register in current function scope
     func_scope = state.functions[state.current_function]
@@ -334,13 +340,22 @@ defmodule Lua.Compiler.Scope do
   # For now, stub out other expression types
   defp resolve_expr(_expr, state), do: state
 
-  # Walk up the scope chain to find a variable and create upvalue descriptors
-  defp find_upvalue(_name, [], _state), do: :not_found
+  # Walk up the scope chain to find a variable and create upvalue descriptors.
+  # Delegates to ensure_upvalue which handles multi-level nesting correctly.
+  defp find_upvalue(name, parent_scopes, state) do
+    ensure_upvalue(name, state.current_function, parent_scopes, state)
+  end
 
-  defp find_upvalue(name, [parent | rest], state) do
+  # ensure_upvalue(name, for_function, parent_scopes, state)
+  # Ensures that for_function has an upvalue for the variable `name`.
+  # Walks up parent_scopes to find the variable, creating upvalue descriptors
+  # in each intermediate function as needed.
+  defp ensure_upvalue(_name, _for_function, [], _state), do: :not_found
+
+  defp ensure_upvalue(name, for_function, [parent | rest], state) do
     case Map.get(parent.locals, name) do
       nil ->
-        # Not in this parent — check if the parent already has it as an upvalue
+        # Not in this parent's locals — check if the parent already has it as an upvalue
         parent_func = state.functions[parent.function]
 
         case Enum.find_index(parent_func.upvalue_descriptors, fn
@@ -348,83 +363,64 @@ defmodule Lua.Compiler.Scope do
                {:parent_upvalue, _, n} -> n == name
              end) do
           nil ->
-            # Not in parent's upvalues either — recurse further up
-            case find_upvalue(name, rest, state) do
-              {:ok, grandparent_upvalue_index, state} ->
-                # The variable was found further up. The parent needs an upvalue too.
+            # Parent doesn't have it. Recurse to ensure the parent gets it first.
+            case ensure_upvalue(name, parent.function, rest, state) do
+              {:ok, _parent_uv_index, state} ->
+                # Parent now has an upvalue for this variable. Find its index.
                 parent_func = state.functions[parent.function]
-                parent_upvalue_index = length(parent_func.upvalue_descriptors)
 
-                parent_func = %{
-                  parent_func
+                parent_uv_index =
+                  Enum.find_index(parent_func.upvalue_descriptors, fn
+                    {:parent_local, _, n} -> n == name
+                    {:parent_upvalue, _, n} -> n == name
+                  end)
+
+                # Add to for_function referencing parent's upvalue
+                func = state.functions[for_function]
+                uv_index = length(func.upvalue_descriptors)
+
+                func = %{
+                  func
                   | upvalue_descriptors:
-                      parent_func.upvalue_descriptors ++
-                        [{:parent_upvalue, grandparent_upvalue_index, name}]
+                      func.upvalue_descriptors ++
+                        [{:parent_upvalue, parent_uv_index, name}]
                 }
 
-                state = %{
-                  state
-                  | functions: Map.put(state.functions, parent.function, parent_func)
-                }
-
-                # Now add upvalue in current function referencing parent's upvalue
-                current_func = state.functions[state.current_function]
-                cur_upvalue_index = length(current_func.upvalue_descriptors)
-
-                current_func = %{
-                  current_func
-                  | upvalue_descriptors:
-                      current_func.upvalue_descriptors ++
-                        [{:parent_upvalue, parent_upvalue_index, name}]
-                }
-
-                state = %{
-                  state
-                  | functions: Map.put(state.functions, state.current_function, current_func)
-                }
-
-                {:ok, cur_upvalue_index, state}
+                state = %{state | functions: Map.put(state.functions, for_function, func)}
+                {:ok, uv_index, state}
 
               :not_found ->
                 :not_found
             end
 
-          parent_upvalue_index ->
-            # Parent already has this upvalue — reference it
-            current_func = state.functions[state.current_function]
-            cur_upvalue_index = length(current_func.upvalue_descriptors)
+          parent_uv_index ->
+            # Parent already has this upvalue — add reference in for_function
+            func = state.functions[for_function]
+            uv_index = length(func.upvalue_descriptors)
 
-            current_func = %{
-              current_func
+            func = %{
+              func
               | upvalue_descriptors:
-                  current_func.upvalue_descriptors ++
-                    [{:parent_upvalue, parent_upvalue_index, name}]
+                  func.upvalue_descriptors ++
+                    [{:parent_upvalue, parent_uv_index, name}]
             }
 
-            state = %{
-              state
-              | functions: Map.put(state.functions, state.current_function, current_func)
-            }
-
-            {:ok, cur_upvalue_index, state}
+            state = %{state | functions: Map.put(state.functions, for_function, func)}
+            {:ok, uv_index, state}
         end
 
       reg ->
-        # Found in parent's locals — create upvalue descriptor
-        current_func = state.functions[state.current_function]
-        upvalue_index = length(current_func.upvalue_descriptors)
+        # Found in parent's locals — add {:parent_local, reg, name} to for_function
+        func = state.functions[for_function]
+        uv_index = length(func.upvalue_descriptors)
 
-        current_func = %{
-          current_func
-          | upvalue_descriptors: current_func.upvalue_descriptors ++ [{:parent_local, reg, name}]
+        func = %{
+          func
+          | upvalue_descriptors: func.upvalue_descriptors ++ [{:parent_local, reg, name}]
         }
 
-        state = %{
-          state
-          | functions: Map.put(state.functions, state.current_function, current_func)
-        }
-
-        {:ok, upvalue_index, state}
+        state = %{state | functions: Map.put(state.functions, for_function, func)}
+        {:ok, uv_index, state}
     end
   end
 

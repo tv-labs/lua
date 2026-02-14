@@ -115,6 +115,7 @@ mix usage_rules.search_docs "Enum.zip" --query-by title
 ## Debugging
 
 - Use `dbg/1` to print values while debugging. This will display the formatted value and other relevant information in the console.
+- Write ExUnit tests when trying to replicate bugs or issues. DO NOT use mix run -e unless necessary, always try to write a unit test replicating failures first.
 
 <!-- usage_rules:elixir-end -->
 <!-- usage_rules:otp-start -->

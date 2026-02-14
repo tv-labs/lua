@@ -15,7 +15,7 @@ defmodule Lua.Lua53SuiteTest do
              |> Enum.sort()
 
   # Tests that are ready to run (not skipped)
-  @ready_tests ["simple_test.lua"]
+  @ready_tests ["simple_test.lua", "api.lua", "code.lua", "vararg.lua"]
 
   # Tests that require features not yet implemented
   # As we implement features, move tests from here to @ready_tests
