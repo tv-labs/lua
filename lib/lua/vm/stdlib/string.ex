@@ -53,7 +53,10 @@ defmodule Lua.VM.Stdlib.String do
       "find" => {:native_func, &string_find/2},
       "match" => {:native_func, &string_match/2},
       "gmatch" => {:native_func, &string_gmatch/2},
-      "gsub" => {:native_func, &string_gsub/2}
+      "gsub" => {:native_func, &string_gsub/2},
+      "packsize" => {:native_func, &string_packsize/2},
+      "pack" => {:native_func, &string_pack/2},
+      "unpack" => {:native_func, &string_unpack/2}
     }
 
     # Create the string table in VM state
@@ -821,5 +824,43 @@ defmodule Lua.VM.Stdlib.String do
 
   defp raise_arg_expected(arg_num, func_name) do
     raise ArgumentError.value_expected("string.#{func_name}", arg_num)
+  end
+
+  # string.packsize(fmt) — returns size in bytes for the given format string
+  # Supports basic format codes used in Lua 5.3
+  defp string_packsize([fmt | _], state) when is_binary(fmt) do
+    size = compute_pack_size(fmt, 0)
+    {[size], state}
+  end
+
+  defp compute_pack_size("", acc), do: acc
+  defp compute_pack_size(<<"b", rest::binary>>, acc), do: compute_pack_size(rest, acc + 1)
+  defp compute_pack_size(<<"B", rest::binary>>, acc), do: compute_pack_size(rest, acc + 1)
+  defp compute_pack_size(<<"h", rest::binary>>, acc), do: compute_pack_size(rest, acc + 2)
+  defp compute_pack_size(<<"H", rest::binary>>, acc), do: compute_pack_size(rest, acc + 2)
+  defp compute_pack_size(<<"i", rest::binary>>, acc), do: compute_pack_size(rest, acc + 4)
+  defp compute_pack_size(<<"I", rest::binary>>, acc), do: compute_pack_size(rest, acc + 4)
+  defp compute_pack_size(<<"l", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
+  defp compute_pack_size(<<"L", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
+  defp compute_pack_size(<<"j", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
+  defp compute_pack_size(<<"J", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
+  defp compute_pack_size(<<"n", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
+  defp compute_pack_size(<<"N", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
+  defp compute_pack_size(<<"f", rest::binary>>, acc), do: compute_pack_size(rest, acc + 4)
+  defp compute_pack_size(<<"d", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
+  defp compute_pack_size(<<"T", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
+  defp compute_pack_size(<<" ", rest::binary>>, acc), do: compute_pack_size(rest, acc)
+  defp compute_pack_size(<<"<", rest::binary>>, acc), do: compute_pack_size(rest, acc)
+  defp compute_pack_size(<<">", rest::binary>>, acc), do: compute_pack_size(rest, acc)
+  defp compute_pack_size(<<"=", rest::binary>>, acc), do: compute_pack_size(rest, acc)
+
+  # string.pack — stub
+  defp string_pack(_args, _state) do
+    raise Lua.RuntimeException, "string.pack not yet implemented"
+  end
+
+  # string.unpack — stub
+  defp string_unpack(_args, _state) do
+    raise Lua.RuntimeException, "string.unpack not yet implemented"
   end
 end

@@ -19,7 +19,8 @@ defmodule Lua.VM.Executor do
   @spec execute([tuple()], tuple(), list(), map(), State.t()) ::
           {list(), tuple(), State.t()}
   def execute(instructions, registers, upvalues, proto, state) do
-    do_execute(instructions, registers, {upvalues, %{}}, proto, state)
+    state = %{state | open_upvalues: %{}}
+    do_execute(instructions, registers, upvalues, proto, state)
   end
 
   @doc """
@@ -47,15 +48,19 @@ defmodule Lua.VM.Executor do
         callee_proto
       end
 
+    saved_open_upvalues = state.open_upvalues
+    state = %{state | open_upvalues: %{}}
+
     {results, _callee_regs, state} =
       do_execute(
         callee_proto.instructions,
         callee_regs,
-        {callee_upvalues, %{}},
+        callee_upvalues,
         callee_proto,
         state
       )
 
+    state = %{state | open_upvalues: saved_open_upvalues}
     {results, state}
   end
 
@@ -155,47 +160,35 @@ defmodule Lua.VM.Executor do
   end
 
   # get_upvalue
-  defp do_execute([{:get_upvalue, dest, index} | rest], regs, {upvalues, _} = upvalue_context, proto, state) do
+  defp do_execute([{:get_upvalue, dest, index} | rest], regs, upvalues, proto, state) do
     cell_ref = Enum.at(upvalues, index)
     value = Map.get(state.upvalue_cells, cell_ref)
     regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalue_context, proto, state)
+    do_execute(rest, regs, upvalues, proto, state)
   end
 
   # set_upvalue
-  defp do_execute([{:set_upvalue, index, source} | rest], regs, {upvalues, _} = upvalue_context, proto, state) do
+  defp do_execute([{:set_upvalue, index, source} | rest], regs, upvalues, proto, state) do
     cell_ref = Enum.at(upvalues, index)
     value = elem(regs, source)
     state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
-    do_execute(rest, regs, upvalue_context, proto, state)
+    do_execute(rest, regs, upvalues, proto, state)
   end
 
   # get_open_upvalue - read a captured local through its open upvalue cell
-  defp do_execute(
-         [{:get_open_upvalue, dest, reg} | rest],
-         regs,
-         {_upvalues, open_upvalues} = upvalue_context,
-         proto,
-         state
-       ) do
-    cell_ref = Map.fetch!(open_upvalues, reg)
+  defp do_execute([{:get_open_upvalue, dest, reg} | rest], regs, upvalues, proto, state) do
+    cell_ref = Map.fetch!(state.open_upvalues, reg)
     value = Map.get(state.upvalue_cells, cell_ref)
     regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalue_context, proto, state)
+    do_execute(rest, regs, upvalues, proto, state)
   end
 
   # set_open_upvalue - write a captured local through its open upvalue cell
-  defp do_execute(
-         [{:set_open_upvalue, reg, source} | rest],
-         regs,
-         {_upvalues, open_upvalues} = upvalue_context,
-         proto,
-         state
-       ) do
-    cell_ref = Map.fetch!(open_upvalues, reg)
+  defp do_execute([{:set_open_upvalue, reg, source} | rest], regs, upvalues, proto, state) do
+    cell_ref = Map.fetch!(state.open_upvalues, reg)
     value = elem(regs, source)
     state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
-    do_execute(rest, regs, upvalue_context, proto, state)
+    do_execute(rest, regs, upvalues, proto, state)
   end
 
   # source_line - track current source location
@@ -334,6 +327,13 @@ defmodule Lua.VM.Executor do
       # Copy counter to loop variable
       regs = put_elem(regs, loop_var, counter)
 
+      # Clear open upvalue cells for loop-local registers (loop var + body locals)
+      # so each iteration gets fresh upvalue cells for its own variables
+      state = %{
+        state
+        | open_upvalues: Map.reject(state.open_upvalues, fn {reg, _} -> reg >= loop_var end)
+      }
+
       # Execute body
       case do_execute(body, regs, upvalues, proto, state) do
         {:break, regs, state} ->
@@ -381,6 +381,14 @@ defmodule Lua.VM.Executor do
           put_elem(regs, var_reg, Enum.at(results, i))
         end)
 
+      # Clear open upvalue cells for loop-local registers
+      first_var_reg = List.first(var_regs)
+
+      state = %{
+        state
+        | open_upvalues: Map.reject(state.open_upvalues, fn {reg, _} -> reg >= first_var_reg end)
+      }
+
       # Execute body
       case do_execute(body, regs, upvalues, proto, state) do
         {:break, regs, state} ->
@@ -401,55 +409,71 @@ defmodule Lua.VM.Executor do
   end
 
   # closure - create a closure value from a prototype, capturing upvalues
-  defp do_execute([{:closure, dest, proto_index} | rest], regs, {upvalues, open_upvalues}, proto, state) do
+  defp do_execute([{:closure, dest, proto_index} | rest], regs, upvalues, proto, state) do
     nested_proto = Enum.at(proto.prototypes, proto_index)
 
     # Capture upvalues based on descriptors, reusing open upvalue cells when available
-    {captured_upvalues, state, open_upvalues} =
-      Enum.reduce(nested_proto.upvalue_descriptors, {[], state, open_upvalues}, fn
-        {:parent_local, reg, _name}, {cells, state, open_upvalues} ->
-          case Map.get(open_upvalues, reg) do
+    {captured_upvalues, state} =
+      Enum.reduce(nested_proto.upvalue_descriptors, {[], state}, fn
+        {:parent_local, reg, _name}, {cells, state} ->
+          case Map.get(state.open_upvalues, reg) do
             nil ->
               # Create a new cell for this local variable
               cell_ref = make_ref()
               value = elem(regs, reg)
-              state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
-              open_upvalues = Map.put(open_upvalues, reg, cell_ref)
-              {cells ++ [cell_ref], state, open_upvalues}
+
+              state = %{
+                state
+                | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value),
+                  open_upvalues: Map.put(state.open_upvalues, reg, cell_ref)
+              }
+
+              {cells ++ [cell_ref], state}
 
             existing_cell ->
               # Reuse existing open upvalue cell
-              {cells ++ [existing_cell], state, open_upvalues}
+              {cells ++ [existing_cell], state}
           end
 
-        {:parent_upvalue, index, _name}, {cells, state, open_upvalues} ->
+        {:parent_upvalue, index, _name}, {cells, state} ->
           # Share the parent's upvalue cell
-          {cells ++ [Enum.at(upvalues, index)], state, open_upvalues}
+          {cells ++ [Enum.at(upvalues, index)], state}
       end)
 
     closure = {:lua_closure, nested_proto, captured_upvalues}
     regs = put_elem(regs, dest, closure)
-    do_execute(rest, regs, {upvalues, open_upvalues}, proto, state)
+    do_execute(rest, regs, upvalues, proto, state)
   end
 
   # call - invoke a function value
-  defp do_execute([{:call, base, arg_count, result_count} | rest], regs, upvalue_context, proto, state) do
+  defp do_execute([{:call, base, arg_count, result_count} | rest], regs, upvalues, proto, state) do
     func_value = elem(regs, base)
 
     # Collect arguments from registers base+1..base+arg_count
     # arg_count < 0 encodes fixed args + varargs:
     # -1 means 0 fixed + varargs, -2 means 1 fixed + varargs, etc.
+    # arg_count = {:multi, fixed} encodes fixed args + multi-return expansion
     args =
-      cond do
-        arg_count > 0 ->
-          for i <- 1..arg_count, do: elem(regs, base + i)
+      case arg_count do
+        {:multi, fixed_count} ->
+          # Fixed args + results from a multi-return call
+          multi_count = state.multi_return_count
+          total = fixed_count + multi_count
 
-        arg_count < 0 ->
+          if total > 0 do
+            for i <- 1..total, do: elem(regs, base + i)
+          else
+            []
+          end
+
+        n when is_integer(n) and n > 0 ->
+          for i <- 1..n, do: elem(regs, base + i)
+
+        n when is_integer(n) and n < 0 ->
           # Collect fixed args + all varargs
           # Decode: -1 => 0 fixed, -2 => 1 fixed, -3 => 2 fixed, etc.
-          fixed_arg_count = -(arg_count + 1)
-          varargs = Map.get(proto, :varargs, [])
-          total_args = fixed_arg_count + length(varargs)
+          fixed_arg_count = -(n + 1)
+          total_args = fixed_arg_count + state.multi_return_count
 
           if total_args > 0 do
             for i <- 1..total_args, do: elem(regs, base + i)
@@ -457,7 +481,7 @@ defmodule Lua.VM.Executor do
             []
           end
 
-        true ->
+        0 ->
           []
       end
 
@@ -494,17 +518,20 @@ defmodule Lua.VM.Executor do
             end
 
           # Execute the callee with fresh open_upvalues
+          saved_open_upvalues = state.open_upvalues
+          state = %{state | open_upvalues: %{}}
+
           {results, _callee_regs, state} =
             do_execute(
               callee_proto.instructions,
               callee_regs,
-              {callee_upvalues, %{}},
+              callee_upvalues,
               callee_proto,
               state
             )
 
-          # Pop call stack frame
-          state = %{state | call_stack: tl(state.call_stack)}
+          # Pop call stack frame, restore open_upvalues
+          state = %{state | call_stack: tl(state.call_stack), open_upvalues: saved_open_upvalues}
 
           {results, state}
 
@@ -561,24 +588,41 @@ defmodule Lua.VM.Executor do
           end
       end
 
-    # result_count == -1 means "return all results" (used in return f() position)
-    if result_count == -1 do
-      {results, regs, state}
-    else
-      # Place results into caller registers starting at base
-      regs =
-        if result_count > 0 do
-          results_list = List.wrap(results)
+    cond do
+      # result_count == -1 means "return all results" (used in return f() position)
+      result_count == -1 ->
+        {results, regs, state}
 
-          Enum.reduce(0..(result_count - 1), regs, fn i, regs ->
-            value = Enum.at(results_list, i)
-            put_elem(regs, base + i, value)
+      # result_count == -2 means "multi-return expansion": place all results into
+      # registers starting at base, store count in state, continue execution
+      result_count == -2 ->
+        results_list = List.wrap(results)
+
+        regs =
+          results_list
+          |> Enum.with_index()
+          |> Enum.reduce(regs, fn {val, i}, regs ->
+            put_elem(regs, base + i, val)
           end)
-        else
-          regs
-        end
 
-      do_execute(rest, regs, upvalue_context, proto, state)
+        state = %{state | multi_return_count: length(results_list)}
+        do_execute(rest, regs, upvalues, proto, state)
+
+      true ->
+        # Place results into caller registers starting at base
+        regs =
+          if result_count > 0 do
+            results_list = List.wrap(results)
+
+            Enum.reduce(0..(result_count - 1), regs, fn i, regs ->
+              value = Enum.at(results_list, i)
+              put_elem(regs, base + i, value)
+            end)
+          else
+            regs
+          end
+
+        do_execute(rest, regs, upvalues, proto, state)
     end
   end
 
@@ -587,17 +631,23 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:vararg, base, count} | rest], regs, upvalues, proto, state) do
     varargs = Map.get(proto, :varargs, [])
 
-    regs =
+    {regs, state} =
       if count == 0 do
-        # Load all varargs
-        Enum.reduce(Enum.with_index(varargs), regs, fn {val, i}, regs ->
-          put_elem(regs, base + i, val)
-        end)
+        # Load all varargs and track the count for set_list/call
+        regs =
+          Enum.reduce(Enum.with_index(varargs), regs, fn {val, i}, regs ->
+            put_elem(regs, base + i, val)
+          end)
+
+        {regs, %{state | multi_return_count: length(varargs)}}
       else
         # Load exactly count values
-        Enum.reduce(0..(count - 1), regs, fn i, regs ->
-          put_elem(regs, base + i, Enum.at(varargs, i))
-        end)
+        regs =
+          Enum.reduce(0..(count - 1), regs, fn i, regs ->
+            put_elem(regs, base + i, Enum.at(varargs, i))
+          end)
+
+        {regs, state}
       end
 
     do_execute(rest, regs, upvalues, proto, state)
@@ -613,23 +663,29 @@ defmodule Lua.VM.Executor do
   # count == -1 means return from base including all varargs
   # count == 0 means return nil
   # count > 0 means return exactly count values
-  defp do_execute([{:return, base, count} | _rest], regs, _upvalues, proto, state) do
+  # count == {:multi_return, fixed} means return fixed values + multi-return expanded values
+  defp do_execute([{:return, base, {:multi_return, fixed_count}} | _rest], regs, _upvalues, _proto, state) do
+    total = fixed_count + state.multi_return_count
+    results = if total > 0, do: for(i <- 0..(total - 1), do: elem(regs, base + i)), else: []
+    {results, regs, state}
+  end
+
+  defp do_execute([{:return, base, count} | _rest], regs, _upvalues, _proto, state) do
     results =
       cond do
         count == 0 ->
           [nil]
 
-        count == -1 ->
-          # Return values from base including varargs
-          # We need to collect values until we've covered the vararg range
-          varargs = Map.get(proto, :varargs, [])
-          tuple_size = tuple_size(regs)
-          max_index = min(tuple_size - 1, base + length(varargs) + proto.param_count - 1)
+        count < 0 ->
+          # Negative count encodes fixed values + variable values (vararg or multi-return)
+          # -(init_count + 1): e.g. -1 = 0 fixed, -2 = 1 fixed, -3 = 2 fixed
+          init_count = -(count + 1)
+          total = init_count + state.multi_return_count
 
-          if max_index < base do
-            []
+          if total > 0 do
+            for i <- 0..(total - 1), do: elem(regs, base + i)
           else
-            for i <- base..max_index, do: elem(regs, i)
+            []
           end
 
         count > 0 ->
@@ -949,8 +1005,31 @@ defmodule Lua.VM.Executor do
     do_execute(rest, regs, upvalues, proto, state)
   end
 
+  # set_list with {:multi, init_count} — multi-return expansion in table constructor
+  defp do_execute([{:set_list, table_reg, start, {:multi, init_count}, offset} | rest], regs, upvalues, proto, state) do
+    {:tref, id} = elem(regs, table_reg)
+    total = init_count + state.multi_return_count
+
+    state =
+      State.update_table(state, {:tref, id}, fn table ->
+        new_data =
+          if total > 0 do
+            Enum.reduce(0..(total - 1), table.data, fn i, data ->
+              value = elem(regs, start + i)
+              Map.put(data, offset + i + 1, value)
+            end)
+          else
+            table.data
+          end
+
+        %{table | data: new_data}
+      end)
+
+    do_execute(rest, regs, upvalues, proto, state)
+  end
+
   # set_list — bulk store: table[offset+i] = R[start+i-1] for i in 1..count
-  # count == 0 means store all values from start until nil or end of tuple
+  # count == 0 means variable number of values (from vararg or multi-return)
   defp do_execute([{:set_list, table_reg, start, count, offset} | rest], regs, upvalues, proto, state) do
     {:tref, id} = elem(regs, table_reg)
 
@@ -958,25 +1037,10 @@ defmodule Lua.VM.Executor do
       State.update_table(state, {:tref, id}, fn table ->
         new_data =
           if count == 0 do
-            # Variable number of values - collect from start register onwards
-            # This happens with varargs in table constructors like {a, b, ...}
-            # The previous vararg instruction loaded all varargs into registers,
-            # so we need to collect values until we've collected all of them
+            # Variable number of values - use multi_return_count which is set by
+            # both vararg (count=0) and call (result_count=-2) instructions
+            values_to_collect = state.multi_return_count
 
-            # Count how many values to collect by checking registers
-            tuple_size = tuple_size(regs)
-
-            # Collect values from start until we reach a nil or end of data
-            # We know varargs were just loaded, so collect until we see
-            # consecutive nils or reach tuple end
-            values_to_collect =
-              start..(tuple_size - 1)
-              |> Enum.take_while(fn reg_idx ->
-                reg_idx < tuple_size && elem(regs, reg_idx) != nil
-              end)
-              |> length()
-
-            # Now collect those values
             if values_to_collect > 0 do
               Enum.reduce(0..(values_to_collect - 1), table.data, fn i, data ->
                 value = elem(regs, start + i)
@@ -1056,15 +1120,19 @@ defmodule Lua.VM.Executor do
         callee_proto
       end
 
+    saved_open_upvalues = state.open_upvalues
+    state = %{state | open_upvalues: %{}}
+
     {results, _callee_regs, state} =
       do_execute(
         callee_proto.instructions,
         callee_regs,
-        {callee_upvalues, %{}},
+        callee_upvalues,
         callee_proto,
         state
       )
 
+    state = %{state | open_upvalues: saved_open_upvalues}
     {results, state}
   end
 
@@ -1289,12 +1357,10 @@ defmodule Lua.VM.Executor do
 
       {:lua_closure, callee_proto, callee_upvalues} ->
         # Call the Lua closure metamethod
-        # We need to execute the closure with the arguments
         args = [a, b]
-
-        # Allocate enough registers for the function (Lua typically uses up to 250 registers)
-        # We need to pad the args to fill the register space the function expects
         initial_regs = List.to_tuple(args ++ List.duplicate(nil, 248))
+        saved_open_upvalues = state.open_upvalues
+        state = %{state | open_upvalues: %{}}
 
         {results, _final_regs, new_state} =
           do_execute(
@@ -1305,7 +1371,8 @@ defmodule Lua.VM.Executor do
             state
           )
 
-        # Return first result and new state
+        new_state = %{new_state | open_upvalues: saved_open_upvalues}
+
         result =
           case results do
             [r | _] -> r
@@ -1343,9 +1410,9 @@ defmodule Lua.VM.Executor do
       {:lua_closure, callee_proto, callee_upvalues} ->
         # Call the Lua closure metamethod
         args = [a]
-
-        # Allocate enough registers for the function (Lua typically uses up to 250 registers)
         initial_regs = List.to_tuple(args ++ List.duplicate(nil, 249))
+        saved_open_upvalues = state.open_upvalues
+        state = %{state | open_upvalues: %{}}
 
         {results, _final_regs, new_state} =
           do_execute(
@@ -1356,7 +1423,8 @@ defmodule Lua.VM.Executor do
             state
           )
 
-        # Return first result and new state
+        new_state = %{new_state | open_upvalues: saved_open_upvalues}
+
         result =
           case results do
             [r | _] -> r
@@ -1402,6 +1470,8 @@ defmodule Lua.VM.Executor do
         {:lua_closure, callee_proto, callee_upvalues} ->
           args = [a, b]
           initial_regs = List.to_tuple(args ++ List.duplicate(nil, 248))
+          saved_open_upvalues = state.open_upvalues
+          state = %{state | open_upvalues: %{}}
 
           {results, _final_regs, new_state} =
             do_execute(
@@ -1411,6 +1481,8 @@ defmodule Lua.VM.Executor do
               callee_proto,
               state
             )
+
+          new_state = %{new_state | open_upvalues: saved_open_upvalues}
 
           result =
             case results do
@@ -1492,10 +1564,17 @@ defmodule Lua.VM.Executor do
   defp safe_floor_divide(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
-      if trunc(nb) == 0 do
-        raise RuntimeError, value: "attempt to divide by zero"
-      else
-        div(trunc(na), trunc(nb))
+      cond do
+        nb == 0 or nb == 0.0 ->
+          raise RuntimeError, value: "attempt to divide by zero"
+
+        is_integer(na) and is_integer(nb) ->
+          # Lua floor division for integers
+          lua_idiv(na, nb)
+
+        true ->
+          # Float floor division
+          Float.floor(na / nb) * 1.0
       end
     else
       {:error, val} ->
@@ -1509,10 +1588,17 @@ defmodule Lua.VM.Executor do
   defp safe_modulo(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
-      if trunc(nb) == 0 do
-        raise RuntimeError, value: "attempt to perform modulo by zero"
-      else
-        rem(trunc(na), trunc(nb))
+      cond do
+        nb == 0 or nb == 0.0 ->
+          raise RuntimeError, value: "attempt to perform modulo by zero"
+
+        is_integer(na) and is_integer(nb) ->
+          # Lua floor modulo for integers: a - floor_div(a, b) * b
+          na - lua_idiv(na, nb) * nb
+
+        true ->
+          # Float floor modulo: a - floor(a/b) * b
+          na - Float.floor(na / nb) * nb
       end
     else
       {:error, val} ->
@@ -1521,6 +1607,14 @@ defmodule Lua.VM.Executor do
           error_kind: :arithmetic_on_non_number,
           value_type: value_type(val)
     end
+  end
+
+  # Lua-style integer floor division (rounds toward negative infinity)
+  defp lua_idiv(a, b) do
+    q = div(a, b)
+    r = rem(a, b)
+    # Adjust if remainder has different sign than divisor
+    if r != 0 and Bitwise.bxor(r, b) < 0, do: q - 1, else: q
   end
 
   defp safe_power(a, b) do

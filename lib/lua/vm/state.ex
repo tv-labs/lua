@@ -9,13 +9,15 @@ defmodule Lua.VM.State do
             call_stack: [],
             metatables: %{},
             upvalue_cells: %{},
+            open_upvalues: %{},
             tables: %{},
             table_next_id: 0,
             userdata: %{},
             userdata_next_id: 0,
             private: %{},
             current_line: 0,
-            current_source: nil
+            current_source: nil,
+            multi_return_count: 0
 
   @type t :: %__MODULE__{
           globals: map(),
@@ -28,7 +30,8 @@ defmodule Lua.VM.State do
           userdata_next_id: non_neg_integer(),
           private: map(),
           current_line: non_neg_integer(),
-          current_source: binary() | nil
+          current_source: binary() | nil,
+          multi_return_count: non_neg_integer()
         }
 
   @doc """

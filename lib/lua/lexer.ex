@@ -133,6 +133,11 @@ defmodule Lua.Lexer do
     scan_number(<<c, rest::binary>>, "", acc, pos, pos)
   end
 
+  # Float starting with dot: .0, .5e3, etc.
+  defp do_tokenize(<<".", c, rest::binary>>, acc, pos) when c in ?0..?9 do
+    scan_float(rest, "0." <> <<c>>, acc, advance_column(pos, 2), pos)
+  end
+
   # Three-character operators
   defp do_tokenize(<<"...", rest::binary>>, acc, pos) do
     token = {:operator, :vararg, pos}
@@ -486,19 +491,24 @@ defmodule Lua.Lexer do
     scan_number(rest, num_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
   end
 
-  defp scan_number(<<?.>>, num_acc, acc, pos, start_pos) do
-    # Trailing dot is not part of the number
-    finalize_number(num_acc, <<".">>, acc, pos, start_pos)
-  end
-
   defp scan_number(<<".", c, rest::binary>>, num_acc, acc, pos, start_pos) when c in ?0..?9 do
-    # Decimal point with digit following
+    # Decimal point with digit following: 0.5
     scan_float(rest, num_acc <> "." <> <<c>>, acc, advance_column(pos, 2), start_pos)
   end
 
+  defp scan_number(<<"..", _rest::binary>> = rest, num_acc, acc, pos, start_pos) do
+    # ".." is concat operator, not a decimal point: 0..5 → 0 .. 5
+    finalize_number(num_acc, rest, acc, pos, start_pos)
+  end
+
+  defp scan_number(<<".", c, rest::binary>>, num_acc, acc, pos, start_pos) when c in [?e, ?E] do
+    # "0.e5" → float with exponent
+    scan_float(<<c, rest::binary>>, num_acc <> ".", acc, advance_column(pos, 1), start_pos)
+  end
+
   defp scan_number(<<".", rest::binary>>, num_acc, acc, pos, start_pos) do
-    # Decimal point but no digit following - finalize number, reprocess "."
-    finalize_number(num_acc, <<".", rest::binary>>, acc, pos, start_pos)
+    # Trailing dot makes it a float: 0. → 0.0
+    scan_float(rest, num_acc <> ".", acc, advance_column(pos, 1), start_pos)
   end
 
   defp scan_number(<<c, rest::binary>>, num_acc, acc, pos, start_pos) when c in [?e, ?E] do
@@ -540,10 +550,20 @@ defmodule Lua.Lexer do
     finalize_number(num_acc, rest, acc, pos, start_pos)
   end
 
-  # Scan hexadecimal number (0x...)
+  # Scan hexadecimal number (0x...) — supports integers, hex floats (0xF0.0), and exponents (0xABCp-3)
   defp scan_hex_number(<<c, rest::binary>>, hex_acc, acc, pos, start_pos)
        when c in ?0..?9 or c in ?a..?f or c in ?A..?F do
     scan_hex_number(rest, hex_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  # Hex float: dot followed by hex digits
+  defp scan_hex_number(<<".", rest::binary>>, hex_acc, acc, pos, start_pos) do
+    scan_hex_frac(rest, hex_acc, "", acc, advance_column(pos, 1), start_pos)
+  end
+
+  # Hex float: binary exponent (p/P)
+  defp scan_hex_number(<<p, rest::binary>>, hex_acc, acc, pos, start_pos) when p in [?p, ?P] do
+    scan_hex_exp(rest, hex_acc, "", acc, advance_column(pos, 1), start_pos)
   end
 
   defp scan_hex_number(rest, hex_acc, acc, pos, start_pos) do
@@ -555,6 +575,59 @@ defmodule Lua.Lexer do
       _ ->
         {:error, {:invalid_hex_number, start_pos}}
     end
+  end
+
+  # Scan hex fractional digits after the dot
+  defp scan_hex_frac(<<c, rest::binary>>, int_acc, frac_acc, acc, pos, start_pos)
+       when c in ?0..?9 or c in ?a..?f or c in ?A..?F do
+    scan_hex_frac(rest, int_acc, frac_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  # Hex float fractional part followed by exponent
+  defp scan_hex_frac(<<p, rest::binary>>, int_acc, frac_acc, acc, pos, start_pos) when p in [?p, ?P] do
+    scan_hex_exp(rest, int_acc, frac_acc, acc, advance_column(pos, 1), start_pos)
+  end
+
+  # Hex float fractional part without exponent
+  defp scan_hex_frac(rest, int_acc, frac_acc, acc, pos, start_pos) do
+    num = build_hex_float(int_acc, frac_acc, 0)
+    token = {:number, num, start_pos}
+    do_tokenize(rest, [token | acc], pos)
+  end
+
+  # Scan binary exponent (p/P followed by optional sign and decimal digits)
+  defp scan_hex_exp(<<sign, rest::binary>>, int_acc, frac_acc, acc, pos, start_pos) when sign in [?+, ?-] do
+    scan_hex_exp_digits(rest, int_acc, frac_acc, <<sign>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  defp scan_hex_exp(rest, int_acc, frac_acc, acc, pos, start_pos) do
+    scan_hex_exp_digits(rest, int_acc, frac_acc, "", acc, pos, start_pos)
+  end
+
+  defp scan_hex_exp_digits(<<c, rest::binary>>, int_acc, frac_acc, exp_acc, acc, pos, start_pos) when c in ?0..?9 do
+    scan_hex_exp_digits(rest, int_acc, frac_acc, exp_acc <> <<c>>, acc, advance_column(pos, 1), start_pos)
+  end
+
+  defp scan_hex_exp_digits(rest, int_acc, frac_acc, exp_acc, acc, pos, start_pos) do
+    exp = if exp_acc == "" or exp_acc == "+" or exp_acc == "-", do: 0, else: String.to_integer(exp_acc)
+    num = build_hex_float(int_acc, frac_acc, exp)
+    token = {:number, num, start_pos}
+    do_tokenize(rest, [token | acc], pos)
+  end
+
+  # Build a hex float value from integer hex digits, fractional hex digits, and binary exponent
+  defp build_hex_float(int_hex, frac_hex, exp) do
+    int_val = if int_hex == "", do: 0, else: String.to_integer(int_hex, 16)
+
+    frac_val =
+      if frac_hex == "" do
+        0.0
+      else
+        frac_int = String.to_integer(frac_hex, 16)
+        frac_int / :math.pow(16, String.length(frac_hex))
+      end
+
+    (int_val + frac_val) * :math.pow(2, exp)
   end
 
   # Finalize number token
@@ -573,7 +646,14 @@ defmodule Lua.Lexer do
   defp parse_number(num_str) do
     if String.contains?(num_str, ".") or String.contains?(num_str, "e") or
          String.contains?(num_str, "E") do
-      case Float.parse(num_str) do
+      # Normalize for Elixir's Float.parse which requires digits after dot
+      normalized = num_str
+      # "0." → "0.0"
+      normalized = if String.ends_with?(normalized, "."), do: normalized <> "0", else: normalized
+      # "2.E-1" → "2.0E-1"
+      normalized = String.replace(normalized, ~r/\.([eE])/, ".0\\1")
+
+      case Float.parse(normalized) do
         {num, ""} -> {:ok, num}
         _ -> {:error, :invalid_number}
       end
