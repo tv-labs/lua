@@ -1,0 +1,2 @@
+-- Main script loaded by luaport on startup.
+-- Benchmark-specific functions are loaded at runtime via :luaport.load/2.
