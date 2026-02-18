@@ -1962,6 +1962,20 @@ defmodule LuaTest do
       assert {[true], _} = Lua.eval!(lua, code)
     end
 
+    test "loops with external variables", %{lua: lua} do
+      code = ~S"""
+      function run(n)
+        for i = 1, n do
+          local obj = {}   -- overwrites limit register → infinite loop
+        end
+        return n
+      end
+      return run(3)
+      """
+
+      assert {[3], _} = Lua.eval!(lua, code)
+    end
+
     @tag :skip
     test "closure upvalue mutation through nested scope", %{lua: lua} do
       # Known limitation: upvalue mutation through nested function scopes
