@@ -64,7 +64,10 @@ defmodule Lua.MixProject do
       {:ex_doc, "~> 0.38", only: :dev, runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.1", only: [:test]},
-      {:styler, "~> 1.10", only: [:dev, :test], runtime: false}
+      {:styler, "~> 1.10", only: [:dev, :test], runtime: false},
+      {:benchee, "~> 1.3", only: :dev},
+      {:luerl, "~> 1.5", only: :dev},
+      {:luaport, "~> 1.6", only: :dev}
     ]
   end
 end
