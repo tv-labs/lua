@@ -1379,6 +1379,369 @@ defmodule LuaTest do
     end
   end
 
+  describe "64-bit integer overflow wrapping (Lua 5.3)" do
+    setup do
+      %{lua: Lua.new(sandboxed: [])}
+    end
+
+    test "maxint + 1 wraps to minint", %{lua: lua} do
+      code = """
+      local maxint = 9223372036854775807
+      local minint = -9223372036854775808
+      return maxint + 1 == minint
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "minint - 1 wraps to maxint", %{lua: lua} do
+      code = """
+      local maxint = 9223372036854775807
+      local minint = -9223372036854775808
+      return minint - 1 == maxint
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "bitwise left shift wraps to signed 64-bit", %{lua: lua} do
+      code = """
+      local minint = -9223372036854775808
+      return 1 << 63 == minint
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "bitwise operations wrap to signed 64-bit", %{lua: lua} do
+      # Test that bitwise operations produce signed results
+      code = """
+      -- 1 << 63 should be minint (most significant bit set)
+      local result = 1 << 63
+      return result < 0
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+
+      # Test bitwise NOT wraps correctly
+      code = """
+      local minint = -9223372036854775808
+      return ~0 == -1
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+
+      # Test bitwise OR with high bit
+      code = """
+      local result = 0 | (1 << 63)
+      return result < 0
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "arithmetic overflow wraps for integers", %{lua: lua} do
+      # Integer addition overflow
+      code = """
+      local maxint = 9223372036854775807
+      local result = maxint + maxint
+      return result < 0  -- Should wrap to negative
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+
+      # Integer multiplication overflow
+      code = """
+      local big = 9223372036854775807
+      local result = big * 2
+      return result == -2
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "unary minus wraps for minint", %{lua: lua} do
+      code = """
+      local minint = -9223372036854775808
+      return -minint == minint  -- minint negated wraps back to minint
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "floor division wraps for integer operands", %{lua: lua} do
+      code = """
+      local minint = -9223372036854775808
+      return minint // -1 == minint  -- Division overflow wraps
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "modulo wraps correctly", %{lua: lua} do
+      code = """
+      local minint = -9223372036854775808
+      -- minint % -1 should be 0 in Lua 5.3
+      return minint % -1 == 0
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "float operations do not wrap", %{lua: lua} do
+      # Float operations should use IEEE 754, not wrap
+      code = """
+      local maxint = 9223372036854775807
+      local result = maxint + 1.0  -- Float addition
+      return result > maxint  -- Should be larger, not wrap
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "mixed integer/float arithmetic preserves float semantics", %{lua: lua} do
+      code = """
+      local maxint = 9223372036854775807
+      local result = maxint + 1.0
+      return type(result) == "number" and result > 0
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "bitwise shift left by 64 or more yields 0", %{lua: lua} do
+      code = """
+      return (1 << 64) == 0 and (1 << 100) == 0
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "bitwise shift right by 64 or more yields 0", %{lua: lua} do
+      code = """
+      return (1 << 63) >> 64 == 0
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "all bitwise operations wrap consistently", %{lua: lua} do
+      code = """
+      local maxint = 9223372036854775807
+      local minint = -9223372036854775808
+
+      -- Test band
+      local a = (maxint + 1) & 0xFFFFFFFFFFFFFFFF
+      assert(a == minint)
+
+      -- Test bor
+      local b = 0 | (1 << 63)
+      assert(b == minint)
+
+      -- Test bxor
+      local c = maxint ~ 0xFFFFFFFFFFFFFFFF
+      assert(c == minint)
+
+      -- Test bnot
+      local d = ~0
+      assert(d == -1)
+
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+  end
+
+  describe "FuncDecl local assignment" do
+    setup do
+      %{lua: Lua.new(sandboxed: [])}
+    end
+
+    test "function f() updates local f when it exists", %{lua: lua} do
+      code = """
+      local f = function(x) return "first: " .. x end
+      assert(f("test") == "first: test")
+
+      -- Redefine using function syntax
+      function f(x)
+        return "second: " .. x
+      end
+
+      return f("test")
+      """
+
+      assert {["second: test"], _} = Lua.eval!(lua, code)
+    end
+
+    test "function f() creates global when no local exists", %{lua: lua} do
+      code = """
+      function f(x)
+        return "global: " .. x
+      end
+
+      return f("test")
+      """
+
+      assert {["global: test"], _} = Lua.eval!(lua, code)
+    end
+
+    test "function f() in nested scope updates correct local", %{lua: lua} do
+      code = """
+      local f = function() return "outer" end
+
+      do
+        local f = function() return "inner1" end
+        assert(f() == "inner1")
+
+        function f()
+          return "inner2"
+        end
+
+        assert(f() == "inner2")
+      end
+
+      -- Outer f should be unchanged
+      return f()
+      """
+
+      assert {["outer"], _} = Lua.eval!(lua, code)
+    end
+
+    test "function f() works with upvalue capture", %{lua: lua} do
+      code = """
+      local x = 10
+      local f = function() return x end
+
+      -- Redefine f - should still capture x
+      function f()
+        return x + 5
+      end
+
+      return f()
+      """
+
+      assert {[15], _} = Lua.eval!(lua, code)
+    end
+
+    test "multiple redefinitions work correctly", %{lua: lua} do
+      code = """
+      local f = function() return 1 end
+      assert(f() == 1)
+
+      function f() return 2 end
+      assert(f() == 2)
+
+      function f() return 3 end
+      assert(f() == 3)
+
+      return f()
+      """
+
+      assert {[3], _} = Lua.eval!(lua, code)
+    end
+
+    test "function f() with different names in same scope", %{lua: lua} do
+      code = """
+      local f = function() return "f1" end
+      local g = function() return "g1" end
+
+      function f() return "f2" end
+      function g() return "g2" end
+
+      return f(), g()
+      """
+
+      assert {["f2", "g2"], _} = Lua.eval!(lua, code)
+    end
+
+    test "function f() in loop creates new local each iteration", %{lua: lua} do
+      code = """
+      local funcs = {}
+      for i = 1, 3 do
+        local f = function() return i end
+        function f() return i * 10 end
+        funcs[i] = f
+      end
+
+      return funcs[1](), funcs[2](), funcs[3]()
+      """
+
+      assert {[10, 20, 30], _} = Lua.eval!(lua, code)
+    end
+
+    test "dotted function names always use table assignment", %{lua: lua} do
+      code = """
+      local t = {}
+      t.f = function() return "first" end
+
+      function t.f()
+        return "second"
+      end
+
+      return t.f()
+      """
+
+      assert {["second"], _} = Lua.eval!(lua, code)
+    end
+
+    test "method syntax works correctly", %{lua: lua} do
+      code = """
+      local obj = {value = 10}
+
+      function obj:get()
+        return self.value
+      end
+
+      function obj:set(v)
+        self.value = v
+      end
+
+      obj:set(20)
+      return obj:get()
+      """
+
+      assert {[20], _} = Lua.eval!(lua, code)
+    end
+
+    test "local function vs function with same name", %{lua: lua} do
+      code = """
+      -- First define as local
+      local function f() return "local1" end
+      assert(f() == "local1")
+
+      -- Redefine using local function again
+      local function f() return "local2" end
+      assert(f() == "local2")
+
+      -- Redefine using function syntax (should update the local)
+      function f() return "updated" end
+
+      return f()
+      """
+
+      assert {["updated"], _} = Lua.eval!(lua, code)
+    end
+
+    test "forward reference pattern works", %{lua: lua} do
+      code = """
+      local f
+
+      local function g()
+        return f() + 1
+      end
+
+      function f()
+        return 10
+      end
+
+      return g()
+      """
+
+      assert {[11], _} = Lua.eval!(lua, code)
+    end
+  end
+
   defp test_file(name) do
     Path.join(["test", "fixtures", name])
   end

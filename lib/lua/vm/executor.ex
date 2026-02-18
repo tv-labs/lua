@@ -796,7 +796,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__band", val_a, val_b, state, fn ->
-        Bitwise.band(to_integer!(val_a), to_integer!(val_b))
+        val_a |> to_integer!() |> Bitwise.band(to_integer!(val_b)) |> to_signed_int64()
       end)
 
     regs = put_elem(regs, dest, result)
@@ -809,7 +809,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__bor", val_a, val_b, state, fn ->
-        Bitwise.bor(to_integer!(val_a), to_integer!(val_b))
+        val_a |> to_integer!() |> Bitwise.bor(to_integer!(val_b)) |> to_signed_int64()
       end)
 
     regs = put_elem(regs, dest, result)
@@ -822,7 +822,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__bxor", val_a, val_b, state, fn ->
-        Bitwise.bxor(to_integer!(val_a), to_integer!(val_b))
+        val_a |> to_integer!() |> Bitwise.bxor(to_integer!(val_b)) |> to_signed_int64()
       end)
 
     regs = put_elem(regs, dest, result)
@@ -860,7 +860,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_unary_metamethod("__bnot", val, state, fn ->
-        Bitwise.bnot(to_integer!(val))
+        val |> to_integer!() |> Bitwise.bnot() |> to_signed_int64()
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1505,7 +1505,8 @@ defmodule Lua.VM.Executor do
   defp safe_add(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
-      na + nb
+      result = na + nb
+      if is_integer(result), do: to_signed_int64(result), else: result
     else
       {:error, val} ->
         raise TypeError,
@@ -1518,7 +1519,8 @@ defmodule Lua.VM.Executor do
   defp safe_subtract(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
-      na - nb
+      result = na - nb
+      if is_integer(result), do: to_signed_int64(result), else: result
     else
       {:error, val} ->
         raise TypeError,
@@ -1531,7 +1533,8 @@ defmodule Lua.VM.Executor do
   defp safe_multiply(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
-      na * nb
+      result = na * nb
+      if is_integer(result), do: to_signed_int64(result), else: result
     else
       {:error, val} ->
         raise TypeError,
@@ -1544,9 +1547,6 @@ defmodule Lua.VM.Executor do
   defp safe_divide(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
-      # Check for division by zero
-      # Note: Standard Lua 5.3 returns inf/-inf/nan for float division by zero,
-      # but Elixir doesn't support creating these values easily, so we raise an error
       if nb == 0 or nb == 0.0 do
         raise RuntimeError, value: "attempt to divide by zero"
       else
@@ -1594,7 +1594,7 @@ defmodule Lua.VM.Executor do
 
         is_integer(na) and is_integer(nb) ->
           # Lua floor modulo for integers: a - floor_div(a, b) * b
-          na - lua_idiv(na, nb) * nb
+          to_signed_int64(na - lua_idiv(na, nb) * nb)
 
         true ->
           # Float floor modulo: a - floor(a/b) * b
@@ -1614,7 +1614,8 @@ defmodule Lua.VM.Executor do
     q = div(a, b)
     r = rem(a, b)
     # Adjust if remainder has different sign than divisor
-    if r != 0 and Bitwise.bxor(r, b) < 0, do: q - 1, else: q
+    result = if r != 0 and Bitwise.bxor(r, b) < 0, do: q - 1, else: q
+    to_signed_int64(result)
   end
 
   defp safe_power(a, b) do
@@ -1633,7 +1634,8 @@ defmodule Lua.VM.Executor do
   defp safe_negate(a) do
     case to_number(a) do
       {:ok, na} ->
-        -na
+        result = -na
+        if is_integer(result), do: to_signed_int64(result), else: result
 
       {:error, val} ->
         raise TypeError,
@@ -1750,7 +1752,7 @@ defmodule Lua.VM.Executor do
   defp lua_shift_left(val, shift) when shift < 0, do: lua_shift_right(val, -shift)
 
   defp lua_shift_left(val, shift) do
-    Bitwise.band(Bitwise.bsl(val, shift), 0xFFFFFFFFFFFFFFFF)
+    val |> Bitwise.bsl(shift) |> to_signed_int64()
   end
 
   defp lua_shift_right(_val, shift) when shift >= 64, do: 0
@@ -1758,9 +1760,17 @@ defmodule Lua.VM.Executor do
   defp lua_shift_right(val, shift) when shift < 0, do: lua_shift_left(val, -shift)
 
   defp lua_shift_right(val, shift) do
-    # Unsigned right shift - mask to 64-bit first
+    # Unsigned right shift - mask to 64-bit unsigned first
     unsigned_val = Bitwise.band(val, 0xFFFFFFFFFFFFFFFF)
-    Bitwise.bsr(unsigned_val, shift)
+    unsigned_val |> Bitwise.bsr(shift) |> to_signed_int64()
+  end
+
+  # Wrap an arbitrary-precision integer to a signed 64-bit integer
+  @int64_max 0x7FFFFFFFFFFFFFFF
+  @int64_mod 0x10000000000000000
+  defp to_signed_int64(val) do
+    masked = Bitwise.band(val, 0xFFFFFFFFFFFFFFFF)
+    if masked > @int64_max, do: masked - @int64_mod, else: masked
   end
 
   # Helper to determine Lua type from Elixir value
