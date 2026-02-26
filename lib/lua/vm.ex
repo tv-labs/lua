@@ -16,9 +16,10 @@ defmodule Lua.VM do
   """
   @spec execute(Prototype.t(), State.t()) :: {:ok, list(), State.t()}
   def execute(%Prototype{} = proto, state \\ State.new()) do
-    # Create register file - tuple of nils
-    # For now, just allocate 256 registers (we'll optimize this later)
-    registers = Tuple.duplicate(nil, 256)
+    # Create register file sized to the prototype's needs.
+    # The +16 buffer covers multi-return expansion slots that the codegen doesn't
+    # always track in max_registers (call results can land beyond the stated max).
+    registers = Tuple.duplicate(nil, proto.max_registers + 16)
 
     # Execute the prototype instructions
     {results, _final_regs, final_state} =
