@@ -412,8 +412,9 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:closure, dest, proto_index} | rest], regs, upvalues, proto, state) do
     nested_proto = Enum.at(proto.prototypes, proto_index)
 
-    # Capture upvalues based on descriptors, reusing open upvalue cells when available
-    {captured_upvalues, state} =
+    # Capture upvalues based on descriptors, reusing open upvalue cells when available.
+    # Accumulate in reverse (prepend) for O(N) collection, then reverse at the end.
+    {captured_upvalues_reversed, state} =
       Enum.reduce(nested_proto.upvalue_descriptors, {[], state}, fn
         {:parent_local, reg, _name}, {cells, state} ->
           case Map.get(state.open_upvalues, reg) do
@@ -428,18 +429,19 @@ defmodule Lua.VM.Executor do
                   open_upvalues: Map.put(state.open_upvalues, reg, cell_ref)
               }
 
-              {cells ++ [cell_ref], state}
+              {[cell_ref | cells], state}
 
             existing_cell ->
               # Reuse existing open upvalue cell
-              {cells ++ [existing_cell], state}
+              {[existing_cell | cells], state}
           end
 
         {:parent_upvalue, index, _name}, {cells, state} ->
           # Share the parent's upvalue cell
-          {cells ++ [Enum.at(upvalues, index)], state}
+          {[Enum.at(upvalues, index) | cells], state}
       end)
 
+    captured_upvalues = Enum.reverse(captured_upvalues_reversed)
     closure = {:lua_closure, nested_proto, captured_upvalues}
     regs = put_elem(regs, dest, closure)
     do_execute(rest, regs, upvalues, proto, state)
