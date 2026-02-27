@@ -59,8 +59,7 @@ defmodule Lua.VM.Executor do
     state = %{state | open_upvalues: %{}}
 
     {results, _callee_regs, state} =
-      do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto,
-                 state, [], [], 0)
+      do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0)
 
     state = %{state | open_upvalues: saved_open_upvalues}
     {results, state}
@@ -362,7 +361,16 @@ defmodule Lua.VM.Executor do
 
   # ── while_loop — CPS: condition → check → body → restart ─────────────────
 
-  defp do_execute([{:while_loop, cond_body, test_reg, loop_body} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute(
+         [{:while_loop, cond_body, test_reg, loop_body} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line
+       ) do
     loop_exit_cont = [{:loop_exit, rest} | cont]
     cond_check = {:cps_while_test, test_reg, loop_body, cond_body, rest, cont}
     do_execute(cond_body, regs, upvalues, proto, state, [cond_check | loop_exit_cont], frames, line)
@@ -370,7 +378,16 @@ defmodule Lua.VM.Executor do
 
   # ── repeat_loop — CPS: body → condition → check → restart ────────────────
 
-  defp do_execute([{:repeat_loop, loop_body, cond_body, test_reg} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute(
+         [{:repeat_loop, loop_body, cond_body, test_reg} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line
+       ) do
     loop_exit_cont = [{:loop_exit, rest} | cont]
     body_done = {:cps_repeat_body, loop_body, cond_body, test_reg, rest, cont}
     do_execute(loop_body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line)
@@ -530,20 +547,28 @@ defmodule Lua.VM.Executor do
 
         call_info = %{source: proto.source, line: line, name: nil}
 
-        state = %{state |
-          call_stack:    [call_info | state.call_stack],
-          open_upvalues: %{}
-        }
+        state = %{state | call_stack: [call_info | state.call_stack], open_upvalues: %{}}
 
         # Tail call — Erlang stack does not grow
-        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto,
-                   state, [], [frame | frames], line)
+        do_execute(
+          callee_proto.instructions,
+          callee_regs,
+          callee_upvalues,
+          callee_proto,
+          state,
+          [],
+          [frame | frames],
+          line
+        )
 
       {:native_func, fun} ->
         {results, state} =
           case fun.(args, state) do
-            {r, %State{} = s} when is_list(r) -> {r, s}
-            {r, %State{} = s} -> {List.wrap(r), s}
+            {r, %State{} = s} when is_list(r) ->
+              {r, s}
+
+            {r, %State{} = s} ->
+              {List.wrap(r), s}
 
             other ->
               raise InternalError,
@@ -631,7 +656,16 @@ defmodule Lua.VM.Executor do
 
   # ── return (multi_return variant) ──────────────────────────────────────────
 
-  defp do_execute([{:return, base, {:multi_return, fixed_count}} | _rest], regs, _upvalues, _proto, state, _cont, frames, line) do
+  defp do_execute(
+         [{:return, base, {:multi_return, fixed_count}} | _rest],
+         regs,
+         _upvalues,
+         _proto,
+         state,
+         _cont,
+         frames,
+         line
+       ) do
     total = fixed_count + state.multi_return_count
     results = if total > 0, do: for(i <- 0..(total - 1), do: elem(regs, base + i)), else: []
 
@@ -991,7 +1025,16 @@ defmodule Lua.VM.Executor do
 
   # ── set_list (multi-return variant) ───────────────────────────────────────
 
-  defp do_execute([{:set_list, table_reg, start, {:multi, init_count}, offset} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute(
+         [{:set_list, table_reg, start, {:multi, init_count}, offset} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line
+       ) do
     {:tref, id} = elem(regs, table_reg)
     total = init_count + state.multi_return_count
 
@@ -1066,20 +1109,17 @@ defmodule Lua.VM.Executor do
 
   defp do_frame_return(results, _callee_regs, state, frame, rest_frames, line) do
     %{
-      rest:          rest,
-      cont:          caller_cont,
-      regs:          caller_regs,
-      upvalues:      caller_upvalues,
-      proto:         caller_proto,
-      base:          base,
-      result_count:  result_count,
+      rest: rest,
+      cont: caller_cont,
+      regs: caller_regs,
+      upvalues: caller_upvalues,
+      proto: caller_proto,
+      base: base,
+      result_count: result_count,
       open_upvalues: saved_open_upvalues
     } = frame
 
-    state = %{state |
-      call_stack:    tl(state.call_stack),
-      open_upvalues: saved_open_upvalues
-    }
+    state = %{state | call_stack: tl(state.call_stack), open_upvalues: saved_open_upvalues}
 
     case result_count do
       -1 ->
@@ -1211,8 +1251,7 @@ defmodule Lua.VM.Executor do
     state = %{state | open_upvalues: %{}}
 
     {results, _callee_regs, state} =
-      do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto,
-                 state, [], [], 0)
+      do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0)
 
     state = %{state | open_upvalues: saved_open_upvalues}
     {results, state}
@@ -1430,15 +1469,15 @@ defmodule Lua.VM.Executor do
         state = %{state | open_upvalues: %{}}
 
         {results, _final_regs, new_state} =
-          do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto,
-                     state, [], [], 0)
+          do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto, state, [], [], 0)
 
         new_state = %{new_state | open_upvalues: saved_open_upvalues}
 
-        result = case results do
-          [r | _] -> r
-          [] -> nil
-        end
+        result =
+          case results do
+            [r | _] -> r
+            [] -> nil
+          end
 
         {result, new_state}
 
@@ -1475,15 +1514,15 @@ defmodule Lua.VM.Executor do
         state = %{state | open_upvalues: %{}}
 
         {results, _final_regs, new_state} =
-          do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto,
-                     state, [], [], 0)
+          do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto, state, [], [], 0)
 
         new_state = %{new_state | open_upvalues: saved_open_upvalues}
 
-        result = case results do
-          [r | _] -> r
-          [] -> nil
-        end
+        result =
+          case results do
+            [r | _] -> r
+            [] -> nil
+          end
 
         {result, new_state}
 
@@ -1524,15 +1563,15 @@ defmodule Lua.VM.Executor do
           state = %{state | open_upvalues: %{}}
 
           {results, _final_regs, new_state} =
-            do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto,
-                       state, [], [], 0)
+            do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto, state, [], [], 0)
 
           new_state = %{new_state | open_upvalues: saved_open_upvalues}
 
-          result = case results do
-            [r | _] -> r
-            [] -> nil
-          end
+          result =
+            case results do
+              [r | _] -> r
+              [] -> nil
+            end
 
           {result, new_state}
 
@@ -1682,8 +1721,11 @@ defmodule Lua.VM.Executor do
 
   defp safe_compare_lt(a, b) do
     cond do
-      is_number(a) and is_number(b) -> a < b
-      is_binary(a) and is_binary(b) -> a < b
+      is_number(a) and is_number(b) ->
+        a < b
+
+      is_binary(a) and is_binary(b) ->
+        a < b
 
       true ->
         raise TypeError,
@@ -1695,8 +1737,11 @@ defmodule Lua.VM.Executor do
 
   defp safe_compare_le(a, b) do
     cond do
-      is_number(a) and is_number(b) -> a <= b
-      is_binary(a) and is_binary(b) -> a <= b
+      is_number(a) and is_number(b) ->
+        a <= b
+
+      is_binary(a) and is_binary(b) ->
+        a <= b
 
       true ->
         raise TypeError,
@@ -1708,8 +1753,11 @@ defmodule Lua.VM.Executor do
 
   defp safe_compare_gt(a, b) do
     cond do
-      is_number(a) and is_number(b) -> a > b
-      is_binary(a) and is_binary(b) -> a > b
+      is_number(a) and is_number(b) ->
+        a > b
+
+      is_binary(a) and is_binary(b) ->
+        a > b
 
       true ->
         raise TypeError,
@@ -1721,8 +1769,11 @@ defmodule Lua.VM.Executor do
 
   defp safe_compare_ge(a, b) do
     cond do
-      is_number(a) and is_number(b) -> a >= b
-      is_binary(a) and is_binary(b) -> a >= b
+      is_number(a) and is_number(b) ->
+        a >= b
+
+      is_binary(a) and is_binary(b) ->
+        a >= b
 
       true ->
         raise TypeError,
