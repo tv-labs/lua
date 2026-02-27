@@ -32,7 +32,7 @@ defmodule Lua.VM.Executor do
   @spec call_function(term(), list(), State.t()) :: {list(), State.t()}
   def call_function({:lua_closure, callee_proto, callee_upvalues}, args, state) do
     callee_regs =
-      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 64)
+      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 16)
 
     callee_regs =
       args
@@ -499,7 +499,7 @@ defmodule Lua.VM.Executor do
 
           # Create new register file for the callee
           callee_regs =
-            Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 64)
+            Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 16)
 
           # Copy arguments into callee registers (params are R[0..N-1])
           callee_regs =
@@ -1104,7 +1104,7 @@ defmodule Lua.VM.Executor do
   # Helper: call a function value inline (used by generic_for)
   defp call_value({:lua_closure, callee_proto, callee_upvalues}, args, _proto, state) do
     callee_regs =
-      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 64)
+      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 16)
 
     callee_regs =
       args
