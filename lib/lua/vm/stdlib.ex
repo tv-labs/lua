@@ -180,7 +180,7 @@ defmodule Lua.VM.Stdlib do
       message =
         case rest do
           [msg | _] -> msg
-          [] -> "assertion failed! (line #{state.current_line})"
+          [] -> "assertion failed!"
         end
 
       raise AssertionError, value: message
