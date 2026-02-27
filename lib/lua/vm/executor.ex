@@ -161,7 +161,7 @@ defmodule Lua.VM.Executor do
 
   # get_upvalue
   defp do_execute([{:get_upvalue, dest, index} | rest], regs, upvalues, proto, state) do
-    cell_ref = Enum.at(upvalues, index)
+    cell_ref = elem(upvalues, index)
     value = Map.get(state.upvalue_cells, cell_ref)
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state)
@@ -169,7 +169,7 @@ defmodule Lua.VM.Executor do
 
   # set_upvalue
   defp do_execute([{:set_upvalue, index, source} | rest], regs, upvalues, proto, state) do
-    cell_ref = Enum.at(upvalues, index)
+    cell_ref = elem(upvalues, index)
     value = elem(regs, source)
     state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
     do_execute(rest, regs, upvalues, proto, state)
@@ -438,11 +438,11 @@ defmodule Lua.VM.Executor do
 
         {:parent_upvalue, index, _name}, {cells, state} ->
           # Share the parent's upvalue cell
-          {[Enum.at(upvalues, index) | cells], state}
+          {[elem(upvalues, index) | cells], state}
       end)
 
     captured_upvalues = Enum.reverse(captured_upvalues_reversed)
-    closure = {:lua_closure, nested_proto, captured_upvalues}
+    closure = {:lua_closure, nested_proto, List.to_tuple(captured_upvalues)}
     regs = put_elem(regs, dest, closure)
     do_execute(rest, regs, upvalues, proto, state)
   end

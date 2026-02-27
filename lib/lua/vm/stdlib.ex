@@ -398,7 +398,7 @@ defmodule Lua.VM.Stdlib do
         # Compiler currently never returns errors, always succeeds
         {:ok, prototype} = Lua.Compiler.compile(ast)
         # Create a closure from the compiled prototype
-        closure = {:lua_closure, prototype, %{}}
+        closure = {:lua_closure, prototype, {}}
         {[closure], state}
 
       {:error, reason} ->

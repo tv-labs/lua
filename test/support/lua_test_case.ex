@@ -81,7 +81,7 @@ defmodule Lua.TestCase do
             case Lua.Compiler.compile(ast, source: chunk_name) do
               {:ok, proto} ->
                 # Return a closure that will execute the proto when called
-                closure = {:lua_closure, proto, []}
+                closure = {:lua_closure, proto, {}}
                 {[closure], state}
 
               {:error, error} ->
