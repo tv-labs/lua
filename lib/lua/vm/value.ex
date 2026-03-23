@@ -114,6 +114,7 @@ defmodule Lua.VM.Value do
   def encode(value, state) when is_boolean(value), do: {value, state}
   def encode(value, state) when is_number(value), do: {value, state}
   def encode(value, state) when is_binary(value), do: {value, state}
+  def encode(value, state) when is_atom(value), do: {Atom.to_string(value), state}
 
   def encode(fun, state) when is_function(fun, 2), do: {{:native_func, fun}, state}
 
