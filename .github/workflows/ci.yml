@@ -43,6 +43,112 @@ jobs:
         run: mix test
       - name: Format
         run: mix format --check-formatted
+  lua53-suite:
+    name: Lua 5.3 suite
+    runs-on: ubuntu-latest
+    # Reports suite pass/fail count but does not block PRs on deferred tests.
+    # See ROADMAP.md "Deferred" section for files intentionally skipped.
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install LuaJIT
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit libluajit-5.1-dev
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18.3"
+          otp-version: "27"
+      - name: Restore dependencies cache
+        uses: actions/cache@v3
+        with:
+          path: deps
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+      - name: Install dependencies
+        run: mix deps.get
+      - name: Run Lua 5.3 suite (only)
+        id: suite
+        run: |
+          # Run the suite tests, capture summary line.
+          mix test --only lua53 2>&1 | tee suite-output.txt
+          # Extract and parse "N tests, M failures, K skipped" from the output.
+          summary=$(grep -E '^[0-9]+ tests?, [0-9]+ failures' suite-output.txt | tail -1)
+          echo "suite_summary=$summary" >> $GITHUB_OUTPUT
+          # Always exit 0 so the count is reported even if some files fail.
+          # Use "Run full suite survey" below for the per-file breakdown.
+          exit 0
+      - name: Run full suite survey
+        # Walk every file in test/lua53_tests/ to get per-file PASS/FAIL,
+        # not just the curated @ready_tests subset. Reports counts to the
+        # GitHub Actions job summary so PR reviewers can see the delta.
+        run: |
+          cat > /tmp/suite_survey.exs <<'EOF'
+          # Skip "all.lua" — it's the upstream Lua harness, not a test file.
+          tests =
+            "test/lua53_tests"
+            |> File.ls!()
+            |> Enum.filter(&String.ends_with?(&1, ".lua"))
+            |> Enum.reject(&(&1 == "all.lua"))
+            |> Enum.sort()
+
+          run_test = fn test_file ->
+            path = Path.join("test/lua53_tests", test_file)
+            source = File.read!(path)
+            lua = Lua.new(exclude: [[:package], [:require], [:load], [:loadstring], [:loadfile], [:dofile]])
+            test_dir = Path.dirname(path)
+            lua = Lua.set_lua_paths(lua, [Path.join(test_dir, "?.lua")])
+
+            task = Task.async(fn ->
+              try do
+                {_, _} = Lua.eval!(lua, source)
+                :pass
+              rescue
+                e ->
+                  msg = case e do
+                    %{value: v} when is_binary(v) -> v
+                    %{value: v} -> inspect(v)
+                    _ -> Exception.message(e)
+                  end
+                  {:fail, msg |> String.replace(~r/\e\[[\d;]+m/, "") |> String.slice(0, 100)}
+              catch
+                _, e -> {:fail, inspect(e) |> String.slice(0, 100)}
+              end
+            end)
+
+            case Task.yield(task, 8_000) || Task.shutdown(task, :brutal_kill) do
+              {:ok, r} -> r
+              nil -> {:fail, "TIMEOUT (8s)"}
+            end
+          end
+
+          results = Enum.map(tests, fn t -> {t, run_test.(t)} end)
+
+          passing = Enum.count(results, fn {_, r} -> r == :pass end)
+          total = length(results)
+
+          IO.puts("\n=== Lua 5.3 suite: #{passing}/#{total} passing ===\n")
+          for {name, result} <- results do
+            case result do
+              :pass -> IO.puts("PASS  #{name}")
+              {:fail, msg} -> IO.puts("FAIL  #{name}: #{msg}")
+            end
+          end
+          IO.puts("\n#{passing}/#{total}")
+          EOF
+          mix run /tmp/suite_survey.exs | tee suite-survey.txt
+
+          # Append the human-readable summary to the GitHub Actions step summary.
+          {
+            echo "## Lua 5.3 official suite"
+            echo ""
+            echo "\`\`\`"
+            cat suite-survey.txt
+            echo "\`\`\`"
+          } >> $GITHUB_STEP_SUMMARY
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
