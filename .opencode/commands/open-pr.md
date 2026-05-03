@@ -9,7 +9,7 @@ Recent commits on this branch (vs main): !`git log --oneline main..HEAD 2>/dev/n
 
 Diff stat: !`git diff --stat main...HEAD 2>/dev/null | tail -20`
 
-Find the plan file under `.opencode/plans/` whose frontmatter `branch:`
+Find the plan file under `.agents/plans/` whose frontmatter `branch:`
 matches the current branch.
 
 If no matching plan exists, ask me whether to:
@@ -26,7 +26,7 @@ If a matching plan exists:
    ```markdown
    ## {Plan title}
 
-   Plan: [`.opencode/plans/{id}-{slug}.md`](link to file at HEAD)
+   Plan: [`.agents/plans/{id}-{slug}.md`](link to file at HEAD)
    Closes #{issue from plan frontmatter}
 
    ### Goal

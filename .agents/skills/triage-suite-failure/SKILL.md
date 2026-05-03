@@ -26,7 +26,7 @@ turning that understanding into a shippable plan.
 - Classifying it (lexer / parser / codegen / executor / stdlib / unimplemented).
 - Reducing it to a 5–20 line repro that lives in `test/lua/vm/`.
 - Producing one of three outputs:
-  1. A new plan file under `.opencode/plans/` if the fix is shippable.
+  1. A new plan file under `.agents/plans/` if the fix is shippable.
   2. An `@tag :skip` annotation in `test/lua53_suite_test.exs` with a clear
      comment explaining the deferral, plus a deferred-issue label.
   3. An update to an existing plan if this failure is part of an ongoing fix.
@@ -139,8 +139,8 @@ in-progress plan: include it in that plan's branch with a note in
 
 #### B. Multi-file impact OR new concern
 
-Write a new plan file under `.opencode/plans/<id>-<slug>.md`. Use the
-template in `.opencode/plans/README.md`. Frontmatter:
+Write a new plan file under `.agents/plans/<id>-<slug>.md`. Use the
+template in `.agents/plans/README.md`. Frontmatter:
 
 - `id`: next available in the current direction (A or B).
 - `unlocks`: list of suite files this plan should fix. Run them all
@@ -168,7 +168,7 @@ In `test/lua53_suite_test.exs`:
 
 ```elixir
 # Deferred: backward goto requires CFG pass in compiler.
-# See .opencode/plans/A-goto-cfg.md (when written) or ROADMAP.md "Deferred".
+# See .agents/plans/A-goto-cfg.md (when written) or ROADMAP.md "Deferred".
 @tag :skip
 test "goto.lua" do ... end
 ```
@@ -194,7 +194,7 @@ Repro: test/lua/vm/<area>_test.exs:<N>
 Classification: <category>
 Decision: fix-in-plan | defer | follow-up
 
-If fix-in-plan: created .opencode/plans/<id>-<slug>.md
+If fix-in-plan: created .agents/plans/<id>-<slug>.md
 If defer: tagged @skip in test/lua53_suite_test.exs with reason
 ```
 

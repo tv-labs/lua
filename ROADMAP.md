@@ -1,6 +1,6 @@
 # Lua VM Roadmap
 
-This is the strategic overview. For per-PR detail, see [`.opencode/plans/`](.opencode/plans).
+This is the strategic overview. For per-PR detail, see [`.agents/plans/`](.agents/plans).
 
 ## Status: 2026-05-02
 
@@ -35,7 +35,7 @@ The new Elixir-native VM (replacing Luerl) is built up through:
 **Goal**: push the official Lua 5.3 test suite from 4/24 to ≥ 12/24 passing files,
 without regressing unit tests, then cut `0.5.0-rc.1`.
 
-Per-PR plans live in [`.opencode/plans/A*.md`](.opencode/plans). Issues track them
+Per-PR plans live in [`.agents/plans/A*.md`](.agents/plans). Issues track them
 under the [`0.5.0` milestone](https://github.com/tv-labs/lua/milestone/1).
 
 ### High-leverage fixes (one bug → many files)
@@ -74,7 +74,7 @@ Several B-direction wins shipped already (PRs #153–#156). What remains:
 - **B3**: Re-baseline benchmarks against Luerl and PUC-Lua. Decide whether further
   architectural work (e.g. flat instruction stream + PC dispatch) is justified.
 
-Per-PR plans land in [`.opencode/plans/B*.md`](.opencode/plans) when Direction A
+Per-PR plans land in [`.agents/plans/B*.md`](.agents/plans) when Direction A
 wraps.
 
 ## Deferred (intentional, not in 0.5)
@@ -92,7 +92,7 @@ wraps.
 ## Glossary
 
 - **Suite** — the official Lua 5.3 test files in `test/lua53_tests/`.
-- **Plan** — a single-PR-shaped chunk of work, lives in `.opencode/plans/`.
+- **Plan** — a single-PR-shaped chunk of work, lives in `.agents/plans/`.
 - **Direction** — strategic grouping (A = correctness/suite, B = performance).
 - **Milestone** — GitHub milestone tracking direction-scoped issues for a release.
 

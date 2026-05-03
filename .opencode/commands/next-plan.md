@@ -3,7 +3,7 @@ description: Pick up the next ready plan file and ship it to a PR
 agent: build
 ---
 
-Find the next plan in `.opencode/plans/` where `status: ready`. Order by id
+Find the next plan in `.agents/plans/` where `status: ready`. Order by id
 (A0 before A1 before A2; A before B). Skip plans whose status is `blocked`,
 `in-progress`, `review`, `merged`, or `deferred`.
 

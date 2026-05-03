@@ -6,6 +6,17 @@ Plan files are the primary unit of work for this project. They are short, focuse
 machine-readable so that agents can pick them up via `/next-plan`, execute them via the
 `ship-a-plan` skill, and produce predictable PRs.
 
+## Why `.agents/plans/`
+
+Plans live under `.agents/` (the cross-tool agent convention) rather than
+`.opencode/`. Plans are tool-agnostic — any agent runner can read this YAML +
+markdown format. They sit alongside `.agents/skills/` so the entire
+"what the agent uses" tree is in one place.
+
+The only thing that has to live in `.opencode/` is the slash commands
+(`.opencode/commands/`), which are an OpenCode-specific feature. Skills and
+plans are portable.
+
 ## Naming
 
 `<id>-<short-slug>.md`, where `<id>` is `A0`, `A1`, …, `B1`, `B2`, etc.
@@ -83,7 +94,7 @@ Optional, appended by the agent during execution:
 
 ## Workflow
 
-1. **Pick a plan**: agent reads `.opencode/plans/`, finds the lowest-id `status: ready` plan.
+1. **Pick a plan**: agent reads `.agents/plans/`, finds the lowest-id `status: ready` plan.
 2. **Verify preconditions**: `ship-a-plan` skill runs `mix test` against `base:` to confirm a clean tree.
 3. **Branch and implement**: switch to `branch:`, change `status:` to `in-progress`.
 4. **Verify**: run the verification block. If anything fails, fix or revert before moving on.

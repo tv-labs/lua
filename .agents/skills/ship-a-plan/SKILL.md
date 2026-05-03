@@ -1,7 +1,7 @@
 ---
 name: ship-a-plan
 description: |
-  Execute one plan file from .opencode/plans/ as a single PR against main.
+  Execute one plan file from .agents/plans/ as a single PR against main.
   Reads the plan, verifies preconditions, implements only what's in scope,
   runs full validation, opens a PR, and updates the plan file's status. Stops
   before merging — review is human-gated.
@@ -14,7 +14,7 @@ description: |
 
 # ship-a-plan
 
-The contract for executing one plan file from `.opencode/plans/` as a single
+The contract for executing one plan file from `.agents/plans/` as a single
 PR. Read this skill carefully before touching code.
 
 ## What this skill is for
@@ -35,7 +35,7 @@ PR. Read this skill carefully before touching code.
 
 ### 1. Read and validate the plan
 
-- Read the named plan file under `.opencode/plans/<id>-<slug>.md`.
+- Read the named plan file under `.agents/plans/<id>-<slug>.md`.
 - Parse YAML frontmatter. Required fields: `id`, `title`, `branch`, `base`,
   `status`, `direction`.
 - **Refuse to proceed** if `status:` is not `ready`. Tell the user the current
@@ -136,7 +136,7 @@ The PR body is generated from the plan file. Template:
 ```markdown
 ## {Plan title}
 
-Plan: [`.opencode/plans/{id}-{slug}.md`](link to file on this branch)
+Plan: [`.agents/plans/{id}-{slug}.md`](link to file on this branch)
 Closes #{issue}
 
 ### Goal

@@ -34,7 +34,7 @@ lua-*.tar
 !.claude/
 !.claude/skills
 !.opencode/
-!.opencode/plans/
 !.opencode/commands/
 !.agents/
 !.agents/skills/
+!.agents/plans/
