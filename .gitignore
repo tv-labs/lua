@@ -31,10 +31,12 @@ lua-*.tar
 
 # Check in shared agent config (skills, plans, commands) so the team and CI
 # can use the same orchestration. Override the global ~/.gitignore for these.
-!.claude/
-!.claude/skills
-!.opencode/
-!.opencode/commands/
+# Source of truth lives in .agents/; .opencode/ and .claude/ are symlinks.
 !.agents/
 !.agents/skills/
 !.agents/plans/
+!.agents/commands/
+!.claude/
+!.claude/skills
+!.opencode/
+!.opencode/commands

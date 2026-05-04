@@ -8,14 +8,20 @@ machine-readable so that agents can pick them up via `/next-plan`, execute them 
 
 ## Why `.agents/plans/`
 
-Plans live under `.agents/` (the cross-tool agent convention) rather than
-`.opencode/`. Plans are tool-agnostic — any agent runner can read this YAML +
-markdown format. They sit alongside `.agents/skills/` so the entire
-"what the agent uses" tree is in one place.
+Plans live under `.agents/` — the cross-tool agent convention. Plans are
+tool-agnostic markdown with YAML frontmatter; any agent runner can read them.
 
-The only thing that has to live in `.opencode/` is the slash commands
-(`.opencode/commands/`), which are an OpenCode-specific feature. Skills and
-plans are portable.
+The whole orchestration tree has a single source of truth under `.agents/`:
+
+```
+.agents/plans/      ← per-PR plans (here)
+.agents/skills/     ← agent skills
+.agents/commands/   ← slash commands
+```
+
+For tool-specific discovery, `.opencode/commands` and `.claude/skills` are
+symlinks back into `.agents/`. There is exactly one copy of every plan,
+skill, and command — no parallel trees to keep in sync.
 
 ## Naming
 
