@@ -25,4 +25,18 @@ lua-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 
-.claude
+# Per-user agent settings (private), but check in shared agent config below.
+.claude/settings.local.json
+.opencode/settings.local.json
+
+# Check in shared agent config (skills, plans, commands) so the team and CI
+# can use the same orchestration. Override the global ~/.gitignore for these.
+# Source of truth lives in .agents/; .opencode/ and .claude/ are symlinks.
+!.agents/
+!.agents/skills/
+!.agents/plans/
+!.agents/commands/
+!.claude/
+!.claude/skills
+!.opencode/
+!.opencode/commands
