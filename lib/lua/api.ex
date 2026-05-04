@@ -206,7 +206,7 @@ defmodule Lua.API do
 
       deflua set_int(key, value) when is_integer(value), state do
         # Return nothing but modify the state
-        {[], Lua.set!(lua, [key])}
+        {[], Lua.set!(state, [key])}
       end
 
   Specifyiing the `when` clause and guards last will result in a confusing error message.
