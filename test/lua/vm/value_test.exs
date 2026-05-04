@@ -32,6 +32,11 @@ defmodule Lua.VM.ValueTest do
       assert {"hello", _state} = Value.encode("hello", new_state())
       assert {"", _state} = Value.encode("", new_state())
     end
+
+    test "atoms get converted to strings" do
+      assert {"hello", _state} = Value.encode(:hello, new_state())
+      assert {"Elixir.MyApp", _state} = Value.encode(MyApp, new_state())
+    end
   end
 
   describe "encode/2 functions" do
@@ -57,19 +62,21 @@ defmodule Lua.VM.ValueTest do
 
   describe "encode/2 maps" do
     test "encodes map with string keys" do
-      {{:tref, id}, state} = Value.encode(%{"x" => 1, "y" => 2}, new_state())
+      {{:tref, id}, state} = Value.encode(%{"x" => 1, "y" => 2, type: :square}, new_state())
 
       table = Map.fetch!(state.tables, id)
       assert table.data["x"] == 1
       assert table.data["y"] == 2
+      assert table.data["type"] == "square"
     end
 
     test "encodes map with atom keys (converted to strings)" do
-      {{:tref, id}, state} = Value.encode(%{name: "Alice", age: 30}, new_state())
+      {{:tref, id}, state} = Value.encode(%{name: "Alice", age: 30, status: :married}, new_state())
 
       table = Map.fetch!(state.tables, id)
       assert table.data["name"] == "Alice"
       assert table.data["age"] == 30
+      assert table.data["status"] == "married"
     end
 
     test "encodes empty map" do
