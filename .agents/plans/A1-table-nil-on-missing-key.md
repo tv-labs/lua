@@ -5,7 +5,7 @@ issue: 162
 pr: null
 branch: fix/table-nil-on-missing-key
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - errors.lua
