@@ -110,18 +110,51 @@ tests.**
 
 ### 7. Commit and push
 
-Stage the changes for this plan only. Use a clear commit message:
+Stage the changes for this plan only. Use a clear conventional-commit
+message. **The scope is the affected subsystem, not the plan id.** Plan
+ids like `A2` are internal bookkeeping; nobody reading `git log` or a
+GitHub release page knows what `A2` is.
 
 ```
-{type}({id}): {one-line summary from plan title}
+{type}({scope}): {one-line summary from plan title}
 
 {2-3 sentence body explaining what this plan does and why}
 
 Closes #{issue}
 ```
 
-Where `{type}` is `feat`, `fix`, `perf`, `chore`, `docs`, etc. Choose based
-on the plan's `direction:` and the nature of the change.
+Where:
+
+- `{type}` is `feat`, `fix`, `perf`, `chore`, `docs`, `test`, etc. Choose
+  based on the plan's `direction:` and the nature of the change.
+- `{scope}` is the **subsystem most affected** by the change — typically
+  the top-level module name in lowercase, the directory under `lib/lua/`,
+  or the closest equivalent. Examples we use in this repo: `lexer`,
+  `parser`, `compiler`, `vm`, `stdlib`, `pattern`, `string`, `table`,
+  `coroutine`, `error`, `suite`, `plan`, `docs`, `bench`. If a change
+  spans multiple subsystems, pick the dominant one or omit the scope.
+
+The plan id belongs in the body (`Plan: A2`) or in the trailing
+`Closes #...`, never in the subject scope.
+
+Examples:
+
+- ✅ `fix(lexer): handle multi-line comments at every bracket level`
+- ✅ `feat(stdlib): implement string.pack and string.unpack`
+- ✅ `perf(vm): inline arithmetic dispatch for integer fast path`
+- ❌ `fix(A2): lex multi-line comments` ← **A2 is meaningless to readers**
+- ❌ `feat(B7): string.pack` ← same
+
+**Plan-lifecycle commits are the one exception.** Commits that touch
+*only* `.agents/plans/{id}-*.md` may use `chore({id}): ...` because the
+plan id IS the artefact being changed:
+
+- ✅ `chore(A2): start plan`
+- ✅ `chore(A2): mark plan as review`
+- ✅ `chore(A2): record PR #180 and what-changed`
+
+These commits exist for plan bookkeeping only. They must not touch any
+other files.
 
 **Do NOT add Co-Authored-By lines for AI agents.** Plain authorship.
 
@@ -130,6 +163,10 @@ git push -u origin {branch}
 ```
 
 ### 8. Open the PR
+
+**PR title** uses the same shape as the implementation commit:
+`{type}({scope}): {one-line summary}` — `scope` is the subsystem, never
+the plan id. See section 7 for the full rule.
 
 The PR body is generated from the plan file. Template:
 
@@ -240,9 +277,17 @@ original plan with what's done, narrowed if necessary.
 - **Branch naming**: as specified in the plan's `branch:` field. Typical
   patterns: `fix/<slug>` for bug fixes, `feat/<slug>` for features,
   `perf/<slug>` for perf, `chore/<slug>` for cleanup, `docs/<slug>` for docs.
-- **Commit prefixes**: match the branch type (`feat:`, `fix:`, `perf:`,
-  `chore:`, `docs:`).
-- **PR title**: typically `{type}({id}): {plan title}` for traceability.
+- **Commit type**: matches the branch type (`feat:`, `fix:`, `perf:`,
+  `chore:`, `docs:`, `test:`).
+- **Commit scope**: the affected **subsystem** in lowercase (`lexer`,
+  `parser`, `vm`, `stdlib`, `pattern`, `string`, `table`, `coroutine`,
+  `error`, `suite`, `bench`, `docs`, etc.). **Never the plan id.** The
+  one exception is commits that touch *only* `.agents/plans/{id}-*.md`,
+  which use `chore({id}): ...`.
+- **PR title**: same shape as the implementation commit subject —
+  `{type}({scope}): {plan title}`. The plan id goes in the body
+  (`Plan: .agents/plans/{id}-{slug}.md`) and in `Closes #{issue}`,
+  not in the title.
 - **No co-authoring**: AI agents do not appear in `git log`.
 - **Format always passes**: run `mix format` before every commit.
 - **Tests always pass**: never push red tests, even WIP.
