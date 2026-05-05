@@ -5,7 +5,7 @@ issue: 161
 pr: 177
 branch: feat/int-overflow-wrapping
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - bitwise.lua
