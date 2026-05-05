@@ -5,7 +5,7 @@ issue: 163
 pr: null
 branch: fix/long-string-lexer
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - literals.lua
@@ -98,4 +98,43 @@ mix test --only lua53
 
 ## Discoveries
 
-(populated during implementation)
+- The plan's leading hypothesis was wrong. `Lua.Lexer.tokenize/1` already
+  handles long strings at every bracket level correctly:
+
+  - `[[ ... ]]` (level 0)
+  - `[=[ ... ]=]`, `[==[ ... ]==]`, `[===[ ... ]===]` (higher levels)
+  - Embedded `]]` inside a higher-level string (level mismatch is fine)
+  - The first matching close at the right level wins (`[==[]=]==]` → `]=`)
+
+  The literals.lua line 14–17 snippet that motivated the plan tokenizes
+  correctly today. A regression test for that exact snippet is now pinned
+  in `test/lua/lexer_test.exs`.
+
+- The actual blocker for `literals.lua` was *long comments*, not long
+  strings. The lexer's `--[` branch only recognized level-0 multi-line
+  comments (`--[[`); `--[=[`, `--[==[`, `--[===[` all fell through to the
+  single-line comment scanner, which then mis-tokenized the body. Fixed by
+  routing `--[` through the existing `scan_long_bracket/2` helper so all
+  bracket levels share one entry point with long strings. This was listed
+  as out of scope, but the success criterion "literals.lua parses" forced
+  the fix — the file uses level-3 long comments.
+
+- The actual blocker for `main.lua` was the first line: `# testing
+  special comment on first line`. Lua's reference loader skips any first
+  line beginning with `#` (manual §3.1, footnote about `lua` CLI). Our
+  `strip_shebang/1` only handled `#!`. Tightened the rule to strip when
+  the first character is `#` followed by `!` or whitespace, which keeps
+  `#` (length operator) and `#table` (length-of) intact. This is also
+  pinned by tests.
+
+- Three existing lexer tests pinned the buggy `--[=[ ... ]=]` →
+  single-line behaviour with explicit "(known limitation)" comments;
+  those have been rewritten to assert the correct multi-line behaviour.
+
+- The dead `scan_multiline_comment/5` helper (which only existed to
+  consume the second `[` of a level-0 opener) was removed.
+
+- Suite delta: `mix test --only lua53` count is unchanged (4 ready,
+  remainder skipped) because `literals.lua` and `main.lua` are still in
+  `@skipped_tests` — they parse cleanly now but they hit unrelated
+  runtime gaps. Promoting them is a separate plan.
