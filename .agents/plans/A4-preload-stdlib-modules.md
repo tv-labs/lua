@@ -1,7 +1,7 @@
 ---
 id: A4
 title: Pre-load Lua stdlib tables into package.loaded
-issue: null
+issue: 165
 pr: null
 branch: fix/preload-stdlib-modules
 base: main

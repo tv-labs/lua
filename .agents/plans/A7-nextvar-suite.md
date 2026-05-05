@@ -1,7 +1,7 @@
 ---
 id: A7
 title: Fix nextvar.lua "concatenate nil" failure
-issue: null
+issue: 168
 pr: null
 branch: fix/nextvar-suite
 base: main

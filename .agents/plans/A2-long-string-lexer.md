@@ -1,7 +1,7 @@
 ---
 id: A2
 title: Long-string [[ ... ]] lexer handles embedded ] and level brackets [==[
-issue: null
+issue: 163
 pr: null
 branch: fix/long-string-lexer
 base: main

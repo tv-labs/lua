@@ -1,7 +1,7 @@
 ---
 id: A9
 title: Fix pm.lua pattern-matching assertion
-issue: null
+issue: 170
 pr: null
 branch: fix/pm-suite
 base: main

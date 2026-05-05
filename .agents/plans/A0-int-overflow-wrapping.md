@@ -1,7 +1,7 @@
 ---
 id: A0
 title: 64-bit integer overflow wrapping for arithmetic and bitwise ops
-issue: null
+issue: 161
 pr: null
 branch: feat/int-overflow-wrapping
 base: main
