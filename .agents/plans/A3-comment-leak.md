@@ -77,4 +77,24 @@ mix test --only lua53
 
 ## Discoveries
 
-(populated during implementation)
+- The lexer is correct: it deliberately emits `{:comment, type, text, pos}`
+  tokens so AST consumers can attach them via `Lua.Parser.Comments`. The
+  parser already skips comments at *some* boundaries (statement,
+  expression prefix, end-of-block), but missed comments at **list/sequence
+  separator boundaries**: function-argument lists and table constructors.
+  After parsing one expression and before peeking for the next `,` (or
+  the closing `)`/`}`), a trailing line-comment plus optional standalone
+  comments would flow straight into `expect/3` and crash the executor with
+  `no case clause matching: {:comment, :single, ...}`.
+- Fix is local: a `skip_comments/1` helper applied at three sites in
+  `Lua.Parser` — `parse_expr_list_acc/2` (between expr and comma),
+  `parse_expr_list_until/2` (between last expr and terminator), and
+  `parse_table_fields/2` (between field and `,`/`;`/`}`). The helper is
+  scoped: in `parse_expr_list_acc`, comments are only consumed when the
+  next significant token is a comma, so trailing line-comments belonging
+  to a parent statement can still be attached by `parse_stmt`.
+- `calls.lua` no longer crashes on the comment leak. It now fails earlier
+  on line 6 (`local debug = require "debug"`) because `require` is
+  sandboxed — a separate, pre-existing concern out of scope here.
+- `string.pack` is also unimplemented; the original repro pattern from
+  `calls.lua:374` would hit that next. Both are tracked elsewhere.
