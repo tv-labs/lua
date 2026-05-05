@@ -2,10 +2,10 @@
 id: A0
 title: 64-bit integer overflow wrapping for arithmetic and bitwise ops
 issue: 161
-pr: null
+pr: 177
 branch: feat/int-overflow-wrapping
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - bitwise.lua
@@ -85,3 +85,34 @@ mix test test/lua/vm/arithmetic_test.exs
   cases (e.g. `0xffffffffffffffff + 1` should be `0` after wrapping).
 - Some property tests in the existing test suite may rely on the current
   (incorrect) bignum behavior — they'll need updating to match Lua 5.3.
+
+## What changed
+
+PR #177.
+
+Files touched:
+
+- `lib/lua/vm/numeric.ex` (new) — `to_signed_int64/1`, `max_int/0`,
+  `min_int/0`, `signed?/1`, with module docs spelling out the
+  Lua-vs-Luerl divergence.
+- `lib/lua/vm/executor.ex` — wrapped integer-only results in `+`, `-`,
+  `*`, `//`, `%`, unary `-`, `&`, `|`, `~^`, `~`, `<<`, `>>`. Floats
+  untouched. Pre-existing partial wrapping in `lua_shift_left`/
+  `lua_shift_right` (masked unsigned, leaving high-bit results as
+  positive bignums) now produces signed values.
+- `test/lua/vm/arithmetic_test.exs` — 11 new tests covering the
+  required cases plus `negation of minint`, `float arithmetic
+  unaffected`, and `modulo wraps`.
+
+Suite delta: `mix test` 1273 → 1284 (11 new tests, no regressions).
+`mix test --only lua53` unchanged at 29/0/25. `bitwise.lua` not flipped
+green — additional stdlib work is required and is the scope of A5.
+
+Discovery: `lua_shift_left/2` was already half-Lua-flavored (masked to
+unsigned 64-bit) but had not been updated to return signed values. The
+plan called this out only obliquely via the `1 << 63 == minint` success
+criterion; the fix is included here since it is in scope and required
+for that test.
+
+Follow-up: documenting the Luerl divergence in CHANGELOG / release
+notes belongs with A12 (readme/changelog) before 0.5.0 ships.
