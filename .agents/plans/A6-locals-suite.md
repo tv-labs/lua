@@ -2,10 +2,10 @@
 id: A6
 title: Fix locals.lua "attempt to call nil" at line 67
 issue: 167
-pr: null
+pr: 185
 branch: fix/locals-suite
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - locals.lua
@@ -65,6 +65,15 @@ mix test --only lua53
 - May interact with the CPS executor's handling of upvalue cells.
 - May be the same root cause as some `nextvar.lua` failure; check after fix.
 
+## What changed
+
+- `lib/lua/compiler/scope.ex` — added a `resolve_statement` clause for single-name `FuncDecl` that walks locals → upvalue chain → global and records the resolution under `{:func_decl_target, decl}` in `var_map`.
+- `lib/lua/compiler/codegen.ex` — `gen_statement` for single-name `FuncDecl` now reads the namespaced `var_map` entry and emits `move`, `set_open_upvalue`, `set_upvalue`, or `set_global` accordingly.
+- `test/lua/vm/local_func_redef_test.exs` — 4 new unit tests covering the core fix and edge cases.
+
+Suite delta: `locals.lua` now progresses past line 67; fails at line 72 on `debug.getupvalue` (out of scope).
+Tests: 1318 → 1322 (4 new tests added), 0 failures.
+
 ## Discoveries
 
-(populated during implementation)
+The `resolve_function_scope` helper always overwrites `var_map[decl]` with the function-scope reference (`make_ref()`). Using a namespaced key `{:func_decl_target, decl}` sidesteps the collision cleanly without touching `resolve_function_scope`.
