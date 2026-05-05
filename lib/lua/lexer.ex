@@ -43,16 +43,22 @@ defmodule Lua.Lexer do
     do_tokenize(code, [], pos)
   end
 
-  # Strip shebang (#!) if it's the first line
-  defp strip_shebang(<<"#!", rest::binary>>) do
-    # Skip entire first line (everything up to and including the newline)
+  # Strip the first line if it looks like a shebang/header directive. Lua's
+  # reference loader skips any first line beginning with `#`, but the lexer is
+  # also called on free-form snippets where `#` is the length operator, so we
+  # only strip when the first character is followed by something that clearly
+  # isn't a length-operator expression: `!` (the canonical shebang) or a
+  # whitespace character (the form `# ...` used by Lua's own main.lua test).
+  defp strip_shebang(<<"#!", rest::binary>>), do: strip_first_line(rest)
+  defp strip_shebang(<<"#", c, rest::binary>>) when c in [?\s, ?\t], do: strip_first_line(rest)
+  defp strip_shebang(code), do: code
+
+  defp strip_first_line(rest) do
     case String.split(rest, ~r/\r\n|\r|\n/, parts: 2) do
-      [_shebang_line, remaining] -> remaining
-      [_only_shebang] -> ""
+      [_first_line, remaining] -> remaining
+      [_only_line] -> ""
     end
   end
-
-  defp strip_shebang(code), do: code
 
   # End of input
   defp do_tokenize(<<>>, acc, pos) do
@@ -82,15 +88,23 @@ defmodule Lua.Lexer do
     do_tokenize(rest, acc, new_pos)
   end
 
-  # Comments: single-line (--) or multi-line (--[[ ... ]])
+  # Comments: single-line (--) or multi-line (--[[ ... ]] or --[=[ ... ]=] etc.)
   defp do_tokenize(<<"--[", rest::binary>>, acc, pos) do
-    # Check if it's a multi-line comment
-    case rest do
-      <<"[", _::binary>> ->
-        # Multi-line comment --[[ ... ]]
-        scan_multiline_comment(rest, acc, advance_column(pos, 3), pos, 0)
+    # scan_long_bracket eats `=` characters then requires a closing `[`,
+    # so it correctly detects --[[ (level 0), --[=[ (level 1), --[==[ (level 2), etc.
+    case scan_long_bracket(rest, 0) do
+      {:ok, equals, after_bracket} ->
+        # Multi-line comment of the given level
+        scan_multiline_comment_text(
+          after_bracket,
+          "",
+          acc,
+          advance_column(pos, 3 + equals),
+          pos,
+          equals
+        )
 
-      _ ->
+      :error ->
         # Single-line comment starting with --[
         scan_single_line_comment(rest, acc, advance_column(pos, 3), pos)
     end
@@ -284,12 +298,9 @@ defmodule Lua.Lexer do
     scan_single_line_comment_content(rest, text <> <<c>>, acc, advance_column(pos, 1), start_pos)
   end
 
-  # Scan multi-line comment --[[ ... ]] or --[=[ ... ]=]
-  # pos is current scanning position, token_pos is where the comment started
-  defp scan_multiline_comment(<<"[", rest::binary>>, acc, pos, token_pos, level) do
-    scan_multiline_comment_text(rest, "", acc, advance_column(pos, 1), token_pos, level)
-  end
-
+  # Scan multi-line comment body. The opening bracket level was determined by
+  # scan_long_bracket in do_tokenize/3. `pos` is the current scanning position
+  # (right after the opener), `start_pos` is where the comment started.
   defp scan_multiline_comment_text(<<"]", rest::binary>>, text, acc, pos, start_pos, level) do
     case try_close_long_bracket(rest, level, 0) do
       {:ok, after_bracket} ->

@@ -215,6 +215,84 @@ defmodule Lua.LexerTest do
       assert {:error, {:unclosed_long_string, _}} = Lexer.tokenize("[=[test")
     end
 
+    test "long strings handle higher bracket levels and embedded brackets" do
+      # Level-3 bracket
+      assert {:ok, [{:string, "hi", _}, {:eof, _}]} = Lexer.tokenize("[===[hi]===]")
+
+      # ]] inside a [=[ ... ]=] is part of the body, not a close
+      assert {:ok, [{:string, " has ]] inside ", _}, {:eof, _}]} =
+               Lexer.tokenize("[=[ has ]] inside ]=]")
+
+      # The first close at the matching level wins
+      assert {:ok, [{:string, "]=", _}, {:eof, _}]} = Lexer.tokenize("[==[]=]==]")
+    end
+
+    test "long strings reproduce the literals.lua line 14-17 snippet" do
+      # From the official Lua 5.3 test suite test/lua53_tests/literals.lua:
+      #
+      #   assert('\n\"\'\\' == [[
+      #
+      #   "'\]])
+      #
+      # The long string body is a literal newline, blank line, then "'\, then
+      # ]] closes. The trailing ]) is a literal `]` followed by `)` that closes
+      # the assert call. Inside a long string, `\` has no escape meaning.
+      assert {:ok, [{:string, body, _}, {:delimiter, :rparen, _}, {:eof, _}]} =
+               Lexer.tokenize("[[\n\n\"'\\]])")
+
+      assert body == "\n\n\"'\\"
+    end
+  end
+
+  describe "long comments" do
+    test "tokenizes long comments at every bracket level" do
+      assert {:ok, [{:comment, :multi, " hi ", _}, {:eof, _}]} =
+               Lexer.tokenize("--[[ hi ]]")
+
+      assert {:ok, [{:comment, :multi, " hi ", _}, {:eof, _}]} =
+               Lexer.tokenize("--[=[ hi ]=]")
+
+      assert {:ok, [{:comment, :multi, " hi ", _}, {:eof, _}]} =
+               Lexer.tokenize("--[==[ hi ]==]")
+
+      assert {:ok, [{:comment, :multi, " hi ", _}, {:eof, _}]} =
+               Lexer.tokenize("--[===[ hi ]===]")
+    end
+
+    test "long comments allow embedded close brackets at lower levels" do
+      # ]] inside [=[ ... ]=] doesn't close the comment
+      assert {:ok, [{:comment, :multi, " has ]] inside ", _}, {:eof, _}]} =
+               Lexer.tokenize("--[=[ has ]] inside ]=]")
+    end
+
+    test "long comments reproduce the literals.lua nested-comment snippet" do
+      # Adapted from test/lua53_tests/literals.lua line 240-245:
+      #
+      #   --[===[
+      #   x y z [==[ blu foo
+      #   ]==
+      #   ]
+      #   ]=]==]
+      #   error error]=]===]
+      #
+      # The level-3 comment swallows everything up to the first matching
+      # ]===]. None of ]==, ], or ]=]==] inside the body close it; the
+      # close is the ]===] at the end of `error error]=]===]`.
+      assert {:ok, tokens} =
+               Lexer.tokenize("--[===[\nx y z [==[ blu foo\n]==\n]\n]=]==]\nerror error]=]===]\nprint(1)")
+
+      assert [
+               {:comment, :multi, body, _},
+               {:identifier, "print", _},
+               {:delimiter, :lparen, _},
+               {:number, 1, _},
+               {:delimiter, :rparen, _},
+               {:eof, _}
+             ] = tokens
+
+      assert body == "\nx y z [==[ blu foo\n]==\n]\n]=]==]\nerror error]="
+    end
+
     test "handles \\z escape sequence (skip whitespace)" do
       # \z skips all following whitespace including newlines
       assert {:ok, [{:string, "abcdef", _}, {:eof, _}]} = Lexer.tokenize("\"abc\\z  \n   def\"")
@@ -305,13 +383,15 @@ defmodule Lua.LexerTest do
                Lexer.tokenize("x --[[ comment ]] ")
     end
 
-    test "handles multi-line comments with equals signs (currently as single-line)" do
-      # Note: --[=[ is currently treated as single-line comment (known limitation)
-      assert {:ok, [{:comment, :single, "=[ comment ]=]", _}, {:eof, _}]} =
+    test "handles multi-line comments with equals signs at every level" do
+      assert {:ok, [{:comment, :multi, " comment ", _}, {:eof, _}]} =
                Lexer.tokenize("--[=[ comment ]=]")
 
-      assert {:ok, [{:comment, :single, "==[ comment ]==]", _}, {:eof, _}]} =
+      assert {:ok, [{:comment, :multi, " comment ", _}, {:eof, _}]} =
                Lexer.tokenize("--[==[ comment ]==]")
+
+      assert {:ok, [{:comment, :multi, " comment ", _}, {:eof, _}]} =
+               Lexer.tokenize("--[===[ comment ]===]")
     end
 
     test "handles content with brackets in multi-line comments" do
@@ -320,9 +400,8 @@ defmodule Lua.LexerTest do
       assert [{:comment, :multi, " comment ", _}, {:eof, _}] = tokens
 
       # With nesting levels using =, you can include ]] in the comment
-      # Note: Currently treated as single-line comment
       assert {:ok, tokens2} = Lexer.tokenize("--[=[ comment with ]] in it ]=]")
-      assert [{:comment, :single, "=[ comment with ]] in it ]=]", _}, {:eof, _}] = tokens2
+      assert [{:comment, :multi, " comment with ]] in it ", _}, {:eof, _}] = tokens2
     end
 
     test "reports error for unclosed multi-line comment" do
@@ -330,12 +409,11 @@ defmodule Lua.LexerTest do
     end
 
     test "handles false closing brackets in multi-line comments" do
-      # Test a ] that is not followed by the right number of =
-      # Note: --[=[ is currently treated as single-line comment
-      assert {:ok, [{:comment, :single, "=[ test ] more ]=]", _}, {:eof, _}]} =
+      # A bare `]` inside a level-1 comment should not close it
+      assert {:ok, [{:comment, :multi, " test ] more ", _}, {:eof, _}]} =
                Lexer.tokenize("--[=[ test ] more ]=]")
 
-      # Test a ] that is not followed by ]
+      # `]=` without the trailing `]` should not close a level-0 comment
       assert {:ok, [{:comment, :multi, " test ]= more ", _}, {:eof, _}]} =
                Lexer.tokenize("--[[ test ]= more ]]")
     end
@@ -376,6 +454,20 @@ defmodule Lua.LexerTest do
 
       # Second line with # should cause error (not a shebang)
       assert {:error, _} = Lexer.tokenize(code2)
+    end
+
+    test "ignores '# ...' header on first line (Lua reference allows any #-prefixed first line)" do
+      # The official Lua 5.3 main.lua test starts with `# testing special comment...`,
+      # so we strip when the first character is `#` followed by whitespace.
+      code = "# testing special comment on first line\nlocal x = 1\n"
+      assert {:ok, [{:keyword, :local, _} | _]} = Lexer.tokenize(code)
+    end
+
+    test "leaves the length operator alone when # is not a header" do
+      # `#` standalone or directly followed by an identifier is the length
+      # operator and must NOT be consumed as a header.
+      assert {:ok, [{:operator, :len, _}, {:eof, _}]} = Lexer.tokenize("#")
+      assert {:ok, [{:operator, :len, _}, {:identifier, "t", _}, {:eof, _}]} = Lexer.tokenize("#t")
     end
   end
 
@@ -631,12 +723,9 @@ defmodule Lua.LexerTest do
     end
 
     test "multi-line comment with mismatched bracket level" do
-      # The closing bracket doesn't match the opening level
-      # Note: --[=[ is currently treated as single-line comment
-      assert {:ok, [{:comment, :single, "=[ comment ]]", _}, {:eof, _}]} =
-               Lexer.tokenize("--[=[ comment ]]")
-
-      # This should continue scanning until EOF because ]] doesn't match the opening [=[
+      # ]] inside a [=[...]=] comment is NOT a close (level mismatch),
+      # so the comment runs past EOF and is reported as unclosed.
+      assert {:error, {:unclosed_comment, _}} = Lexer.tokenize("--[=[ comment ]]")
     end
 
     test "long string with mismatched closing bracket" do
