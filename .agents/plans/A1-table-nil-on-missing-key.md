@@ -5,7 +5,7 @@ issue: 162
 pr: null
 branch: fix/table-nil-on-missing-key
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - errors.lua
@@ -96,4 +96,41 @@ Compare suite count before/after; capture in PR body.
 
 ## Discoveries
 
-(populated during implementation)
+The four explicit success-criteria cases (`local t = {}; return t[5]`,
+out-of-bounds array read, missing string field, `t[5] == nil`) **already
+returned `nil` correctly** when this plan was picked up. Same for
+metatable `__index` resolution (function and table forms), `rawget`,
+`pairs`/`ipairs` over empty tables, and `next({})`. The underlying fix
+appears to have landed earlier — most likely as part of the CPS executor
+refactor in PR #156.
+
+The error message the plan describes (`Lua runtime error: key N not found
+in: %{}`) does still appear in some Lua 5.3 suite files (`sort.lua`,
+`strings.lua`, `verybig.lua`), but the source is **not** a missing
+`table.data` key. It is `Map.fetch!(state.open_upvalues, reg)` in
+`lib/lua/vm/executor.ex` at lines 301 and 310 — an open-upvalue tracking
+bug that surfaces with the same exception class. Tracked separately in
+plan **A15** (`fix/open-upvalue-missing-cell`).
+
+`nextvar.lua` fails with a different shape (`attempt to concatenate a nil
+value`); reproducer points at the same area as the for-loop register
+regression covered by plan **A14**.
+
+This PR therefore does not change runtime behaviour. It locks in the
+existing correct behaviour with a regression test file
+(`test/lua/vm/table_index_test.exs`, 10 cases) so the bug cannot
+silently come back, and opens A15 to handle the unlocked-files
+slice that is in fact a different bug.
+
+## What changed
+
+- New file: `test/lua/vm/table_index_test.exs` — 10 regression tests
+  covering missing-key reads (empty table, out-of-bounds array, missing
+  string field, `nil` comparison), metatable `__index` fall-through
+  (function form, table form, and direct-hit short-circuit), and stdlib
+  helpers (`rawget`, `next`, `pairs`).
+- New plan: `.agents/plans/A15-open-upvalue-missing-cell.md` — covers the
+  `set_open_upvalue` / `get_open_upvalue` crash that this plan originally
+  attributed to table-data reads.
+- No production code changes. Suite count unchanged. `mix test` 1284 → 1294
+  (10 new tests, 0 failures).
