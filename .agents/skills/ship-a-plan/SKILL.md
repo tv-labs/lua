@@ -17,6 +17,32 @@ description: |
 The contract for executing one plan file from `.agents/plans/` as a single
 PR. Read this skill carefully before touching code.
 
+## ⚠️ Critical rules — read these FIRST and re-read before every commit
+
+These are the rules most commonly violated. Re-read them before step 7
+(commit) and step 8 (PR title). If you find yourself typing a plan id
+into a commit subject scope or a PR title, stop and re-read section 7.
+
+1. **Commit and PR subject scopes are the SUBSYSTEM, never the plan id.**
+   - ✅ `fix(parser): ...`, `feat(stdlib): ...`, `perf(vm): ...`
+   - ❌ `fix(A3): ...`, `feat(B7): ...`
+   - The plan id (`A3`, `B7`) is internal bookkeeping. It belongs in the
+     commit body as `Plan: A3` and/or in the issue link, never in the
+     subject scope.
+   - **One exception**: plan-lifecycle commits that touch *only*
+     `.agents/plans/{id}-*.md` may use `chore({id}): ...` because the
+     plan id IS the artefact being changed.
+2. **The PR title uses the same scope rule as the commit subject.** If
+   you wrote `fix(parser): ...` on the commit, the PR title is
+   `fix(parser): ...`, not `fix(A3): ...`.
+3. **No Co-Authored-By for AI agents.** Plain authorship.
+4. **Do not merge.** PR creation is the stopping point.
+
+If any rule above is violated, fix it before pushing. If you've already
+pushed, rewrite history with `git rebase -i` + `git push --force-with-lease`
+and update the PR title with `gh pr edit`. The full mechanics are in
+section 12 (Verification before push).
+
 ## What this skill is for
 
 - Executing exactly one plan file end-to-end: branch creation → implementation
@@ -158,6 +184,35 @@ other files.
 
 **Do NOT add Co-Authored-By lines for AI agents.** Plain authorship.
 
+#### 7a. Verify the commit subjects before pushing
+
+Before `git push`, run this and read every subject:
+
+```bash
+git log --format="%h %s" {base}..HEAD
+```
+
+For each commit, check:
+
+- Subject is `{type}({scope}): {summary}` (or `{type}: {summary}` if
+  scope is omitted).
+- `{scope}` is **never** a plan id like `A3`, `B7`, `C2`, etc., **unless**
+  the commit touches only `.agents/plans/{id}-*.md`. Verify with
+  `git show --stat {hash}` if unsure.
+- `{type}` is one of `feat`, `fix`, `perf`, `chore`, `docs`, `test`,
+  `refactor`, `build`, `ci`, `style`.
+
+If any subject is wrong, rewrite it now while the branch is local — do
+not push and then fix. Use:
+
+```bash
+GIT_SEQUENCE_EDITOR="sed -i '' 's/^pick {hash}/reword {hash}/'" \
+GIT_EDITOR="cp /tmp/new_msg.txt" \
+git rebase -i {hash}^
+```
+
+(or `git commit --amend` if it's the most recent commit).
+
 ```bash
 git push -u origin {branch}
 ```
@@ -167,6 +222,18 @@ git push -u origin {branch}
 **PR title** uses the same shape as the implementation commit:
 `{type}({scope}): {one-line summary}` — `scope` is the subsystem, never
 the plan id. See section 7 for the full rule.
+
+Before calling `gh pr create`, sanity-check the title you're about to
+pass. If the title contains `(A0)`, `(A1)`, `(A2)`, ..., `(B0)`, `(B1)`,
+..., `(C0)`, ... — i.e. a single capital letter followed by digits —
+that's a plan id, and it does not belong in the scope. Replace it with
+the affected subsystem (`parser`, `lexer`, `vm`, `stdlib`, etc.).
+
+If the PR is already open with a wrong title, fix it:
+
+```bash
+gh pr edit {pr-number} --title "{type}({scope}): {summary}"
+```
 
 The PR body is generated from the plan file. Template:
 
