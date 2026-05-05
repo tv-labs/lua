@@ -276,4 +276,69 @@ defmodule Lua.VM.ArithmeticTest do
       assert err =~ "compare"
     end
   end
+
+  # See `Lua.VM.Numeric` and Lua 5.3 §3.4.1. Integer operations wrap to
+  # signed 64-bit. This is a deliberate divergence from Luerl, which uses
+  # Erlang's bignum semantics.
+  describe "64-bit integer overflow wrapping (Lua 5.3 §3.4.1)" do
+    @maxint 9_223_372_036_854_775_807
+    @minint -9_223_372_036_854_775_808
+
+    defp eval_int(code) do
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = State.new()
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      result
+    end
+
+    test "maxint + 1 wraps to minint" do
+      assert eval_int("return 0x7fffffffffffffff + 1") == @minint
+    end
+
+    test "minint - 1 wraps to maxint" do
+      assert eval_int("return -0x8000000000000000 - 1") == @maxint
+    end
+
+    test "maxint * 2 wraps to -2" do
+      assert eval_int("return 0x7fffffffffffffff * 2") == -2
+    end
+
+    test "1 << 63 is minint, not a positive bignum" do
+      assert eval_int("return 1 << 63") == @minint
+    end
+
+    test "~0 is -1" do
+      assert eval_int("return ~0") == -1
+    end
+
+    test "~0xffffffffffffffff is 0" do
+      assert eval_int("return ~0xffffffffffffffff") == 0
+    end
+
+    test "0x8000000000000000 // 1 stays at minint (no overflow into bignum)" do
+      assert eval_int("return 0x8000000000000000 // 1") == @minint
+    end
+
+    test "negation of minint wraps back to minint" do
+      # -minint as a true integer would be 2^63 which is one past maxint.
+      # In Lua 5.3 that overflows back to minint.
+      assert eval_int("local x = -0x8000000000000000; return -x") == @minint
+    end
+
+    test "float arithmetic is unaffected by wrapping" do
+      # 2^53 is the largest exact integer in IEEE 754 doubles. As a float
+      # result it must not get masked through the int64 wrapping path —
+      # the result should still be a float, and it should be the IEEE
+      # answer, not an integer.
+      result = eval_int("return 9007199254740992.0 * 2")
+      assert is_float(result)
+      assert result == 1.8014398509481984e16
+    end
+
+    test "modulo wraps results into signed range" do
+      # When both operands are integers, lua_mod result must be signed-64.
+      assert eval_int("return -1 % 0x7fffffffffffffff") == @maxint - 1
+    end
+  end
 end
