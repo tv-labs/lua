@@ -121,9 +121,9 @@ defmodule Lua.VM.Stdlib do
   #
   # install_library/2 already caches the four installed modules (string, math,
   # table, debug), so this pass is a safety net for any future stdlib tables
-  # (e.g. os, io, coroutine) that may be added as globals before this call.
+  # that may be added as globals before this call.
   defp preload_stdlib_modules(state) do
-    modules = ["string", "math", "table", "os", "debug", "coroutine", "io"]
+    modules = ["string", "math", "table", "debug"]
 
     Enum.reduce(modules, state, fn name, acc ->
       case Map.get(acc.globals, name) do
