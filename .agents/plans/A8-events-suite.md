@@ -1,7 +1,7 @@
 ---
 id: A8
 title: Fix events.lua metamethod assertion
-issue: null
+issue: 169
 pr: null
 branch: fix/events-suite
 base: main

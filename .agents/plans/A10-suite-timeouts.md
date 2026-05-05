@@ -1,7 +1,7 @@
 ---
 id: A10
 title: Investigate big.lua, closure.lua, utf8.lua timeouts
-issue: null
+issue: 171
 pr: null
 branch: fix/suite-timeouts
 base: main

@@ -1,7 +1,7 @@
 ---
 id: A5
 title: Fix bitwise.lua failing assertion
-issue: null
+issue: 166
 pr: null
 branch: fix/bitwise-suite
 base: main

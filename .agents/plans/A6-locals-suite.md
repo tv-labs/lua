@@ -1,7 +1,7 @@
 ---
 id: A6
 title: Fix locals.lua "attempt to call nil" at line 67
-issue: null
+issue: 167
 pr: null
 branch: fix/locals-suite
 base: main
