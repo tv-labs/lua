@@ -48,6 +48,7 @@ defmodule Lua.VM.Stdlib do
     |> install_library(Lua.VM.Stdlib.Math)
     |> install_library(Lua.VM.Stdlib.Table)
     |> install_library(Lua.VM.Stdlib.Debug)
+    |> preload_stdlib_modules()
     |> install_unpack_alias()
     |> install_global_g()
   end
@@ -111,6 +112,25 @@ defmodule Lua.VM.Stdlib do
       end)
 
     state
+  end
+
+  # Pre-load any stdlib table globals into package.loaded so that
+  # require("string"), require("math"), etc. resolve to the existing global
+  # tables without triggering a filesystem search. This mirrors Lua 5.3's
+  # behaviour where package.loaded is pre-populated by the runtime.
+  #
+  # install_library/2 already caches the four installed modules (string, math,
+  # table, debug), so this pass is a safety net for any future stdlib tables
+  # (e.g. os, io, coroutine) that may be added as globals before this call.
+  defp preload_stdlib_modules(state) do
+    modules = ["string", "math", "table", "os", "debug", "coroutine", "io"]
+
+    Enum.reduce(modules, state, fn name, acc ->
+      case Map.get(acc.globals, name) do
+        {:tref, _} = tref -> cache_module_result(acc, name, tref)
+        _ -> acc
+      end
+    end)
   end
 
   # type(v) — returns the type of v as a string
@@ -506,15 +526,22 @@ defmodule Lua.VM.Stdlib do
     # Create package.loaded table (initially empty)
     {loaded_tref, state} = State.alloc_table(state)
 
-    # Create package table with loaded and path fields
+    # Create package.preload table (initially empty)
+    {preload_tref, state} = State.alloc_table(state)
+
+    # Create package table with loaded, preload, and path fields
     package_data = %{
       "loaded" => loaded_tref,
+      "preload" => preload_tref,
       "path" => "?.lua;?/init.lua"
     }
 
     {package_tref, state} = State.alloc_table(state, package_data)
 
-    State.set_global(state, "package", package_tref)
+    state = State.set_global(state, "package", package_tref)
+
+    # Cache "package" itself in package.loaded
+    cache_module_result(state, "package", package_tref)
   end
 
   # require(modname) — loads a Lua module

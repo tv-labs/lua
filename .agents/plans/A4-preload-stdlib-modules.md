@@ -97,4 +97,16 @@ mix test --only lua53
 
 ## Discoveries
 
-(populated during implementation)
+- `install_library/2` already calls `cache_module_result/3` for each of the four
+  installed libs (`string`, `math`, `table`, `debug`), so `require "string"` etc.
+  already worked before this plan. The `preload_stdlib_modules/1` function added
+  here is a forward-compatibility safety net — it deduplicates harmlessly and will
+  auto-populate any future stdlib globals (os, io, coroutine) once they're added.
+- `package.preload` was missing from the package table. Added it as an empty table.
+- `package` itself was not in `package.loaded`. Added as part of `install_package_table/1`.
+- `io`, `os`, `coroutine` are `nil` in globals so `require "io"` still fails at
+  attrib.lua line 9. Those modules are out of scope per the plan — a future plan
+  should stub those globals so they survive the full attrib.lua require block.
+- `attrib.lua` now prints "testing require" and passes the first three asserts
+  (`string`, `math`, `table`) before failing on `require "io"`, confirming it
+  progresses past line 1 of the require block.
