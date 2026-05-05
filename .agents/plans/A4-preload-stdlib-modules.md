@@ -2,10 +2,10 @@
 id: A4
 title: Pre-load Lua stdlib tables into package.loaded
 issue: 165
-pr: null
+pr: 184
 branch: fix/preload-stdlib-modules
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - attrib.lua
@@ -110,3 +110,16 @@ mix test --only lua53
 - `attrib.lua` now prints "testing require" and passes the first three asserts
   (`string`, `math`, `table`) before failing on `require "io"`, confirming it
   progresses past line 1 of the require block.
+
+## What changed
+
+Files touched:
+- `lib/lua/vm/stdlib.ex` — added `package.preload` table, cached `package` in
+  `package.loaded`, added `preload_stdlib_modules/1` helper
+- `test/lua/vm/stdlib/package_test.exs` — new file, 9 tests covering all criteria
+
+Suite delta: no change to lua53 ready/skip split (attrib.lua still skipped — `io`/`os`/`coroutine` globals not yet stubbed).
+
+Tests: 1309 → 1318 passing, 0 failing.
+
+PR: https://github.com/tv-labs/lua/pull/184
