@@ -2,10 +2,10 @@
 id: A3
 title: Comment tokens leak past lexer in calls.lua path
 issue: 164
-pr: null
+pr: 182
 branch: fix/lexer-comment-leak
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - calls.lua
@@ -98,3 +98,20 @@ mix test --only lua53
   sandboxed — a separate, pre-existing concern out of scope here.
 - `string.pack` is also unimplemented; the original repro pattern from
   `calls.lua:374` would hit that next. Both are tracked elsewhere.
+
+## What changed
+
+- `lib/lua/parser.ex`: added a `skip_comments/1` helper near the
+  `peek`/`consume` token utilities. Applied it at three boundaries:
+  `parse_expr_list_acc/2` (gated on comma lookahead so trailing
+  comments still reach `parse_stmt`), `parse_expr_list_until/2`
+  (before terminator peek), and `parse_table_fields/2` (before and
+  after each field).
+- `test/lua/parser/comment_test.exs`: new `describe` block "comments
+  inside expression lists (regression for A3)" with 7 regression
+  tests covering function-arg lists and table constructors, plus a
+  test that walks the full parsed AST asserting no `{:comment, ...}`
+  tuple survives into the structure passed to codegen.
+- Suite: 1301 → 1309 tests passing, 0 failures, 0 regressions.
+- PR: #182. No follow-up issues opened — `require` sandboxing and
+  `string.pack` were pre-existing.
