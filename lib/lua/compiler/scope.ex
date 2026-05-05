@@ -200,6 +200,43 @@ defmodule Lua.Compiler.Scope do
     state
   end
 
+  defp resolve_statement(
+         %Statement.FuncDecl{name: [single_name], params: params, body: body, is_method: is_method} = decl,
+         state
+       )
+       when is_binary(single_name) do
+    # Per Lua 5.3 §3.4.11: `function name(...) end` is sugar for `name = function(...) end`.
+    # Resolve the target name through scope (local → captured_local → upvalue → global)
+    # and store the result in var_map so codegen can emit the right store instruction.
+    all_params = if is_method, do: ["self" | params], else: params
+
+    # Resolve the target name (local/upvalue/global) and store under a namespaced
+    # key so resolve_function_scope cannot overwrite it (it always stores the
+    # function-scope reference under the bare `decl` key).
+    target_key = {:func_decl_target, decl}
+
+    state =
+      case Map.get(state.locals, single_name) do
+        nil ->
+          case find_upvalue(single_name, state.parent_scopes, state) do
+            {:ok, upvalue_index, state} ->
+              %{state | var_map: Map.put(state.var_map, target_key, {:upvalue, upvalue_index})}
+
+            :not_found ->
+              %{state | var_map: Map.put(state.var_map, target_key, {:global, single_name})}
+          end
+
+        reg ->
+          if MapSet.member?(state.captured_locals, single_name) do
+            %{state | var_map: Map.put(state.var_map, target_key, {:captured_local, reg})}
+          else
+            %{state | var_map: Map.put(state.var_map, target_key, {:register, reg})}
+          end
+      end
+
+    resolve_function_scope(decl, all_params, body, state)
+  end
+
   defp resolve_statement(%Statement.FuncDecl{params: params, body: body, is_method: is_method} = decl, state) do
     all_params = if is_method, do: ["self" | params], else: params
     resolve_function_scope(decl, all_params, body, state)

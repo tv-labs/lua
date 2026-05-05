@@ -610,8 +610,30 @@ defmodule Lua.Compiler.Codegen do
     {closure_instructions, closure_reg, ctx} = gen_closure_from_node(decl, ctx)
 
     case name do
-      [single_name] ->
-        {closure_instructions ++ [Instruction.set_global(single_name, closure_reg)], ctx}
+      [_single_name] ->
+        # Per Lua 5.3: `function name(...) end` is sugar for `name = function(...) end`.
+        # Use the var_map entry resolved by scope analysis (local/upvalue/global).
+        store_instructions =
+          case Map.get(ctx.scope.var_map, {:func_decl_target, decl}) do
+            {:register, local_reg} ->
+              if local_reg == closure_reg, do: [], else: [Instruction.move(local_reg, closure_reg)]
+
+            {:captured_local, local_reg} ->
+              [Instruction.set_open_upvalue(local_reg, closure_reg)]
+
+            {:upvalue, index} ->
+              [Instruction.set_upvalue(index, closure_reg)]
+
+            {:global, gname} ->
+              [Instruction.set_global(gname, closure_reg)]
+
+            nil ->
+              # Fallback: treat as global (shouldn't happen after scope analysis)
+              [single] = name
+              [Instruction.set_global(single, closure_reg)]
+          end
+
+        {closure_instructions ++ store_instructions, ctx}
 
       [first | rest] ->
         # Dotted name: get the table chain, then set the final field
