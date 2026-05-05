@@ -5,7 +5,7 @@ issue: 167
 pr: null
 branch: fix/locals-suite
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - locals.lua
