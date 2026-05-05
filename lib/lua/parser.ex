@@ -948,6 +948,11 @@ defmodule Lua.Parser do
   end
 
   defp parse_table_fields(tokens, acc) do
+    # Skip leading comments (and any orphaned trailing comments from a
+    # previous field) before deciding whether we've hit the terminator
+    # or another field.
+    tokens = skip_comments(tokens)
+
     case peek(tokens) do
       {:delimiter, :rbrace, _} ->
         {:ok, acc, tokens}
@@ -955,6 +960,10 @@ defmodule Lua.Parser do
       _ ->
         case parse_table_field(tokens) do
           {:ok, field, rest} ->
+            # Trailing comments can sit between a field and its separator
+            # (or the closing brace). Skip them before the punctuation peek.
+            rest = skip_comments(rest)
+
             case peek(rest) do
               {:delimiter, :comma, _} ->
                 {_, rest2} = consume(rest)
@@ -1101,9 +1110,15 @@ defmodule Lua.Parser do
   defp parse_expr_list_acc(tokens, acc) do
     case parse_expr(tokens) do
       {:ok, expr, rest} ->
-        case peek(rest) do
+        # Comments can appear between an argument and the comma (e.g.
+        # `f(1 -- one\n, 2)` or a trailing line-comment in calls.lua).
+        # Only swallow them here if doing so exposes a comma — otherwise
+        # leave the stream untouched so the statement-level comment
+        # collection in `parse_stmt` can still attach a trailing comment
+        # to the right node.
+        case peek(skip_comments(rest)) do
           {:delimiter, :comma, _} ->
-            {_, rest2} = consume(rest)
+            {_, rest2} = consume(skip_comments(rest))
             parse_expr_list_acc(rest2, [expr | acc])
 
           _ ->
@@ -1120,6 +1135,8 @@ defmodule Lua.Parser do
   end
 
   defp parse_expr_list_until(tokens, terminator) do
+    tokens = skip_comments(tokens)
+
     case peek(tokens) do
       {:delimiter, ^terminator, _} ->
         {_, rest} = consume(tokens)
@@ -1128,6 +1145,10 @@ defmodule Lua.Parser do
       _ ->
         case parse_expr_list(tokens) do
           {:ok, exprs, rest} ->
+            # Trailing comments can sit between the last expression and
+            # the terminator (e.g. `f(1, 2 -- note\n)`).
+            rest = skip_comments(rest)
+
             case expect(rest, :delimiter, terminator) do
               {:ok, _, rest2} ->
                 {:ok, exprs, rest2}
@@ -1149,6 +1170,18 @@ defmodule Lua.Parser do
 
   defp consume([token | rest]), do: {token, rest}
   defp consume([]), do: {nil, []}
+
+  # Drop leading comment tokens from a token stream.
+  #
+  # The lexer emits `{:comment, type, text, pos}` tuples (deliberately, so
+  # tooling can attach them to the AST via `Lua.Parser.Comments`). They are
+  # collected at statement and expression-prefix boundaries, but inside list
+  # constructs (function arguments, table fields, parenthesized lists) a
+  # trailing or interleaved comment must be skipped before peeking for a
+  # separator (`,`, `;`) or terminator (`)`, `}`, `]`). Without this skip,
+  # a comment leaks into `expect/3` and crashes the executor.
+  defp skip_comments([{:comment, _, _, _} | rest]), do: skip_comments(rest)
+  defp skip_comments(tokens), do: tokens
 
   # Expect a specific token type
   defp expect(tokens, expected_type) do

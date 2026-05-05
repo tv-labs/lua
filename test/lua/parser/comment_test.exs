@@ -378,4 +378,168 @@ defmodule Lua.Parser.CommentTest do
       end
     end
   end
+
+  describe "comments inside expression lists (regression for A3)" do
+    # Shrunken repro from test/lua53_tests/calls.lua:374, which crashed
+    # the executor with `no case clause matching: {:comment, :single, ...}`.
+    # The lexer emits comment tokens (deliberately, for AST consumers), but
+    # the parser was failing to skip them between expressions in a function
+    # argument list — so a trailing comment before `)` leaked into expect/3.
+
+    test "trailing comment after final argument before closing paren" do
+      code = ~s[local x = math.max(1, 2, 3 -- LUAC_INT\n)\nreturn x]
+      assert {:ok, _chunk} = Parser.parse(code)
+      assert {[3], _} = Lua.eval!(code)
+    end
+
+    test "trailing comment after every argument across multiple lines" do
+      code = """
+      local function f(a, b, c) return a + b + c end
+      local x = f(
+        1,                       -- first
+        2,                       -- second
+        3                        -- third
+      )
+      return x
+      """
+
+      assert {:ok, _chunk} = Parser.parse(code)
+      assert {[6], _} = Lua.eval!(code)
+    end
+
+    test "multiple consecutive comments before closing paren" do
+      # Mirrors the exact shape from calls.lua: a trailing line comment
+      # plus an additional standalone comment before the close paren.
+      code = """
+      local function f(a) return a end
+      local x = f(
+        42                       -- LUAC_INT
+        -- another note (padding...)
+      )
+      return x
+      """
+
+      assert {:ok, _chunk} = Parser.parse(code)
+      assert {[42], _} = Lua.eval!(code)
+    end
+
+    test "comment between argument and comma" do
+      code = """
+      local function f(a, b) return a + b end
+      return f(1 -- one
+      , 2)
+      """
+
+      assert {:ok, _chunk} = Parser.parse(code)
+      assert {[3], _} = Lua.eval!(code)
+    end
+
+    test "long comment between arguments" do
+      code = """
+      local function f(a, b) return a + b end
+      return f(1, --[[ block ]] 2)
+      """
+
+      assert {:ok, _chunk} = Parser.parse(code)
+      assert {[3], _} = Lua.eval!(code)
+    end
+
+    test "comments inside table constructor" do
+      code = """
+      local t = {
+        1,                       -- one
+        2,                       -- two
+        3                        -- three
+        -- trailing standalone
+      }
+      return #t
+      """
+
+      assert {:ok, _chunk} = Parser.parse(code)
+      assert {[3], _} = Lua.eval!(code)
+    end
+
+    test "no :comment tuples leak into the AST passed to the compiler" do
+      # The lexer deliberately emits {:comment, ...} tokens for AST
+      # consumers, but they are stored as Meta annotations — they must
+      # never appear as raw tokens inside the parsed AST that flows to
+      # codegen and the executor. Walk every value in the parsed chunk
+      # and assert no comment tuple is reachable except through Meta's
+      # comments field.
+      code = """
+      local function f(a, b, c) return a + b + c end
+      local x = f(
+        1,                       -- one
+        2,                       -- two
+        3                        -- three
+        -- trailing
+      )
+      local t = {
+        10,                      -- ten
+        20,                      -- twenty
+        -- standalone
+      }
+      return x, #t
+      """
+
+      assert {:ok, chunk} = Parser.parse(code)
+      refute contains_comment_tuple?(chunk)
+    end
+
+    test "exact calls.lua:374 shape parses and evaluates" do
+      # Direct repro of the failing pattern from calls.lua (without
+      # the actual string.pack invocation, which is unrelated).
+      code = """
+      local function pack(...) return select("#", ...) end
+      local n = pack(
+        "\\27Lua",                -- signature
+        5*16 + 3,                -- version 5.3
+        0,                       -- format
+        "data",                  -- data
+        4,                       -- sizeof(int)
+        8,                       -- sizeof(size_t)
+        4,                       -- size of instruction
+        8,                       -- sizeof(lua integer)
+        8,                       -- sizeof(lua number)
+        0x5678                   -- LUAC_INT
+        -- LUAC_NUM may not have a unique binary representation (padding...)
+      )
+      return n
+      """
+
+      assert {:ok, _chunk} = Parser.parse(code)
+      assert {[10], _} = Lua.eval!(code)
+    end
+  end
+
+  # Recursively check whether a parsed AST contains any raw
+  # `{:comment, ...}` lexer tuple as a sub-term, ignoring the Meta
+  # `comments` field where they're legitimately stored as maps.
+  defp contains_comment_tuple?(%Meta{} = _meta) do
+    # Comments stored on Meta are %{type: ..., text: ..., position: ...} maps,
+    # not raw tuples, so traversing into Meta is unnecessary.
+    false
+  end
+
+  defp contains_comment_tuple?({:comment, _, _, _}), do: true
+
+  defp contains_comment_tuple?(%_{} = struct) do
+    struct
+    |> Map.from_struct()
+    |> contains_comment_tuple?()
+  end
+
+  defp contains_comment_tuple?(map) when is_map(map) do
+    Enum.any?(map, fn {_k, v} -> contains_comment_tuple?(v) end)
+  end
+
+  defp contains_comment_tuple?(list) when is_list(list) do
+    Enum.any?(list, &contains_comment_tuple?/1)
+  end
+
+  defp contains_comment_tuple?(tuple) when is_tuple(tuple) do
+    tuple |> Tuple.to_list() |> contains_comment_tuple?()
+  end
+
+  defp contains_comment_tuple?(_), do: false
 end
