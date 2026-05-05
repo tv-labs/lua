@@ -7,15 +7,17 @@ defmodule Lua.VM.TableIndexTest do
   alias Lua.VM.State
   alias Lua.VM.Stdlib
 
-  # Regression coverage for the bug described in A1: reading a missing key
-  # from a table must return nil, not crash with `Map.fetch!` /
-  # `key N not found in: %{}`.
+  # Reading a missing key from a table must return nil, never raise. This
+  # covers the language-level contract from Lua 5.3 §3.4.7: an indexing
+  # access `t[k]` for a key that is not present in `t` evaluates to nil
+  # (after consulting `__index` if a metatable is set).
   #
-  # The cases below were the explicit success criteria for plan A1. By the
-  # time A1 was investigated they all already passed (the underlying fix
-  # had landed in earlier work, most likely the CPS executor refactor in
-  # PR #156). These tests pin the behaviour so it cannot regress silently
-  # again, and document what "table read returns nil" means in this VM.
+  # The cases below pin that contract against silent regression on the
+  # most common shapes: empty tables, out-of-bounds array reads, missing
+  # string fields, comparisons with nil, metatable `__index` fall-through
+  # in both function and table form, the "direct hit must not consult
+  # __index" short-circuit, and the stdlib helpers (`rawget`, `next`,
+  # `pairs`) that all share the same lookup path.
 
   describe "missing key reads return nil" do
     test "empty table returns nil for any integer key" do
