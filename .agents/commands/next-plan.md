@@ -17,7 +17,10 @@ Show me the plan summary first:
 
 Then ask whether to proceed.
 
-If I confirm, load the `ship-a-plan` skill and execute it on that plan file.
+If I confirm, first sync `main` with `origin/main` (checkout main, fetch,
+fast-forward pull), then branch off of the freshly-synced main using the
+plan's `branch:` value before starting work. After that, load the
+`ship-a-plan` skill and execute it on that plan file.
 
 If there are no ready plans, list the plans grouped by status so I can see
 the current state of the pipeline.
