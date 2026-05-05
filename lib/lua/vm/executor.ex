@@ -13,6 +13,7 @@ defmodule Lua.VM.Executor do
   """
 
   alias Lua.VM.InternalError
+  alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.TypeError
@@ -807,7 +808,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__band", val_a, val_b, state, fn ->
-        Bitwise.band(to_integer!(val_a), to_integer!(val_b))
+        Numeric.to_signed_int64(Bitwise.band(to_integer!(val_a), to_integer!(val_b)))
       end)
 
     regs = put_elem(regs, dest, result)
@@ -820,7 +821,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__bor", val_a, val_b, state, fn ->
-        Bitwise.bor(to_integer!(val_a), to_integer!(val_b))
+        Numeric.to_signed_int64(Bitwise.bor(to_integer!(val_a), to_integer!(val_b)))
       end)
 
     regs = put_elem(regs, dest, result)
@@ -833,7 +834,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__bxor", val_a, val_b, state, fn ->
-        Bitwise.bxor(to_integer!(val_a), to_integer!(val_b))
+        Numeric.to_signed_int64(Bitwise.bxor(to_integer!(val_a), to_integer!(val_b)))
       end)
 
     regs = put_elem(regs, dest, result)
@@ -871,7 +872,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_unary_metamethod("__bnot", val, state, fn ->
-        Bitwise.bnot(to_integer!(val))
+        Numeric.to_signed_int64(Bitwise.bnot(to_integer!(val)))
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1588,7 +1589,7 @@ defmodule Lua.VM.Executor do
   defp safe_add(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
-      na + nb
+      narrow_if_integer(na + nb)
     else
       {:error, val} ->
         raise TypeError,
@@ -1601,7 +1602,7 @@ defmodule Lua.VM.Executor do
   defp safe_subtract(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
-      na - nb
+      narrow_if_integer(na - nb)
     else
       {:error, val} ->
         raise TypeError,
@@ -1614,7 +1615,7 @@ defmodule Lua.VM.Executor do
   defp safe_multiply(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
-      na * nb
+      narrow_if_integer(na * nb)
     else
       {:error, val} ->
         raise TypeError,
@@ -1649,7 +1650,7 @@ defmodule Lua.VM.Executor do
           raise RuntimeError, value: "attempt to divide by zero"
 
         is_integer(na) and is_integer(nb) ->
-          lua_idiv(na, nb)
+          Numeric.to_signed_int64(lua_idiv(na, nb))
 
         true ->
           Float.floor(na / nb) * 1.0
@@ -1671,7 +1672,7 @@ defmodule Lua.VM.Executor do
           raise RuntimeError, value: "attempt to perform modulo by zero"
 
         is_integer(na) and is_integer(nb) ->
-          na - lua_idiv(na, nb) * nb
+          Numeric.to_signed_int64(na - lua_idiv(na, nb) * nb)
 
         true ->
           na - Float.floor(na / nb) * nb
@@ -1707,7 +1708,7 @@ defmodule Lua.VM.Executor do
   defp safe_negate(a) do
     case to_number(a) do
       {:ok, na} ->
-        -na
+        narrow_if_integer(-na)
 
       {:error, val} ->
         raise TypeError,
@@ -1716,6 +1717,12 @@ defmodule Lua.VM.Executor do
           value_type: value_type(val)
     end
   end
+
+  # Narrow integer results to signed 64-bit per Lua 5.3 §3.4.1. Floats are
+  # left untouched: IEEE 754 has its own overflow semantics that the spec
+  # leaves alone.
+  defp narrow_if_integer(n) when is_integer(n), do: Numeric.to_signed_int64(n)
+  defp narrow_if_integer(n), do: n
 
   # ── Type-safe comparison ───────────────────────────────────────────────────
 
@@ -1826,7 +1833,7 @@ defmodule Lua.VM.Executor do
   defp lua_shift_left(val, shift) when shift < 0, do: lua_shift_right(val, -shift)
 
   defp lua_shift_left(val, shift) do
-    Bitwise.band(Bitwise.bsl(val, shift), 0xFFFFFFFFFFFFFFFF)
+    Numeric.to_signed_int64(Bitwise.bsl(val, shift))
   end
 
   defp lua_shift_right(_val, shift) when shift >= 64, do: 0
@@ -1835,7 +1842,7 @@ defmodule Lua.VM.Executor do
 
   defp lua_shift_right(val, shift) do
     unsigned_val = Bitwise.band(val, 0xFFFFFFFFFFFFFFFF)
-    Bitwise.bsr(unsigned_val, shift)
+    Numeric.to_signed_int64(Bitwise.bsr(unsigned_val, shift))
   end
 
   # ── Value type helper ──────────────────────────────────────────────────────
