@@ -2,7 +2,7 @@
 id: A1
 title: Empty/missing-key table reads return nil instead of crashing
 issue: 162
-pr: null
+pr: 179
 branch: fix/table-nil-on-missing-key
 base: main
 status: review
