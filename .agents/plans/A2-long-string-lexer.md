@@ -2,7 +2,7 @@
 id: A2
 title: Long-string [[ ... ]] lexer handles embedded ] and level brackets [==[
 issue: 163
-pr: null
+pr: 180
 branch: fix/long-string-lexer
 base: main
 status: review
@@ -138,3 +138,28 @@ mix test --only lua53
   remainder skipped) because `literals.lua` and `main.lua` are still in
   `@skipped_tests` — they parse cleanly now but they hit unrelated
   runtime gaps. Promoting them is a separate plan.
+
+## What changed
+
+Files touched:
+
+- `lib/lua/lexer.ex` — route `--[` through `scan_long_bracket/2`; widen
+  shebang strip to `#!` or `# `+whitespace; remove dead
+  `scan_multiline_comment/5`.
+- `test/lua/lexer_test.exs` — three tests rewritten to assert correct
+  multi-line behaviour for `--[=[`/`--[==[`; +7 new tests covering long
+  strings at level 3, level-mismatched embedded `]]`, the
+  `literals.lua:14–17` snippet, the `literals.lua:240–245`
+  nested-comment snippet, the `main.lua` `# ...` header, and the `#`
+  length operator.
+- `.agents/plans/A2-long-string-lexer.md` — status, PR number,
+  discoveries, this section.
+
+Test deltas:
+
+- `mix test`: 1294 → 1301, 0 failures.
+- `mix test --only lua53`: unchanged (4 ready, 25 skipped). literals.lua
+  and main.lua still skipped — they parse cleanly now but hit unrelated
+  runtime gaps. Promoting them is a separate plan.
+
+No follow-up issues opened.
