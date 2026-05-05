@@ -40,6 +40,9 @@ under the [`0.5.0` milestone](https://github.com/tv-labs/lua/milestone/1).
 
 ### High-leverage fixes (one bug → many files)
 
+- ~~**A0**: 64-bit integer overflow wrapping for arithmetic and bitwise ops
+  (Lua 5.3 §3.4.1; deliberate divergence from Luerl bignum semantics).~~
+  Shipped in PR #177.
 - **A1**: Empty/missing-key table reads return `nil` (unblocks ~6 files).
 - **A2**: Long-string `[[ … ]]` lexer handles embedded `]` and level brackets `[==[`.
 - **A3**: Comment tokens leak past lexer in `calls.lua`.
@@ -59,11 +62,6 @@ under the [`0.5.0` milestone](https://github.com/tv-labs/lua/milestone/1).
   `stdlib.ex:412`).
 - **A12**: README and CHANGELOG for 0.5.0.
 - **A13**: Cut `0.5.0-rc.1` (blocked on the rest).
-
-### Known integer-semantics gap
-
-- **A-int-overflow**: 64-bit integer wrapping for arithmetic and bitwise ops
-  (cherry-picked from a prior local branch; matches Lua 5.3 spec semver).
 
 ## Next: Direction B — Performance (milestone `0.5.x`)
 
