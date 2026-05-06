@@ -2,10 +2,10 @@
 id: A14
 title: Fix for-loop register regression (consecutive for loops corrupt state)
 issue: 146
-pr: null
+pr: 195
 branch: fix/for-loop-register-regression
 base: main
-status: ready
+status: review
 direction: A
 unlocks: []
 ---
@@ -104,4 +104,58 @@ mix test test/lua/vm/for_loop_register_test.exs
 
 ## Discoveries
 
-(populated during implementation)
+The bug was in `lib/lua/compiler/scope.ex`, not in the executor. The
+executor was correct: it copies `regs[base]` (counter) into
+`regs[loop_var]` and then runs the body. The body's instructions read
+from whatever register the **per-occurrence** scope binding assigned to
+`i`.
+
+The mismatch came from how `ForNum` resolved its loop variable:
+
+1. Loop 1's body resolved with `state.locals["i"] = R₁`. Body
+   instructions therefore reference `R₁` for `i`.
+2. Loop 2 then resolved with `state.locals["i"] = R₂` (a fresh
+   register), overwriting the entry. Body instructions reference `R₂`.
+3. After resolution, codegen ran. For each `ForNum`, codegen looked up
+   the loop-variable register via `ctx.scope.locals[var]` — which by
+   that point was `R₂` for **both** loops.
+4. The result: the `numeric_for` instruction for loop 1 wrote the
+   counter to `R₂`, but loop 1's body read `i` from `R₁`. So `i` was
+   `nil` when the body executed, and the second loop blew up first
+   because its body actually used `R₂` and was entitled to expect a
+   number there.
+
+This is the same class of bug that `LocalFunc` already had a fix for
+(see `local_func_reg` in `var_map`). The fix here mirrors that: capture
+the per-statement loop-variable register in `var_map`, keyed by the
+`ForNum`/`ForIn` AST node, and have codegen prefer that lookup over
+`scope.locals[var]`.
+
+The Phase 17 fix (commit `e7c50e5`) had used a different mechanism that
+was lost in the CPS rewrite. The new fix is structurally aligned with
+the existing `LocalFunc` pattern, which should make it more robust to
+future executor refactors.
+
+The plan suggested register-clearing logic between iterations as a
+likely fix; that turned out not to be the issue — the real fix was at
+compile time, before the executor ever runs.
+
+## What changed
+
+PR #195 — `fix(compiler): bind for-loop variable per statement to fix register reuse`
+
+Files touched:
+
+- `lib/lua/compiler/scope.ex` — capture per-statement loop-variable
+  registers in `var_map` for both `ForNum` and `ForIn`.
+- `lib/lua/compiler/codegen.ex` — prefer the per-statement `var_map`
+  binding when emitting `numeric_for` and `generic_for` instructions.
+- `test/lua/vm/for_loop_register_test.exs` — new file, 6 regression
+  tests covering consecutive numeric for loops with shared/distinct
+  variable names, explicit step values, and closures over loop variables.
+
+Suite delta: lua53 4/29 → 4/29 (no regression; this fix doesn't unlock
+new suite files but unblocks user code that mixed multiple for loops in
+the same scope).
+
+Test delta: 1369 → 1375 (6 new regression tests, 0 failures).
