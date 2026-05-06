@@ -23,12 +23,12 @@ jobs:
         include:
           - elixir: "1.19.0"
             otp: "28.0"
-            install_rebar: true
-          # OTP 29 RC's :httpc can't reach builds.hex.pm, so let setup-beam
-          # skip the rebar autoinstall and we curl it ourselves below.
+            bootstrap_beam: false
+          # OTP 29 RC's :httpc can't reach builds.hex.pm, so we tell setup-beam
+          # to skip Hex/Rebar autoinstall and curl them ourselves below.
           - elixir: "1.20.0-rc.4"
             otp: "29.0-rc3"
-            install_rebar: false
+            bootstrap_beam: true
 
     steps:
       - name: Checkout
@@ -47,12 +47,16 @@ jobs:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
           version-type: strict
-          install-rebar: ${{ matrix.install_rebar }}
+          install-hex: ${{ !matrix.bootstrap_beam }}
+          install-rebar: ${{ !matrix.bootstrap_beam }}
 
-      - &install-rebar-manually
-        name: Install rebar3 (when setup-beam skipped it)
-        if: matrix.install_rebar == false
+      - &bootstrap-beam
+        name: Bootstrap Hex/Rebar via curl (OTP 29 RC :httpc workaround)
+        if: matrix.bootstrap_beam
         run: |
+          curl -fsSL --retry 3 -o /tmp/hex.ez \
+            https://builds.hex.pm/installs/1.19.0/hex-2.4.2-otp-28.ez
+          mix archive.install /tmp/hex.ez --force
           curl -fsSL --retry 3 -o /tmp/rebar3 \
             https://github.com/erlang/rebar3/releases/download/3.25.1/rebar3
           chmod +x /tmp/rebar3
@@ -87,14 +91,14 @@ jobs:
         include:
           - elixir: "1.19.0"
             otp: "28.0"
-            install_rebar: true
+            bootstrap_beam: false
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - *install-luajit
       - *setup-beam
-      - *install-rebar-manually
+      - *bootstrap-beam
       - *cache-deps
       - *install-deps
       - name: Run Lua 5.3 suite (only)
@@ -185,14 +189,14 @@ jobs:
         include:
           - elixir: "1.19.0"
             otp: "28.0"
-            install_rebar: true
+            bootstrap_beam: false
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - *install-luajit
       - *setup-beam
-      - *install-rebar-manually
+      - *bootstrap-beam
       - *cache-deps
       - *install-deps
       - name: Run dialyzer
