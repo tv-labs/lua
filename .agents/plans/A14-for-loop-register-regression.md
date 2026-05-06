@@ -5,7 +5,7 @@ issue: 146
 pr: null
 branch: fix/for-loop-register-regression
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks: []
 ---
