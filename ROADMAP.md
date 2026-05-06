@@ -2,9 +2,9 @@
 
 This is the strategic overview. For per-PR detail, see [`.agents/plans/`](.agents/plans).
 
-## Status: 2026-05-02
+## Status: 2026-05-06
 
-- **Unit tests**: 1,273 passing, 0 failing, 32 skipped.
+- **Unit tests**: 1,369 passing, 0 failing, 36 skipped.
 - **Lua 5.3 official suite**: 4/24 files passing (`simple_test.lua`, `api.lua`, `code.lua`, `vararg.lua`).
 - **Current focus**: [Direction A — Suite Triage](#in-flight-direction-a--suite-triage-milestone-050).
 
@@ -61,8 +61,8 @@ under the [`0.5.0` milestone](https://github.com/tv-labs/lua/milestone/1).
 
 ### Polish
 
-- **A11**: Clear in-source TODOs (`compiler.ex:34`, `compiler_exception.ex:27`,
-  `stdlib.ex:412`).
+- ~~**A11**: Clear in-source TODOs (`compiler.ex:34`, `compiler_exception.ex:27`,
+  `stdlib.ex:412`).~~ Shipped in PR #194.
 - **A12**: README and CHANGELOG for 0.5.0.
 - **A13**: Cut `0.5.0-rc.1` (blocked on the rest).
 
