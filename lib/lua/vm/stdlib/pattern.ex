@@ -93,8 +93,10 @@ defmodule Lua.VM.Stdlib.Pattern do
 
   defp gsub_from(subject, pos, len, _pattern, _repl, max_n, count, acc)
        when pos > len or (max_n != nil and count >= max_n) do
-    # Append remaining subject
-    remaining = binary_part(subject, pos, len - pos)
+    # Append remaining subject (clamp pos so we never read past end_of_string)
+    remaining =
+      if pos < len, do: binary_part(subject, pos, len - pos), else: ""
+
     {IO.iodata_to_binary([Enum.reverse(acc), remaining]), count}
   end
 
@@ -185,6 +187,11 @@ defmodule Lua.VM.Stdlib.Pattern do
 
   defp compile_elements("$", acc) do
     Enum.reverse([:anchor_end | acc])
+  end
+
+  defp compile_elements("()" <> rest, acc) do
+    # Position capture: records the current byte position (1-based) at this point.
+    compile_elements(rest, [:position_capture | acc])
   end
 
   defp compile_elements("(" <> rest, acc) do
@@ -283,6 +290,11 @@ defmodule Lua.VM.Stdlib.Pattern do
   # Capture start
   defp match_elements(subject, pos, [:capture_start | rest], full, cstack, captures) do
     match_elements(subject, pos, rest, full, [{pos, nil} | cstack], captures)
+  end
+
+  # Position capture — record the current 1-based byte position as a number
+  defp match_elements(subject, pos, [:position_capture | rest], full, cstack, captures) do
+    match_elements(subject, pos, rest, full, cstack, captures ++ [pos + 1])
   end
 
   # Capture end
@@ -476,6 +488,14 @@ defmodule Lua.VM.Stdlib.Pattern do
 
   defp match_char_class(ch, ?c), do: ch < 32 or ch == 127
   defp match_char_class(ch, ?C), do: not (ch < 32 or ch == 127)
+
+  # %g — printable characters except space (ASCII 0x21..0x7E)
+  defp match_char_class(ch, ?g), do: ch in 0x21..0x7E
+  defp match_char_class(ch, ?G), do: ch not in 0x21..0x7E
+
+  # %x — hexadecimal digit
+  defp match_char_class(ch, ?x), do: ch in ?0..?9 or ch in ?a..?f or ch in ?A..?F
+  defp match_char_class(ch, ?X), do: not (ch in ?0..?9 or ch in ?a..?f or ch in ?A..?F)
 
   # Escaped literal (non-alphanumeric after %)
   defp match_char_class(ch, literal), do: ch == literal

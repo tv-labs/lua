@@ -657,10 +657,43 @@ defmodule Lua.LexerTest do
                Lexer.tokenize("> =")
     end
 
-    test "handles invalid escape sequences in strings" do
-      # Invalid escape sequences should be included as-is
-      assert {:ok, [{:string, "\\x", _}, {:eof, _}]} = Lexer.tokenize(~s("\\x"))
-      assert {:ok, [{:string, "\\1", _}, {:eof, _}]} = Lexer.tokenize(~s("\\1"))
+    test "handles unknown escape sequences in strings" do
+      # Unknown alpha-escapes (not part of the Lua 5.3 escape set and not a
+      # numeric escape) are kept verbatim. Per the reference, only escapes
+      # that look numeric (\\xXX, \\u{...}, \\ddd) but are malformed are
+      # parse-time errors — see the dedicated tests below.
+      assert {:ok, [{:string, "\\q", _}, {:eof, _}]} = Lexer.tokenize(~s("\\q"))
+    end
+
+    test "decimal escape \\ddd produces the corresponding byte" do
+      assert {:ok, [{:string, <<0>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\0"))
+      assert {:ok, [{:string, <<1>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\1"))
+      assert {:ok, [{:string, <<255>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\255"))
+      # Greedy up to 3 digits when they all fit in a byte (102 == 'f')
+      assert {:ok, [{:string, <<102>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\102"))
+      # \\256 overflows a byte so the third digit is not consumed
+      assert {:ok, [{:string, <<25, ?6>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\256"))
+      # \\10x — third char isn't a digit, only \\10 is consumed
+      assert {:ok, [{:string, <<10, ?x>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\10x"))
+    end
+
+    test "hex escape \\xXX produces the corresponding byte" do
+      assert {:ok, [{:string, <<0>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\x00"))
+      assert {:ok, [{:string, <<0xFF>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\xff"))
+      assert {:ok, [{:string, <<0xAB>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\xAB"))
+    end
+
+    test "malformed numeric escape sequences error" do
+      # \\x must be followed by exactly two hex digits
+      assert {:error, {:invalid_escape, _}} = Lexer.tokenize(~s("\\x"))
+      assert {:error, {:invalid_escape, _}} = Lexer.tokenize(~s("\\xZ"))
+      assert {:error, {:invalid_escape, _}} = Lexer.tokenize(~s("\\x1g"))
+    end
+
+    test "unicode escape \\u{XXX} encodes as UTF-8" do
+      assert {:ok, [{:string, "A", _}, {:eof, _}]} = Lexer.tokenize(~s("\\u{41}"))
+      # Codepoint 0x4E2D (中) → 3-byte UTF-8 sequence
+      assert {:ok, [{:string, <<0xE4, 0xB8, 0xAD>>, _}, {:eof, _}]} = Lexer.tokenize(~s("\\u{4E2D}"))
     end
 
     test "reports error for string with unescaped newline" do
