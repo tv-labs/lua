@@ -718,6 +718,29 @@ defmodule Lua.VM.StringTest do
       state = Stdlib.install(State.new())
       assert {:ok, [0], _state} = VM.execute(proto, state)
     end
+
+    test "string.gmatch skips empty match adjacent to previous non-empty match" do
+      # PUC-Lua's `gmatch_aux` tracks `lastmatch` and skips a match whose
+      # end position equals the previous match's end. Without this the
+      # `()%s*()` pattern double-fires at every whitespace run and this
+      # loop produces spurious extra `-`s in the result. Test taken from
+      # `pm.lua` lines 169-176 in the Lua 5.3 official test suite.
+      code = ~S"""
+      local res = ""
+      local sub = "a  \nbc\t\td"
+      local i = 1
+      for p, e in string.gmatch(sub, "()%s*()") do
+        res = res .. string.sub(sub, i, p - 1) .. "-"
+        i = e
+      end
+      return res
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["-a-b-c-d-"], _state} = VM.execute(proto, state)
+    end
   end
 
   describe "string.gsub" do
@@ -781,6 +804,80 @@ defmodule Lua.VM.StringTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = Stdlib.install(State.new())
       assert {:ok, ["hello", 0], _state} = VM.execute(proto, state)
+    end
+
+    # Regression tests for A9b — pattern engine and stateful gsub callbacks.
+
+    test "string.gsub with function callback threads upvalue mutation" do
+      # Before A9b: the gsub-with-callback path discarded the threaded
+      # state from each Executor.call_function call, so upvalue mutations
+      # in the callback (like `count = count + 1`) silently no-op'd.
+      code = """
+      local count = 0
+      string.gsub("abc", "[a-c]", function() count = count + 1 end)
+      return count
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [3], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub with function callback threads table writes" do
+      code = """
+      local res = {s = ''}
+      string.gsub("abcde", "[a-c]", function(c) res.s = res.s .. c end)
+      return res.s
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["abc"], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub returns position-capture as digits in replacement" do
+      # `()` is a position capture; %1 must render as the integer's digits,
+      # not as a raw byte (which would corrupt the iodata buffer).
+      code = ~s{return string.gsub("alo alo", "()[al]", "%1")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["12o 56o", 4], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub treats %1 as whole match when pattern has no captures" do
+      # PUC-Lua compatibility quirk: with no captures, %1 == %0.
+      code = ~s{return string.gsub("abc", "%w", "%1%0")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["aabbcc", 3], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub honours Lua 5.3.3 empty-match-skip rule" do
+      # Without the skip-empty rule we'd produce `-a--b--c-d-` because the
+      # empty match fires both at the boundary of every non-empty space match
+      # and on the next char.
+      code = ~s{return string.gsub("a b cd", " *", "-")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["-a-b-c-d-", 5], _state} = VM.execute(proto, state)
+    end
+
+    test "string.gsub matches %Z (non-zero byte)" do
+      code = """
+      local s = string.char(0) .. "abc" .. string.char(0)
+      local result = string.gsub(s, "%Z", "x")
+      return result, #result
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [<<0, ?x, ?x, ?x, 0>>, 5], _state} = VM.execute(proto, state)
     end
   end
 
@@ -956,6 +1053,18 @@ defmodule Lua.VM.StringTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = Stdlib.install(State.new())
       assert {:ok, [5, 5], _state} = VM.execute(proto, state)
+    end
+
+    test "nested captures return in opening order" do
+      # Captures are numbered by `(` position, not by `)` close order. Before
+      # A9b's refactor `cstack` accumulated closed captures by close time,
+      # which reversed nested groups: `(((.).).* (%w*))` returned innermost
+      # first.
+      code = ~s|return string.match("alo alo", "^(((.).).* (%w*))$")|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["alo alo", "al", "a", "alo"], _state} = VM.execute(proto, state)
     end
   end
 

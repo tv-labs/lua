@@ -736,34 +736,29 @@ defmodule Lua.VM.Stdlib.String do
     max_n = Enum.at(rest, 0)
     max_n = if is_number(max_n), do: trunc(max_n)
 
-    # Determine replacement function
+    # Determine stateful replacement: either a binary (literal pattern repl)
+    # or a 2-arity fn `(args, state) -> {result, state}` so callback side
+    # effects (upvalue mutation, table writes) thread back out of gsub.
     repl_fn =
       cond do
         is_binary(repl) ->
           repl
 
-        is_function(repl, 1) ->
-          repl
-
         match?({:tref, _}, repl) ->
-          # Table replacement: look up match in table
-          fn [match | _] ->
-            table = State.get_table(state, repl)
-            Map.get(table.data, match, match)
+          # Table replacement: look up match in table. Reads only — table
+          # reads don't mutate state, so we pass it through unchanged.
+          fn [match | _], st ->
+            table = State.get_table(st, repl)
+            value = Map.get(table.data, match, match)
+            {value, st}
           end
 
-        match?({:lua_closure, _, _}, repl) ->
-          fn args ->
-            {results, _state} = Executor.call_function(repl, args, state)
+        match?({:lua_closure, _, _}, repl) or match?({:native_func, _}, repl) ->
+          fn args, st ->
+            {results, st} = Executor.call_function(repl, args, st)
             result = List.first(results)
-            if result == nil or result == false, do: false, else: result
-          end
-
-        match?({:native_func, _}, repl) ->
-          fn args ->
-            {results, _state} = Executor.call_function(repl, args, state)
-            result = List.first(results)
-            if result == nil or result == false, do: false, else: result
+            value = if result == nil or result == false, do: false, else: result
+            {value, st}
           end
 
         true ->
@@ -773,7 +768,7 @@ defmodule Lua.VM.Stdlib.String do
             expected: "string/function/table"
       end
 
-    {result, count} = Pattern.gsub(s, pattern, repl_fn, max_n)
+    {result, count, state} = Pattern.gsub_stateful(s, pattern, repl_fn, state, max_n)
     {[result, count], state}
   end
 
