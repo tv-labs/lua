@@ -68,4 +68,68 @@ mix test --only lua53
 
 ## Discoveries
 
-(populated during implementation)
+The three files turned out to have three distinct root causes. Only one
+is in scope for Direction A's 0.5.0 cut; the other two are deferred
+into split plans.
+
+### utf8.lua — IN SCOPE, FIXED HERE
+
+`utf8.lua` line 6 is `local utf8 = require'utf8'`. There is no `utf8`
+stdlib module installed in this VM, so `require` falls through to the
+filesystem search. `package.path` includes `test/lua53_tests/?.lua`,
+so it finds — and runs — `utf8.lua` itself. That recursive load hits
+the same `require'utf8'`, loops, and prints "testing UTF-8 library"
+repeatedly forever.
+
+This is a real `require` bug independent of utf8: any module file
+whose name collides with itself on the search path would loop. Reference
+Lua avoids this by caching a sentinel (`true`) in `package.loaded`
+*before* executing the module body, so re-entrant `require` calls during
+load resolve to the sentinel instead of re-loading.
+
+Fix in `lib/lua/vm/stdlib.ex`:`parse_and_execute_module/4`: cache `true`
+under `modname` in `package.loaded` immediately, then run the body, then
+overwrite with the real return value.
+
+After the fix, `utf8.lua` fast-fails in ~20 ms with "key 1 not found in
+%{}" — the test code dereferences `utf8.charpattern` on what is now the
+sentinel boolean, which is the correct, expected failure given that no
+`utf8` stdlib module exists. That's the natural stopping point until
+the `utf8` library itself is implemented (separate concern).
+
+### closure.lua — OUT OF SCOPE → A10a (deferred)
+
+Lines 27-32 are a "spin until GC" loop using `__mode = 'kv'` weak
+references. Without weak-table semantics, the inner table is never
+collected and the loop is infinite. Implementing weak tables is a
+multi-day feature with implications for every table read/write/alloc
+path; not worth blocking 0.5.0 on. See `A10a-closure-weak-tables.md`.
+
+### big.lua — OUT OF SCOPE → A10b (deferred)
+
+Builds a ≈263k-element source-string array via `for i=1,lim do
+prog[#prog + 1] = i end`. `Lua.VM.Value.sequence_length/1` is a linear
+scan, so `#prog + 1` is O(n) and the loop is O(n²) — runs for tens of
+seconds, not the few seconds the suite expects. This is a Direction B
+(performance) concern. See `A10b-big-perf.md`.
+
+## What changed
+
+- `lib/lua/vm/stdlib.ex` — `parse_and_execute_module/4` now writes a
+  `true` sentinel to `package.loaded[modname]` before executing the
+  module body, mirroring reference Lua. Prevents infinite recursion
+  on self-requiring modules.
+- `test/lua/vm/stdlib/package_test.exs` — added a `require recursion
+  guard` describe block with three tests:
+  1. A module that self-requires returns the sentinel without re-loading.
+  2. Two modules that mutually require each other don't loop.
+  3. `require` returns the cached value on a second call (and the
+     module body is only evaluated once).
+- `.agents/plans/A10a-closure-weak-tables.md` — new deferred plan for
+  the `closure.lua` weak-table issue.
+- `.agents/plans/A10b-big-perf.md` — new deferred plan for the
+  `big.lua` table-append performance issue.
+
+Suite count: 4/29 ready → 4/29 ready (utf8.lua now fails fast but
+`utf8` stdlib still missing, so it stays in `@skipped_tests`).
+Test count: 1354 → 1357 (+3 new). No regressions.
