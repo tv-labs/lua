@@ -5,6 +5,7 @@ defmodule Lua.VM.CallStackTest do
   alias Lua.Parser
   alias Lua.VM
   alias Lua.VM.State
+  alias Lua.VM.Stdlib
 
   describe "call stack tracking" do
     test "tracks current line during execution" do
@@ -121,6 +122,92 @@ defmodule Lua.VM.CallStackTest do
 
       assert results == [3]
       assert final_state.call_stack == []
+    end
+  end
+
+  describe "multi-return register expansion" do
+    # Regression test for the executor crash exposed by pm.lua line 112:
+    # `string.char(range(0, 255))` where `range` is a recursive helper that
+    # tail-position multi-returns 256 values. The compiler sizes the caller's
+    # register tuple for the syntactic call site, but multi-return expansion
+    # can produce many more values than were statically reserved. The
+    # executor must grow the register tuple before writing the expanded
+    # results.
+
+    test "recursive multi-return with 256 values feeds string.char" do
+      code = """
+      local function range(i, j)
+        if i <= j then return i, range(i+1, j) end
+      end
+      return string.char(range(0, 255))
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+      state = Stdlib.install(State.new())
+      assert {:ok, [result], _final_state} = VM.execute(proto, state)
+
+      assert is_binary(result)
+      assert byte_size(result) == 256
+      assert :binary.first(result) == 0
+      assert :binary.last(result) == 255
+    end
+
+    test "recursive multi-return with 100 values feeds variadic native call" do
+      # Smaller variant, also exercises the grow-tuple path because the
+      # default register tuple won't be sized for 100 expanded slots.
+      code = """
+      local function range(i, j)
+        if i <= j then return i, range(i+1, j) end
+      end
+      return string.char(range(65, 164))
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+      state = Stdlib.install(State.new())
+      assert {:ok, [result], _final_state} = VM.execute(proto, state)
+
+      assert is_binary(result)
+      assert byte_size(result) == 100
+    end
+
+    test "fixed-count assignment from large multi-return takes only first N" do
+      code = """
+      local function range(i, j)
+        if i <= j then return i, range(i+1, j) end
+      end
+      local a, b, c = range(0, 200)
+      return a, b, c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+      state = State.new()
+      assert {:ok, results, _final_state} = VM.execute(proto, state)
+
+      assert results == [0, 1, 2]
+    end
+
+    test "table constructor expands large multi-return into all slots" do
+      code = """
+      local function range(i, j)
+        if i <= j then return i, range(i+1, j) end
+      end
+      local t = {range(1, 150)}
+      return #t, t[1], t[150]
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+      state = State.new()
+      assert {:ok, results, _final_state} = VM.execute(proto, state)
+
+      assert results == [150, 1, 150]
     end
   end
 end
