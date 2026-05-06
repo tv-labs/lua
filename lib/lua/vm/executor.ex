@@ -1136,6 +1136,7 @@ defmodule Lua.VM.Executor do
       -2 ->
         # Multi-return expansion: place all results into caller regs from base
         results_list = List.wrap(results)
+        caller_regs = ensure_regs_capacity(caller_regs, base + length(results_list))
 
         caller_regs =
           results_list
@@ -1152,6 +1153,7 @@ defmodule Lua.VM.Executor do
       n when n > 0 ->
         # Fixed count: place first n results into caller regs from base
         results_list = List.wrap(results)
+        caller_regs = ensure_regs_capacity(caller_regs, base + n)
 
         caller_regs =
           Enum.reduce(0..(n - 1), caller_regs, fn i, r ->
@@ -1175,6 +1177,7 @@ defmodule Lua.VM.Executor do
 
       -2 ->
         results_list = List.wrap(results)
+        regs = ensure_regs_capacity(regs, base + length(results_list))
 
         regs =
           results_list
@@ -1189,6 +1192,7 @@ defmodule Lua.VM.Executor do
 
       n when n > 0 ->
         results_list = List.wrap(results)
+        regs = ensure_regs_capacity(regs, base + n)
 
         regs =
           Enum.reduce(0..(n - 1), regs, fn i, r ->
@@ -1198,6 +1202,31 @@ defmodule Lua.VM.Executor do
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
     end
   end
+
+  # ── ensure_regs_capacity — grow a register tuple when multi-return overflows ─
+  #
+  # The compiler sizes register tuples for the syntactic call site, but a
+  # multi-return call can produce more values than the caller statically
+  # reserved (e.g. `string.char(range(0, 255))` returns 256 values from a
+  # recursive helper). Rather than pre-allocate for the pathological case,
+  # grow the tuple lazily here and keep the common case to a single
+  # `put_elem`. `needed_size` is the total number of slots we must be able
+  # to write to (i.e. base + count), so capacity must be at least that.
+  defp ensure_regs_capacity(regs, needed_size) when is_tuple(regs) do
+    current_size = tuple_size(regs)
+
+    if needed_size > current_size do
+      # Append nil slots with a small headroom so back-to-back expansions
+      # don't repeatedly reallocate.
+      extra = needed_size - current_size + 16
+      grow_tuple(regs, extra)
+    else
+      regs
+    end
+  end
+
+  defp grow_tuple(tuple, 0), do: tuple
+  defp grow_tuple(tuple, n), do: grow_tuple(Tuple.insert_at(tuple, tuple_size(tuple), nil), n - 1)
 
   # ── find_loop_exit — scan cont for the nearest {:loop_exit, _} marker ──────
 
