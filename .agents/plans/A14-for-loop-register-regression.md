@@ -2,10 +2,10 @@
 id: A14
 title: Fix for-loop register regression (consecutive for loops corrupt state)
 issue: 146
-pr: null
+pr: 195
 branch: fix/for-loop-register-regression
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks: []
 ---
@@ -139,3 +139,23 @@ future executor refactors.
 The plan suggested register-clearing logic between iterations as a
 likely fix; that turned out not to be the issue — the real fix was at
 compile time, before the executor ever runs.
+
+## What changed
+
+PR #195 — `fix(compiler): bind for-loop variable per statement to fix register reuse`
+
+Files touched:
+
+- `lib/lua/compiler/scope.ex` — capture per-statement loop-variable
+  registers in `var_map` for both `ForNum` and `ForIn`.
+- `lib/lua/compiler/codegen.ex` — prefer the per-statement `var_map`
+  binding when emitting `numeric_for` and `generic_for` instructions.
+- `test/lua/vm/for_loop_register_test.exs` — new file, 6 regression
+  tests covering consecutive numeric for loops with shared/distinct
+  variable names, explicit step values, and closures over loop variables.
+
+Suite delta: lua53 4/29 → 4/29 (no regression; this fix doesn't unlock
+new suite files but unblocks user code that mixed multiple for loops in
+the same scope).
+
+Test delta: 1369 → 1375 (6 new regression tests, 0 failures).
