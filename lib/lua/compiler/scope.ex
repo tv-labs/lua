@@ -171,7 +171,7 @@ defmodule Lua.Compiler.Scope do
   end
 
   defp resolve_statement(
-         %Statement.ForNum{var: var, start: start_expr, limit: limit_expr, step: step_expr, body: body},
+         %Statement.ForNum{var: var, start: start_expr, limit: limit_expr, step: step_expr, body: body} = for_stmt,
          state
        ) do
     # Resolve start, limit, and step expressions with current scope
@@ -186,6 +186,12 @@ defmodule Lua.Compiler.Scope do
     # Reserve 3 registers: the loop variable shares with the internal counter,
     # plus limit and step registers (codegen allocates base, base+1, base+2)
     state = %{state | next_register: loop_var_reg + 3}
+
+    # Store this loop's variable register in var_map so codegen can find the
+    # correct register even when consecutive `for` statements share a variable
+    # name (each loop binds the same name to a fresh register, but
+    # `state.locals[var]` only retains the most recent binding).
+    state = %{state | var_map: Map.put(state.var_map, {:for_num_var_reg, for_stmt}, loop_var_reg)}
 
     # Update max_register
     func_scope = state.functions[state.current_function]
@@ -246,17 +252,23 @@ defmodule Lua.Compiler.Scope do
     resolve_expr(call, state)
   end
 
-  defp resolve_statement(%Statement.ForIn{vars: vars, iterators: iterators, body: body}, state) do
+  defp resolve_statement(%Statement.ForIn{vars: vars, iterators: iterators, body: body} = for_stmt, state) do
     # Resolve iterator expressions with current scope
     state = Enum.reduce(iterators, state, &resolve_expr/2)
 
     # Assign registers for loop variables (same pattern as ForNum)
-    {state, _} =
-      Enum.reduce(vars, {state, state.next_register}, fn name, {state, reg} ->
+    {state, _, var_regs} =
+      Enum.reduce(vars, {state, state.next_register, []}, fn name, {state, reg, acc} ->
         state = %{state | locals: Map.put(state.locals, name, reg)}
         state = %{state | next_register: reg + 1}
-        {state, reg + 1}
+        {state, reg + 1, [reg | acc]}
       end)
+
+    # Store this loop's variable registers in var_map so codegen can find the
+    # correct registers even when consecutive `for` statements share variable
+    # names (each loop binds the same names to fresh registers, but
+    # `state.locals[name]` only retains the most recent binding).
+    state = %{state | var_map: Map.put(state.var_map, {:for_in_var_regs, for_stmt}, Enum.reverse(var_regs))}
 
     # Update max_register
     func_scope = state.functions[state.current_function]

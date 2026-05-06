@@ -464,9 +464,15 @@ defmodule Lua.Compiler.Codegen do
     {[loop_instruction], ctx}
   end
 
-  defp gen_statement(%Statement.ForNum{var: var, start: start_expr, limit: limit_expr, step: step_expr, body: body}, ctx) do
-    # Get the loop variable's register from scope
-    loop_var_reg = ctx.scope.locals[var]
+  defp gen_statement(
+         %Statement.ForNum{var: var, start: start_expr, limit: limit_expr, step: step_expr, body: body} = for_stmt,
+         ctx
+       ) do
+    # Get the loop variable's register. Prefer the per-statement binding
+    # captured during scope resolution so consecutive `for` loops with the
+    # same variable name use distinct registers (issue #146).
+    loop_var_reg =
+      Map.get(ctx.scope.var_map, {:for_num_var_reg, for_stmt}, ctx.scope.locals[var])
 
     # Allocate 3 internal registers for: counter, limit, step
     base = ctx.next_reg
@@ -510,9 +516,12 @@ defmodule Lua.Compiler.Codegen do
        [loop_instruction], ctx}
   end
 
-  defp gen_statement(%Statement.ForIn{vars: vars, iterators: iterators, body: body}, ctx) do
-    # Look up loop variable registers from scope
-    var_regs = Enum.map(vars, fn name -> ctx.scope.locals[name] end)
+  defp gen_statement(%Statement.ForIn{vars: vars, iterators: iterators, body: body} = for_stmt, ctx) do
+    # Look up loop variable registers from scope. Prefer the per-statement
+    # bindings captured during scope resolution so consecutive `for` loops
+    # with the same variable names use distinct registers (issue #146).
+    var_regs =
+      Map.get(ctx.scope.var_map, {:for_in_var_regs, for_stmt}, Enum.map(vars, fn name -> ctx.scope.locals[name] end))
 
     # Allocate 3 internal registers for: iterator function, invariant state, control variable
     base = ctx.next_reg
