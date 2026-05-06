@@ -22,29 +22,45 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install LuaJIT
+      - &install-luajit
+        name: Install LuaJIT
         run: |
           sudo apt-get update
           sudo apt-get install -y luajit libluajit-5.1-dev
-      - name: Install Elixir/Erlang (mise)
-        uses: jdx/mise-action@v4
+
+      - &read-versions
+        name: Read versions from mise.toml
+        id: versions
+        run: |
+          elixir=$(awk -F'"' '/^elixir/{print $2}' mise.toml)
+          echo "elixir=${elixir%-otp-*}" >> "$GITHUB_OUTPUT"
+          awk -F'"' '/^erlang/{print "otp=" $2}' mise.toml >> "$GITHUB_OUTPUT"
+
+      - &setup-beam
+        name: Set up Elixir
+        uses: erlef/setup-beam@v1
         with:
-          install_args: "erlang elixir"
-      - name: Restore dependencies cache
+          elixir-version: ${{ steps.versions.outputs.elixir }}
+          otp-version: ${{ steps.versions.outputs.otp }}
+
+      - &cache-deps
+        name: Restore dependencies cache
         uses: actions/cache@v4
         with:
           path: deps
           key: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-
-      - name: Install dependencies
-        run: |
-          mix local.hex --force --if-missing
-          mix local.rebar --force --if-missing
-          mix deps.get
+
+      - &install-deps
+        name: Install dependencies
+        run: mix deps.get
+
       - name: Run tests
         run: mix test
+
       - name: Format
         run: mix format --check-formatted
+
   lua53-suite:
     name: Lua 5.3 suite
     runs-on: ubuntu-latest
@@ -55,25 +71,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Install LuaJIT
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y luajit libluajit-5.1-dev
-      - name: Install Elixir/Erlang (mise)
-        uses: jdx/mise-action@v4
-        with:
-          install_args: "erlang elixir"
-      - name: Restore dependencies cache
-        uses: actions/cache@v4
-        with:
-          path: deps
-          key: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-
-      - name: Install dependencies
-        run: |
-          mix local.hex --force --if-missing
-          mix local.rebar --force --if-missing
-          mix deps.get
+      - *install-luajit
+      - *read-versions
+      - *setup-beam
+      - *cache-deps
+      - *install-deps
       - name: Run Lua 5.3 suite (only)
         id: suite
         run: |
@@ -153,6 +155,7 @@ jobs:
             cat suite-survey.txt
             echo "\`\`\`"
           } >> $GITHUB_STEP_SUMMARY
+
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
@@ -160,25 +163,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install LuaJIT
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y luajit libluajit-5.1-dev
-      - name: Install Elixir/Erlang (mise)
-        uses: jdx/mise-action@v4
-        with:
-          install_args: "erlang elixir"
-      - name: Restore dependencies cache
-        uses: actions/cache@v4
-        with:
-          path: deps
-          key: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-
-      - name: Install dependencies
-        run: |
-          mix local.hex --force --if-missing
-          mix local.rebar --force --if-missing
-          mix deps.get
+      - *install-luajit
+      - *read-versions
+      - *setup-beam
+      - *cache-deps
+      - *install-deps
       - name: Run dialyzer
         run: mix dialyzer
