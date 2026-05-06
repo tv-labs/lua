@@ -88,6 +88,33 @@ defmodule Lua.VM.StringTest do
       state = Stdlib.install(State.new())
       assert {:ok, [""], _state} = VM.execute(proto, state)
     end
+
+    test "string.sub with j == 0 returns empty string (PUC-Lua semantics)" do
+      # Regression: string.find on a zero-width pattern returns (1, 0) and
+      # idiomatic Lua then calls string.sub(s, 1, 0) expecting "". This
+      # exercises the i > j case after PUC-Lua's clamp-after-relative-index.
+      code = ~S|return string.sub("aaa", 1, 0)|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [""], _state} = VM.execute(proto, state)
+    end
+
+    test "string.sub with i past end returns empty string" do
+      code = ~S|return string.sub("hello", 6)|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [""], _state} = VM.execute(proto, state)
+    end
+
+    test "string.sub clamps very negative i to start of string" do
+      code = ~S|return string.sub("hello", -100, 3)|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["hel"], _state} = VM.execute(proto, state)
+    end
   end
 
   describe "string.rep" do
@@ -828,6 +855,83 @@ defmodule Lua.VM.StringTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = Stdlib.install(State.new())
       assert {:ok, ["ello"], _state} = VM.execute(proto, state)
+    end
+
+    test "character class %g matches printable except space" do
+      # %g is non-space printable (ASCII 0x21..0x7E). pm.lua line 51 uses
+      # %g%g%g+ to extract the contiguous non-space, non-newline run "xuxu".
+      code = ~S|return string.match("  \n\r*&\n\r   xuxu  \n\n", "%g%g%g+")|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["xuxu"], _state} = VM.execute(proto, state)
+    end
+
+    test "character class %G matches whitespace and non-printable" do
+      code = ~S|return string.match("ab cd", "%G")|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [" "], _state} = VM.execute(proto, state)
+    end
+
+    test "character class %x matches hexadecimal digits" do
+      # %x covers 0-9, a-f, A-F — covers the deadBEEF99 run; "hello" fails
+      # the first match early (h is not hex), so we anchor with a space.
+      code = ~S|return string.match(" deadBEEF99 ", "%x+")|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["deadBEEF99"], _state} = VM.execute(proto, state)
+    end
+
+    test "position capture () returns numeric byte position" do
+      # () captures the current 1-based byte position as a number, not a
+      # zero-length string. This is what pm.lua's f1 helper relies on.
+      code = ~S|return string.match("hello", "()l")|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [3], _state} = VM.execute(proto, state)
+    end
+
+    test "position capture mixed with normal capture" do
+      code = ~S|return string.match("abc=xyz", "()(%w+)=()")|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      # Three captures: position 1, "abc", position 5
+      assert {:ok, [1, "abc", 5], _state} = VM.execute(proto, state)
+    end
+
+    test "string.find handles literal NUL bytes in pattern" do
+      # The lexer must decode \0 as a NUL byte so the pattern "a\0o" is three
+      # bytes and matches positions 1..3 in "a\0o a\0o a\0o".
+      code = ~S|return string.find("a\0o a\0o a\0o", "a\0o")|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [1, 3], _state} = VM.execute(proto, state)
+    end
+
+    test "string.find with init past end returns nil" do
+      code = ~S|return string.find("abc", "a", 10)|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, [nil], _state} = VM.execute(proto, state)
+    end
+
+    test "gsub with end-anchored zero-width pattern does not crash" do
+      # Regression: pm.lua line 96 uses string.gsub(p, "($?)$", "()%1", 1) to
+      # append a position capture to the end of a pattern. Previously the
+      # gsub recursion blew past the end of the subject and tripped
+      # binary_part with a negative length.
+      code = ~S|return string.gsub("(..*) %2", "($?)$", "()%1", 1)|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+      assert {:ok, ["(..*) %2()", 1], _state} = VM.execute(proto, state)
     end
 
     test "lazy quantifier -" do

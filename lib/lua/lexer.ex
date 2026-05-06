@@ -5,6 +5,8 @@ defmodule Lua.Lexer do
   Tokenizes Lua source code into a list of tokens with position tracking.
   """
 
+  import Bitwise
+
   @type position :: %{line: pos_integer(), column: pos_integer(), byte_offset: non_neg_integer()}
   @type token ::
           {:keyword, atom(), position()}
@@ -353,6 +355,45 @@ defmodule Lua.Lexer do
     scan_string(remaining, str_acc, acc, new_pos, start_pos, quote)
   end
 
+  # \xXX hex escape: exactly two hex digits
+  defp scan_string(<<?\\, ?x, h1, h2, rest::binary>>, str_acc, acc, pos, start_pos, quote)
+       when h1 in ?0..?9 or h1 in ?a..?f or h1 in ?A..?F do
+    if hex?(h2) do
+      byte = hex_value(h1) * 16 + hex_value(h2)
+      scan_string(rest, str_acc <> <<byte>>, acc, advance_column(pos, 4), start_pos, quote)
+    else
+      {:error, {:invalid_escape, pos}}
+    end
+  end
+
+  defp scan_string(<<?\\, ?x, _rest::binary>>, _str_acc, _acc, pos, _start_pos, _quote) do
+    {:error, {:invalid_escape, pos}}
+  end
+
+  # \u{XXX} unicode escape (UTF-8 encoded codepoint)
+  defp scan_string(<<?\\, ?u, ?{, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
+    case scan_unicode_escape(rest, 0, 0) do
+      {:ok, codepoint, digits, after_brace} when codepoint <= 0x7FFFFFFF ->
+        utf8 = encode_lua_utf8(codepoint)
+        # consumed: \u{ + digits + }
+        scan_string(after_brace, str_acc <> utf8, acc, advance_column(pos, 4 + digits), start_pos, quote)
+
+      _ ->
+        {:error, {:invalid_escape, pos}}
+    end
+  end
+
+  # \ddd decimal escape: 1-3 decimal digits, value must fit in a byte
+  defp scan_string(<<?\\, d1, rest::binary>>, str_acc, acc, pos, start_pos, quote) when d1 in ?0..?9 do
+    {value, digits, remaining} = read_decimal_escape(d1 - ?0, 1, rest)
+
+    if value > 255 do
+      {:error, {:invalid_escape, pos}}
+    else
+      scan_string(remaining, str_acc <> <<value>>, acc, advance_column(pos, 1 + digits), start_pos, quote)
+    end
+  end
+
   defp scan_string(<<?\\, esc, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
     # Escape sequence
     case escape_char(esc) do
@@ -375,6 +416,70 @@ defmodule Lua.Lexer do
 
   defp scan_string(<<c, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
     scan_string(rest, str_acc <> <<c>>, acc, advance_column(pos, 1), start_pos, quote)
+  end
+
+  # Read up to two more decimal digits for a \ddd escape
+  defp read_decimal_escape(value, digits, <<d, rest::binary>>) when d in ?0..?9 and digits < 3 do
+    next = value * 10 + (d - ?0)
+
+    if next > 255 do
+      {value, digits, <<d, rest::binary>>}
+    else
+      read_decimal_escape(next, digits + 1, rest)
+    end
+  end
+
+  defp read_decimal_escape(value, digits, rest), do: {value, digits, rest}
+
+  # Read hex digits inside \u{...}
+  defp scan_unicode_escape(<<?}, rest::binary>>, value, digits) when digits > 0 do
+    {:ok, value, digits + 1, rest}
+  end
+
+  defp scan_unicode_escape(<<c, rest::binary>>, value, digits) when digits < 8 do
+    if hex?(c) do
+      scan_unicode_escape(rest, value * 16 + hex_value(c), digits + 1)
+    else
+      :error
+    end
+  end
+
+  defp scan_unicode_escape(_rest, _value, _digits), do: :error
+
+  defp hex?(c), do: c in ?0..?9 or c in ?a..?f or c in ?A..?F
+
+  defp hex_value(c) when c in ?0..?9, do: c - ?0
+  defp hex_value(c) when c in ?a..?f, do: c - ?a + 10
+  defp hex_value(c) when c in ?A..?F, do: c - ?A + 10
+
+  # Encode a codepoint as UTF-8. Lua 5.3 accepts codepoints up to 0x7FFFFFFF
+  # (6-byte UTF-8), beyond what Erlang's :unicode module emits, so handle the
+  # full range manually.
+  defp encode_lua_utf8(c) when c < 0x80 do
+    <<c>>
+  end
+
+  defp encode_lua_utf8(c) when c < 0x800 do
+    <<0b110_00000 ||| c >>> 6, 0b10_000000 ||| (c &&& 0b111111)>>
+  end
+
+  defp encode_lua_utf8(c) when c < 0x10000 do
+    <<0b1110_0000 ||| c >>> 12, 0b10_000000 ||| (c >>> 6 &&& 0b111111), 0b10_000000 ||| (c &&& 0b111111)>>
+  end
+
+  defp encode_lua_utf8(c) when c < 0x200000 do
+    <<0b11110_000 ||| c >>> 18, 0b10_000000 ||| (c >>> 12 &&& 0b111111), 0b10_000000 ||| (c >>> 6 &&& 0b111111),
+      0b10_000000 ||| (c &&& 0b111111)>>
+  end
+
+  defp encode_lua_utf8(c) when c < 0x4000000 do
+    <<0b111110_00 ||| c >>> 24, 0b10_000000 ||| (c >>> 18 &&& 0b111111), 0b10_000000 ||| (c >>> 12 &&& 0b111111),
+      0b10_000000 ||| (c >>> 6 &&& 0b111111), 0b10_000000 ||| (c &&& 0b111111)>>
+  end
+
+  defp encode_lua_utf8(c) do
+    <<0b1111110_0 ||| c >>> 30, 0b10_000000 ||| (c >>> 24 &&& 0b111111), 0b10_000000 ||| (c >>> 18 &&& 0b111111),
+      0b10_000000 ||| (c >>> 12 &&& 0b111111), 0b10_000000 ||| (c >>> 6 &&& 0b111111), 0b10_000000 ||| (c &&& 0b111111)>>
   end
 
   # Escape character mapping

@@ -124,19 +124,20 @@ defmodule Lua.VM.Stdlib.String do
         expected: "number"
     end
 
-    # Convert Lua 1-based indices to 0-based, handle negative indices
+    # Mirror PUC-Lua's str_sub: keep 1-based positions, then clamp.
     len = byte_size(str)
-    start_idx = normalize_index(i, len)
-    end_idx = if j == nil, do: len - 1, else: normalize_index(j, len)
+    start_pos = posrelat(i, len)
+    end_pos = if j == nil, do: -1, else: j
+    end_pos = posrelat(end_pos, len)
+
+    start_pos = if start_pos < 1, do: 1, else: start_pos
+    end_pos = if end_pos > len, do: len, else: end_pos
 
     result =
-      if start_idx > end_idx or start_idx >= len do
-        ""
+      if start_pos <= end_pos do
+        binary_part(str, start_pos - 1, end_pos - start_pos + 1)
       else
-        start_byte = max(0, start_idx)
-        end_byte = min(len - 1, end_idx)
-        length = end_byte - start_byte + 1
-        binary_part(str, start_byte, length)
+        ""
       end
 
     {[result], state}
@@ -810,6 +811,13 @@ defmodule Lua.VM.Stdlib.String do
   defp normalize_index(idx, _len) when idx > 0, do: idx - 1
   defp normalize_index(idx, len) when idx < 0, do: len + idx
   defp normalize_index(0, _len), do: 0
+
+  # PUC-Lua's posrelat: keep 1-based positions, translate negatives.
+  # Negative indices are relative to len+1 (so -1 = len). If a negative is
+  # smaller than -len, it clamps to 0 (which the caller then bumps to 1).
+  defp posrelat(pos, _len) when pos >= 0, do: pos
+  defp posrelat(pos, len) when -pos > len, do: 0
+  defp posrelat(pos, len), do: len + pos + 1
 
   # Error helpers
   defp raise_string_expected(arg_num, func_name, value) do
