@@ -2,7 +2,7 @@
 id: A16
 title: Implement Lua 5.3 _ENV semantics for global access
 issue: 186
-pr: null
+pr: 197
 branch: feat/env-semantics
 base: main
 status: review
@@ -226,3 +226,66 @@ g_ref` at install time for backwards compatibility (so introspection
 tools that read `_G._ENV` see something), but reading the global
 `_ENV` is decoupled from the chunk-level `_ENV` that free-name access
 consults.
+
+## What changed
+
+PR: [#197](https://github.com/tv-labs/lua/pull/197)
+
+### Files touched
+
+- `lib/lua/vm/state.ex` — removed `globals: %{}` field; added `g_ref`
+  field; new `get_global/2` and `globals/1` helpers; `set_global/3`
+  rewrites to `_G.data`; `new/0` allocates `_G` up-front.
+- `lib/lua/vm/stdlib.ex` — removed the `_G` metamethod proxy from
+  `install_global_g/1`; replaced internal `Map.get(state.globals, ...)`
+  reads with `State.get_global/2`.
+- `lib/lua.ex` — `Lua.set!` / `Lua.get!` use `State.set_global` /
+  `State.get_global` instead of the removed `state.globals` map.
+- `lib/lua/compiler/instruction.ex` — added `load_env(dest)` opcode
+  constructor.
+- `lib/lua/vm/executor.ex` — added `:load_env` handler; `:get_global` /
+  `:set_global` handlers now route through `State.get_global` /
+  `State.set_global`.
+- `lib/lua/compiler/scope.ex` — replaced `{:global, name}` var_ref
+  with `{:env_field, env_var_ref, name}`; chunk pre-registers `_ENV`
+  as a captured-local at register 0; nested functions eagerly resolve
+  `_ENV` as an upvalue; FuncDecl single-name target tagging moved
+  after function-body resolution; new `resolve_env_ref/1` helper.
+- `lib/lua/compiler/codegen.ex` — new `gen_env_field_get/3`,
+  `gen_env_field_set/4`, `gen_load_env/2`,
+  `compute_env_var_ref_at_codegen/1`,
+  `current_function_env_upvalue_index/1` helpers; `gen_assign_target`
+  for `{:captured_local, _}` now also emits a `move` so writes
+  propagate before any cell exists; multi-target multi-return Assign
+  reserves call-result register slots in `ctx.next_reg`; chunk
+  `generate/3` prepends `:load_env 0`; codegen ctx now carries
+  `current_function`.
+- `test/lua/vm/env_semantics_test.exs` — removed `:skip` tags;
+  refreshed module doc.
+- `test/lua/compiler/integration_test.exs` — assertions on
+  `state.globals["x"]` now use `State.get_global(state, "x")`; one
+  literal `%Lua.VM.State{globals: ...}` constructor replaced with
+  `State.set_global(State.new(), ...)`.
+
+### Suite delta
+
+- `mix test`: 1382 → 1382 passing (no regressions). Skipped count
+  36 → 32 (4 env-semantics tests un-skipped).
+- `mix test --only lua53`: 29 tests, 0 failures (unchanged).
+- Manually verified: `events.lua` now passes through line 19's
+  `_ENV`-dependent block (`X == 30 and _G.X == 20`, `B == false`,
+  `B == 30`).
+
+### Follow-up issues / plans
+
+- The `:get_global` / `:set_global` opcode handlers and constructors
+  are now vestigial (codegen no longer emits them). Removing them is
+  a small future cleanup.
+- `gen_var_by_name`'s pre-existing limitation (doesn't walk the
+  upvalue chain for FuncDecl table-chain head names) is unchanged.
+  Free-name fallback now goes via `_ENV.<name>`, which is correct Lua
+  5.3 behaviour.
+- Performance: globals access now involves an `_ENV` upvalue load
+  plus a `get_field` (table lookup) per global read/write, vs. the
+  previous direct map access. If this shows up in benchmarks, a
+  fast-path opcode for "unmodified `_ENV`" could be added.
