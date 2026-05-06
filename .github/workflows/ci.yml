@@ -15,61 +15,92 @@ permissions:
 
 jobs:
   build:
-    name: Build and test
+    name: Build and test (${{ matrix.elixir }} / OTP ${{ matrix.otp }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - elixir: "1.19.0"
+            otp: "28.0"
+            bootstrap_beam: false
+          # OTP 29 RC's :httpc can't reach builds.hex.pm, so we tell setup-beam
+          # to skip Hex/Rebar autoinstall and curl them ourselves below.
+          - elixir: "1.20.0-rc.4"
+            otp: "29.0-rc3"
+            bootstrap_beam: true
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Install LuaJIT
+      - &install-luajit
+        name: Install LuaJIT
         run: |
           sudo apt-get update
           sudo apt-get install -y luajit libluajit-5.1-dev
-      - name: Set up Elixir
+
+      - &setup-beam
+        name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18.3"
-          otp-version: "27"
-      - name: Restore dependencies cache
-        uses: actions/cache@v3
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+          version-type: strict
+          install-hex: ${{ !matrix.bootstrap_beam }}
+          install-rebar: ${{ !matrix.bootstrap_beam }}
+
+      - &bootstrap-beam
+        name: Bootstrap Hex/Rebar via curl (OTP 29 RC :httpc workaround)
+        if: matrix.bootstrap_beam
+        run: |
+          curl -fsSL --retry 3 -o /tmp/hex.ez \
+            https://builds.hex.pm/installs/1.19.0/hex-2.4.2-otp-28.ez
+          mix archive.install /tmp/hex.ez --force
+          curl -fsSL --retry 3 -o /tmp/rebar3 \
+            https://github.com/erlang/rebar3/releases/download/3.25.1/rebar3
+          chmod +x /tmp/rebar3
+          mix local.rebar rebar3 /tmp/rebar3 --force
+
+      - &cache-deps
+        name: Restore dependencies cache
+        uses: actions/cache@v4
         with:
           path: deps
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
-      - name: Install dependencies
+          key: ${{ runner.os }}-elixir${{ matrix.elixir }}-otp${{ matrix.otp }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-elixir${{ matrix.elixir }}-otp${{ matrix.otp }}-mix-
+
+      - &install-deps
+        name: Install dependencies
         run: mix deps.get
+
       - name: Run tests
         run: mix test
+
       - name: Format
         run: mix format --check-formatted
+
   lua53-suite:
     name: Lua 5.3 suite
     runs-on: ubuntu-latest
     # Reports suite pass/fail count but does not block PRs on deferred tests.
     # See ROADMAP.md "Deferred" section for files intentionally skipped.
     continue-on-error: true
+    strategy:
+      matrix:
+        include:
+          - elixir: "1.19.0"
+            otp: "28.0"
+            bootstrap_beam: false
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
-      - name: Install LuaJIT
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y luajit libluajit-5.1-dev
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: "1.18.3"
-          otp-version: "27"
-      - name: Restore dependencies cache
-        uses: actions/cache@v3
-        with:
-          path: deps
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
-      - name: Install dependencies
-        run: mix deps.get
+        uses: actions/checkout@v4
+      - *install-luajit
+      - *setup-beam
+      - *bootstrap-beam
+      - *cache-deps
+      - *install-deps
       - name: Run Lua 5.3 suite (only)
         id: suite
         run: |
@@ -149,30 +180,24 @@ jobs:
             cat suite-survey.txt
             echo "\`\`\`"
           } >> $GITHUB_STEP_SUMMARY
+
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - elixir: "1.19.0"
+            otp: "28.0"
+            bootstrap_beam: false
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Install LuaJIT
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y luajit libluajit-5.1-dev
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: "1.18.3"
-          otp-version: "27"
-      - name: Restore dependencies cache
-        uses: actions/cache@v3
-        with:
-          path: deps
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
-      - name: Install dependencies
-        run: mix deps.get
+        uses: actions/checkout@v4
+      - *install-luajit
+      - *setup-beam
+      - *bootstrap-beam
+      - *cache-deps
+      - *install-deps
       - name: Run dialyzer
         run: mix dialyzer

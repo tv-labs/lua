@@ -601,7 +601,7 @@ defmodule Lua.Parser do
       {:ok, values, rest2} ->
         # Create meta from first target's position
         meta =
-          if targets != [] and hd(targets).meta do
+          if hd(targets).meta do
             %{hd(targets).meta | start: hd(targets).meta.start || pos}
           else
             Meta.new(pos)
