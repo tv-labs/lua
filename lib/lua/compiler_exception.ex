@@ -24,19 +24,11 @@ defmodule Lua.CompilerException do
     %__MODULE__{errors: [error]}
   end
 
-  # TODO: Re-add stacktrace formatting once the new VM has stacktrace support.
-  # The old Luerl-backed implementation included stacktraces in compiler errors:
-  #
-  #   def message(%__MODULE__{errors: errors, state: state}) do
-  #     stacktrace = :luerl.get_stacktrace(state)
-  #     """
-  #     Failed to compile Lua!
-  #
-  #     #{Enum.join(errors, "\n")}
-  #
-  #     #{Util.format_stacktrace(stacktrace, state)}
-  #     """
-  #   end
+  # Compile-time errors don't have a meaningful runtime stack trace — they're
+  # produced by the lexer/parser before any code is executed. The rich source
+  # context (line, column, pointer to the offending token) is embedded in
+  # `errors` by `Lua.Parser.Error.format/2` (and the lexer's equivalent), so
+  # we just join those messages under a clear "Failed to compile" header.
   def message(%__MODULE__{errors: errors}) do
     """
     Failed to compile Lua!
