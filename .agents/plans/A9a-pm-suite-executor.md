@@ -2,13 +2,13 @@
 id: A9a
 title: Fix multi-return register expansion exposed by pm.lua
 issue: null
-pr: null
+pr: 189
 branch: fix/pm-suite-executor
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
-  - pm.lua (continuation of A9)
+  - pm.lua (continuation of A9, blocked behind A9b)
 ---
 
 ## Goal
@@ -90,4 +90,50 @@ mix test test/lua/vm/string_test.exs
 
 ## Discoveries
 
-(populated during implementation)
+The executor fix lands cleanly: `string.char(range(0, 255))` now
+returns the expected 256-byte string and pm.lua advances past line 114
+(`assert(string.len(abc) == 256)`).
+
+The next failure — pm.lua line 122, `strset('[\200-\210]')` — is a
+**pattern-engine bug**, explicitly out of scope per this plan's
+"Out of scope" section. Minimal repro: `string.gsub("abc", "[a-c]",
+"X")` returns `"abc"` instead of `"XXX"`. The gsub character-class
+matcher appears to drop matches.
+
+Split into [`A9b`](.agents/plans/A9b-pm-suite-pattern.md) — `fix/pm-suite-pattern`.
+pm.lua remains in `@skipped_tests` until A9b lands.
+
+**Implementation summary:**
+
+- Added `ensure_regs_capacity/2` helper in `lib/lua/vm/executor.ex`.
+  When a multi-return expansion would write past the end of the
+  caller's register tuple, the helper grows the tuple lazily with a
+  small headroom (16 extra slots) so back-to-back expansions don't
+  thrash. The common case (sufficient capacity) remains a single
+  `tuple_size/1` check.
+- Applied at the three call sites: the `-2` and `n > 0` arms of
+  `do_frame_return/6`, and the matching arms in `continue_after_call/12`.
+- Test coverage in `test/lua/vm/call_stack_test.exs` covers four
+  shapes: 256-value multi-return into a variadic native call,
+  100-value into a variadic native call, fixed-count assignment from a
+  large multi-return (taking only the first N), and table constructor
+  expansion from a large multi-return.
+
+## What changed
+
+PR: #189
+
+Files touched:
+
+- `lib/lua/vm/executor.ex` — `ensure_regs_capacity/2` helper, applied
+  at the three multi-return write sites (`do_frame_return/6` -2 and
+  n>0 arms, plus the matching arms in `continue_after_call/12`).
+- `test/lua/vm/call_stack_test.exs` — four new tests under the
+  "multi-return register expansion" describe block.
+
+Suite delta: pm.lua advances past line 114 but still fails at line 122.
+Remains in `@skipped_tests`. Will move to `@ready_tests` when A9b lands.
+
+Test count: 1342 → 1346 (4 new tests), 0 failures, no regressions.
+
+Follow-up: [A9b](A9b-pm-suite-pattern.md) — `fix/pm-suite-pattern`.
