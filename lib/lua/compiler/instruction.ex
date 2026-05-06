@@ -20,6 +20,13 @@ defmodule Lua.Compiler.Instruction do
   def get_global(dest, name), do: {:get_global, dest, name}
   def set_global(name, source), do: {:set_global, name, source}
 
+  # Loads the runtime `_G` table reference into `dest`. Emitted at the start
+  # of every chunk to bind `_ENV` as a chunk-level local. Plan A16 (Lua 5.3
+  # `_ENV` semantics): free names compile to `_ENV.name` field access; the
+  # chunk's `_ENV` is initialised here and inherited by nested functions
+  # via the standard upvalue chain.
+  def load_env(dest), do: {:load_env, dest}
+
   # Table operations
   def new_table(dest, array_hint \\ 0, hash_hint \\ 0), do: {:new_table, dest, array_hint, hash_hint}
 

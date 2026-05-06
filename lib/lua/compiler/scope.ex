@@ -14,7 +14,18 @@ defmodule Lua.Compiler.Scope do
           {:register, index :: non_neg_integer()}
           | {:captured_local, index :: non_neg_integer()}
           | {:upvalue, index :: non_neg_integer()}
-          | {:global, name :: binary()}
+          | {:env_field, env_var_ref :: env_var_ref(), name :: binary()}
+
+  @typedoc """
+  How `_ENV` itself is resolved at the use site of a free name. One of
+  `{:register, n}` (chunk-level), `{:captured_local, n}` (chunk-level
+  `_ENV` captured by a nested function), or `{:upvalue, n}` (most common
+  for nested functions).
+  """
+  @type env_var_ref ::
+          {:register, index :: non_neg_integer()}
+          | {:captured_local, index :: non_neg_integer()}
+          | {:upvalue, index :: non_neg_integer()}
 
   defmodule FunctionScope do
     @moduledoc false
@@ -58,8 +69,13 @@ defmodule Lua.Compiler.Scope do
   Resolves variable scopes in the AST.
 
   Returns a state containing:
-  - var_map: maps each Var node to {:register, n} | {:upvalue, n} | {:global, name}
+  - var_map: maps each Var node to {:register, n} | {:upvalue, n} | {:env_field, env_var_ref, name}
   - functions: maps each function node to its FunctionScope
+
+  Plan A16 (Lua 5.3 `_ENV` semantics): the chunk reserves register 0 for
+  an implicit `_ENV` local, holding `_G`. Free names compile to
+  `_ENV.name` field access; nested functions capture `_ENV` via the
+  standard upvalue chain.
   """
   @spec resolve(Chunk.t(), keyword()) :: {:ok, State.t()} | {:error, term()}
   def resolve(%Chunk{block: block}, _opts \\ []) do
@@ -68,6 +84,28 @@ defmodule Lua.Compiler.Scope do
     # The chunk itself is an implicit vararg function (Lua 5.3 spec)
     func_scope = %FunctionScope{is_vararg: true}
     state = %{state | current_function: :chunk, functions: %{chunk: func_scope}}
+
+    # Bind `_ENV` as a chunk-level local at register 0. Codegen emits a
+    # `load_env` instruction at the start of the chunk to populate this
+    # register; user code (and any free-name reference resolved through
+    # `_ENV`) sees it as a normal local. User-level `_ENV = ...` rebinds
+    # this register and redirects subsequent free-name access.
+    #
+    # We mark `_ENV` as captured up-front so all chunk-level `_ENV` access
+    # routes through the open-upvalue cell. This keeps reads/writes
+    # consistent regardless of whether a nested function actually captures
+    # `_ENV` later in the chunk: the executor's open-upvalue mechanism
+    # falls back to direct register access until a cell is allocated.
+    state = %{
+      state
+      | locals: %{"_ENV" => 0},
+        next_register: 1,
+        captured_locals: MapSet.put(state.captured_locals, "_ENV")
+    }
+
+    # Track max_register accordingly
+    func_scope = %{func_scope | max_register: 1}
+    state = %{state | functions: Map.put(state.functions, :chunk, func_scope)}
 
     # Resolve the chunk body
     state = resolve_block(block, state)
@@ -221,26 +259,32 @@ defmodule Lua.Compiler.Scope do
     # function-scope reference under the bare `decl` key).
     target_key = {:func_decl_target, decl}
 
-    state =
-      case Map.get(state.locals, single_name) do
-        nil ->
-          case find_upvalue(single_name, state.parent_scopes, state) do
-            {:ok, upvalue_index, state} ->
-              %{state | var_map: Map.put(state.var_map, target_key, {:upvalue, upvalue_index})}
+    # Process the function body FIRST. The body may capture this scope's
+    # locals (including `_ENV`); processing it before tagging the assignment
+    # target ensures `state.captured_locals` is fully populated when we
+    # decide between `{:register, _}` vs `{:captured_local, _}` for the
+    # target (and for `_ENV` when the target is a free name).
+    state = resolve_function_scope(decl, all_params, body, state)
 
-            :not_found ->
-              %{state | var_map: Map.put(state.var_map, target_key, {:global, single_name})}
-          end
+    case Map.get(state.locals, single_name) do
+      nil ->
+        case find_upvalue(single_name, state.parent_scopes, state) do
+          {:ok, upvalue_index, state} ->
+            %{state | var_map: Map.put(state.var_map, target_key, {:upvalue, upvalue_index})}
 
-        reg ->
-          if MapSet.member?(state.captured_locals, single_name) do
-            %{state | var_map: Map.put(state.var_map, target_key, {:captured_local, reg})}
-          else
-            %{state | var_map: Map.put(state.var_map, target_key, {:register, reg})}
-          end
-      end
+          :not_found ->
+            # Free name: compile as `_ENV.name = ...`
+            {env_ref, state} = resolve_env_ref(state)
+            %{state | var_map: Map.put(state.var_map, target_key, {:env_field, env_ref, single_name})}
+        end
 
-    resolve_function_scope(decl, all_params, body, state)
+      reg ->
+        if MapSet.member?(state.captured_locals, single_name) do
+          %{state | var_map: Map.put(state.var_map, target_key, {:captured_local, reg})}
+        else
+          %{state | var_map: Map.put(state.var_map, target_key, {:register, reg})}
+        end
+    end
   end
 
   defp resolve_statement(%Statement.FuncDecl{params: params, body: body, is_method: is_method} = decl, state) do
@@ -318,7 +362,7 @@ defmodule Lua.Compiler.Scope do
   defp resolve_expr(%Expr.Nil{}, state), do: state
 
   defp resolve_expr(%Expr.Var{name: name} = var, state) do
-    # Check if this variable is a local, upvalue, or global
+    # Check if this variable is a local, upvalue, or free name (=> _ENV.name)
     case Map.get(state.locals, name) do
       nil ->
         # Not a local — check parent scopes for upvalue
@@ -327,7 +371,9 @@ defmodule Lua.Compiler.Scope do
             %{state | var_map: Map.put(state.var_map, var, {:upvalue, upvalue_index})}
 
           :not_found ->
-            %{state | var_map: Map.put(state.var_map, var, {:global, name})}
+            # Free name: compile as `_ENV.name`
+            {env_ref, state} = resolve_env_ref(state)
+            %{state | var_map: Map.put(state.var_map, var, {:env_field, env_ref, name})}
         end
 
       reg ->
@@ -393,6 +439,41 @@ defmodule Lua.Compiler.Scope do
   # Delegates to ensure_upvalue which handles multi-level nesting correctly.
   defp find_upvalue(name, parent_scopes, state) do
     ensure_upvalue(name, state.current_function, parent_scopes, state)
+  end
+
+  # Resolve `_ENV` as a `var_ref` (`{:register, n}` | `{:captured_local, n}` |
+  # `{:upvalue, n}`) usable for env-field access at the current scope.
+  #
+  # `_ENV` is bound as register 0 of the chunk and inherits to nested
+  # functions via the standard upvalue chain. This helper handles all three
+  # cases: chunk-level register, chunk-level captured-by-nested-fn, and
+  # nested-function upvalue.
+  defp resolve_env_ref(state) do
+    case Map.get(state.locals, "_ENV") do
+      nil ->
+        # Not a local in the current function — must be reachable as an
+        # upvalue (the chunk binds `_ENV` as a local at register 0; nested
+        # functions inherit through `find_upvalue`).
+        case find_upvalue("_ENV", state.parent_scopes, state) do
+          {:ok, upvalue_index, state} ->
+            {{:upvalue, upvalue_index}, state}
+
+          :not_found ->
+            # Should never happen: the chunk always defines `_ENV`.
+            raise "Internal error: _ENV not found in scope chain (Plan A16)"
+        end
+
+      reg ->
+        # Local `_ENV` (chunk register 0, or `local _ENV = ...` in an inner
+        # function). If a nested closure has captured this register, the
+        # current function reads it through the open-upvalue cell so writes
+        # remain visible.
+        if MapSet.member?(state.captured_locals, "_ENV") do
+          {{:captured_local, reg}, state}
+        else
+          {{:register, reg}, state}
+        end
+    end
   end
 
   # ensure_upvalue(name, for_function, parent_scopes, state)
@@ -516,6 +597,26 @@ defmodule Lua.Compiler.Scope do
     }
 
     state = %{state | functions: Map.put(state.functions, func_key, func_scope)}
+
+    # Plan A16: every nested function inherits `_ENV` as an upvalue. We
+    # eagerly resolve `_ENV` before the body is processed so codegen paths
+    # that need it (notably `gen_var_by_name` for FuncDecl table-chain
+    # heads) can rely on it being present, and so the upvalue index is
+    # known up-front. If the function shadows `_ENV` with a parameter or
+    # later `local _ENV = ...`, those local bindings still take precedence
+    # for free-name resolution, which is the correct Lua 5.3 behaviour.
+    state =
+      if Map.has_key?(state.locals, "_ENV") do
+        # `_ENV` is a parameter — no upvalue allocation needed at this entry
+        # point. Inner local rebinds will be handled by normal scope rules.
+        state
+      else
+        case find_upvalue("_ENV", state.parent_scopes, state) do
+          {:ok, _index, state} -> state
+          # Should not happen: chunk always defines `_ENV` as a local.
+          :not_found -> state
+        end
+      end
 
     # Resolve the function body
     state = resolve_block(body, state)

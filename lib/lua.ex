@@ -281,7 +281,7 @@ defmodule Lua do
 
   defp do_set_nested(state, [first | rest], value) do
     # Get or allocate the table at the first key
-    case Map.get(state.globals, first) do
+    case State.get_global(state, first) do
       {:tref, _} = tref ->
         state = set_in_table(state, tref, rest, value)
         state
@@ -363,11 +363,11 @@ defmodule Lua do
   end
 
   defp do_get_nested(state, [key]) do
-    Map.get(state.globals, key)
+    State.get_global(state, key)
   end
 
   defp do_get_nested(state, [first | rest]) do
-    case Map.get(state.globals, first) do
+    case State.get_global(state, first) do
       {:tref, _} = tref ->
         get_in_table(state, tref, rest)
 

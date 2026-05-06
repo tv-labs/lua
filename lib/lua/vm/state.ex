@@ -5,8 +5,7 @@ defmodule Lua.VM.State do
 
   alias Lua.VM.Table
 
-  defstruct globals: %{},
-            call_stack: [],
+  defstruct call_stack: [],
             metatables: %{},
             upvalue_cells: %{},
             open_upvalues: %{},
@@ -15,10 +14,14 @@ defmodule Lua.VM.State do
             userdata: %{},
             userdata_next_id: 0,
             private: %{},
-            multi_return_count: 0
+            multi_return_count: 0,
+            # The `_G` table reference. Globals storage lives in this table's
+            # `data` map. Allocated by `new/0`. Plan A16: `_ENV` semantics
+            # require globals to be a real Lua table so `_ENV` reassignment
+            # can redirect global access.
+            g_ref: nil
 
   @type t :: %__MODULE__{
-          globals: map(),
           call_stack: list(),
           metatables: map(),
           upvalue_cells: map(),
@@ -27,23 +30,60 @@ defmodule Lua.VM.State do
           userdata: %{optional(non_neg_integer()) => term()},
           userdata_next_id: non_neg_integer(),
           private: map(),
-          multi_return_count: non_neg_integer()
+          multi_return_count: non_neg_integer(),
+          g_ref: nil | {:tref, non_neg_integer()}
         }
 
   @doc """
   Creates a new VM state.
+
+  Allocates an empty `_G` table to hold globals.
   """
   @spec new() :: t()
   def new do
-    %__MODULE__{}
+    state = %__MODULE__{}
+    {g_ref, state} = alloc_table(state)
+    %{state | g_ref: g_ref}
   end
 
   @doc """
+  Returns the `_G` table reference.
+  """
+  @spec g_ref(t()) :: {:tref, non_neg_integer()}
+  def g_ref(%__MODULE__{g_ref: g_ref}), do: g_ref
+
+  @doc """
   Sets a global variable in the VM state.
+
+  Writes into the `_G` table's data map. Globals storage lives entirely
+  inside the `_G` table since Plan A16 (Lua 5.3 `_ENV` semantics).
   """
   @spec set_global(t(), binary(), term()) :: t()
-  def set_global(%__MODULE__{} = state, name, value) when is_binary(name) do
-    %{state | globals: Map.put(state.globals, name, value)}
+  def set_global(%__MODULE__{g_ref: g_ref} = state, name, value) when is_binary(name) and not is_nil(g_ref) do
+    update_table(state, g_ref, fn table ->
+      %{table | data: Map.put(table.data, name, value)}
+    end)
+  end
+
+  @doc """
+  Reads a global variable from the VM state. Returns `nil` if unset.
+  """
+  @spec get_global(t(), binary()) :: term()
+  def get_global(%__MODULE__{g_ref: g_ref} = state, name) when is_binary(name) and not is_nil(g_ref) do
+    table = get_table(state, g_ref)
+    Map.get(table.data, name)
+  end
+
+  @doc """
+  Returns the underlying globals data map (read-only convenience).
+
+  Equivalent to `state._G.data`. Avoid using this for state mutation —
+  use `set_global/3` instead so that future invariants stay consistent.
+  """
+  @spec globals(t()) :: map()
+  def globals(%__MODULE__{g_ref: g_ref} = state) when not is_nil(g_ref) do
+    table = get_table(state, g_ref)
+    table.data
   end
 
   @doc """
