@@ -593,8 +593,21 @@ defmodule Lua.VM.Stdlib do
     end
   end
 
-  # Parse, compile, and execute a module file
+  # Parse, compile, and execute a module file.
+  #
+  # Caches `true` as a sentinel in `package.loaded` *before* executing the
+  # module body so that any recursive `require(modname)` call from within
+  # the body resolves to the sentinel instead of triggering another
+  # filesystem search and re-execution. This mirrors reference Lua's
+  # behavior and prevents infinite recursion when a module file's name
+  # collides with a package on the search path (e.g. a test file named
+  # `utf8.lua` calling `require'utf8'`).
+  #
+  # The sentinel is overwritten with the module's actual return value (or
+  # `true` if the module returned nothing) once execution completes.
   defp parse_and_execute_module(modname, file_path, content, state) do
+    state = cache_module_result(state, modname, true)
+
     with {:ok, ast} <- Lua.Parser.parse(content),
          {:ok, proto} <- Lua.Compiler.compile(ast),
          {:ok, results, state} <- Lua.VM.execute(proto, state) do
@@ -605,7 +618,7 @@ defmodule Lua.VM.Stdlib do
           [] -> true
         end
 
-      # Store in package.loaded
+      # Overwrite the sentinel with the actual result
       state = cache_module_result(state, modname, result)
       {[result], state}
     else
