@@ -37,7 +37,10 @@ jobs:
           key: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-
       - name: Install dependencies
-        run: mix deps.get
+        run: |
+          mix local.hex --force --if-missing
+          mix local.rebar --force --if-missing
+          mix deps.get
       - name: Run tests
         run: mix test
       - name: Format
@@ -67,7 +70,10 @@ jobs:
           key: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-
       - name: Install dependencies
-        run: mix deps.get
+        run: |
+          mix local.hex --force --if-missing
+          mix local.rebar --force --if-missing
+          mix deps.get
       - name: Run Lua 5.3 suite (only)
         id: suite
         run: |
@@ -170,6 +176,9 @@ jobs:
           key: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-
       - name: Install dependencies
-        run: mix deps.get
+        run: |
+          mix local.hex --force --if-missing
+          mix local.rebar --force --if-missing
+          mix deps.get
       - name: Run dialyzer
         run: mix dialyzer
