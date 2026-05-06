@@ -5,8 +5,9 @@ issue: 173
 pr: null
 branch: docs/0-5-0
 base: main
-status: ready
+status: blocked
 direction: A
+blocked_on: [A14, A15, A16]
 ---
 
 ## Goal
