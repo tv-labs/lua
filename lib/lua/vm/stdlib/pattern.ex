@@ -56,15 +56,23 @@ defmodule Lua.VM.Stdlib.Pattern do
   """
   def gmatch(subject, pattern) do
     {_anchored, pattern_elems} = compile(pattern)
-    gmatch_from(subject, 0, byte_size(subject), pattern_elems, [])
+    gmatch_from(subject, 0, byte_size(subject), pattern_elems, [], -1)
   end
 
-  defp gmatch_from(_subject, pos, len, _pattern, acc) when pos > len do
+  defp gmatch_from(_subject, pos, len, _pattern, acc, _lastmatch) when pos > len do
     Enum.reverse(acc)
   end
 
-  defp gmatch_from(subject, pos, len, pattern, acc) do
+  # PUC Lua's `gmatch_aux` skips a match whose end equals the previous match's
+  # end — this prevents an empty match that fires immediately after a previous
+  # non-empty match from being returned twice (once at the boundary, once on
+  # the empty-advance step).
+  defp gmatch_from(subject, pos, len, pattern, acc, lastmatch) do
     case match_pattern(subject, pos, pattern, subject) do
+      {:match, end_pos, _} when end_pos == lastmatch ->
+        # Same end as previous match — skip and try at next position.
+        gmatch_from(subject, pos + 1, len, pattern, acc, lastmatch)
+
       {:match, end_pos, captures} ->
         result =
           if captures == [] do
@@ -75,73 +83,145 @@ defmodule Lua.VM.Stdlib.Pattern do
 
         # Advance at least 1 to prevent infinite loop on empty match
         next_pos = if end_pos == pos, do: pos + 1, else: end_pos
-        gmatch_from(subject, next_pos, len, pattern, [result | acc])
+        gmatch_from(subject, next_pos, len, pattern, [result | acc], end_pos)
 
       :nomatch ->
-        gmatch_from(subject, pos + 1, len, pattern, acc)
+        gmatch_from(subject, pos + 1, len, pattern, acc, lastmatch)
     end
   end
 
   @doc """
-  Global substitution. Returns {result_string, count}.
-  `repl` is one of: binary (string), function, or table-like map.
+  Global substitution. Returns `{result_string, count}`.
+
+  `repl` is one of: binary (string), function (arity 1, `args -> result`), or
+  any other term (treated as a no-op, returning the whole match).
+
+  This entry point does NOT thread Lua VM state through the function
+  replacement — any side effects in the callback (upvalue mutation, table
+  writes) are dropped on the floor. For Lua-level `string.gsub` use
+  `gsub_stateful/5` instead.
   """
   def gsub(subject, pattern, repl, max_n \\ nil) do
     {_anchored, pattern_elems} = compile(pattern)
-    gsub_from(subject, 0, byte_size(subject), pattern_elems, repl, max_n, 0, [])
+
+    stateful_repl =
+      if is_function(repl, 1) do
+        fn args, state -> {repl.(args), state} end
+      else
+        repl
+      end
+
+    {result, count, _state} =
+      gsub_from(subject, 0, byte_size(subject), pattern_elems, stateful_repl, max_n, 0, [], nil, false)
+
+    {result, count}
   end
 
-  defp gsub_from(subject, pos, len, _pattern, _repl, max_n, count, acc)
+  @doc """
+  Stateful global substitution. Returns `{result_string, count, state}`.
+
+  When `repl` is a function it must have arity 2 — `(args, state) -> {result, state}`
+  — so callbacks that mutate Lua state (upvalues, tables) thread their
+  changes back out. String and table replacements are state-pass-through.
+  """
+  def gsub_stateful(subject, pattern, repl, state, max_n \\ nil) do
+    {_anchored, pattern_elems} = compile(pattern)
+    gsub_from(subject, 0, byte_size(subject), pattern_elems, repl, max_n, 0, [], state, false)
+  end
+
+  # Lua 5.3.3+ semantics: an empty match that starts where the *previous*
+  # match ended (with the previous match itself being empty-and-skipped, or
+  # immediately following any prior match) does not replace — we advance by
+  # one byte instead. Without this, ` *` against `a b cd` double-fires at
+  # every space boundary and produces `-a--b--c-d-` instead of `-a-b-c-d-`.
+  #
+  # The flag `skip_empty?` is set after every matched-and-applied replacement;
+  # the next iteration is allowed to fire an empty match only after we've
+  # advanced past that boundary.
+
+  defp gsub_from(subject, pos, len, _pattern, _repl, max_n, count, acc, state, _skip_empty?)
        when pos > len or (max_n != nil and count >= max_n) do
     # Append remaining subject (clamp pos so we never read past end_of_string)
     remaining =
       if pos < len, do: binary_part(subject, pos, len - pos), else: ""
 
-    {IO.iodata_to_binary([Enum.reverse(acc), remaining]), count}
+    {IO.iodata_to_binary([Enum.reverse(acc), remaining]), count, state}
   end
 
-  defp gsub_from(subject, pos, len, pattern, repl, max_n, count, acc) do
+  defp gsub_from(subject, pos, len, pattern, repl, max_n, count, acc, state, skip_empty?) do
     case match_pattern(subject, pos, pattern, subject) do
+      {:match, end_pos, _captures} when skip_empty? and end_pos == pos ->
+        # Empty match immediately after a previous match — skip without
+        # replacing, advance by one byte (or terminate at end of subject).
+        if pos < len do
+          char = <<:binary.at(subject, pos)>>
+          gsub_from(subject, pos + 1, len, pattern, repl, max_n, count, [char | acc], state, false)
+        else
+          {IO.iodata_to_binary(Enum.reverse(acc)), count, state}
+        end
+
       {:match, end_pos, captures} ->
         if max_n != nil and count >= max_n do
           remaining = binary_part(subject, pos, len - pos)
-          {IO.iodata_to_binary([Enum.reverse(acc), remaining]), count}
+          {IO.iodata_to_binary([Enum.reverse(acc), remaining]), count, state}
         else
           whole_match = binary_part(subject, pos, max(end_pos - pos, 0))
-          replacement = apply_replacement(repl, whole_match, captures)
-          next_pos = if end_pos == pos, do: pos + 1, else: end_pos
-          prefix = if end_pos == pos and pos < len, do: <<:binary.at(subject, pos)>>, else: ""
-          gsub_from(subject, next_pos, len, pattern, repl, max_n, count + 1, [prefix, replacement | acc])
+          {replacement, state} = apply_replacement(repl, whole_match, captures, state)
+          empty_match? = end_pos == pos
+          next_pos = if empty_match?, do: pos + 1, else: end_pos
+          prefix = if empty_match? and pos < len, do: <<:binary.at(subject, pos)>>, else: ""
+
+          # Only flag skip on the next iteration if THIS match was non-empty
+          # — the skip-empty rule guards against an empty match that fires
+          # immediately on the boundary of a prior non-empty match (see
+          # Lua 5.3.3 changelog). Empty matches that already advanced via
+          # `prefix` don't trigger the guard.
+          gsub_from(
+            subject,
+            next_pos,
+            len,
+            pattern,
+            repl,
+            max_n,
+            count + 1,
+            [prefix, replacement | acc],
+            state,
+            not empty_match?
+          )
         end
 
       :nomatch ->
         if pos < len do
           char = <<:binary.at(subject, pos)>>
-          gsub_from(subject, pos + 1, len, pattern, repl, max_n, count, [char | acc])
+          gsub_from(subject, pos + 1, len, pattern, repl, max_n, count, [char | acc], state, false)
         else
-          {IO.iodata_to_binary(Enum.reverse(acc)), count}
+          {IO.iodata_to_binary(Enum.reverse(acc)), count, state}
         end
     end
   end
 
-  defp apply_replacement(repl, whole_match, captures) when is_binary(repl) do
+  defp apply_replacement(repl, whole_match, captures, state) when is_binary(repl) do
     # Replace %0 with whole match, %1-%9 with captures
-    replace_captures(repl, whole_match, captures)
+    {replace_captures(repl, whole_match, captures), state}
   end
 
-  defp apply_replacement(repl, whole_match, captures) when is_function(repl) do
+  defp apply_replacement(repl, whole_match, captures, state) when is_function(repl, 2) do
     args = if captures == [], do: [whole_match], else: captures
+    {result, state} = repl.(args, state)
 
-    case repl.(args) do
-      result when is_binary(result) -> result
-      result when is_number(result) -> to_string(result)
-      false -> whole_match
-      nil -> whole_match
-      _ -> whole_match
-    end
+    replacement =
+      case result do
+        result when is_binary(result) -> result
+        result when is_number(result) -> to_string(result)
+        false -> whole_match
+        nil -> whole_match
+        _ -> whole_match
+      end
+
+    {replacement, state}
   end
 
-  defp apply_replacement(_repl, whole_match, _captures), do: whole_match
+  defp apply_replacement(_repl, whole_match, _captures, state), do: {whole_match, state}
 
   defp replace_captures("", _whole, _captures), do: ""
 
@@ -149,13 +229,21 @@ defmodule Lua.VM.Stdlib.Pattern do
     idx = c - ?0
 
     value =
-      if idx == 0 do
-        whole
-      else
-        Enum.at(captures, idx - 1) || ""
+      cond do
+        idx == 0 ->
+          whole
+
+        # Lua quirk: if the pattern has no captures, %1 refers to the
+        # whole match (PUC-Lua compatibility). Beyond %1 in that case,
+        # PUC-Lua errors; we fall back to "" to keep the engine total.
+        captures == [] and idx == 1 ->
+          whole
+
+        true ->
+          Enum.at(captures, idx - 1) || ""
       end
 
-    value <> replace_captures(rest, whole, captures)
+    capture_to_binary(value) <> replace_captures(rest, whole, captures)
   end
 
   defp replace_captures("%" <> <<c, rest::binary>>, whole, captures) do
@@ -165,6 +253,13 @@ defmodule Lua.VM.Stdlib.Pattern do
   defp replace_captures(<<c, rest::binary>>, whole, captures) do
     <<c>> <> replace_captures(rest, whole, captures)
   end
+
+  # Captures from `()` (position captures) are integers; everything else is
+  # already a binary. Coerce to a binary so iodata-flattening downstream
+  # doesn't reinterpret integers as raw bytes.
+  defp capture_to_binary(value) when is_binary(value), do: value
+  defp capture_to_binary(value) when is_integer(value), do: Integer.to_string(value)
+  defp capture_to_binary(value), do: to_string(value)
 
   # --- Pattern Compiler ---
 
@@ -267,15 +362,25 @@ defmodule Lua.VM.Stdlib.Pattern do
 
   # Match a compiled pattern against subject starting at pos.
   # Returns {:match, end_pos, captures} or :nomatch.
+  #
+  # Capture model:
+  #   `captures` is a list in OPENING order. Each entry is `{:open, start_pos}`
+  #   while a capture is in-flight, or `{:done, value}` once closed. Position
+  #   captures are appended directly as `{:done, pos+1}`.
+  #
+  #   `cstack` is a stack of indices into `captures`, pointing at the most
+  #   recently-opened-but-not-yet-closed entry. LIFO — `capture_end` always
+  #   closes the innermost open capture.
+  #
+  # This preserves the Lua-required ordering (captures numbered by opening
+  # position) even for nested groups like `(((.).).* (%w*))`.
   defp match_pattern(subject, pos, pattern, full_subject) do
     match_elements(subject, pos, pattern, full_subject, [], [])
   end
 
   # All pattern elements consumed — success
-  defp match_elements(_subject, pos, [], _full, capture_stack, captures) do
-    # Close any remaining open captures
-    final_captures = finalize_captures(capture_stack, captures)
-    {:match, pos, final_captures}
+  defp match_elements(_subject, pos, [], _full, _cstack, captures) do
+    {:match, pos, finalize_captures(captures)}
   end
 
   # Anchor end — must be at end of string
@@ -287,20 +392,23 @@ defmodule Lua.VM.Stdlib.Pattern do
     end
   end
 
-  # Capture start
+  # Capture start — append open marker, remember its index on the stack
   defp match_elements(subject, pos, [:capture_start | rest], full, cstack, captures) do
-    match_elements(subject, pos, rest, full, [{pos, nil} | cstack], captures)
+    index = length(captures)
+    match_elements(subject, pos, rest, full, [index | cstack], captures ++ [{:open, pos}])
   end
 
   # Position capture — record the current 1-based byte position as a number
   defp match_elements(subject, pos, [:position_capture | rest], full, cstack, captures) do
-    match_elements(subject, pos, rest, full, cstack, captures ++ [pos + 1])
+    match_elements(subject, pos, rest, full, cstack, captures ++ [{:done, pos + 1}])
   end
 
-  # Capture end
-  defp match_elements(subject, pos, [:capture_end | rest], full, [{start, nil} | cstack], captures) do
+  # Capture end — replace the topmost open marker with its captured value
+  defp match_elements(subject, pos, [:capture_end | rest], full, [index | cstack], captures) do
+    {:open, start} = Enum.at(captures, index)
     captured = binary_part(subject, start, pos - start)
-    match_elements(subject, pos, rest, full, cstack, captures ++ [captured])
+    captures = List.replace_at(captures, index, {:done, captured})
+    match_elements(subject, pos, rest, full, cstack, captures)
   end
 
   # Greedy star (0 or more, greedy)
@@ -339,16 +447,22 @@ defmodule Lua.VM.Stdlib.Pattern do
     end
   end
 
-  # Backref
+  # Backref — references a previously-closed capture by 1-based index.
+  # Open captures and out-of-range references fall through to :nomatch.
   defp match_elements(subject, pos, [{:backref, n} | rest], full, cstack, captures) do
-    captured = Enum.at(captures, n - 1, "")
-    cap_len = byte_size(captured)
+    case Enum.at(captures, n - 1) do
+      {:done, captured} when is_binary(captured) ->
+        cap_len = byte_size(captured)
 
-    if pos + cap_len <= byte_size(subject) and
-         binary_part(subject, pos, cap_len) == captured do
-      match_elements(subject, pos + cap_len, rest, full, cstack, captures)
-    else
-      :nomatch
+        if pos + cap_len <= byte_size(subject) and
+             binary_part(subject, pos, cap_len) == captured do
+          match_elements(subject, pos + cap_len, rest, full, cstack, captures)
+        else
+          :nomatch
+        end
+
+      _ ->
+        :nomatch
     end
   end
 
@@ -497,13 +611,26 @@ defmodule Lua.VM.Stdlib.Pattern do
   defp match_char_class(ch, ?x), do: ch in ?0..?9 or ch in ?a..?f or ch in ?A..?F
   defp match_char_class(ch, ?X), do: not (ch in ?0..?9 or ch in ?a..?f or ch in ?A..?F)
 
+  # %z — the byte with value 0 (deprecated in 5.2+, present in 5.3 reference);
+  # %Z — its complement.
+  defp match_char_class(ch, ?z), do: ch == 0
+  defp match_char_class(ch, ?Z), do: ch != 0
+
   # Escaped literal (non-alphanumeric after %)
   defp match_char_class(ch, literal), do: ch == literal
 
-  defp finalize_captures([], captures), do: captures
-
-  defp finalize_captures([{_start, nil} | _rest], _captures) do
-    # Unclosed capture — shouldn't happen with valid patterns
-    []
+  # Strip the {:done, value} wrappers in opening order. Any remaining
+  # {:open, _} entries indicate an unclosed capture, which is a pattern
+  # validity issue — fail closed by returning [].
+  defp finalize_captures(captures) do
+    captures
+    |> Enum.reduce_while([], fn
+      {:done, value}, acc -> {:cont, [value | acc]}
+      {:open, _}, _acc -> {:halt, :unclosed}
+    end)
+    |> case do
+      :unclosed -> []
+      acc -> Enum.reverse(acc)
+    end
   end
 end
