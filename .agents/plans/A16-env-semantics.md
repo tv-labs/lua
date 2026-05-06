@@ -5,7 +5,7 @@ issue: 186
 pr: null
 branch: feat/env-semantics
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - events.lua
@@ -137,4 +137,92 @@ mix test test/language/global_test.exs
 
 ## Discoveries
 
-(populated during implementation)
+### Storage migration: globals now live in `_G.data`
+
+Chose option 2 from the plan's "globals storage strategy" — moved global
+storage out of the flat `state.globals` map and into the `_G` table's
+`data` field. `State.new/0` now allocates `_G` up-front and stores its
+tref in `state.g_ref`. New `State.get_global/2` and updated
+`State.set_global/3` read/write `_G.data`. The `_G` metatable proxy
+(`__index`/`__newindex` routing to `state.globals`) is gone — globals
+are just real table fields now.
+
+This was cleaner than option 1 ("keep `state.globals` and sync with
+`_G`") and avoids an ongoing sync-risk surface. Host API (`Lua.set!` /
+`Lua.get!`) continues to work transparently because they now go through
+`State.get_global`/`set_global`.
+
+### `_ENV` as a chunk-level local at register 0
+
+The chunk reserves register 0 for `_ENV`. Codegen emits a new
+`:load_env` opcode at the start of every chunk that copies
+`state.g_ref` into register 0. User-level `_ENV = ...` becomes a normal
+assignment to that local; nested functions inherit `_ENV` via the
+existing upvalue chain.
+
+`_ENV` is unconditionally marked as a captured-local at the chunk
+level. This guarantees that any later capture by a nested function
+(which creates the open-upvalue cell) sees a consistent value, and that
+chunk-level `_ENV` access always uses `get_open_upvalue` /
+`set_open_upvalue` — which fall back to direct register I/O when no
+cell exists yet.
+
+### `set_open_upvalue` no longer relies on a prior register write
+
+Previously, `gen_assign_target` for `{:captured_local, _}` emitted only
+`set_open_upvalue` and relied on the (informal) invariant that the
+register already held the value before the cell was created. That worked
+for the existing call sites but broke under Plan A16 because chunk-level
+`_ENV` is now captured-local from the very first instruction, before any
+closure has run. Updated `gen_assign_target` to emit a `move` *and* the
+`set_open_upvalue` so writes propagate regardless of cell-allocation
+state.
+
+### Multi-target assignment to free names: register reservation fix
+
+In `Statement.Assign` codegen for `[a, b] = f()` (multi-return call), the
+post-call `ctx.next_reg` only advanced past the *first* result register.
+Old code emitted `set_global` per target, which doesn't allocate temp
+registers — so it accidentally worked. New code emits `_ENV.<name> = ...`
+which loads `_ENV` into a temp register, and the temp allocation
+clobbered subsequent call result registers. Fix: bump `ctx.next_reg`
+past all the call's expanded result slots after `gen_expr(call, ctx)`.
+
+### FuncDecl target resolution moved after body resolution
+
+The `Statement.FuncDecl{name: [single_name]}` resolver used to tag the
+target *before* recursing into the function body. Under A16 that
+ordering was wrong: the body may capture `_ENV` from the chunk, and
+`captured_locals` (and the `_ENV` upvalue chain in nested functions) is
+only finalised after the body is processed. Now we resolve the body
+first, then tag the target. This is a generalisation that doesn't change
+behaviour for any non-`_ENV` case.
+
+### Eager `_ENV` upvalue allocation in every nested function
+
+`resolve_function_scope` now eagerly walks `find_upvalue("_ENV", ...)`
+for every nested function it processes. This guarantees `_ENV` is
+always available as an upvalue regardless of whether the function body
+references any free name explicitly — required because the
+`gen_var_by_name` path (used for FuncDecl table-chain heads like
+`function obj.method`) needs to look up `_ENV` at codegen time without
+re-walking the scope chain.
+
+### `:get_global` / `:set_global` opcodes are now vestigial
+
+Codegen no longer emits these instructions; all global access goes
+through `_ENV` field access. The opcode handlers and constructors
+remain in place (`Instruction.get_global/2`, `Instruction.set_global/2`,
+the executor `do_execute` clauses) for forward-compatibility with any
+external prototypes or hand-written instruction sequences. They could
+be removed in a follow-up cleanup.
+
+### `_ENV` is no longer registered as a global
+
+`install_global_g/1` previously stored `_ENV` as a global aliasing
+`_G`. With `_ENV` now living in chunk register 0, that global slot is
+no longer the source of truth. We still set `state.globals["_ENV"] =
+g_ref` at install time for backwards compatibility (so introspection
+tools that read `_G._ENV` see something), but reading the global
+`_ENV` is decoupled from the chunk-level `_ENV` that free-name access
+consults.
