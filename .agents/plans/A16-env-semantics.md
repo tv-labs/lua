@@ -5,7 +5,7 @@ issue: 186
 pr: null
 branch: feat/env-semantics
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - events.lua
