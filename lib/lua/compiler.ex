@@ -29,9 +29,13 @@ defmodule Lua.Compiler do
   """
   @spec compile!(Chunk.t(), compile_opts()) :: Prototype.t()
   def compile!(%Chunk{} = chunk, opts \\ []) do
+    # `compile/2`'s spec allows `{:error, _}` for forward compatibility, but the
+    # codegen path doesn't yet have an error-returning code path — codegen
+    # surfaces unsupported constructs by raising directly. Once codegen is
+    # converted to thread `{:ok, _} | {:error, _}` through every clause, swap
+    # this back to a `case` that re-raises `{:error, reason}` as a clear
+    # compiler exception.
     {:ok, prototype} = compile(chunk, opts)
     prototype
-    # TODO bring back when the compiler can return errors 
-    # {:error, reason} -> raise "Compilation failed: #{inspect(reason)}"
   end
 end

@@ -79,4 +79,106 @@ defmodule Lua.Language.LoadTest do
 
     assert {[true], _} = Lua.eval!(lua, code)
   end
+
+  describe "load with a reader function" do
+    setup do
+      %{lua: Lua.new(sandboxed: [])}
+    end
+
+    test "concatenates pieces returned by the reader", %{lua: lua} do
+      code = ~S"""
+      local pieces = {"return 1", " + ", "2 + 3"}
+      local i = 0
+      local function reader()
+        i = i + 1
+        return pieces[i]
+      end
+      local f = load(reader)
+      return f()
+      """
+
+      assert {[6], _} = Lua.eval!(lua, code)
+    end
+
+    test "ends the chunk when the reader returns nil", %{lua: lua} do
+      code = ~S"""
+      local pieces = {"return ", "42"}
+      local i = 0
+      local function reader()
+        i = i + 1
+        return pieces[i]  -- becomes nil after the last piece
+      end
+      local f = load(reader)
+      return f()
+      """
+
+      assert {[42], _} = Lua.eval!(lua, code)
+    end
+
+    test "ends the chunk when the reader returns an empty string", %{lua: lua} do
+      code = ~S"""
+      local pieces = {"return ", "7", ""}
+      local i = 0
+      local function reader()
+        i = i + 1
+        return pieces[i]
+      end
+      local f = load(reader)
+      return f()
+      """
+
+      assert {[7], _} = Lua.eval!(lua, code)
+    end
+
+    test "ends the chunk when the reader returns no value", %{lua: lua} do
+      code = ~S"""
+      local called = false
+      local function reader()
+        if called then return end
+        called = true
+        return "return 99"
+      end
+      local f = load(reader)
+      return f()
+      """
+
+      assert {[99], _} = Lua.eval!(lua, code)
+    end
+
+    test "returns nil and an error message when the reader returns a non-string", %{lua: lua} do
+      code = ~S"""
+      local function reader()
+        return 42
+      end
+      local f, err = load(reader)
+      return f == nil, type(err) == "string"
+      """
+
+      assert {[true, true], _} = Lua.eval!(lua, code)
+    end
+
+    test "returns nil and an error message when the reader-supplied source has a syntax error", %{lua: lua} do
+      code = ~S"""
+      local pieces = {"return 1 +", ""}
+      local i = 0
+      local function reader()
+        i = i + 1
+        return pieces[i]
+      end
+      local f, err = load(reader)
+      return f == nil, type(err) == "string"
+      """
+
+      assert {[true, true], _} = Lua.eval!(lua, code)
+    end
+
+    test "rejects non-string non-function arguments", %{lua: lua} do
+      code = ~S"""
+      local f, err = load(42)
+      return f == nil, type(err) == "string"
+      """
+
+      assert {[true, true], _} = Lua.eval!(lua, code)
+    end
+  end
 end

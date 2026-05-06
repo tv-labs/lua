@@ -410,14 +410,73 @@ defmodule Lua.VM.Stdlib do
   end
 
   # load(chunk, chunkname, mode, env) — loads a Lua chunk
-  # chunk can be a string
-  # Returns compiled function or (nil, error message)
+  # `chunk` may be either a string or a reader function. A reader function
+  # is called repeatedly; each call must return a string piece, and the
+  # chunk ends when it returns nil, an empty string, or no value.
+  # Returns the compiled function, or (nil, error message) on failure.
   defp lua_load([chunk | _rest], state) when is_binary(chunk) do
-    case Lua.Parser.parse(chunk) do
+    compile_loaded_chunk(chunk, state)
+  end
+
+  defp lua_load([{:lua_closure, _, _} = reader | _rest], state) do
+    load_from_reader(reader, state)
+  end
+
+  defp lua_load([{:native_func, _} = reader | _rest], state) do
+    load_from_reader(reader, state)
+  end
+
+  defp lua_load([_other | _], state) do
+    # Lua 5.3 reference: "If chunk is not a string, load also accepts a
+    # function value." Anything else is rejected.
+    {[nil, "bad argument #1 to 'load' (string or function expected)"], state}
+  end
+
+  defp lua_load([], _state) do
+    raise ArgumentError.value_expected("load", 1)
+  end
+
+  # Calls the reader function in a loop, accumulating string pieces until
+  # it signals end-of-chunk (nil or ""). Bails out with `(nil, error_msg)`
+  # if the reader ever returns a non-string non-nil value, mirroring the
+  # behavior of Lua 5.3's reference implementation.
+  defp load_from_reader(reader, state) do
+    case collect_reader_chunks(reader, state, []) do
+      {:ok, source, state} ->
+        compile_loaded_chunk(source, state)
+
+      {:error, msg, state} ->
+        {[nil, msg], state}
+    end
+  end
+
+  defp collect_reader_chunks(reader, state, acc) do
+    {results, state} = Executor.call_function(reader, [], state)
+
+    case results do
+      [] ->
+        {:ok, IO.iodata_to_binary(Enum.reverse(acc)), state}
+
+      [nil | _] ->
+        {:ok, IO.iodata_to_binary(Enum.reverse(acc)), state}
+
+      ["" | _] ->
+        {:ok, IO.iodata_to_binary(Enum.reverse(acc)), state}
+
+      [piece | _] when is_binary(piece) ->
+        collect_reader_chunks(reader, state, [piece | acc])
+
+      [bad | _] ->
+        {:error, "reader function must return a string (got #{Value.type_name(bad)})", state}
+    end
+  end
+
+  defp compile_loaded_chunk(source, state) do
+    case Lua.Parser.parse(source) do
       {:ok, ast} ->
-        # Compiler currently never returns errors, always succeeds
+        # Compiler currently never returns errors, always succeeds — see
+        # `Lua.Compiler.compile!/2` for the matching note.
         {:ok, prototype} = Lua.Compiler.compile(ast)
-        # Create a closure from the compiled prototype
         closure = {:lua_closure, prototype, {}}
         {[closure], state}
 
@@ -425,16 +484,6 @@ defmodule Lua.VM.Stdlib do
         error_msg = format_parse_error(reason)
         {[nil, error_msg], state}
     end
-  end
-
-  defp lua_load([non_string | _], state) when not is_binary(non_string) do
-    # For now, only support string chunks
-    # TODO: Support function chunks and reader functions
-    {[nil, "load only supports string chunks currently"], state}
-  end
-
-  defp lua_load([], _state) do
-    raise ArgumentError.value_expected("load", 1)
   end
 
   defp format_parse_error(error) when is_binary(error), do: error
