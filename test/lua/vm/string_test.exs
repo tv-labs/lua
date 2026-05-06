@@ -1414,7 +1414,8 @@ defmodule Lua.VM.StringTest do
               int <- integer(-999..999),
               width <- integer(1..15)
             ) do
-        result = run_format("return string.format(\"%#{width}d\", #{int})", state)
+        width_str = Integer.to_string(width)
+        result = run_format("return string.format(\"%#{width_str}d\", #{int})", state)
         assert String.length(result) >= width
         assert String.trim(result) == Integer.to_string(int)
       end
@@ -1425,7 +1426,8 @@ defmodule Lua.VM.StringTest do
               int <- integer(0..999),
               width <- integer(5..12)
             ) do
-        result = run_format("return string.format(\"%-#{width}d\", #{int})", state)
+        width_str = Integer.to_string(width)
+        result = run_format("return string.format(\"%-#{width_str}d\", #{int})", state)
         assert String.length(result) >= width
         # Left-justified: no leading spaces, trailing spaces
         refute String.starts_with?(result, " ")
@@ -1462,7 +1464,8 @@ defmodule Lua.VM.StringTest do
               precision <- integer(1..10)
             ) do
         escaped = escape_string(str)
-        result = run_format("return string.format(\"%.#{precision}s\", \"#{escaped}\")", state)
+        precision_str = Integer.to_string(precision)
+        result = run_format("return string.format(\"%.#{precision_str}s\", \"#{escaped}\")", state)
         assert String.length(result) <= precision
         # Result should be a prefix of the original
         assert String.starts_with?(str, result)

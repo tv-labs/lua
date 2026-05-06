@@ -20,23 +20,22 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install LuaJIT
         run: |
           sudo apt-get update
           sudo apt-get install -y luajit libluajit-5.1-dev
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+      - name: Install Elixir/Erlang (mise)
+        uses: jdx/mise-action@v4
         with:
-          elixir-version: "1.18.3"
-          otp-version: "27"
+          install_args: "erlang elixir"
       - name: Restore dependencies cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: deps
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
+          key: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-
       - name: Install dependencies
         run: mix deps.get
       - name: Run tests
@@ -52,22 +51,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Install LuaJIT
         run: |
           sudo apt-get update
           sudo apt-get install -y luajit libluajit-5.1-dev
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+      - name: Install Elixir/Erlang (mise)
+        uses: jdx/mise-action@v4
         with:
-          elixir-version: "1.18.3"
-          otp-version: "27"
+          install_args: "erlang elixir"
       - name: Restore dependencies cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: deps
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
+          key: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-
       - name: Install dependencies
         run: mix deps.get
       - name: Run Lua 5.3 suite (only)
@@ -155,23 +153,22 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install LuaJIT
         run: |
           sudo apt-get update
           sudo apt-get install -y luajit libluajit-5.1-dev
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+      - name: Install Elixir/Erlang (mise)
+        uses: jdx/mise-action@v4
         with:
-          elixir-version: "1.18.3"
-          otp-version: "27"
+          install_args: "erlang elixir"
       - name: Restore dependencies cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: deps
-          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
+          key: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-
       - name: Install dependencies
         run: mix deps.get
       - name: Run dialyzer
