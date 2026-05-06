@@ -15,8 +15,20 @@ permissions:
 
 jobs:
   build:
-    name: Build and test
+    name: Build and test (${{ matrix.elixir }} / OTP ${{ matrix.otp }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - elixir: "1.19.0"
+            otp: "28.0"
+            install_rebar: true
+          # OTP 29 RC's :httpc can't reach builds.hex.pm, so let setup-beam
+          # skip the rebar autoinstall and we curl it ourselves below.
+          - elixir: "1.20.0-rc.4"
+            otp: "29.0-rc3"
+            install_rebar: false
 
     steps:
       - name: Checkout
@@ -28,28 +40,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y luajit libluajit-5.1-dev
 
-      - &read-versions
-        name: Read versions from mise.toml
-        id: versions
-        run: |
-          elixir=$(awk -F'"' '/^elixir/{print $2}' mise.toml)
-          echo "elixir=${elixir%-otp-*}" >> "$GITHUB_OUTPUT"
-          awk -F'"' '/^erlang/{print "otp=" $2}' mise.toml >> "$GITHUB_OUTPUT"
-
       - &setup-beam
         name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{ steps.versions.outputs.elixir }}
-          otp-version: ${{ steps.versions.outputs.otp }}
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+          version-type: strict
+          install-rebar: ${{ matrix.install_rebar }}
+
+      - &install-rebar-manually
+        name: Install rebar3 (when setup-beam skipped it)
+        if: matrix.install_rebar == false
+        run: |
+          curl -fsSL --retry 3 -o /tmp/rebar3 \
+            https://github.com/erlang/rebar3/releases/download/3.25.1/rebar3
+          chmod +x /tmp/rebar3
+          mix local.rebar rebar3 /tmp/rebar3 --force
 
       - &cache-deps
         name: Restore dependencies cache
         uses: actions/cache@v4
         with:
           path: deps
-          key: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-${{ hashFiles('**/mix.lock') }}
-          restore-keys: ${{ runner.os }}-${{ hashFiles('mise.toml') }}-mix-
+          key: ${{ runner.os }}-elixir${{ matrix.elixir }}-otp${{ matrix.otp }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-elixir${{ matrix.elixir }}-otp${{ matrix.otp }}-mix-
 
       - &install-deps
         name: Install dependencies
@@ -67,13 +82,19 @@ jobs:
     # Reports suite pass/fail count but does not block PRs on deferred tests.
     # See ROADMAP.md "Deferred" section for files intentionally skipped.
     continue-on-error: true
+    strategy:
+      matrix:
+        include:
+          - elixir: "1.19.0"
+            otp: "28.0"
+            install_rebar: true
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - *install-luajit
-      - *read-versions
       - *setup-beam
+      - *install-rebar-manually
       - *cache-deps
       - *install-deps
       - name: Run Lua 5.3 suite (only)
@@ -159,13 +180,19 @@ jobs:
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - elixir: "1.19.0"
+            otp: "28.0"
+            install_rebar: true
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - *install-luajit
-      - *read-versions
       - *setup-beam
+      - *install-rebar-manually
       - *cache-deps
       - *install-deps
       - name: Run dialyzer
