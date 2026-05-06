@@ -297,19 +297,39 @@ defmodule Lua.VM.Executor do
 
   # ── get_open_upvalue ───────────────────────────────────────────────────────
 
+  # Read a captured-local value, preferring the upvalue cell when one exists.
+  # If no cell has been created yet (no closure has captured this register),
+  # the register itself is the source of truth -- the next closure that
+  # captures the register will create a cell from the current register value.
   defp do_execute([{:get_open_upvalue, dest, reg} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    cell_ref = Map.fetch!(state.open_upvalues, reg)
-    value = Map.get(state.upvalue_cells, cell_ref)
+    value =
+      case Map.get(state.open_upvalues, reg) do
+        nil -> elem(regs, reg)
+        cell_ref -> Map.get(state.upvalue_cells, cell_ref)
+      end
+
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
   # ── set_open_upvalue ───────────────────────────────────────────────────────
 
+  # Write a captured-local value through the upvalue cell when one exists.
+  # If no cell has been created yet, this is a no-op: the register already
+  # holds the value (codegen always emits a move into the register before
+  # set_open_upvalue), and the next closure that captures the register will
+  # create a cell from the current register value.
   defp do_execute([{:set_open_upvalue, reg, source} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    cell_ref = Map.fetch!(state.open_upvalues, reg)
-    value = elem(regs, source)
-    state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
+    state =
+      case Map.get(state.open_upvalues, reg) do
+        nil ->
+          state
+
+        cell_ref ->
+          value = elem(regs, source)
+          %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
+      end
+
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 

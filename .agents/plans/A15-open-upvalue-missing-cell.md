@@ -2,10 +2,10 @@
 id: A15
 title: set_open_upvalue / get_open_upvalue crash when cell is missing
 issue: null
-pr: null
+pr: 196
 branch: fix/open-upvalue-missing-cell
 base: main
-status: ready
+status: review
 direction: A
 unlocks:
   - sort.lua
@@ -127,4 +127,88 @@ Capture suite delta in PR body.
 
 ## Discoveries
 
-(populated during implementation)
+### Root cause
+
+The codegen for `Statement.LocalFunc` in `lib/lua/compiler/codegen.ex` (around
+line 684) decided whether to emit `set_open_upvalue` based on
+`MapSet.member?(ctx.scope.captured_locals, name)`. `captured_locals` is the
+*final* set of parent-locals captured by *any* descendant closure across the
+current scope -- it is computed by scope analysis across the full block
+before codegen runs.
+
+That made the check too permissive. For non-recursive `local function L`,
+the closure for `L` doesn't capture itself, so no upvalue cell is created
+when the closure instruction runs. But if a *later* sibling closure
+captures `L` by name, `captured_locals` contains `L`, so codegen emitted a
+`set_open_upvalue` immediately after `move dest_reg, closure_reg`. That
+instruction crashed with `key N not found in: %{}` because the cell only
+gets created later, when the sibling closure's `closure` instruction
+executes.
+
+A second, structurally identical bug lived in `gen_var_by_name` (around
+line 1313). It emitted `get_open_upvalue` for FuncDecl table-chain targets
+(`function obj.method() end`) when `obj` was captured by a later closure.
+Same crash shape, different opcode.
+
+### Fix
+
+Two complementary changes:
+
+1. **Compiler-level (codegen.ex)**: In `LocalFunc`, only emit
+   `set_open_upvalue` when the function's own closure captures itself --
+   the genuine recursive case. The check uses the closure's
+   `upvalue_descriptors` instead of the surrounding scope's
+   `captured_locals`. This eliminates the wasteful, broken emission for
+   non-recursive locals.
+
+2. **Executor-level (executor.ex)**: Make `get_open_upvalue` and
+   `set_open_upvalue` cell-aware. If the register has no entry in
+   `open_upvalues`, the register itself is the source of truth -- read
+   from / write to it directly. The next closure that captures the
+   register will create a cell from the current register value via the
+   existing `closure` handler logic. This handles `gen_var_by_name` and
+   any other downstream sites the compiler can't easily detect at codegen
+   time.
+
+### Suite delta
+
+`sort.lua`, `strings.lua`, `verybig.lua` all now make further progress:
+
+- `sort.lua` reaches an `assert` failure inside `checkerror("wrong number of
+  arguments", table.insert, ...)` -- our `table.insert` raises with a
+  message that doesn't match `"wrong number of arguments"` ("bad argument
+  #1 to 'table.insert' (table expected, got table)"). Out of scope for A15.
+- `strings.lua` reaches an `assert` failure inside
+  `testing strings and string library` -- separate stdlib issue.
+- `verybig.lua` reaches `os.tmpname()` which is sandboxed by default.
+
+None of the three now crash with the original `key N not found in: %{}`
+shape. The lua53 suite keeps these files in `@skipped_tests` until those
+downstream bugs are also fixed; this plan only unblocks them, it does not
+flip them to ready.
+
+## What changed
+
+PR: https://github.com/tv-labs/lua/pull/196
+
+Files touched:
+
+- `lib/lua/compiler/codegen.ex` -- only emit `set_open_upvalue` for
+  `LocalFunc` when the closure captures itself (recursive case). Adds
+  `captures_self?/3` helper.
+- `lib/lua/vm/executor.ex` -- `get_open_upvalue` falls back to reading
+  the register when no cell exists; `set_open_upvalue` is a no-op in
+  that case (the register already holds the correct value).
+- `test/lua/vm/upvalue_test.exs` -- new file with 7 regression tests
+  covering the LocalFunc-sibling-capture case, the FuncDecl
+  table-chain-capture case, the recursive case (still works), and a
+  shared-upvalue-cell case.
+
+Test delta: `mix test` 1375 → 1382 (1373 unchanged + 7 new + 2
+existing-but-untouched-by-this-change net of for-loop-register tests
+that landed concurrently in main). 0 failures, 0 regressions.
+
+Suite delta (`mix test --only lua53`): no change (29 tests, 0 failures,
+25 skipped). The three unblocked files (`sort.lua`, `strings.lua`,
+`verybig.lua`) stay in `@skipped_tests` until their downstream failures
+are fixed -- those are separate plans.

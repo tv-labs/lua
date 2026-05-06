@@ -678,10 +678,15 @@ defmodule Lua.Compiler.Codegen do
         [Instruction.move(dest_reg, closure_reg)]
       end
 
-    # If this local is captured by the inner function (e.g., recursive local function),
-    # also update the open upvalue cell so the closure can reference itself
+    # If this local function captures itself (recursive local function),
+    # update the open upvalue cell so the closure can reference its final value.
+    # The cell is created by the closure instruction above (executor.ex closure
+    # handler creates a cell on capture). We must NOT emit set_open_upvalue
+    # based on whether the name is captured by *any* sibling/descendant
+    # closure -- those closures will create their own cells later when they
+    # run, reading the current register value at that point.
     update_upvalue =
-      if MapSet.member?(ctx.scope.captured_locals, name) do
+      if captures_self?(local_func, name, ctx) do
         [Instruction.set_open_upvalue(dest_reg, closure_reg)]
       else
         []
@@ -1357,6 +1362,24 @@ defmodule Lua.Compiler.Codegen do
     ctx = %{ctx | next_reg: dest_reg + 1}
 
     {[Instruction.closure(dest_reg, proto_index)], dest_reg, ctx}
+  end
+
+  # Returns true when the closure for `local_func` captures its own name as a
+  # parent_local upvalue -- i.e. the recursive case
+  # `local function f() ... f() ... end`. We use the closure's own
+  # upvalue_descriptors (not the surrounding scope's captured_locals set) so
+  # that sibling captures of the same name don't trigger a spurious
+  # set_open_upvalue against a cell that doesn't exist yet.
+  defp captures_self?(local_func, name, ctx) do
+    with {:ok, func_key} <- Map.fetch(ctx.scope.var_map, local_func),
+         {:ok, func_scope} <- Map.fetch(ctx.scope.functions, func_key) do
+      Enum.any?(func_scope.upvalue_descriptors, fn
+        {:parent_local, _reg, captured_name} -> captured_name == name
+        _ -> false
+      end)
+    else
+      _ -> false
+    end
   end
 
   # Move argument values to their expected contiguous positions (base_start+i)
