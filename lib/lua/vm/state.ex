@@ -61,7 +61,7 @@ defmodule Lua.VM.State do
   @spec set_global(t(), binary(), term()) :: t()
   def set_global(%__MODULE__{g_ref: g_ref} = state, name, value) when is_binary(name) and not is_nil(g_ref) do
     update_table(state, g_ref, fn table ->
-      %{table | data: Map.put(table.data, name, value)}
+      %{table | data: Table.put_data(table.data, name, value)}
     end)
   end
 

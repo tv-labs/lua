@@ -11,6 +11,7 @@ defmodule Lua.VM.Stdlib do
   alias Lua.VM.Executor
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
+  alias Lua.VM.Table
   alias Lua.VM.TypeError
   alias Lua.VM.Value
 
@@ -246,14 +247,14 @@ defmodule Lua.VM.Stdlib do
   # rawget(table, key) — get without metamethods
   defp lua_rawget([{:tref, id}, key | _], state) do
     table = Map.fetch!(state.tables, id)
-    {[Map.get(table.data, key)], state}
+    {[Table.get_data(table.data, key)], state}
   end
 
   # rawset(table, key, value) — set without metamethods
   defp lua_rawset([{:tref, _} = tref, key, value | _], state) do
     state =
       State.update_table(state, tref, fn table ->
-        %{table | data: Map.put(table.data, key, value)}
+        %{table | data: Table.put_data(table.data, key, value)}
       end)
 
     {[tref], state}
@@ -280,7 +281,7 @@ defmodule Lua.VM.Stdlib do
 
   # next(table [, key]) — returns next key-value pair after key
   defp lua_next([{:tref, id} | rest], state) do
-    key = List.first(rest)
+    key = rest |> List.first() |> Table.normalize_key()
     table = Map.fetch!(state.tables, id)
 
     case find_next_entry(table.data, key) do
@@ -302,7 +303,14 @@ defmodule Lua.VM.Stdlib do
   end
 
   defp find_next_entry(data, key) do
-    # Walk the iterator until we find key, then return the next entry
+    # Walk the iterator until we find key, then return the next entry.
+    # NOTE: Lua 5.3 §6.1 says `next(t, k)` should error when `k` is not
+    # present in `t`. We can't yet emit that error reliably because we
+    # don't track "dead keys" — when a for-in loop sets `t[k] = nil`
+    # mid-iteration, real Lua keeps the key reachable in the hash chain
+    # so iteration continues. Until that lands (plan A7a), be lenient
+    # and treat a missing key as end-of-iteration. Direct `next(t, bad)`
+    # calls therefore return nil, nil instead of raising "invalid key".
     iter = :maps.iterator(data)
     find_after_key(iter, key)
   end
@@ -329,6 +337,10 @@ defmodule Lua.VM.Stdlib do
     {[next_func, tref, nil], state}
   end
 
+  defp lua_pairs([], _state), do: raise(ArgumentError.value_expected("pairs", 1))
+
+  defp lua_pairs([v | _], _state), do: raise(ArgumentError.type_error("pairs", 1, "table", Value.type_name(v)))
+
   # ipairs(table) — returns iterator function, table, 0
   defp lua_ipairs([{:tref, _} = tref | _], state) do
     iterator =
@@ -346,6 +358,10 @@ defmodule Lua.VM.Stdlib do
 
     {[iterator, tref, 0], state}
   end
+
+  defp lua_ipairs([], _state), do: raise(ArgumentError.value_expected("ipairs", 1))
+
+  defp lua_ipairs([v | _], _state), do: raise(ArgumentError.type_error("ipairs", 1, "table", Value.type_name(v)))
 
   # select(index, ...) — returns arguments starting from index
   # select('#', ...) — returns count of arguments

@@ -16,6 +16,7 @@ defmodule Lua.VM.Executor do
   alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
+  alias Lua.VM.Table
   alias Lua.VM.TypeError
   alias Lua.VM.Value
 
@@ -1075,7 +1076,7 @@ defmodule Lua.VM.Executor do
           if total > 0 do
             Enum.reduce(0..(total - 1), table.data, fn i, data ->
               value = elem(regs, start + i)
-              Map.put(data, offset + i + 1, value)
+              Table.put_data(data, offset + i + 1, value)
             end)
           else
             table.data
@@ -1101,7 +1102,7 @@ defmodule Lua.VM.Executor do
             if values_to_collect > 0 do
               Enum.reduce(0..(values_to_collect - 1), table.data, fn i, data ->
                 value = elem(regs, start + i)
-                Map.put(data, offset + i + 1, value)
+                Table.put_data(data, offset + i + 1, value)
               end)
             else
               table.data
@@ -1109,7 +1110,7 @@ defmodule Lua.VM.Executor do
           else
             Enum.reduce(1..count, table.data, fn i, data ->
               value = elem(regs, start + i - 1)
-              Map.put(data, offset + i, value)
+              Table.put_data(data, offset + i, value)
             end)
           end
 
@@ -1434,7 +1435,7 @@ defmodule Lua.VM.Executor do
 
     table = Map.fetch!(state.tables, id)
 
-    case Map.get(table.data, key) do
+    case Table.get_data(table.data, key) do
       nil ->
         case table.metatable do
           nil ->
@@ -1468,15 +1469,15 @@ defmodule Lua.VM.Executor do
 
     table = Map.fetch!(state.tables, id)
 
-    if Map.has_key?(table.data, key) do
+    if Table.has_data?(table.data, key) do
       State.update_table(state, {:tref, id}, fn t ->
-        %{t | data: Map.put(t.data, key, value)}
+        %{t | data: Table.put_data(t.data, key, value)}
       end)
     else
       case table.metatable do
         nil ->
           State.update_table(state, {:tref, id}, fn t ->
-            %{t | data: Map.put(t.data, key, value)}
+            %{t | data: Table.put_data(t.data, key, value)}
           end)
 
         {:tref, mt_id} ->
@@ -1485,7 +1486,7 @@ defmodule Lua.VM.Executor do
           case Map.get(mt.data, "__newindex") do
             nil ->
               State.update_table(state, {:tref, id}, fn t ->
-                %{t | data: Map.put(t.data, key, value)}
+                %{t | data: Table.put_data(t.data, key, value)}
               end)
 
             {:tref, _} = newindex_table ->
