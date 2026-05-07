@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: fix/nextvar-dead-keys
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - nextvar.lua
