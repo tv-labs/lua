@@ -15,6 +15,7 @@ defmodule Lua.VM.Stdlib.Math do
   - `math.cos(x)` - Returns the cosine of x (in radians)
   - `math.exp(x)` - Returns e^x
   - `math.floor(x)` - Returns the largest integer <= x
+  - `math.fmod(x, y)` - Returns the remainder of x/y rounded toward zero
   - `math.log(x [, base])` - Returns the logarithm of x in the given base (default e)
   - `math.max(x, ...)` - Returns the maximum value among arguments
   - `math.min(x, ...)` - Returns the minimum value among arguments
@@ -51,6 +52,7 @@ defmodule Lua.VM.Stdlib.Math do
       "cos" => {:native_func, &math_cos/2},
       "exp" => {:native_func, &math_exp/2},
       "floor" => {:native_func, &math_floor/2},
+      "fmod" => {:native_func, &math_fmod/2},
       "log" => {:native_func, &math_log/2},
       "max" => {:native_func, &math_max/2},
       "min" => {:native_func, &math_min/2},
@@ -217,6 +219,73 @@ defmodule Lua.VM.Stdlib.Math do
 
   defp math_floor([], _state) do
     raise ArgumentError.value_expected("math.floor", 1)
+  end
+
+  # math.fmod(x, y)
+  #
+  # Returns the remainder of the division of x by y that rounds the quotient
+  # toward zero (truncated division). Per Lua 5.3 §6.7:
+  #
+  #   * If both x and y are integers, the result is an integer.
+  #   * Otherwise the result is a float computed via C's fmod (matching
+  #     `:math.fmod/2`).
+  #   * For two integers, y == 0 raises "bad argument #2 ... (zero)".
+  #   * The integer case y == -1 short-circuits to 0 to avoid overflow on
+  #     `mininteger / -1` (matching the C implementation in lmathlib.c).
+  #
+  # Note: Lua 5.3 defines `math.fmod(x, 0.0)` as NaN for floats. The BEAM has
+  # no NaN value, so we raise instead — consistent with the rest of this VM,
+  # which raises on `0.0 / 0.0` and similar (see safe_divide/2 in
+  # Lua.VM.Executor).
+  defp math_fmod([x, y], _state) when is_integer(x) and is_integer(y) and y == 0 do
+    raise ArgumentError,
+      function_name: "math.fmod",
+      arg_num: 2,
+      details: "zero"
+  end
+
+  defp math_fmod([x, y], state) when is_integer(x) and is_integer(y) and y == -1 do
+    # Avoid overflow trap on mininteger / -1; remainder is always 0.
+    {[0], state}
+  end
+
+  defp math_fmod([x, y], state) when is_integer(x) and is_integer(y) do
+    {[Kernel.rem(x, y)], state}
+  end
+
+  defp math_fmod([x, y], _state) when is_number(x) and is_number(y) and y == 0 do
+    raise ArgumentError,
+      function_name: "math.fmod",
+      arg_num: 2,
+      details: "zero"
+  end
+
+  defp math_fmod([x, y], state) when is_number(x) and is_number(y) do
+    {[:math.fmod(x / 1, y / 1)], state}
+  end
+
+  defp math_fmod([x, y | _], _state) when is_number(x) do
+    raise ArgumentError,
+      function_name: "math.fmod",
+      arg_num: 2,
+      expected: "number",
+      got: Util.typeof(y)
+  end
+
+  defp math_fmod([x], _state) when is_number(x) do
+    raise ArgumentError.value_expected("math.fmod", 2)
+  end
+
+  defp math_fmod([x | _], _state) do
+    raise ArgumentError,
+      function_name: "math.fmod",
+      arg_num: 1,
+      expected: "number",
+      got: Util.typeof(x)
+  end
+
+  defp math_fmod([], _state) do
+    raise ArgumentError.value_expected("math.fmod", 1)
   end
 
   # math.log(x [, base])

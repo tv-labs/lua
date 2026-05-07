@@ -68,4 +68,16 @@ mix run --no-mix-exs -e 'Code.require_file("test/support/lua_test_case.ex"); Lua
 
 ## Discoveries
 
-(populated during implementation)
+- Lua 5.3 returns NaN for `math.fmod(x, 0.0)` when either argument is a
+  float. The BEAM has no NaN value, and the rest of this VM raises on
+  zero-divisor float arithmetic (`safe_divide` in
+  `lib/lua/vm/executor.ex:1690`). For consistency we raise `bad argument
+  #2 to 'math.fmod' (zero)` for both integer and float zero divisors.
+  Documented inline in `lib/lua/vm/stdlib/math.ex`.
+- Integer `math.fmod(mininteger, -1)` is short-circuited to `0` to avoid
+  an overflow trap (matches the C implementation in `lmathlib.c`'s special
+  case for `d == -1`).
+- Moved `bitwise.lua` from `@skipped_tests` to `@ready_tests` in
+  `test/lua53_suite_test.exs`, locking in the suite-count gain.
+- No other math.* gaps surfaced while wiring fmod in. `math.modf` and
+  `math.atan2` are not exercised by `bitwise.lua`.

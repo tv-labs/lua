@@ -4,6 +4,7 @@ defmodule Lua.VM.Stdlib.MathTest do
   alias Lua.Compiler
   alias Lua.Parser
   alias Lua.VM
+  alias Lua.VM.ArgumentError, as: LuaArgumentError
   alias Lua.VM.State
   alias Lua.VM.Stdlib
 
@@ -167,6 +168,111 @@ defmodule Lua.VM.Stdlib.MathTest do
 
       assert {:ok, [9_223_372_036_854_775_807, -9_223_372_036_854_775_808], _state} =
                VM.execute(proto, state)
+    end
+
+    test "math.fmod with two integers returns integer remainder (sign of dividend)" do
+      code = "return math.fmod(7, 3), math.fmod(-7, 3), math.fmod(7, -3), math.fmod(0, 5)"
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [r1, r2, r3, r4], _state} = VM.execute(proto, state)
+      assert r1 === 1
+      assert r2 === -1
+      assert r3 === 1
+      assert r4 === 0
+    end
+
+    test "math.fmod with mixed int/float returns a float" do
+      code = "return math.fmod(7, 2.5), math.fmod(7.5, 2)"
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [r1, r2], _state} = VM.execute(proto, state)
+      assert is_float(r1)
+      assert is_float(r2)
+      assert_in_delta r1, 2.0, 1.0e-9
+      assert_in_delta r2, 1.5, 1.0e-9
+    end
+
+    test "math.fmod with two floats returns a float matching :math.fmod/2" do
+      code = "return math.fmod(5.5, 2.0), math.fmod(-5.5, 2.0), math.fmod(5.5, -2.0)"
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [r1, r2, r3], _state} = VM.execute(proto, state)
+      assert_in_delta r1, 1.5, 1.0e-9
+      assert_in_delta r2, -1.5, 1.0e-9
+      assert_in_delta r3, 1.5, 1.0e-9
+    end
+
+    test "math.fmod handles mininteger / -1 without overflow" do
+      code = "return math.fmod(math.mininteger, -1)"
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [0], _state} = VM.execute(proto, state)
+    end
+
+    test "math.fmod with integer divisor of zero raises bad argument" do
+      code = "return math.fmod(5, 0)"
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert_raise LuaArgumentError, ~r/bad argument #2 to 'math\.fmod' \(zero\)/, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
+    test "math.fmod with float divisor of zero raises bad argument" do
+      # Lua 5.3 returns NaN here for floats, but BEAM has no NaN value, so we
+      # raise — consistent with other zero-divisor paths in this VM.
+      code = "return math.fmod(5.0, 0.0)"
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert_raise LuaArgumentError, ~r/bad argument #2 to 'math\.fmod' \(zero\)/, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
+    test "math.fmod rejects non-number arguments" do
+      assert {:ok, ast1} = Parser.parse("return math.fmod('x', 1)")
+      assert {:ok, proto1} = Compiler.compile(ast1, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert_raise LuaArgumentError, ~r/bad argument #1 to 'math\.fmod'/, fn ->
+        VM.execute(proto1, state)
+      end
+
+      assert {:ok, ast2} = Parser.parse("return math.fmod(1, 'x')")
+      assert {:ok, proto2} = Compiler.compile(ast2, source: "test.lua")
+
+      assert_raise LuaArgumentError, ~r/bad argument #2 to 'math\.fmod'/, fn ->
+        VM.execute(proto2, state)
+      end
+    end
+
+    test "math.fmod with too few arguments raises value expected" do
+      assert {:ok, ast0} = Parser.parse("return math.fmod()")
+      assert {:ok, proto0} = Compiler.compile(ast0, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert_raise LuaArgumentError, ~r/bad argument #1 to 'math\.fmod' \(value expected\)/, fn ->
+        VM.execute(proto0, state)
+      end
+
+      assert {:ok, ast1} = Parser.parse("return math.fmod(5)")
+      assert {:ok, proto1} = Compiler.compile(ast1, source: "test.lua")
+
+      assert_raise LuaArgumentError, ~r/bad argument #2 to 'math\.fmod' \(value expected\)/, fn ->
+        VM.execute(proto1, state)
+      end
     end
 
     test "math.random generates random numbers" do
