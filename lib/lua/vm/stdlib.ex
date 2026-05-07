@@ -58,60 +58,34 @@ defmodule Lua.VM.Stdlib do
     state = module.install(state)
     name = module.lib_name()
 
-    case Map.get(state.globals, name) do
+    case State.get_global(state, name) do
       {:tref, _} = tref -> cache_module_result(state, name, tref)
       _ -> state
     end
   end
 
-  # Install _G global table as a proxy with __index/__newindex metamethods
+  # Install `_G` and `_ENV` globals.
+  #
+  # As of Plan A16 (Lua 5.3 `_ENV` semantics), the `_G` table itself is the
+  # storage for globals — its `data` map is what `State.set_global/3` and
+  # `State.get_global/2` read and write. The `_G` table is allocated by
+  # `State.new/0` and its tref is stored in `state.g_ref`.
+  #
+  # Here we just expose `_G` to Lua code under the names `_G` and `_ENV`.
+  # Top-level chunks see `_ENV` as a register holding `_G`; user code can
+  # reassign `_ENV` to redirect global access without affecting `_G` itself.
   defp install_global_g(state) do
-    # Create empty proxy table for _G
-    {g_ref, state} = State.alloc_table(state)
+    g_ref = State.g_ref(state)
 
-    # Create __index function that reads from globals
-    index_fn =
-      {:native_func,
-       fn [_table, key], st ->
-         value = Map.get(st.globals, key)
-         {[value], st}
-       end}
-
-    # Create __newindex function that writes to globals
-    newindex_fn =
-      {:native_func,
-       fn [_table, key, value], st ->
-         st = %{st | globals: Map.put(st.globals, key, value)}
-         {[], st}
-       end}
-
-    # Create metatable with __index and __newindex
-    mt_data = %{
-      "__index" => index_fn,
-      "__newindex" => newindex_fn
-    }
-
-    {mt_ref, state} = State.alloc_table(state, mt_data)
-
-    # Set the metatable on the _G proxy
-    state =
-      State.update_table(state, g_ref, fn table ->
-        %{table | metatable: mt_ref}
-      end)
-
-    # Set _G global (the proxy table itself is stored in the raw data for _G._G == _G)
+    # Expose _G to Lua under the name "_G"
     state = State.set_global(state, "_G", g_ref)
 
-    # _ENV is the environment table — equivalent to _G for top-level code
-    state = State.set_global(state, "_ENV", g_ref)
-
-    # Store _G in the proxy's raw data so _G._G == _G works without hitting __index
-    state =
-      State.update_table(state, g_ref, fn table ->
-        %{table | data: Map.put(table.data, "_G", g_ref)}
-      end)
-
-    state
+    # _ENV is also exposed at boot for backwards compatibility with code that
+    # references `_ENV` as a global. The compiler binds `_ENV` as a chunk-level
+    # local (register 0) at execute time, so this global is mostly for
+    # introspection; user-level `_ENV` reassignment goes to that local, not
+    # this global.
+    State.set_global(state, "_ENV", g_ref)
   end
 
   # Pre-load any stdlib table globals into package.loaded so that
@@ -126,7 +100,7 @@ defmodule Lua.VM.Stdlib do
     modules = ["string", "math", "table", "debug"]
 
     Enum.reduce(modules, state, fn name, acc ->
-      case Map.get(acc.globals, name) do
+      case State.get_global(acc, name) do
         {:tref, _} = tref -> cache_module_result(acc, name, tref)
         _ -> acc
       end
@@ -351,7 +325,7 @@ defmodule Lua.VM.Stdlib do
 
   # pairs(table) — returns next, table, nil
   defp lua_pairs([{:tref, _} = tref | _], state) do
-    next_func = Map.fetch!(state.globals, "next")
+    next_func = State.get_global(state, "next")
     {[next_func, tref, nil], state}
   end
 
@@ -596,7 +570,7 @@ defmodule Lua.VM.Stdlib do
   # require(modname) — loads a Lua module
   defp lua_require([modname | _], state) when is_binary(modname) do
     # Get package table
-    {:tref, pkg_id} = Map.fetch!(state.globals, "package")
+    {:tref, pkg_id} = State.get_global(state, "package")
     package = Map.fetch!(state.tables, pkg_id)
 
     # Get package.loaded table
@@ -688,7 +662,7 @@ defmodule Lua.VM.Stdlib do
 
   # Get the package.loaded table reference
   defp get_package_loaded_ref(state) do
-    with {:tref, pkg_id} <- Map.fetch!(state.globals, "package"),
+    with {:tref, pkg_id} <- State.get_global(state, "package"),
          package = Map.fetch!(state.tables, pkg_id),
          {:tref, _loaded_id} = loaded_ref <- Map.fetch!(package.data, "loaded") do
       loaded_ref
@@ -760,7 +734,7 @@ defmodule Lua.VM.Stdlib do
 
   # Install global 'unpack' as alias for table.unpack
   defp install_unpack_alias(state) do
-    case Map.get(state.globals, "table") do
+    case State.get_global(state, "table") do
       {:tref, id} ->
         table = Map.fetch!(state.tables, id)
 

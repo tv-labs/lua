@@ -264,7 +264,7 @@ defmodule Lua.VM.Executor do
   # ── get_global ─────────────────────────────────────────────────────────────
 
   defp do_execute([{:get_global, dest, name} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    value = Map.get(state.globals, name, nil)
+    value = State.get_global(state, name)
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
@@ -273,7 +273,17 @@ defmodule Lua.VM.Executor do
 
   defp do_execute([{:set_global, name, source} | rest], regs, upvalues, proto, state, cont, frames, line) do
     value = elem(regs, source)
-    state = %{state | globals: Map.put(state.globals, name, value)}
+    state = State.set_global(state, name, value)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+  end
+
+  # ── load_env ───────────────────────────────────────────────────────────────
+  # Loads the runtime `_G` table reference into `dest`. Plan A16 emits this
+  # at the start of every chunk so `_ENV` (a chunk-level local at register 0)
+  # is initialised before user code runs.
+
+  defp do_execute([{:load_env, dest} | rest], regs, upvalues, proto, state, cont, frames, line) do
+    regs = put_elem(regs, dest, State.g_ref(state))
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 

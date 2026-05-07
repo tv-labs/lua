@@ -5,6 +5,7 @@ defmodule Lua.Compiler.IntegrationTest do
   alias Lua.Parser
   alias Lua.VM
   alias Lua.VM.AssertionError
+  alias Lua.VM.State
   alias Lua.VM.Stdlib
   alias Lua.VM.TypeError
   alias Lua.VM.Value
@@ -370,7 +371,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, results, state} = VM.execute(proto)
 
       assert results == [42]
-      assert state.globals["x"] == 42
+      assert State.get_global(state, "x") == 42
     end
 
     test "multiple global assignments" do
@@ -381,8 +382,8 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, results, state} = VM.execute(proto)
 
       assert results == [3]
-      assert state.globals["a"] == 1
-      assert state.globals["b"] == 2
+      assert State.get_global(state, "a") == 1
+      assert State.get_global(state, "b") == 2
     end
 
     test "reassign global variable" do
@@ -966,7 +967,7 @@ defmodule Lua.Compiler.IntegrationTest do
            {[a + b], state}
          end}
 
-      state = %Lua.VM.State{globals: %{"add" => native_add}}
+      state = State.set_global(State.new(), "add", native_add)
       assert {:ok, results, _state} = VM.execute(proto, state)
 
       assert results == [7]
@@ -1180,7 +1181,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.register_function(VM.State.new(), "double", fn [n], state -> {[n * 2], state} end)
+        State.register_function(State.new(), "double", fn [n], state -> {[n * 2], state} end)
 
       assert {:ok, [42], _state} = VM.execute(proto, state)
     end
@@ -1192,7 +1193,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.register_function(VM.State.new(), "add", fn args, state ->
+        State.register_function(State.new(), "add", fn args, state ->
           {[Enum.sum(args)], state}
         end)
 
@@ -1206,7 +1207,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.register_function(VM.State.new(), "get_answer", fn _args, state -> {[42], state} end)
+        State.register_function(State.new(), "get_answer", fn _args, state -> {[42], state} end)
 
       assert {:ok, [42], _state} = VM.execute(proto, state)
     end
@@ -1221,8 +1222,8 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.register_function(VM.State.new(), "set_x", fn [val], state ->
-          {[], VM.State.set_global(state, "x", val)}
+        State.register_function(State.new(), "set_x", fn [val], state ->
+          {[], State.set_global(state, "x", val)}
         end)
 
       assert {:ok, [99], _state} = VM.execute(proto, state)
@@ -1238,7 +1239,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.register_function(VM.State.new(), "get_field", fn [{:tref, id}, key], state ->
+        State.register_function(State.new(), "get_field", fn [{:tref, id}, key], state ->
           table = Map.fetch!(state.tables, id)
           {[Map.get(table.data, key)], state}
         end)
@@ -1256,8 +1257,8 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, proto} = Compiler.compile(ast)
 
       state =
-        VM.State.register_function(VM.State.new(), "make_table", fn _args, state ->
-          {tref, state} = VM.State.alloc_table(state, %{"x" => 100})
+        State.register_function(State.new(), "make_table", fn _args, state ->
+          {tref, state} = State.alloc_table(state, %{"x" => 100})
           {[tref], state}
         end)
 
@@ -1292,7 +1293,7 @@ defmodule Lua.Compiler.IntegrationTest do
 
   describe "standard library" do
     setup do
-      state = Stdlib.install(VM.State.new())
+      state = Stdlib.install(State.new())
       {:ok, state: state}
     end
 
@@ -1624,7 +1625,7 @@ defmodule Lua.Compiler.IntegrationTest do
 
   describe "generic for loops" do
     setup do
-      state = Stdlib.install(VM.State.new())
+      state = Stdlib.install(State.new())
       {:ok, state: state}
     end
 
@@ -1704,9 +1705,9 @@ defmodule Lua.Compiler.IntegrationTest do
   describe "value encode/decode round-trip" do
     test "encode Elixir map as global, execute Lua, decode result" do
       # Encode an Elixir map into state as a global
-      state = Stdlib.install(VM.State.new())
+      state = Stdlib.install(State.new())
       {tref, state} = Value.encode(%{x: 10, y: 20}, state)
-      state = VM.State.set_global(state, "config", tref)
+      state = State.set_global(state, "config", tref)
 
       # Execute Lua code that reads from the encoded table
       code = "return config.x + config.y"
@@ -1716,9 +1717,9 @@ defmodule Lua.Compiler.IntegrationTest do
     end
 
     test "encode list as global, iterate in Lua, decode result" do
-      state = Stdlib.install(VM.State.new())
+      state = Stdlib.install(State.new())
       {tref, state} = Value.encode([10, 20, 30], state)
-      state = VM.State.set_global(state, "items", tref)
+      state = State.set_global(state, "items", tref)
 
       code = """
       local sum = 0
@@ -1734,7 +1735,7 @@ defmodule Lua.Compiler.IntegrationTest do
     end
 
     test "Lua produces table, decode to Elixir" do
-      state = Stdlib.install(VM.State.new())
+      state = Stdlib.install(State.new())
 
       code = """
       local t = {a = 1, b = 2}
@@ -2202,7 +2203,7 @@ defmodule Lua.Compiler.IntegrationTest do
     end
 
     test "break exits generic for loop", %{} do
-      state = Stdlib.install(VM.State.new())
+      state = Stdlib.install(State.new())
 
       code = """
       local sum = 0
