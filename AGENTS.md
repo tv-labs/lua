@@ -146,3 +146,26 @@ mix usage_rules.search_docs "Enum.zip" --query-by title
 
 <!-- usage_rules:otp-end -->
 <!-- usage-rules-end -->
+
+## Repo-specific conventions
+
+These rules sit outside the auto-managed `usage_rules` block so they
+survive `mix usage_rules.sync`.
+
+### Don't reference plans in source files
+
+Plan files in `.agents/plans/` are ephemeral working documents. They
+exist to scope a single PR and are cleanup-bait once that PR merges. The
+durable artefact is the code itself: source files describe the contract
+they implement, not where the work was scoped.
+
+This applies to `@moduledoc`, `@doc`, code comments, and especially test
+moduledocs. The plan id belongs in the commit body (`Plan: A7a`) and the
+PR description; it does not belong in the file the PR produces.
+
+- ✅ `@moduledoc "Pins Lua 5.3 §6.1 dead-key iteration semantics."`
+- ❌ `@moduledoc "Regressions for plan A7a (follow-up to A7)."`
+
+The same principle drives the existing rule in
+`.agents/skills/ship-a-plan/SKILL.md` that commit subjects and PR titles
+use the affected subsystem as scope, never the plan id.
