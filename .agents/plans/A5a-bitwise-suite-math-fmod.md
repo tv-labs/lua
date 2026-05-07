@@ -2,10 +2,10 @@
 id: A5a
 title: Add math.fmod for bitwise.lua bit32 verification
 issue: null
-pr: null
+pr: 199
 branch: feat/math-fmod
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - bitwise.lua (final third — bit32.lshift verification block)
@@ -81,3 +81,15 @@ mix run --no-mix-exs -e 'Code.require_file("test/support/lua_test_case.ex"); Lua
   `test/lua53_suite_test.exs`, locking in the suite-count gain.
 - No other math.* gaps surfaced while wiring fmod in. `math.modf` and
   `math.atan2` are not exercised by `bitwise.lua`.
+
+## What changed
+
+- `lib/lua/vm/stdlib/math.ex` — added `math.fmod/2` with int/int, float,
+  zero-divisor, and `mininteger / -1` paths.
+- `test/lua/vm/stdlib/math_test.exs` — added 8 tests covering each path.
+- `test/lua53_suite_test.exs` — moved `bitwise.lua` from
+  `@skipped_tests` to `@ready_tests`.
+- Suite delta: `mix test` 1394 → 1402 (8 new tests, 0 regressions);
+  ready Lua 5.3 suite files: 4 → 5.
+- PR: #199.
+- No follow-up issues required.
