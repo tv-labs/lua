@@ -2,10 +2,10 @@
 id: A8
 title: Fix events.lua metamethod assertion
 issue: 169
-pr: 187
+pr: null
 branch: fix/events-suite
 base: main
-status: blocked
+status: ready
 direction: A
 unlocks:
   - events.lua

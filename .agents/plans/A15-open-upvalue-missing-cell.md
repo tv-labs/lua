@@ -5,7 +5,7 @@ issue: null
 pr: 196
 branch: fix/open-upvalue-missing-cell
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - sort.lua

@@ -5,7 +5,7 @@ issue: 166
 pr: null
 branch: fix/bitwise-suite
 base: main
-status: blocked
+status: ready
 direction: A
 unlocks:
   - bitwise.lua

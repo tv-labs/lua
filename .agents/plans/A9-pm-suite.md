@@ -5,7 +5,7 @@ issue: 170
 pr: 188
 branch: fix/pm-suite
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - pm.lua

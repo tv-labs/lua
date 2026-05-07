@@ -5,7 +5,7 @@ issue: 162
 pr: 179
 branch: fix/table-nil-on-missing-key
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - errors.lua

@@ -5,7 +5,7 @@ issue: 165
 pr: 184
 branch: fix/preload-stdlib-modules
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - attrib.lua

@@ -5,7 +5,7 @@ issue: null
 pr: 190
 branch: fix/pm-suite-pattern
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - pm.lua (continuation of A9a)

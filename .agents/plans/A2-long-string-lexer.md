@@ -5,7 +5,7 @@ issue: 163
 pr: 180
 branch: fix/long-string-lexer
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - literals.lua

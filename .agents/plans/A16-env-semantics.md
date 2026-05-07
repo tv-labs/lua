@@ -5,7 +5,7 @@ issue: 186
 pr: 197
 branch: feat/env-semantics
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - events.lua

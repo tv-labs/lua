@@ -5,7 +5,7 @@ issue: 164
 pr: 182
 branch: fix/lexer-comment-leak
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - calls.lua

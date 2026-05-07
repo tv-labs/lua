@@ -5,7 +5,7 @@ issue: null
 pr: 189
 branch: fix/pm-suite-executor
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - pm.lua (continuation of A9, blocked behind A9b)

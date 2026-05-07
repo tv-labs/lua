@@ -5,7 +5,7 @@ issue: 146
 pr: 195
 branch: fix/for-loop-register-regression
 base: main
-status: review
+status: merged
 direction: A
 unlocks: []
 ---

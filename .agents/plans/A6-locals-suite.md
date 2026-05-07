@@ -5,7 +5,7 @@ issue: 167
 pr: 185
 branch: fix/locals-suite
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - locals.lua
