@@ -580,9 +580,15 @@ defmodule Lua.VM.Stdlib do
     # Check if already loaded
     case Map.get(loaded_table.data, modname) do
       nil ->
-        # Not loaded, need to search and load
-        search_path = Map.get(package.data, "path", "?.lua")
-        load_module(modname, search_path, state)
+        # Not loaded. First consult package.preload, then fall back to path.
+        case lookup_preload(modname, package, state) do
+          {:ok, loader} ->
+            load_from_preload(modname, loader, state)
+
+          :not_found ->
+            search_path = Map.get(package.data, "path", "?.lua")
+            load_module(modname, search_path, state)
+        end
 
       result ->
         # Already loaded, return cached result
@@ -600,6 +606,41 @@ defmodule Lua.VM.Stdlib do
 
   defp lua_require([], _state) do
     raise ArgumentError.value_expected("require", 1)
+  end
+
+  # Look up `package.preload[modname]`. Returns `{:ok, loader}` if a callable
+  # is registered, `:not_found` otherwise. This is the narrow searcher
+  # equivalent for `package.preload` — we don't yet expose the full
+  # `package.searchers` table.
+  defp lookup_preload(modname, package, state) do
+    case Map.get(package.data, "preload") do
+      {:tref, preload_id} ->
+        preload_table = Map.fetch!(state.tables, preload_id)
+
+        case Map.get(preload_table.data, modname) do
+          nil -> :not_found
+          loader -> {:ok, loader}
+        end
+
+      _ ->
+        :not_found
+    end
+  end
+
+  # Call a preload loader (closure or native_func) with the module name
+  # and cache its result, mirroring `parse_and_execute_module`.
+  defp load_from_preload(modname, loader, state) do
+    state = cache_module_result(state, modname, true)
+    {results, state} = Executor.call_function(loader, [modname], state)
+
+    result =
+      case results do
+        [value | _] -> value
+        [] -> true
+      end
+
+    state = cache_module_result(state, modname, result)
+    {[result], state}
   end
 
   # Load a module by searching the path

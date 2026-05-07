@@ -1863,7 +1863,7 @@ defmodule Lua.VM.Executor do
   defp to_number(v), do: {:error, v}
 
   defp to_integer!(v) when is_integer(v), do: v
-  defp to_integer!(v) when is_float(v), do: trunc(v)
+  defp to_integer!(v) when is_float(v), do: float_to_integer!(v)
 
   defp to_integer!(v) when is_binary(v) do
     case Value.parse_number(v) do
@@ -1873,8 +1873,11 @@ defmodule Lua.VM.Executor do
           error_kind: :bitwise_on_non_integer,
           value_type: :string
 
-      n ->
-        trunc(n)
+      n when is_integer(n) ->
+        n
+
+      n when is_float(n) ->
+        float_to_integer!(n)
     end
   end
 
@@ -1883,6 +1886,21 @@ defmodule Lua.VM.Executor do
       value: "attempt to perform bitwise operation on a #{Value.type_name(v)} value",
       error_kind: :bitwise_on_non_integer,
       value_type: value_type(v)
+  end
+
+  # Per Lua 5.3 §3.4.3: a float converts to integer for bitwise ops only if
+  # it represents an integer exactly and fits in the signed 64-bit range.
+  defp float_to_integer!(f) when is_float(f) do
+    truncated = trunc(f)
+
+    if f == truncated * 1.0 and Numeric.signed?(truncated) do
+      truncated
+    else
+      raise TypeError,
+        value: "number has no integer representation",
+        error_kind: :bitwise_on_non_integer,
+        value_type: :number
+    end
   end
 
   # ── Lua 5.3 shift semantics ────────────────────────────────────────────────

@@ -685,12 +685,25 @@ defmodule Lua.Lexer do
   defp scan_hex_number(rest, hex_acc, acc, pos, start_pos) do
     case Integer.parse(hex_acc, 16) do
       {num, ""} ->
-        token = {:number, num, start_pos}
+        # Per Lua 5.3 §3.1: hex integer literals overflow-wrap into the
+        # signed 64-bit range. e.g. 0xFFFFFFFFFFFFFFFF == -1.
+        token = {:number, wrap_int64(num), start_pos}
         do_tokenize(rest, [token | acc], pos)
 
       _ ->
         {:error, {:invalid_hex_number, start_pos}}
     end
+  end
+
+  # Wrap an unsigned hex integer to the signed 64-bit range. Inlined here so
+  # the lexer doesn't depend on Lua.VM.Numeric (kept VM-internal).
+  @uint64_mask 0xFFFFFFFFFFFFFFFF
+  @uint64_modulus 0x10000000000000000
+  @sign_bit 0x8000000000000000
+
+  defp wrap_int64(n) when is_integer(n) do
+    masked = band(n, @uint64_mask)
+    if masked >= @sign_bit, do: masked - @uint64_modulus, else: masked
   end
 
   # Scan hex fractional digits after the dot

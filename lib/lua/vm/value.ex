@@ -7,6 +7,7 @@ defmodule Lua.VM.Value do
   the executor and stdlib.
   """
 
+  alias Lua.VM.Numeric
   alias Lua.VM.State
 
   @doc """
@@ -63,28 +64,94 @@ defmodule Lua.VM.Value do
   @doc """
   Parses a string to a number (integer or float), supporting hex notation.
 
+  Hex integer literals overflow-wrap into the signed 64-bit range per Lua 5.3
+  §3.1 (e.g. `"0xFFFFFFFFFFFFFFFF"` → `-1`). Hex floats with a fractional
+  part or binary exponent (e.g. `"0xAA.0"`, `"0x1.8p3"`) are also supported.
+
   Returns `nil` if the string cannot be parsed.
   """
   @spec parse_number(String.t()) :: number() | nil
   def parse_number(str) do
     str = String.trim(str)
 
-    if String.starts_with?(str, "0x") or String.starts_with?(str, "0X") do
-      case Integer.parse(String.slice(str, 2..-1//1), 16) do
-        {n, ""} -> n
-        _ -> nil
+    {sign, body} =
+      case str do
+        "-" <> rest -> {-1, String.trim_leading(rest)}
+        "+" <> rest -> {1, String.trim_leading(rest)}
+        _ -> {1, str}
       end
-    else
-      case Integer.parse(str) do
-        {n, ""} ->
-          n
 
-        _ ->
-          case Float.parse(str) do
-            {f, ""} -> f
-            _ -> nil
-          end
+    parsed =
+      if String.starts_with?(body, "0x") or String.starts_with?(body, "0X") do
+        parse_hex_number(String.slice(body, 2..-1//1))
+      else
+        case Integer.parse(body) do
+          {n, ""} ->
+            n
+
+          _ ->
+            case Float.parse(body) do
+              {f, ""} -> f
+              _ -> nil
+            end
+        end
       end
+
+    case parsed do
+      nil -> nil
+      n when sign == 1 -> n
+      n when is_integer(n) -> Numeric.to_signed_int64(-n)
+      n when is_float(n) -> -n
+    end
+  end
+
+  # Parse the body of a hex literal (after "0x"). Supports:
+  #   * integer:        "FF"        → 255 (wrapped to signed int64)
+  #   * fractional:     "FF.8"      → 255.5
+  #   * exponent only:  "FFp4"      → 4080.0
+  #   * fractional+exp: "1.8p3"     → 12.0
+  defp parse_hex_number(body) do
+    case parse_hex_int(body) do
+      {int_val, ""} ->
+        Numeric.to_signed_int64(int_val)
+
+      {int_val, "." <> rest} ->
+        parse_hex_frac(int_val, rest)
+
+      {int_val, <<p, rest::binary>>} when p in [?p, ?P] ->
+        parse_hex_exp(int_val + 0.0, rest)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp parse_hex_int(""), do: :error
+  defp parse_hex_int(body), do: Integer.parse(body, 16)
+
+  defp parse_hex_frac(int_val, frac_and_rest) do
+    case Integer.parse(frac_and_rest, 16) do
+      {frac_int, rest} ->
+        # Determine how many hex digits the fractional part used.
+        digits = byte_size(frac_and_rest) - byte_size(rest)
+        frac = if digits == 0, do: 0.0, else: frac_int / :math.pow(16, digits)
+        base = int_val + frac
+
+        case rest do
+          "" -> base
+          <<p, exp_rest::binary>> when p in [?p, ?P] -> parse_hex_exp(base, exp_rest)
+          _ -> nil
+        end
+
+      :error ->
+        nil
+    end
+  end
+
+  defp parse_hex_exp(base, exp_str) do
+    case Integer.parse(exp_str) do
+      {exp, ""} -> base * :math.pow(2, exp)
+      _ -> nil
     end
   end
 
