@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: feat/math-fmod
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - bitwise.lua (final third — bit32.lshift verification block)
