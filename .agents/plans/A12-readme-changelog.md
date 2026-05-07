@@ -73,4 +73,14 @@ mix docs
 
 ## Discoveries
 
-(populated during implementation)
+- `mix docs` emits 6 pre-existing warnings on `main` (references to hidden
+  modules `Lua.CompilerException`, `Lua.Compiler.Scope.State`). These are
+  about code visibility, not docs content, so they're out of scope for a
+  README/CHANGELOG plan. This PR does not introduce new warnings.
+- ROADMAP says 4/24 suite files passing; the actual count is 5/29
+  (`simple_test.lua`, `api.lua`, `bitwise.lua`, `code.lua`, `vararg.lua`
+  — `bitwise.lua` was added as ready in #198/#199). The CHANGELOG uses
+  the accurate count.
+- The `{module(), atom(), list()}` MFA encoding form is no longer accepted
+  by `Lua.encode!/2` in the new VM. Documented in the CHANGELOG's Removed
+  section.
