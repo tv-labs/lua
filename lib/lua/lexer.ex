@@ -67,8 +67,11 @@ defmodule Lua.Lexer do
     {:ok, Enum.reverse([{:eof, pos} | acc])}
   end
 
-  # Whitespace (space, tab)
-  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in [?\s, ?\t] do
+  # Whitespace (space, horizontal tab, vertical tab, form feed).
+  # Per Lua 5.3 reference manual §3.1, whitespace is space, tab, newline,
+  # carriage return, vertical tab, and form feed. Newline and CR advance
+  # the line counter and are handled below.
+  defp do_tokenize(<<c, rest::binary>>, acc, pos) when c in [?\s, ?\t, ?\v, ?\f] do
     new_pos = advance_column(pos, 1)
     do_tokenize(rest, acc, new_pos)
   end
@@ -501,6 +504,14 @@ defmodule Lua.Lexer do
   end
 
   defp skip_whitespace_in_string(<<?\t, rest::binary>>, pos) do
+    skip_whitespace_in_string(rest, advance_column(pos, 1))
+  end
+
+  defp skip_whitespace_in_string(<<?\v, rest::binary>>, pos) do
+    skip_whitespace_in_string(rest, advance_column(pos, 1))
+  end
+
+  defp skip_whitespace_in_string(<<?\f, rest::binary>>, pos) do
     skip_whitespace_in_string(rest, advance_column(pos, 1))
   end
 
