@@ -2,10 +2,10 @@
 id: A5a
 title: Add math.fmod for bitwise.lua bit32 verification
 issue: null
-pr: null
+pr: 199
 branch: feat/math-fmod
 base: main
-status: ready
+status: review
 direction: A
 unlocks:
   - bitwise.lua (final third — bit32.lshift verification block)
@@ -68,4 +68,28 @@ mix run --no-mix-exs -e 'Code.require_file("test/support/lua_test_case.ex"); Lua
 
 ## Discoveries
 
-(populated during implementation)
+- Lua 5.3 returns NaN for `math.fmod(x, 0.0)` when either argument is a
+  float. The BEAM has no NaN value, and the rest of this VM raises on
+  zero-divisor float arithmetic (`safe_divide` in
+  `lib/lua/vm/executor.ex:1690`). For consistency we raise `bad argument
+  #2 to 'math.fmod' (zero)` for both integer and float zero divisors.
+  Documented inline in `lib/lua/vm/stdlib/math.ex`.
+- Integer `math.fmod(mininteger, -1)` is short-circuited to `0` to avoid
+  an overflow trap (matches the C implementation in `lmathlib.c`'s special
+  case for `d == -1`).
+- Moved `bitwise.lua` from `@skipped_tests` to `@ready_tests` in
+  `test/lua53_suite_test.exs`, locking in the suite-count gain.
+- No other math.* gaps surfaced while wiring fmod in. `math.modf` and
+  `math.atan2` are not exercised by `bitwise.lua`.
+
+## What changed
+
+- `lib/lua/vm/stdlib/math.ex` — added `math.fmod/2` with int/int, float,
+  zero-divisor, and `mininteger / -1` paths.
+- `test/lua/vm/stdlib/math_test.exs` — added 8 tests covering each path.
+- `test/lua53_suite_test.exs` — moved `bitwise.lua` from
+  `@skipped_tests` to `@ready_tests`.
+- Suite delta: `mix test` 1394 → 1402 (8 new tests, 0 regressions);
+  ready Lua 5.3 suite files: 4 → 5.
+- PR: #199.
+- No follow-up issues required.
