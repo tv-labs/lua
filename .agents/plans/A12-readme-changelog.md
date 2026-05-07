@@ -2,10 +2,10 @@
 id: A12
 title: Update README and CHANGELOG for 0.5.0
 issue: 173
-pr: null
+pr: 201
 branch: docs/0-5-0
 base: main
-status: in-progress
+status: review
 direction: A
 blocked_on: [A14, A15, A16]
 ---
@@ -84,3 +84,18 @@ mix docs
 - The `{module(), atom(), list()}` MFA encoding form is no longer accepted
   by `Lua.encode!/2` in the new VM. Documented in the CHANGELOG's Removed
   section.
+
+## What changed
+
+Files touched:
+- `README.md` — rewrote tagline, Features list, encoding/decoding table
+  rows, and Credits section. No more Luerl claims in user-facing copy
+  (only a historical reference in Credits).
+- `CHANGELOG.md` — new `[v0.5.0]` entry covering Added / Changed /
+  Removed / Performance / Fixed; updated link refs.
+
+Suite delta: none — pure docs PR.
+
+Tests: 1420 passing, 0 failing, 31 skipped (unchanged).
+
+PR: #201.
