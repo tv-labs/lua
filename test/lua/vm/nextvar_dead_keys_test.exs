@@ -1,20 +1,20 @@
 defmodule Lua.VM.NextvarDeadKeysTest do
   @moduledoc """
-  Regressions for dead-key iteration semantics surfaced by `nextvar.lua`
-  (plan A7a, follow-up to A7).
+  Pins the dead-key iteration semantics required by Lua 5.3 §6.1.
 
-  Lua 5.3 §6.1 says `next(t, k)` is well-defined while `pairs` is iterating
-  even if the body just cleared `t[k]`. The reference VM keeps the cleared
-  key reachable in the hash chain (a `TDEADKEY` slot) so iteration can find
-  the next live entry. The same paragraph also requires `next(t, k)` to
-  raise "invalid key to 'next'" when `k` was *never* a key in `t`.
+  `next(t, k)` is well-defined while `pairs` is iterating even if the body
+  just cleared `t[k]`. The reference VM keeps the cleared key reachable in
+  the hash chain (a `TDEADKEY` slot) so iteration can find the next live
+  entry. The same paragraph also requires `next(t, k)` to raise
+  "invalid key to 'next'" when `k` was *never* a key in `t`.
 
-  These cases pin the three contracts the plan calls out:
+  Three contracts covered, one per `describe` block:
 
-    1. `next(t, k)` raises when `k` was never present.
-    2. `for k, v in pairs(t) do t[k] = nil end` visits every key once.
-    3. Re-assigning a previously cleared key revives it cleanly across a
-       fresh iteration (no leaked dead-key state).
+    1. Strict `next` — phantom keys raise.
+    2. Iterate-then-clear — `for k in pairs(t) do t[k] = nil end` visits
+       every key once.
+    3. Dead-key revival — re-assigning a previously cleared key works
+       across a fresh iteration with no leaked state.
   """
 
   use ExUnit.Case, async: true
