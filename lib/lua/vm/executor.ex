@@ -1072,17 +1072,14 @@ defmodule Lua.VM.Executor do
 
     state =
       State.update_table(state, {:tref, id}, fn table ->
-        new_data =
-          if total > 0 do
-            Enum.reduce(0..(total - 1), table.data, fn i, data ->
-              value = elem(regs, start + i)
-              Table.put_data(data, offset + i + 1, value)
-            end)
-          else
-            table.data
-          end
-
-        %{table | data: new_data}
+        if total > 0 do
+          Enum.reduce(0..(total - 1), table, fn i, t ->
+            value = elem(regs, start + i)
+            Table.put(t, offset + i + 1, value)
+          end)
+        else
+          table
+        end
       end)
 
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
@@ -1095,26 +1092,23 @@ defmodule Lua.VM.Executor do
 
     state =
       State.update_table(state, {:tref, id}, fn table ->
-        new_data =
-          if count == 0 do
-            values_to_collect = state.multi_return_count
+        if count == 0 do
+          values_to_collect = state.multi_return_count
 
-            if values_to_collect > 0 do
-              Enum.reduce(0..(values_to_collect - 1), table.data, fn i, data ->
-                value = elem(regs, start + i)
-                Table.put_data(data, offset + i + 1, value)
-              end)
-            else
-              table.data
-            end
-          else
-            Enum.reduce(1..count, table.data, fn i, data ->
-              value = elem(regs, start + i - 1)
-              Table.put_data(data, offset + i, value)
+          if values_to_collect > 0 do
+            Enum.reduce(0..(values_to_collect - 1), table, fn i, t ->
+              value = elem(regs, start + i)
+              Table.put(t, offset + i + 1, value)
             end)
+          else
+            table
           end
-
-        %{table | data: new_data}
+        else
+          Enum.reduce(1..count, table, fn i, t ->
+            value = elem(regs, start + i - 1)
+            Table.put(t, offset + i, value)
+          end)
+        end
       end)
 
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
@@ -1470,24 +1464,18 @@ defmodule Lua.VM.Executor do
     table = Map.fetch!(state.tables, id)
 
     if Table.has_data?(table.data, key) do
-      State.update_table(state, {:tref, id}, fn t ->
-        %{t | data: Table.put_data(t.data, key, value)}
-      end)
+      State.update_table(state, {:tref, id}, fn t -> Table.put(t, key, value) end)
     else
       case table.metatable do
         nil ->
-          State.update_table(state, {:tref, id}, fn t ->
-            %{t | data: Table.put_data(t.data, key, value)}
-          end)
+          State.update_table(state, {:tref, id}, fn t -> Table.put(t, key, value) end)
 
         {:tref, mt_id} ->
           mt = Map.fetch!(state.tables, mt_id)
 
           case Map.get(mt.data, "__newindex") do
             nil ->
-              State.update_table(state, {:tref, id}, fn t ->
-                %{t | data: Table.put_data(t.data, key, value)}
-              end)
+              State.update_table(state, {:tref, id}, fn t -> Table.put(t, key, value) end)
 
             {:tref, _} = newindex_table ->
               table_newindex(newindex_table, key, value, state, depth + 1)

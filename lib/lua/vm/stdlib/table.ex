@@ -21,6 +21,7 @@ defmodule Lua.VM.Stdlib.Table do
   alias Lua.VM.ArgumentError
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
+  alias Lua.VM.Table
 
   @impl true
   def lib_name, do: "table"
@@ -46,8 +47,7 @@ defmodule Lua.VM.Stdlib.Table do
     # Insert at end
     table = State.get_table(state, tref)
     len = get_table_length(table)
-    new_data = Map.put(table.data, len + 1, value)
-    state = State.update_table(state, tref, fn _ -> %{table | data: new_data} end)
+    state = State.update_table(state, tref, fn t -> Table.put(t, len + 1, value) end)
     {[], state}
   end
 
@@ -62,18 +62,21 @@ defmodule Lua.VM.Stdlib.Table do
         details: "position out of bounds"
     end
 
-    # Shift elements from pos to len one position up
-    new_data =
-      len..pos
-      |> Enum.reduce(table.data, fn i, acc ->
-        case Map.get(acc, i) do
-          nil -> acc
-          val -> Map.put(acc, i + 1, val)
-        end
-      end)
-      |> Map.put(pos, value)
+    # Shift elements from pos..len up by one (write top-down so we don't
+    # clobber unread slots), then drop the new value into `pos`.
+    state =
+      State.update_table(state, tref, fn t ->
+        t =
+          Enum.reduce(len..pos//-1, t, fn i, acc ->
+            case Map.get(acc.data, i) do
+              nil -> acc
+              val -> Table.put(acc, i + 1, val)
+            end
+          end)
 
-    state = State.update_table(state, tref, fn _ -> %{table | data: new_data} end)
+        Table.put(t, pos, value)
+      end)
+
     {[], state}
   end
 
@@ -91,43 +94,33 @@ defmodule Lua.VM.Stdlib.Table do
 
   # table.remove(list [, pos])
   defp table_remove([{:tref, _} = tref], state) do
-    # Remove from end
+    # Default pos is #list, so a single-arg call removes the last element.
+    # When #list == 0, this still removes (and returns) t[0] per Lua 5.3
+    # — `table.remove(t) == t[0]` when t has no sequence part.
     table = State.get_table(state, tref)
     len = get_table_length(table)
-
-    if len == 0 do
-      {[nil], state}
-    else
-      value = Map.get(table.data, len)
-      new_data = Map.delete(table.data, len)
-      state = State.update_table(state, tref, fn _ -> %{table | data: new_data} end)
-      {[value], state}
-    end
+    do_table_remove(tref, table, len, len, state)
   end
 
   defp table_remove([{:tref, _} = tref, pos], state) when is_integer(pos) do
-    # Remove from position, shift elements down
     table = State.get_table(state, tref)
     len = get_table_length(table)
 
-    if pos < 1 or pos > len do
-      {[nil], state}
-    else
-      value = Map.get(table.data, pos)
+    # Match Lua 5.3 ltablib.c: validate pos only when pos != size. This
+    # lets `table.remove(t, 0)` succeed when `#t == 0` (returns t[0]) but
+    # raises when `#t > 0`. pos == size + 1 is a no-op that returns nil.
+    cond do
+      pos == len ->
+        do_table_remove(tref, table, len, pos, state)
 
-      # Shift elements from pos+1 to len one position down
-      new_data =
-        (pos + 1)..len
-        |> Enum.reduce(Map.delete(table.data, pos), fn i, acc ->
-          case Map.get(acc, i) do
-            nil -> Map.delete(acc, i)
-            val -> Map.put(Map.delete(acc, i), i - 1, val)
-          end
-        end)
-        |> Map.delete(len)
+      pos < 1 or pos > len + 1 ->
+        raise ArgumentError,
+          function_name: "table.remove",
+          arg_num: 2,
+          details: "position out of bounds"
 
-      state = State.update_table(state, tref, fn _ -> %{table | data: new_data} end)
-      {[value], state}
+      true ->
+        do_table_remove(tref, table, len, pos, state)
     end
   end
 
@@ -141,6 +134,34 @@ defmodule Lua.VM.Stdlib.Table do
 
   defp table_remove([], _state) do
     raise ArgumentError.value_expected("table.remove", 1)
+  end
+
+  defp do_table_remove(tref, table, len, pos, state) do
+    value = Map.get(table.data, pos)
+
+    state =
+      State.update_table(state, tref, fn t ->
+        # Shift t[pos+1..len] down by one, then clear t[max(pos, len)].
+        # Mirrors the loop in Lua 5.3 ltablib.c tremove: after the shift,
+        # `pos` is incremented to `size`, and the cleared slot is t[pos].
+        # When pos == 0 (and len == 0) we clear t[0]. When pos == len we
+        # clear t[len]. When pos == len + 1 (a no-op remove) we clear
+        # t[len + 1], which was already nil.
+        clear_at = max(pos, len)
+
+        t =
+          if pos < len do
+            Enum.reduce((pos + 1)..len//1, t, fn i, acc ->
+              Table.put(acc, i - 1, Map.get(acc.data, i))
+            end)
+          else
+            t
+          end
+
+        Table.put(t, clear_at, nil)
+      end)
+
+    {[value], state}
   end
 
   # table.concat(list [, sep [, i [, j]]])
@@ -226,7 +247,9 @@ defmodule Lua.VM.Stdlib.Table do
       end)
       |> Map.merge(Map.drop(table.data, Enum.to_list(1..len)))
 
-    state = State.update_table(state, tref, fn _ -> %{table | data: new_data} end)
+    # Sort rewrites every integer key, so rebuild order/dead from scratch
+    # rather than trying to track per-position changes.
+    state = State.update_table(state, tref, fn t -> Table.replace_data(t, new_data) end)
     {[], state}
   end
 
@@ -311,24 +334,19 @@ defmodule Lua.VM.Stdlib.Table do
     end
 
     table1 = State.get_table(state, tref1)
-    table2 = State.get_table(state, tref2)
 
     # Move elements from a1[f..e] to a2[t..]
-    {new_data2, _} =
-      Enum.reduce(f..e, {table2.data, t}, fn src_idx, {data, dst_idx} ->
-        val = Map.get(table1.data, src_idx)
+    state =
+      State.update_table(state, tref2, fn t2 ->
+        {new_t2, _} =
+          Enum.reduce(f..e//1, {t2, t}, fn src_idx, {acc, dst_idx} ->
+            val = Map.get(table1.data, src_idx)
+            {Table.put(acc, dst_idx, val), dst_idx + 1}
+          end)
 
-        new_data =
-          if val == nil do
-            Map.delete(data, dst_idx)
-          else
-            Map.put(data, dst_idx, val)
-          end
-
-        {new_data, dst_idx + 1}
+        new_t2
       end)
 
-    state = State.update_table(state, tref2, fn _ -> %{table2 | data: new_data2} end)
     {[tref2], state}
   end
 

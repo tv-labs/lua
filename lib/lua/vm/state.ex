@@ -60,9 +60,7 @@ defmodule Lua.VM.State do
   """
   @spec set_global(t(), binary(), term()) :: t()
   def set_global(%__MODULE__{g_ref: g_ref} = state, name, value) when is_binary(name) and not is_nil(g_ref) do
-    update_table(state, g_ref, fn table ->
-      %{table | data: Table.put_data(table.data, name, value)}
-    end)
+    update_table(state, g_ref, fn table -> Table.put(table, name, value) end)
   end
 
   @doc """
@@ -103,7 +101,10 @@ defmodule Lua.VM.State do
   @spec alloc_table(t(), map()) :: {{:tref, non_neg_integer()}, t()}
   def alloc_table(state, data \\ %{}) do
     id = state.table_next_id
-    table = %Table{data: data}
+    # Use Table.from_data so the iteration `order` list mirrors the
+    # initial map's keys. Stdlib tables (math, string, etc.) are built
+    # via this path with non-empty data and need a sane iteration order.
+    table = Table.from_data(data)
     state = %{state | tables: Map.put(state.tables, id, table), table_next_id: id + 1}
     {{:tref, id}, state}
   end

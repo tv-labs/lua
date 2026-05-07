@@ -252,11 +252,7 @@ defmodule Lua.VM.Stdlib do
 
   # rawset(table, key, value) — set without metamethods
   defp lua_rawset([{:tref, _} = tref, key, value | _], state) do
-    state =
-      State.update_table(state, tref, fn table ->
-        %{table | data: Table.put_data(table.data, key, value)}
-      end)
-
+    state = State.update_table(state, tref, fn table -> Table.put(table, key, value) end)
     {[tref], state}
   end
 
@@ -279,57 +275,31 @@ defmodule Lua.VM.Stdlib do
 
   defp lua_rawequal(_, state), do: {[false], state}
 
-  # next(table [, key]) — returns next key-value pair after key
+  # next(table [, key]) — returns next key-value pair after key.
+  # Per Lua 5.3 §6.1, when `key` is non-nil and was never a key in the
+  # table, raises "invalid key to 'next'". Dead keys (cleared during
+  # iteration) are treated as still-iterable so `for k,v in pairs(t)`
+  # loops that nil out their keys mid-traversal complete cleanly.
   defp lua_next([{:tref, id} | rest], state) do
-    key = rest |> List.first() |> Table.normalize_key()
+    key = List.first(rest)
     table = Map.fetch!(state.tables, id)
 
-    case find_next_entry(table.data, key) do
-      nil -> {[nil, nil], state}
-      {k, v} -> {[k, v], state}
+    case Table.next_entry(table, key) do
+      :invalid_key ->
+        raise ArgumentError,
+          function_name: "next",
+          arg_num: 2,
+          details: "invalid key to 'next'"
+
+      nil ->
+        {[nil, nil], state}
+
+      {k, v} ->
+        {[k, v], state}
     end
   end
 
   defp lua_next(_, state), do: {[nil, nil], state}
-
-  defp find_next_entry(data, nil) do
-    # Return the first entry
-    iter = :maps.iterator(data)
-
-    case :maps.next(iter) do
-      :none -> nil
-      {k, v, _} -> {k, v}
-    end
-  end
-
-  defp find_next_entry(data, key) do
-    # Walk the iterator until we find key, then return the next entry.
-    # NOTE: Lua 5.3 §6.1 says `next(t, k)` should error when `k` is not
-    # present in `t`. We can't yet emit that error reliably because we
-    # don't track "dead keys" — when a for-in loop sets `t[k] = nil`
-    # mid-iteration, real Lua keeps the key reachable in the hash chain
-    # so iteration continues. Until that lands (plan A7a), be lenient
-    # and treat a missing key as end-of-iteration. Direct `next(t, bad)`
-    # calls therefore return nil, nil instead of raising "invalid key".
-    iter = :maps.iterator(data)
-    find_after_key(iter, key)
-  end
-
-  defp find_after_key(iter, key) do
-    case :maps.next(iter) do
-      :none ->
-        nil
-
-      {^key, _, next_iter} ->
-        case :maps.next(next_iter) do
-          :none -> nil
-          {k, v, _} -> {k, v}
-        end
-
-      {_, _, next_iter} ->
-        find_after_key(next_iter, key)
-    end
-  end
 
   # pairs(table) — returns next, table, nil
   defp lua_pairs([{:tref, _} = tref | _], state) do

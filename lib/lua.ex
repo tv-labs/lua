@@ -10,6 +10,7 @@ defmodule Lua do
   alias Lua.VM.AssertionError
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
+  alias Lua.VM.Table
   alias Lua.VM.TypeError
   alias Lua.VM.Value
 
@@ -300,9 +301,7 @@ defmodule Lua do
 
   # Sets a value inside nested tables, creating intermediates as needed
   defp set_in_table(state, tref, [key], value) do
-    State.update_table(state, tref, fn table ->
-      %{table | data: Map.put(table.data, key, value)}
-    end)
+    State.update_table(state, tref, fn table -> Table.put(table, key, value) end)
   end
 
   defp set_in_table(state, tref, [key | rest], value) do
@@ -316,9 +315,7 @@ defmodule Lua do
         {child_tref, state} = State.alloc_table(state)
 
         state =
-          State.update_table(state, tref, fn table ->
-            %{table | data: Map.put(table.data, key, child_tref)}
-          end)
+          State.update_table(state, tref, fn table -> Table.put(table, key, child_tref) end)
 
         set_in_table(state, child_tref, rest, value)
 
