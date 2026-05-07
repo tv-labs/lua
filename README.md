@@ -210,7 +210,7 @@ Trying to deference userdata inside a Lua program will result in an exception.
 ## Credits
 
 `Lua` started as an ergonomic Elixir wrapper around Robert Virding's
-[Luerl](https://github.com/rvirding/luerl) project. As of `0.5.0` this library
+[Luerl](https://github.com/rvirding/luerl) project. As of `1.0.0` this library
 is a full Elixir-native reimplementation of the Lua 5.3 lexer, parser, and
 virtual machine, with a public API designed to feel idiomatic from Elixir.
 Luerl deserves credit as the prior art that made this possible — its design
