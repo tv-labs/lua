@@ -5,7 +5,7 @@ issue: 168
 pr: null
 branch: fix/nextvar-suite
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - nextvar.lua
