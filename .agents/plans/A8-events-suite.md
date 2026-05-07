@@ -2,10 +2,10 @@
 id: A8
 title: Fix events.lua metamethod assertion
 issue: 169
-pr: null
+pr: 203
 branch: fix/events-suite
 base: main
-status: ready
+status: review
 direction: A
 unlocks:
   - events.lua
@@ -116,3 +116,80 @@ metamethod-only fix that would let events.lua pass.
 A8 is set to **blocked** on A16. Once A16 lands, A8 can be reopened to
 triage any remaining metamethod-specific failures in events.lua (if
 any surface beyond the `_ENV` block).
+
+### Re-triage post-A16: vararg metamethod calling convention bug
+
+A16 (env semantics) merged. Re-running events.lua revealed a new first
+failure at line 137: `assert(b+5 == b)`, where `b` has metatable
+`{__add = function(...) cap = {[0]="add", ...}; return (...) end}`.
+
+Reduced to a 5-line repro:
+
+```lua
+local t = {}
+t.__add = function(...) print(select('#', ...)) end
+local b = setmetatable({}, t)
+local _ = b + 5
+-- expected: prints 2; actual: prints 0
+```
+
+Root cause: `try_binary_metamethod`, `try_unary_metamethod`, and
+`try_equality_metamethod` in `lib/lua/vm/executor.ex` invoked Lua
+closure metamethods by hand, putting args into registers but **not**
+populating `proto.varargs`. A metamethod declared `function(...)`
+has `param_count == 0` and `is_vararg == true`, so it reads from
+`varargs` (which was empty) instead of registers. Args were silently
+dropped.
+
+A second, separate bug surfaced in the same code path: for `'5' + b`
+(string + metamethod-bearing table), the cond in
+`try_binary_metamethod` looked up `__add` on the string metatable,
+got `nil`, and stopped — it never tried `b`'s metatable. Per Lua 5.3
+§2.4 the runtime must try the first operand's metamethod, and if
+nil, try the second operand's.
+
+### Fix
+
+Replace the inlined closure invocation in all three helpers with a
+delegation to `call_function/3`, which already sets up `varargs`
+correctly. Refactor the metamethod lookup into a shared
+`lookup_metamethod/3` helper that returns `nil` for missing entries,
+and chain with `||` so the second operand is consulted when the first
+operand's metatable lacks the metamethod. Net diff: -91 lines in
+`lib/lua/vm/executor.ex`.
+
+### Remaining gap: float division by zero
+
+After the metamethod fix, events.lua advances from line 15 to line
+156: `assert(a // (1/0) == a)`. The expression `1/0` raises
+`"attempt to divide by zero"` instead of producing `inf` per Lua 5.3
+§3.4.1. This is a stdlib-level semantics gap distinct from metamethod
+dispatch.
+
+Tracked as `.agents/plans/A8a-float-div-zero.md` (status: ready).
+A8 ships the metamethod fix; events.lua remains skipped pending A8a.
+
+## What changed
+
+PR: #203
+
+Files touched:
+
+- `lib/lua/vm/executor.ex` — refactor `try_binary_metamethod`,
+  `try_unary_metamethod`, `try_equality_metamethod` to delegate to
+  `call_function/3` instead of inlining a closure invocation that
+  bypassed proto.varargs. Add `lookup_metamethod/3` so binary metamethod
+  lookup correctly falls through to the second operand. Net -91 lines.
+- `test/lua/vm/events_metamethod_vararg_test.exs` (new) — 21 unit
+  tests pinning the calling convention for vararg-form metamethods
+  across all arithmetic, bitwise, unary, comparison, concat, and
+  equality cases, plus the events.lua factory pattern.
+
+Suite delta: events.lua advances from first failure at line 15
+(pre-A16) to line 156 (post-this-fix). Remains in `@skipped_tests`
+pending A8a (float division by zero).
+
+Test count delta: 1446 → 1467 passing (+21 new tests, 0 regressions).
+
+Follow-up: `.agents/plans/A8a-float-div-zero.md` covers the remaining
+`1/0` semantics gap blocking events.lua end-to-end.
