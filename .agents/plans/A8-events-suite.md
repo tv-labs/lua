@@ -2,10 +2,10 @@
 id: A8
 title: Fix events.lua metamethod assertion
 issue: 169
-pr: null
+pr: 203
 branch: fix/events-suite
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - events.lua
@@ -168,3 +168,28 @@ dispatch.
 
 Tracked as `.agents/plans/A8a-float-div-zero.md` (status: ready).
 A8 ships the metamethod fix; events.lua remains skipped pending A8a.
+
+## What changed
+
+PR: #203
+
+Files touched:
+
+- `lib/lua/vm/executor.ex` — refactor `try_binary_metamethod`,
+  `try_unary_metamethod`, `try_equality_metamethod` to delegate to
+  `call_function/3` instead of inlining a closure invocation that
+  bypassed proto.varargs. Add `lookup_metamethod/3` so binary metamethod
+  lookup correctly falls through to the second operand. Net -91 lines.
+- `test/lua/vm/events_metamethod_vararg_test.exs` (new) — 21 unit
+  tests pinning the calling convention for vararg-form metamethods
+  across all arithmetic, bitwise, unary, comparison, concat, and
+  equality cases, plus the events.lua factory pattern.
+
+Suite delta: events.lua advances from first failure at line 15
+(pre-A16) to line 156 (post-this-fix). Remains in `@skipped_tests`
+pending A8a (float division by zero).
+
+Test count delta: 1446 → 1467 passing (+21 new tests, 0 regressions).
+
+Follow-up: `.agents/plans/A8a-float-div-zero.md` covers the remaining
+`1/0` semantics gap blocking events.lua end-to-end.
