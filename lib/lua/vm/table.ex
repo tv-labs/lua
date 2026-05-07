@@ -3,7 +3,7 @@ defmodule Lua.VM.Table do
   Lua table data structure.
 
   A single Elixir map backing both array and hash portions, plus a list of
-  keys in insertion order and a `MapSet` of "dead" keys whose values were
+  keys in insertion order and a key-set of "dead" keys whose values were
   cleared during iteration.
 
   Keys and values are VM values (numbers, strings, booleans, `{:tref, id}`,
@@ -22,10 +22,12 @@ defmodule Lua.VM.Table do
     * `order` — keys in the order they were first assigned a value. Live
       and dead keys both appear; assigning a fresh value to a previously
       dead key moves it to the end (it counts as a new insertion).
-    * `dead` — `MapSet` of keys that have been assigned `nil`. Their slot
-      in `order` is preserved so `next(t, k)` can locate the slot, but
-      `data` no longer contains the key, so the key is reported as
-      absent to readers.
+    * `dead` — a `key => true` map of keys that have been assigned `nil`.
+      Their slot in `order` is preserved so `next(t, k)` can locate the
+      slot, but `data` no longer contains the key, so the key is reported
+      as absent to readers. (We use a plain map rather than `MapSet` here
+      so dialyzer can treat the empty default opaquely; the API surface
+      is the same — `Map.has_key?/2`, `Map.put/3`, `Map.delete/2`.)
 
   All mutations should flow through `put/3` (or `put_data/3` for code that
   only has access to the underlying data map and doesn't care about the
@@ -34,13 +36,13 @@ defmodule Lua.VM.Table do
 
   defstruct data: %{},
             order: [],
-            dead: MapSet.new(),
+            dead: %{},
             metatable: nil
 
   @type t :: %__MODULE__{
           data: %{optional(term()) => term()},
           order: list(term()),
-          dead: MapSet.t(),
+          dead: %{optional(term()) => true},
           metatable: {:tref, non_neg_integer()} | nil
         }
 
@@ -54,7 +56,7 @@ defmodule Lua.VM.Table do
   """
   @spec from_data(map()) :: t()
   def from_data(data) when is_map(data) do
-    %__MODULE__{data: data, order: Map.keys(data), dead: MapSet.new()}
+    %__MODULE__{data: data, order: Map.keys(data)}
   end
 
   @doc """
@@ -66,7 +68,7 @@ defmodule Lua.VM.Table do
   """
   @spec replace_data(t(), map()) :: t()
   def replace_data(%__MODULE__{} = table, data) when is_map(data) do
-    %{table | data: data, order: Map.keys(data), dead: MapSet.new()}
+    %{table | data: data, order: Map.keys(data), dead: %{}}
   end
 
   @doc """
@@ -94,11 +96,11 @@ defmodule Lua.VM.Table do
 
   defp insert(%__MODULE__{data: data, order: order, dead: dead} = table, key, value) do
     cond do
-      MapSet.member?(dead, key) ->
+      Map.has_key?(dead, key) ->
         # Reviving a dead key — drop it from `order` and re-append so the
         # observable insertion order matches a fresh assignment.
         new_order = Enum.reject(order, &(&1 === key)) ++ [key]
-        %{table | data: Map.put(data, key, value), order: new_order, dead: MapSet.delete(dead, key)}
+        %{table | data: Map.put(data, key, value), order: new_order, dead: Map.delete(dead, key)}
 
       Map.has_key?(data, key) ->
         # Update of an existing live key — value changes, position stable.
@@ -114,7 +116,7 @@ defmodule Lua.VM.Table do
     if Map.has_key?(data, key) do
       # Live key being cleared — move to dead set, leave `order` slot
       # in place so any in-flight iteration can still walk past it.
-      %{table | data: Map.delete(data, key), dead: MapSet.put(dead, key)}
+      %{table | data: Map.delete(data, key), dead: Map.put(dead, key, true)}
     else
       # Already absent (never present, or already cleared) — no-op.
       # Per Lua 5.3 §3.4.11, fields with nil values are absent from the
@@ -203,11 +205,11 @@ defmodule Lua.VM.Table do
   When `key` is `nil`, returns the first live entry (or `nil` if the
   table is empty/all-dead).
 
-  When `key` is non-nil and is not present in `order` at all, raises
-  `ArgumentError` matching Lua 5.3's "invalid key to 'next'" semantics —
-  callers can catch this and re-raise with a richer error.
+  When `key` is non-nil and is not present in `order` at all, returns the
+  sentinel `:invalid_key` so the caller can raise the user-facing
+  "invalid key to 'next'" error per Lua 5.3 §6.1.
   """
-  @spec next_entry(t(), term()) :: {term(), term()} | nil
+  @spec next_entry(t(), term()) :: {term(), term()} | nil | :invalid_key
   def next_entry(%__MODULE__{} = table, nil) do
     first_live(table.order, table.data)
   end
@@ -218,7 +220,7 @@ defmodule Lua.VM.Table do
     case advance_past(table.order, key) do
       :not_found ->
         # The key was never in this table, even as a dead slot. Lua spec
-        # §6.1 requires raising for this.
+        # §6.1 requires raising for this — caller does the raising.
         :invalid_key
 
       remaining ->
