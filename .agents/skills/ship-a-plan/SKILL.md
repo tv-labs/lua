@@ -35,8 +35,16 @@ into a commit subject scope or a PR title, stop and re-read section 7.
 2. **The PR title uses the same scope rule as the commit subject.** If
    you wrote `fix(parser): ...` on the commit, the PR title is
    `fix(parser): ...`, not `fix(A3): ...`.
-3. **No Co-Authored-By for AI agents.** Plain authorship.
-4. **Do not merge.** PR creation is the stopping point.
+3. **No plan references in source files** (including test moduledocs,
+   `@doc` strings, and code comments). Plans are ephemeral working
+   documents — once they merge they're cleanup-bait. Source files
+   describe the contract they pin or the behavior they implement, not
+   where the work was scoped. The plan id appears in the commit body
+   and the PR description, never in the code or tests it produces.
+   - ✅ `@moduledoc "Pins Lua 5.3 §6.1 dead-key iteration semantics."`
+   - ❌ `@moduledoc "Regressions for plan A7a (follow-up to A7)."`
+4. **No Co-Authored-By for AI agents.** Plain authorship.
+5. **Do not merge.** PR creation is the stopping point.
 
 If any rule above is violated, fix it before pushing. If you've already
 pushed, rewrite history with `git rebase -i` + `git push --force-with-lease`
