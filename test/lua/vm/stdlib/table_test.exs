@@ -315,6 +315,260 @@ defmodule Lua.VM.Stdlib.TableTest do
     end
   end
 
+  describe "metamethod dispatch" do
+    # `table.insert`, `table.remove`, `table.concat`, `table.move`, and
+    # `table.sort` route reads through `__index`, writes through
+    # `__newindex`, and length lookups through `__len`. The tests below
+    # use a "proxy" pattern (an empty table with metamethods that delegate
+    # to a backing store) to confirm the stdlib never reaches into the
+    # raw table when a metamethod is set.
+
+    test "table.insert calls __newindex on missing slot" do
+      code = """
+      local backing = {1, 2, 3}
+      local proxy = setmetatable({}, {
+        __index = backing,
+        __newindex = backing,
+        __len = function() return #backing end,
+      })
+      table.insert(proxy, 4)
+      return #backing, backing[4], rawlen(proxy)
+      """
+
+      # `rawlen` skips __len so we can assert the proxy itself is still
+      # empty — the value lives on the backing table.
+      assert run!(code) == [4, 4, 0]
+    end
+
+    test "table.insert at position writes via __newindex" do
+      code = """
+      local writes = {}
+      local backing = {1, 2, 4}
+      local proxy = setmetatable({}, {
+        __index = backing,
+        __newindex = function(_, k, v)
+          writes[#writes + 1] = k
+          backing[k] = v
+        end,
+        __len = function() return #backing end,
+      })
+      table.insert(proxy, 3, 3)
+      return backing[1], backing[2], backing[3], backing[4], writes[1], writes[2]
+      """
+
+      # The shift writes to slot 4 first (top-down), then the new value
+      # lands at slot 3.
+      assert run!(code) == [1, 2, 3, 4, 4, 3]
+    end
+
+    test "table.remove reads via __index and writes nil via __newindex" do
+      code = """
+      local backing = {10, 20, 30}
+      local clears = {}
+      local proxy = setmetatable({}, {
+        __index = backing,
+        __newindex = function(_, k, v)
+          if v == nil then clears[#clears + 1] = k end
+          backing[k] = v
+        end,
+        __len = function() return #backing end,
+      })
+      local v = table.remove(proxy)
+      return v, #backing, backing[3], clears[1]
+      """
+
+      assert run!(code) == [30, 2, nil, 3]
+    end
+
+    test "table.remove from middle shifts via metamethods" do
+      code = """
+      local backing = {10, 20, 30, 40}
+      local proxy = setmetatable({}, {
+        __index = backing,
+        __newindex = backing,
+        __len = function() return #backing end,
+      })
+      local v = table.remove(proxy, 2)
+      return v, backing[1], backing[2], backing[3], backing[4]
+      """
+
+      assert run!(code) == [20, 10, 30, 40, nil]
+    end
+
+    test "table.concat reads via __index and uses __len for upper bound" do
+      code = """
+      local backing = {"a", "b", "c"}
+      local reads = 0
+      local proxy = setmetatable({}, {
+        __index = function(_, k)
+          reads = reads + 1
+          return backing[k]
+        end,
+        __newindex = backing,
+        __len = function() return #backing end,
+      })
+      local result = table.concat(proxy, ",")
+      return result, reads
+      """
+
+      # 3 reads via __index — one per element. __len is used to determine
+      # the default upper bound `j`.
+      assert run!(code) == ["a,b,c", 3]
+    end
+
+    test "table.concat with explicit range still routes through __index" do
+      code = """
+      local backing = {"a", "b", "c", "d"}
+      local proxy = setmetatable({}, {
+        __index = backing,
+        __newindex = backing,
+      })
+      return table.concat(proxy, "-", 2, 3)
+      """
+
+      assert run!(code) == ["b-c"]
+    end
+
+    test "table.move reads src via __index and writes dst via __newindex" do
+      code = """
+      local src_backing = {1, 2, 3, 4, 5}
+      local dst_writes = {}
+      local src = setmetatable({}, {
+        __index = src_backing,
+        __newindex = src_backing,
+        __len = function() return #src_backing end,
+      })
+      local dst = setmetatable({}, {
+        __index = function(_, k) return dst_writes[k] end,
+        __newindex = function(_, k, v) dst_writes[k] = v end,
+        __len = function()
+          local n = 0
+          for k in pairs(dst_writes) do
+            if type(k) == "number" and k > n then n = k end
+          end
+          return n
+        end,
+      })
+      table.move(src, 2, 4, 1, dst)
+      return dst_writes[1], dst_writes[2], dst_writes[3], dst_writes[4]
+      """
+
+      assert run!(code) == [2, 3, 4, nil]
+    end
+
+    test "table.sort reads and writes via metamethods" do
+      code = """
+      local backing = {3, 1, 4, 1, 5}
+      local read_count = 0
+      local write_count = 0
+      local proxy = setmetatable({}, {
+        __index = function(_, k)
+          read_count = read_count + 1
+          return backing[k]
+        end,
+        __newindex = function(_, k, v)
+          write_count = write_count + 1
+          backing[k] = v
+        end,
+        __len = function() return #backing end,
+      })
+      table.sort(proxy)
+      return backing[1], backing[2], backing[3], backing[4], backing[5],
+             read_count > 0, write_count == 5
+      """
+
+      assert run!(code) == [1, 1, 3, 4, 5, true, true]
+    end
+
+    test "table.sort with custom comparator routes through metamethods" do
+      code = """
+      local backing = {1, 2, 3, 4, 5}
+      local proxy = setmetatable({}, {
+        __index = backing,
+        __newindex = backing,
+        __len = function() return #backing end,
+      })
+      table.sort(proxy, function(a, b) return a > b end)
+      return backing[1], backing[2], backing[3], backing[4], backing[5]
+      """
+
+      assert run!(code) == [5, 4, 3, 2, 1]
+    end
+
+    test "__index as a function metamethod is invoked for table.concat" do
+      # When __index is a function (not a table), the stdlib must call
+      # it with (proxy, key) and use the returned value.
+      code = """
+      local proxy = setmetatable({}, {
+        __index = function(_, k) return tostring(k * 10) end,
+        __len = function() return 3 end,
+      })
+      return table.concat(proxy, ",")
+      """
+
+      assert run!(code) == ["10,20,30"]
+    end
+
+    test "__newindex as a function metamethod is invoked for table.insert" do
+      code = """
+      local store = {}
+      local proxy = setmetatable({}, {
+        __index = store,
+        __newindex = function(_, k, v) store[k] = v * 2 end,
+        __len = function()
+          local n = 0
+          for k in pairs(store) do
+            if type(k) == "number" and k > n then n = k end
+          end
+          return n
+        end,
+      })
+      table.insert(proxy, 5)
+      table.insert(proxy, 7)
+      return store[1], store[2]
+      """
+
+      # __newindex doubles every value on its way in.
+      assert run!(code) == [10, 14]
+    end
+
+    test "table.insert into raw table without metamethods is unchanged" do
+      # Ensure the metamethod path doesn't regress the raw-table case.
+      assert run!("local t = {1, 2}; table.insert(t, 3); return t[1], t[2], t[3]") ==
+               [1, 2, 3]
+    end
+
+    test "table.unpack reads via __index and uses __len" do
+      # Picked up alongside the other `table.*` fixes — `nextvar.lua`'s
+      # proxy section calls `table.unpack(proxy)` and expects metamethod
+      # dispatch the same way ltablib.c uses `lua_geti`.
+      code = """
+      local backing = {10, 20, 30}
+      local proxy = setmetatable({}, {
+        __index = backing,
+        __len = function() return #backing end,
+      })
+      return table.unpack(proxy)
+      """
+
+      assert run!(code) == [10, 20, 30]
+    end
+
+    test "table.concat raises when __len returns a non-integer" do
+      # Matches Lua 5.3: aux_getn coerces the __len result via
+      # luaL_checkinteger, raising on bad return values.
+      assert_raise Lua.RuntimeException, ~r/length is not an integer/, fn ->
+        Lua.eval!(Lua.new(), """
+        local proxy = setmetatable({}, {
+          __index = function() return "x" end,
+          __len = function() return "abc" end,
+        })
+        return table.concat(proxy)
+        """)
+      end
+    end
+  end
+
   describe "table.insert / table.remove round-trip property" do
     # Inserting a value at position `pos` then removing at the same `pos`
     # is the identity for the sequence portion of the table: the original

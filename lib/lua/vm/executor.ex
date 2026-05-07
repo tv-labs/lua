@@ -1422,7 +1422,21 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  defp table_index({:tref, id}, key, state, depth \\ 0) do
+  @doc """
+  Reads `t[key]` honoring the `__index` metamethod chain.
+
+  Returns `{value, state}`. Raises `RuntimeError` if the `__index` chain
+  exceeds `@metamethod_chain_limit` to guard against cyclic metatables.
+
+  Public so that stdlib functions (e.g. `table.concat`, `table.sort`) can
+  perform metamethod-aware reads without duplicating dispatch logic.
+  """
+  @spec table_index({:tref, non_neg_integer()}, term(), State.t()) :: {term(), State.t()}
+  def table_index({:tref, _} = tref, key, state) do
+    table_index(tref, key, state, 0)
+  end
+
+  defp table_index({:tref, id}, key, state, depth) do
     if depth >= @metamethod_chain_limit do
       raise RuntimeError, value: "'__index' chain too long; possible loop"
     end
@@ -1456,7 +1470,21 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  defp table_newindex({:tref, id}, key, value, state, depth \\ 0) do
+  @doc """
+  Writes `t[key] = value` honoring the `__newindex` metamethod chain.
+
+  Returns the updated state. Raises `RuntimeError` if the `__newindex`
+  chain exceeds `@metamethod_chain_limit`.
+
+  Public so that stdlib functions (e.g. `table.insert`, `table.sort`) can
+  perform metamethod-aware writes without duplicating dispatch logic.
+  """
+  @spec table_newindex({:tref, non_neg_integer()}, term(), term(), State.t()) :: State.t()
+  def table_newindex({:tref, _} = tref, key, value, state) do
+    table_newindex(tref, key, value, state, 0)
+  end
+
+  defp table_newindex({:tref, id}, key, value, state, depth) do
     if depth >= @metamethod_chain_limit do
       raise RuntimeError, value: "'__newindex' chain too long; possible loop"
     end
@@ -1485,6 +1513,48 @@ defmodule Lua.VM.Executor do
               state
           end
       end
+    end
+  end
+
+  @doc """
+  Returns the integer length of `tref`, honoring `__len`.
+
+  When `__len` is defined the metamethod is invoked and its result is
+  coerced to an integer. Otherwise falls back to `Value.sequence_length/1`.
+
+  Returns `{integer_length, state}`. Raises `TypeError` when `__len`
+  returns a value that cannot be coerced to an integer (matching
+  `ltablib.c`'s `aux_getn`/`luaL_len` semantics for the `table` library).
+  """
+  @spec table_length({:tref, non_neg_integer()}, State.t()) ::
+          {integer(), State.t()}
+  def table_length({:tref, _} = tref, state) do
+    {raw, state} =
+      try_unary_metamethod("__len", tref, state, fn ->
+        {:tref, id} = tref
+        table = Map.fetch!(state.tables, id)
+        Value.sequence_length(table.data)
+      end)
+
+    case raw do
+      n when is_integer(n) ->
+        {n, state}
+
+      n when is_float(n) ->
+        if Float.floor(n) == n and n >= -9_223_372_036_854_775_808.0 and n <= 9_223_372_036_854_775_807.0 do
+          {trunc(n), state}
+        else
+          raise TypeError,
+            value: "object length is not an integer",
+            error_kind: :length_not_integer,
+            value_type: :number
+        end
+
+      _ ->
+        raise TypeError,
+          value: "object length is not an integer",
+          error_kind: :length_not_integer,
+          value_type: value_type(raw)
     end
   end
 
