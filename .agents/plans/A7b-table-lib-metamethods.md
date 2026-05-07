@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: fix/table-lib-metamethods
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - nextvar.lua (partial — combined with A7c)
