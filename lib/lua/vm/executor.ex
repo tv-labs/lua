@@ -1489,146 +1489,55 @@ defmodule Lua.VM.Executor do
   end
 
   defp try_binary_metamethod(metamethod_name, a, b, state, default_fn) do
-    mt_a = get_metatable(a, state)
-    mt_b = get_metatable(b, state)
-
     metamethod =
-      cond do
-        mt_a != nil ->
-          mt = Map.fetch!(state.tables, elem(mt_a, 1))
-          Map.get(mt.data, metamethod_name)
+      lookup_metamethod(a, metamethod_name, state) ||
+        lookup_metamethod(b, metamethod_name, state)
 
-        mt_b != nil ->
-          mt = Map.fetch!(state.tables, elem(mt_b, 1))
-          Map.get(mt.data, metamethod_name)
+    invoke_metamethod(metamethod, [a, b], state, default_fn)
+  end
 
-        true ->
-          nil
-      end
-
-    case metamethod do
-      {:native_func, func} ->
-        {[result], new_state} = func.([a, b], state)
-        {result, new_state}
-
-      {:lua_closure, callee_proto, callee_upvalues} ->
-        args = [a, b]
-        initial_regs = List.to_tuple(args ++ List.duplicate(nil, 248))
-        saved_open_upvalues = state.open_upvalues
-        state = %{state | open_upvalues: %{}}
-
-        {results, _final_regs, new_state} =
-          do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto, state, [], [], 0)
-
-        new_state = %{new_state | open_upvalues: saved_open_upvalues}
-
-        result =
-          case results do
-            [r | _] -> r
-            [] -> nil
-          end
-
-        {result, new_state}
-
-      nil ->
-        {default_fn.(), state}
-
-      _ ->
-        {default_fn.(), state}
+  defp lookup_metamethod(value, name, state) do
+    case get_metatable(value, state) do
+      nil -> nil
+      {:tref, mt_id} -> Map.get(Map.fetch!(state.tables, mt_id).data, name)
     end
   end
 
   defp try_unary_metamethod(metamethod_name, a, state, default_fn) do
-    mt = get_metatable(a, state)
-
-    metamethod =
-      case mt do
-        nil ->
-          nil
-
-        {:tref, mt_id} ->
-          mt_table = Map.fetch!(state.tables, mt_id)
-          Map.get(mt_table.data, metamethod_name)
-      end
-
-    case metamethod do
-      {:native_func, func} ->
-        {[result], new_state} = func.([a], state)
-        {result, new_state}
-
-      {:lua_closure, callee_proto, callee_upvalues} ->
-        args = [a]
-        initial_regs = List.to_tuple(args ++ List.duplicate(nil, 249))
-        saved_open_upvalues = state.open_upvalues
-        state = %{state | open_upvalues: %{}}
-
-        {results, _final_regs, new_state} =
-          do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto, state, [], [], 0)
-
-        new_state = %{new_state | open_upvalues: saved_open_upvalues}
-
-        result =
-          case results do
-            [r | _] -> r
-            [] -> nil
-          end
-
-        {result, new_state}
-
-      nil ->
-        {default_fn.(), state}
-
-      _ ->
-        {default_fn.(), state}
-    end
+    metamethod = lookup_metamethod(a, metamethod_name, state)
+    invoke_metamethod(metamethod, [a], state, default_fn)
   end
 
   defp try_equality_metamethod(a, b, state, default_fn) do
-    mt_a = get_metatable(a, state)
-    mt_b = get_metatable(b, state)
-
-    eq_a =
-      case mt_a do
-        nil -> nil
-        {:tref, mt_id} -> Map.get(Map.fetch!(state.tables, mt_id).data, "__eq")
-      end
-
-    eq_b =
-      case mt_b do
-        nil -> nil
-        {:tref, mt_id} -> Map.get(Map.fetch!(state.tables, mt_id).data, "__eq")
-      end
+    eq_a = lookup_metamethod(a, "__eq", state)
+    eq_b = lookup_metamethod(b, "__eq", state)
 
     if not is_nil(eq_a) and eq_a == eq_b do
-      case eq_a do
-        {:native_func, func} ->
-          {[result], new_state} = func.([a, b], state)
-          {result, new_state}
-
-        {:lua_closure, callee_proto, callee_upvalues} ->
-          args = [a, b]
-          initial_regs = List.to_tuple(args ++ List.duplicate(nil, 248))
-          saved_open_upvalues = state.open_upvalues
-          state = %{state | open_upvalues: %{}}
-
-          {results, _final_regs, new_state} =
-            do_execute(callee_proto.instructions, initial_regs, callee_upvalues, callee_proto, state, [], [], 0)
-
-          new_state = %{new_state | open_upvalues: saved_open_upvalues}
-
-          result =
-            case results do
-              [r | _] -> r
-              [] -> nil
-            end
-
-          {result, new_state}
-
-        _ ->
-          {default_fn.(), state}
-      end
+      invoke_metamethod(eq_a, [a, b], state, default_fn)
     else
       {default_fn.(), state}
+    end
+  end
+
+  # Invokes a metamethod (native or Lua closure) with the given args, falling
+  # back to default_fn when the metamethod is missing or unsupported. Delegates
+  # to call_function/3 so vararg metamethods receive operands through proto
+  # varargs rather than being silently dropped.
+  defp invoke_metamethod(metamethod, args, state, default_fn) do
+    case metamethod do
+      nil ->
+        {default_fn.(), state}
+
+      {:native_func, _} = func ->
+        {results, new_state} = call_function(func, args, state)
+        {List.first(results), new_state}
+
+      {:lua_closure, _, _} = func ->
+        {results, new_state} = call_function(func, args, state)
+        {List.first(results), new_state}
+
+      _ ->
+        {default_fn.(), state}
     end
   end
 
