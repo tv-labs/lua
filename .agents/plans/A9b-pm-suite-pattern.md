@@ -186,3 +186,34 @@ until A9c lands. Unit tests: 1346 → 1354, 0 regressions.
 
 Follow-up: A9c should investigate the `do`-block + `for-in` VM bug
 documented above before pm.lua can move to `@ready_tests`.
+
+## Status update — 2026-05-07
+
+The `do`-block + `for-in` VM bug recorded above as the A9c follow-up
+**is fixed on main**. Both repros pass:
+
+```lua
+do
+  for k, v in pairs({a=1, b=2}) do
+    print(k, v)
+  end
+end
+```
+
+```lua
+local s = "abcde"
+local res = {s=''}
+string.gsub(s, '[a-c]', function (c) res.s = res.s .. c end)
+-- res.s is now "abc"
+```
+
+Likely incidentally fixed by one of A14 (for-loop register regression),
+A15 (open-upvalue missing cell), or A16 (env semantics).
+
+`pm.lua` standalone still fails — but the failure is now somewhere
+**after** line 163 (the last `print('+')` it hits), and is no longer
+the `do`+`for-in` interaction. A new triage pass via the
+`triage-suite-failure` skill is needed to locate and scope the current
+failure before drafting a follow-up plan. Do **not** file an A9c plan
+against the now-fixed bug.
+

@@ -5,7 +5,7 @@ issue: 205
 pr: 206
 branch: fix/lexer-vt-ff-whitespace
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - literals.lua  # partial — unblocks line 11; full pass depends on later content
