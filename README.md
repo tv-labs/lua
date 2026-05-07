@@ -2,19 +2,27 @@
 
 <!-- MDOC !-->
 
-`Lua` is an ergonomic interface to [Luerl](https://github.com/rvirding/luerl), aiming to be the best way to use Luerl from Elixir.
+`Lua` is an Elixir-native Lua 5.3 virtual machine. It runs Lua code on the BEAM
+with no Erlang or C dependencies, and exposes an ergonomic Elixir API for
+embedding Lua scripting in your application.
 
 ## Features
 
-* `~LUA` sigil for validating Lua code at compile-time
+* Pure-Elixir implementation of Lua 5.3 — lexer, parser, register-based VM,
+  and standard library — running directly on the BEAM
+* `~LUA` sigil for validating (and optionally pre-compiling) Lua code at
+  compile time
 * `deflua` macro for exposing Elixir functions to Lua
-* Improved error messages and sandboxing
-* Deep setting/getting variables and state
-* Excellent documentation and guides for working with Luerl
+* Beautiful error messages and stack traces
+* Sandboxing of stdlib paths
+* Deep setting/getting of variables and state from Elixir
+* Pattern-matching, metatables, varargs, multiple returns, `_G`/`_ENV`,
+  `string`/`table`/`math`/`debug` libraries, and the `string.find`/`match`/
+  `gmatch`/`gsub` pattern engine
 
 > #### Lua the Elixir library vs Lua the language {: .info}
 > When referring to this library, `Lua` will be stylized as a link.
-> 
+>
 > References to Lua the language will be in plaintext and not linked.
 
 ## Executing Lua
@@ -162,23 +170,22 @@ This allows you to have simple, expressive APIs that access context that is unav
 
 ## Encoding and Decoding data
 
-When working with `Lua`, you may want inject data of various types into the runtime. Some values, such as integers, have the same representation inside of the runtime as they do in Elixir, they do not require encoding. Other values, such as maps, are represented inside of `Lua` as tables, and must be encoded first. Values not listed are not valid and cannot be encoded by `Lua` and Luerl, however, they can be passed using a `{:userdata, any()}` tuple and encoding them.
+When working with `Lua`, you may want to inject data of various types into the runtime. Some values, such as integers, have the same representation inside the VM as they do in Elixir and do not require encoding. Other values, such as maps, are represented inside the VM as tables and must be encoded first. Arbitrary Elixir terms can be passed across the boundary using a `{:userdata, any()}` tuple.
 
-Values may be encoded with `Lua.encode!/2`
+Values may be encoded with `Lua.encode!/2`.
 
-  Elixir type                 | Luerl type                | Requires encoding?
-  :-------------------------- | :------------------------ | :---------------------
-  `nil`                       | `nil`                     | no
-  `boolean()`                 | `boolean()`               | no
-  `number()`                  | `number()`                | no
-  `binary()`                  | `binary()`                | no
-  `atom()`                    | `binary()`                | yes
-  `map()`                     | `:luerl.tref()`           | yes
-  `{:userdata, any()}`        | `:luerl.usdref()`         | yes
-  `(any()) -> any()`          | `:luerl.erl_func()`       | yes
-  `(any(), Lua.t()) -> any()` | `:luerl.erl_func()`       | yes
-  `{module(), atom(), list()` | `:luerl.erl_mfa()`        | yes
-  `list(any())`               | `list(luerl type)`        | maybe (if any of its values require encoding)
+  Elixir type                 | Internal VM type            | Requires encoding?
+  :-------------------------- | :-------------------------- | :---------------------
+  `nil`                       | `nil`                       | no
+  `boolean()`                 | `boolean()`                 | no
+  `number()`                  | `number()`                  | no
+  `binary()`                  | `binary()`                  | no
+  `atom()`                    | `binary()`                  | yes
+  `map()`                     | `{:tref, integer()}`        | yes
+  `{:userdata, any()}`        | `{:udref, integer()}`       | yes
+  `(any()) -> any()`          | `{:native_func, fun}`       | yes
+  `(any(), Lua.t()) -> any()` | `{:native_func, fun}`       | yes
+  `list(any())`               | `list(VM type)`             | maybe (if any of its values require encoding)
   
 
 ## Userdata
@@ -202,4 +209,9 @@ Trying to deference userdata inside a Lua program will result in an exception.
   
 ## Credits
 
-`Lua` piggy-backs off of Robert Virding's [Luerl](https://github.com/rvirding/luerl) project, which implements a Lua lexer, parser, and full-blown Lua virtual machine that runs inside the BEAM.
+`Lua` started as an ergonomic Elixir wrapper around Robert Virding's
+[Luerl](https://github.com/rvirding/luerl) project. As of `1.0.0` this library
+is a full Elixir-native reimplementation of the Lua 5.3 lexer, parser, and
+virtual machine, with a public API designed to feel idiomatic from Elixir.
+Luerl deserves credit as the prior art that made this possible — its design
+informed many of the decisions in the new VM, and we benchmark against it.

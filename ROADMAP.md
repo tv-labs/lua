@@ -4,9 +4,10 @@ This is the strategic overview. For per-PR detail, see [`.agents/plans/`](.agent
 
 ## Status: 2026-05-06
 
-- **Unit tests**: 1,369 passing, 0 failing, 36 skipped.
-- **Lua 5.3 official suite**: 4/24 files passing (`simple_test.lua`, `api.lua`, `code.lua`, `vararg.lua`).
-- **Current focus**: [Direction A — Suite Triage](#in-flight-direction-a--suite-triage-milestone-050).
+- **Unit tests**: 1,420 passing, 0 failing, 31 skipped.
+- **Lua 5.3 official suite**: 5/29 files passing (`simple_test.lua`,
+  `api.lua`, `bitwise.lua`, `code.lua`, `vararg.lua`).
+- **Current focus**: [Direction A — Suite Triage](#in-flight-direction-a--suite-triage-milestone-100).
 
 ## Done
 
@@ -30,10 +31,15 @@ The new Elixir-native VM (replacing Luerl) is built up through:
   - O(1) upvalue access by storing upvalues as a tuple (PR #155).
   - Fully tail-recursive CPS executor with line tracking off heap (PR #156).
 
-## In flight: Direction A — Suite Triage (milestone `0.5.0`)
+## In flight: Direction A — Suite Triage (milestone `1.0.0`)
 
-**Goal**: push the official Lua 5.3 test suite from 4/24 to ≥ 12/24 passing files,
-without regressing unit tests, then cut `0.5.0-rc.1`.
+**Goal**: push the official Lua 5.3 test suite from 5/29 to a healthier
+pass rate, without regressing unit tests, then cut `1.0.0-rc.1`.
+
+The version jump from `0.4` to `1.0` reflects the magnitude of the VM
+rewrite (Luerl is no longer a runtime dependency) and a commitment to
+public API stability. Cutting an `rc` first leaves room to catch
+regressions before locking 1.0 final.
 
 Per-PR plans live in [`.agents/plans/A*.md`](.agents/plans). Issues track them
 under the [`0.5.0` milestone](https://github.com/tv-labs/lua/milestone/1).
@@ -63,10 +69,10 @@ under the [`0.5.0` milestone](https://github.com/tv-labs/lua/milestone/1).
 
 - ~~**A11**: Clear in-source TODOs (`compiler.ex:34`, `compiler_exception.ex:27`,
   `stdlib.ex:412`).~~ Shipped in PR #194.
-- **A12**: README and CHANGELOG for 0.5.0.
-- **A13**: Cut `0.5.0-rc.1` (blocked on the rest).
+- **A12**: README and CHANGELOG for 1.0.0-rc.1.
+- **A13**: Cut `1.0.0-rc.1` (blocked on the rest).
 
-## Next: Direction B — Performance (milestone `0.5.x`)
+## Next: Direction B — Performance (milestone `1.0.x`)
 
 Several B-direction wins shipped already (PRs #153–#156). What remains:
 
@@ -78,7 +84,7 @@ Several B-direction wins shipped already (PRs #153–#156). What remains:
 Per-PR plans land in [`.agents/plans/B*.md`](.agents/plans) when Direction A
 wraps.
 
-## Deferred (intentional, not in 0.5)
+## Deferred (intentional, not in 1.0)
 
 - **Coroutines** (`coroutine.lua`) — full continuation/process model, weeks of work.
 - **Garbage collection / weak tables** (`gc.lua`).
