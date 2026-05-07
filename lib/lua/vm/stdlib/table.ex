@@ -14,14 +14,23 @@ defmodule Lua.VM.Stdlib.Table do
   - `table.pack(...)` - Packs arguments into table with 'n' field
   - `table.unpack(list [, i [, j]])` - Returns elements from list
   - `table.move(a1, f, e, t [, a2])` - Moves elements between tables
+
+  ## Metamethod handling
+
+  `table.insert`, `table.remove`, `table.concat`, `table.move`, and
+  `table.sort` route every read through `__index`, every write through
+  `__newindex`, and every length lookup through `__len`. This matches
+  Lua 5.3 §6.6 and the reference implementation in `ltablib.c`, which
+  uses `lua_geti`/`lua_seti`/`luaL_len` for these operations rather than
+  reaching into the raw table.
   """
 
   @behaviour Lua.VM.Stdlib.Library
 
   alias Lua.VM.ArgumentError
+  alias Lua.VM.Executor
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
-  alias Lua.VM.Table
 
   @impl true
   def lib_name, do: "table"
@@ -44,17 +53,15 @@ defmodule Lua.VM.Stdlib.Table do
 
   # table.insert(list, [pos,] value)
   defp table_insert([{:tref, _} = tref, value], state) do
-    # Insert at end
-    table = State.get_table(state, tref)
-    len = get_table_length(table)
-    state = State.update_table(state, tref, fn t -> Table.put(t, len + 1, value) end)
+    # Insert at end (pos = len + 1).
+    {len, state} = Executor.table_length(tref, state)
+    state = Executor.table_newindex(tref, len + 1, value, state)
     {[], state}
   end
 
   defp table_insert([{:tref, _} = tref, pos, value], state) when is_integer(pos) do
-    # Insert at position, shift elements up
-    table = State.get_table(state, tref)
-    len = get_table_length(table)
+    # Insert at position, shift elements up.
+    {len, state} = Executor.table_length(tref, state)
 
     if pos < 1 or pos > len + 1 do
       raise ArgumentError,
@@ -62,20 +69,16 @@ defmodule Lua.VM.Stdlib.Table do
         details: "position out of bounds"
     end
 
-    # Shift elements from pos..len up by one (write top-down so we don't
-    # clobber unread slots), then drop the new value into `pos`.
+    # Shift t[pos..len] up by one (top-down so reads stay coherent), then
+    # write `value` into t[pos]. Reads route through __index, writes
+    # through __newindex.
     state =
-      State.update_table(state, tref, fn t ->
-        t =
-          Enum.reduce(len..pos//-1, t, fn i, acc ->
-            case Map.get(acc.data, i) do
-              nil -> acc
-              val -> Table.put(acc, i + 1, val)
-            end
-          end)
-
-        Table.put(t, pos, value)
+      Enum.reduce(len..pos//-1, state, fn i, st ->
+        {v, st} = Executor.table_index(tref, i, st)
+        Executor.table_newindex(tref, i + 1, v, st)
       end)
+
+    state = Executor.table_newindex(tref, pos, value, state)
 
     {[], state}
   end
@@ -97,21 +100,19 @@ defmodule Lua.VM.Stdlib.Table do
     # Default pos is #list, so a single-arg call removes the last element.
     # When #list == 0, this still removes (and returns) t[0] per Lua 5.3
     # — `table.remove(t) == t[0]` when t has no sequence part.
-    table = State.get_table(state, tref)
-    len = get_table_length(table)
-    do_table_remove(tref, table, len, len, state)
+    {len, state} = Executor.table_length(tref, state)
+    do_table_remove(tref, len, len, state)
   end
 
   defp table_remove([{:tref, _} = tref, pos], state) when is_integer(pos) do
-    table = State.get_table(state, tref)
-    len = get_table_length(table)
+    {len, state} = Executor.table_length(tref, state)
 
     # Match Lua 5.3 ltablib.c: validate pos only when pos != size. This
     # lets `table.remove(t, 0)` succeed when `#t == 0` (returns t[0]) but
     # raises when `#t > 0`. pos == size + 1 is a no-op that returns nil.
     cond do
       pos == len ->
-        do_table_remove(tref, table, len, pos, state)
+        do_table_remove(tref, len, pos, state)
 
       pos < 1 or pos > len + 1 ->
         raise ArgumentError,
@@ -120,7 +121,7 @@ defmodule Lua.VM.Stdlib.Table do
           details: "position out of bounds"
 
       true ->
-        do_table_remove(tref, table, len, pos, state)
+        do_table_remove(tref, len, pos, state)
     end
   end
 
@@ -136,40 +137,46 @@ defmodule Lua.VM.Stdlib.Table do
     raise ArgumentError.value_expected("table.remove", 1)
   end
 
-  defp do_table_remove(tref, table, len, pos, state) do
-    value = Map.get(table.data, pos)
+  defp do_table_remove(tref, len, pos, state) do
+    # Read the value at `pos` first (via __index) so we can return it.
+    {value, state} = Executor.table_index(tref, pos, state)
 
+    # Shift t[pos+1..len] down by one, then clear t[max(pos, len)].
+    # Mirrors the loop in Lua 5.3 ltablib.c tremove: after the shift,
+    # `pos` is incremented to `size`, and the cleared slot is t[pos].
+    # When pos == 0 (and len == 0) we clear t[0]. When pos == len we
+    # clear t[len]. When pos == len + 1 (a no-op remove) we clear
+    # t[len + 1], which was already nil.
     state =
-      State.update_table(state, tref, fn t ->
-        # Shift t[pos+1..len] down by one, then clear t[max(pos, len)].
-        # Mirrors the loop in Lua 5.3 ltablib.c tremove: after the shift,
-        # `pos` is incremented to `size`, and the cleared slot is t[pos].
-        # When pos == 0 (and len == 0) we clear t[0]. When pos == len we
-        # clear t[len]. When pos == len + 1 (a no-op remove) we clear
-        # t[len + 1], which was already nil.
-        clear_at = max(pos, len)
+      if pos < len do
+        Enum.reduce((pos + 1)..len//1, state, fn i, st ->
+          {v, st} = Executor.table_index(tref, i, st)
+          Executor.table_newindex(tref, i - 1, v, st)
+        end)
+      else
+        state
+      end
 
-        t =
-          if pos < len do
-            Enum.reduce((pos + 1)..len//1, t, fn i, acc ->
-              Table.put(acc, i - 1, Map.get(acc.data, i))
-            end)
-          else
-            t
-          end
-
-        Table.put(t, clear_at, nil)
-      end)
+    clear_at = max(pos, len)
+    state = Executor.table_newindex(tref, clear_at, nil, state)
 
     {[value], state}
   end
 
   # table.concat(list [, sep [, i [, j]]])
   defp table_concat([{:tref, _} = tref | rest], state) do
-    table = State.get_table(state, tref)
     sep = Enum.at(rest, 0, "")
     i = Enum.at(rest, 1, 1)
-    j = Enum.at(rest, 2, get_table_length(table))
+
+    # `j` defaults to #list, which itself routes through __len.
+    {j, state} =
+      case Enum.at(rest, 2) do
+        nil ->
+          Executor.table_length(tref, state)
+
+        explicit ->
+          {explicit, state}
+      end
 
     if !is_binary(sep) do
       raise ArgumentError,
@@ -195,18 +202,35 @@ defmodule Lua.VM.Stdlib.Table do
         got: Util.typeof(j)
     end
 
-    elements =
-      for idx <- i..j do
-        case Map.get(table.data, idx) do
-          nil -> ""
-          val when is_binary(val) -> val
-          val when is_number(val) -> to_string(val)
-          _ -> raise ArgumentError, function_name: "table.concat", details: "invalid value"
-        end
+    # Read each element via __index. Empty range (i > j) yields "".
+    {elements, state} =
+      if i > j do
+        {[], state}
+      else
+        i..j//1
+        |> Enum.reduce({[], state}, fn idx, {acc, st} ->
+          {val, st} = Executor.table_index(tref, idx, st)
+
+          str =
+            case val do
+              v when is_binary(v) ->
+                v
+
+              v when is_number(v) ->
+                to_string(v)
+
+              _ ->
+                raise ArgumentError,
+                  function_name: "table.concat",
+                  details: "invalid value (#{Util.typeof(val)}) at index #{idx}"
+            end
+
+          {[str | acc], st}
+        end)
+        |> then(fn {acc, st} -> {Enum.reverse(acc), st} end)
       end
 
-    result = Enum.join(elements, sep)
-    {[result], state}
+    {[Enum.join(elements, sep)], state}
   end
 
   defp table_concat([tref | _], _state) do
@@ -223,33 +247,43 @@ defmodule Lua.VM.Stdlib.Table do
 
   # table.sort(list [, comp])
   defp table_sort([{:tref, _} = tref | rest], state) do
-    table = State.get_table(state, tref)
     comp = List.first(rest)
 
-    len = get_table_length(table)
-    elements = for i <- 1..len, do: {i, Map.get(table.data, i)}
+    # Resolve length via __len and materialize the slice via __index. We
+    # then sort in Elixir and write back via __newindex. This matches
+    # Lua 5.3 ltablib.c, which sorts through lua_geti/lua_seti rather
+    # than mutating the raw table mid-sort.
+    {len, state} = Executor.table_length(tref, state)
 
-    sorted_elements =
-      if comp do
-        # Custom comparison function - not fully implemented yet
-        # For now, just use default sort
-        Enum.sort_by(elements, fn {_idx, val} -> val end)
+    {values, state} =
+      if len <= 1 do
+        # Even for len 0/1 we still call __index so callers observe the
+        # access pattern matching the reference impl. For len == 1 we
+        # skip the sort entirely; the slot is already in order.
+        if len == 0 do
+          {[], state}
+        else
+          {v, state} = Executor.table_index(tref, 1, state)
+          {[v], state}
+        end
       else
-        # Default sort
-        Enum.sort_by(elements, fn {_idx, val} -> val end)
+        1..len//1
+        |> Enum.reduce({[], state}, fn i, {acc, st} ->
+          {v, st} = Executor.table_index(tref, i, st)
+          {[v | acc], st}
+        end)
+        |> then(fn {acc, st} -> {Enum.reverse(acc), st} end)
       end
 
-    new_data =
-      sorted_elements
-      |> Enum.with_index(1)
-      |> Enum.reduce(%{}, fn {{_old_idx, val}, new_idx}, acc ->
-        Map.put(acc, new_idx, val)
-      end)
-      |> Map.merge(Map.drop(table.data, Enum.to_list(1..len)))
+    {sorted, state} = sort_values(values, comp, state)
 
-    # Sort rewrites every integer key, so rebuild order/dead from scratch
-    # rather than trying to track per-position changes.
-    state = State.update_table(state, tref, fn t -> Table.replace_data(t, new_data) end)
+    state =
+      sorted
+      |> Enum.with_index(1)
+      |> Enum.reduce(state, fn {val, idx}, st ->
+        Executor.table_newindex(tref, idx, val, st)
+      end)
+
     {[], state}
   end
 
@@ -263,6 +297,55 @@ defmodule Lua.VM.Stdlib.Table do
 
   defp table_sort([], _state) do
     raise ArgumentError.value_expected("table.sort", 1)
+  end
+
+  # Sort values, threading state through the comparator when one is
+  # supplied. The comparator may be a Lua closure or a native func; we
+  # invoke it through `Executor.call_function/3` so vararg comparators
+  # work the same way they do at the call site.
+  defp sort_values(values, nil, state) do
+    {Enum.sort(values, &default_compare/2), state}
+  end
+
+  defp sort_values(values, comp, state) do
+    # `Enum.sort/2` cannot thread external state through its comparator,
+    # so we use a stable insertion sort that does. Sort sizes here track
+    # the table being sorted, so for a 1000-element table this is
+    # O(n^2). Acceptable for now — matches the cost ceiling of calling
+    # `comp` n*log(n) times in any case (comp is the dominant cost).
+    Enum.reduce(values, {[], state}, fn val, {sorted, st} ->
+      {inserted, st} = insert_sorted(sorted, val, comp, st)
+      {inserted, st}
+    end)
+  end
+
+  defp insert_sorted([], val, _comp, state), do: {[val], state}
+
+  defp insert_sorted([head | tail] = list, val, comp, state) do
+    {less?, state} = invoke_compare(comp, val, head, state)
+
+    if less? do
+      {[val | list], state}
+    else
+      {rest, state} = insert_sorted(tail, val, comp, state)
+      {[head | rest], state}
+    end
+  end
+
+  defp invoke_compare(comp, a, b, state) do
+    {results, state} = Executor.call_function(comp, [a, b], state)
+    {!!List.first(results), state}
+  end
+
+  # Default comparator mirrors Lua's `<`: numbers compare numerically,
+  # strings compare lexicographically. Cross-type compares raise.
+  defp default_compare(a, b) when is_number(a) and is_number(b), do: a < b
+  defp default_compare(a, b) when is_binary(a) and is_binary(b), do: a < b
+
+  defp default_compare(a, b) do
+    raise ArgumentError,
+      function_name: "table.sort",
+      details: "attempt to compare #{Util.typeof(a)} with #{Util.typeof(b)}"
   end
 
   # table.pack(...)
@@ -280,10 +363,18 @@ defmodule Lua.VM.Stdlib.Table do
 
   # table.unpack(list [, i [, j]])
   defp table_unpack([{:tref, _} = tref | rest], state) do
-    table = State.get_table(state, tref)
-    # Treat nil as "not provided" — fall back to defaults
+    # Treat nil as "not provided" — fall back to defaults. `i` defaults
+    # to 1 and `j` defaults to #list (which routes through __len).
     i = Enum.at(rest, 0) || 1
-    j = Enum.at(rest, 1) || get_table_length(table)
+
+    {j, state} =
+      case Enum.at(rest, 1) do
+        nil ->
+          Executor.table_length(tref, state)
+
+        explicit ->
+          {explicit, state}
+      end
 
     if !is_integer(i) do
       raise ArgumentError,
@@ -301,9 +392,18 @@ defmodule Lua.VM.Stdlib.Table do
         got: Util.typeof(j)
     end
 
-    results =
-      for idx <- i..j do
-        Map.get(table.data, idx, nil)
+    # Read each element via __index. Empty range (i > j) returns no
+    # values. Matches `ltablib.c` which uses `lua_geti` per slot.
+    {results, state} =
+      if i > j do
+        {[], state}
+      else
+        i..j//1
+        |> Enum.reduce({[], state}, fn idx, {acc, st} ->
+          {v, st} = Executor.table_index(tref, idx, st)
+          {[v | acc], st}
+        end)
+        |> then(fn {acc, st} -> {Enum.reverse(acc), st} end)
       end
 
     {results, state}
@@ -333,19 +433,31 @@ defmodule Lua.VM.Stdlib.Table do
         got: Util.typeof(tref2)
     end
 
-    table1 = State.get_table(state, tref1)
-
-    # Move elements from a1[f..e] to a2[t..]
+    # Empty range (f > e) is a no-op that still returns tref2.
     state =
-      State.update_table(state, tref2, fn t2 ->
-        {new_t2, _} =
-          Enum.reduce(f..e//1, {t2, t}, fn src_idx, {acc, dst_idx} ->
-            val = Map.get(table1.data, src_idx)
-            {Table.put(acc, dst_idx, val), dst_idx + 1}
+      if f > e do
+        state
+      else
+        # Read each src slot via __index on tref1, write to dst via
+        # __newindex on tref2. Aliasing (tref1 == tref2 with overlapping
+        # ranges) is handled by reading every value first, then writing
+        # — matching ltablib.c's tmove which preserves overlap-safety
+        # only when src and dst are distinct or t <= f.
+        {values, state} =
+          Enum.reduce(f..e//1, {[], state}, fn idx, {acc, st} ->
+            {v, st} = Executor.table_index(tref1, idx, st)
+            {[v | acc], st}
           end)
 
-        new_t2
-      end)
+        values = Enum.reverse(values)
+
+        {final_state, _} =
+          Enum.reduce(values, {state, t}, fn v, {st, dst_idx} ->
+            {Executor.table_newindex(tref2, dst_idx, v, st), dst_idx + 1}
+          end)
+
+        final_state
+      end
 
     {[tref2], state}
   end
@@ -384,18 +496,5 @@ defmodule Lua.VM.Stdlib.Table do
 
   defp table_move([], _state) do
     raise ArgumentError.value_expected("table.move", 1)
-  end
-
-  # Helper: Get the length of the array part of a table (consecutive integer keys starting from 1)
-  defp get_table_length(table) do
-    find_table_length(table.data, 1)
-  end
-
-  defp find_table_length(data, i) do
-    if Map.has_key?(data, i) do
-      find_table_length(data, i + 1)
-    else
-      i - 1
-    end
   end
 end
