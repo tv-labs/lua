@@ -917,7 +917,7 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_equality_metamethod(val_a, val_b, state, fn -> val_a == val_b end)
+      try_equality_metamethod(val_a, val_b, state, fn -> lua_equal(val_a, val_b) end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -958,7 +958,7 @@ defmodule Lua.VM.Executor do
   end
 
   defp do_execute([{:not_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    result = elem(regs, a) != elem(regs, b)
+    result = not lua_equal(elem(regs, a), elem(regs, b))
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
@@ -1582,11 +1582,29 @@ defmodule Lua.VM.Executor do
     end
   end
 
+  # Lua 5.3 §3.4.1: `/` is always float division and never raises. Division
+  # by zero produces ±inf or NaN. The BEAM has no IEEE float infinity or NaN
+  # (Erlang raises `:badarith` on `1.0 / 0.0`), so we use finite stand-ins
+  # consistent with `math.huge = 1.0e308`:
+  #
+  #   * `1/0`  → `+1.0e308`
+  #   * `-1/0` → `-1.0e308`
+  #   * `0/0`  → `:nan` (sentinel atom)
+  #
+  # Sign of an inf result follows sign of the numerator. Equality on `:nan`
+  # is overridden in `lua_equal/2` so the canonical `nan ~= nan` test holds.
+  # Arithmetic on `:nan` will surface a TypeError via `to_number/1`; that's
+  # an accepted divergence from real IEEE 754, since the suite tests we
+  # care about don't propagate NaN through further arithmetic.
   defp safe_divide(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
       if nb == 0 or nb == 0.0 do
-        raise RuntimeError, value: "attempt to divide by zero"
+        cond do
+          na == 0 or na == 0.0 -> :nan
+          na > 0 -> 1.0e308
+          true -> -1.0e308
+        end
       else
         na / nb
       end
@@ -1680,6 +1698,15 @@ defmodule Lua.VM.Executor do
   # leaves alone.
   defp narrow_if_integer(n) when is_integer(n), do: Numeric.to_signed_int64(n)
   defp narrow_if_integer(n), do: n
+
+  # ── Equality ───────────────────────────────────────────────────────────────
+
+  # Lua-level value equality. Mirrors Erlang `==` for ordinary values, but
+  # honors the IEEE 754 rule that `nan ~= nan` for the `:nan` sentinel
+  # produced by `0/0`. See `safe_divide/2` for the rationale.
+  defp lua_equal(:nan, _), do: false
+  defp lua_equal(_, :nan), do: false
+  defp lua_equal(a, b), do: a == b
 
   # ── Type-safe comparison ───────────────────────────────────────────────────
 

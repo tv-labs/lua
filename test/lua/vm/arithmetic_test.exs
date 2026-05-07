@@ -111,28 +111,23 @@ defmodule Lua.VM.ArithmeticTest do
   end
 
   describe "division by zero" do
-    test "float division by zero raises error" do
+    test "float division by zero yields +math.huge (Lua 5.3 §3.4.1)" do
+      # Lua 5.3 §3.4.1: `/` is always float division and never raises. The
+      # BEAM has no IEEE +inf, so we use the same finite stand-in as
+      # `math.huge = 1.0e308`.
       code = "return 5 / 0"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
-
-      # Note: Standard Lua 5.3 returns inf for this case, but we raise an error
-      # because Elixir doesn't easily support creating inf/nan values
-      assert_raise RuntimeError, ~r/divide by zero/, fn ->
-        VM.execute(proto, state)
-      end
+      assert {:ok, [1.0e308], _state} = VM.execute(proto, state)
     end
 
-    test "float division of negative by zero raises error" do
+    test "float division of negative by zero yields -math.huge" do
       code = "return -5 / 0"
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
-
-      assert_raise RuntimeError, ~r/divide by zero/, fn ->
-        VM.execute(proto, state)
-      end
+      assert {:ok, [-1.0e308], _state} = VM.execute(proto, state)
     end
 
     test "floor division by zero raises error" do
