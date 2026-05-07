@@ -306,6 +306,13 @@ defmodule Lua.LexerTest do
 
       # With CRLF
       assert {:ok, [{:string, "test", _}, {:eof, _}]} = Lexer.tokenize("\"test\\z\r\n\"")
+
+      # Vertical tab and form feed are whitespace per Lua 5.3 §3.1, so \z
+      # eats them too. Without this, "\\z" + \v would leave \v in the
+      # string and break parses that rely on \z swallowing arbitrary
+      # whitespace.
+      assert {:ok, [{:string, "abcdef", _}, {:eof, _}]} =
+               Lexer.tokenize("\"abc\\z\v\f \t\ndef\"")
     end
   end
 
@@ -475,6 +482,38 @@ defmodule Lua.LexerTest do
     test "skips spaces and tabs" do
       assert {:ok, [{:number, 1, _}, {:number, 2, _}, {:eof, _}]} = Lexer.tokenize("1  2")
       assert {:ok, [{:number, 1, _}, {:number, 2, _}, {:eof, _}]} = Lexer.tokenize("1\t2")
+    end
+
+    # Lua 5.3 reference manual §3.1 lists vertical tab (\v, 0x0B) and form
+    # feed (\f, 0x0C) as whitespace. Surfaced by literals.lua line 11:
+    #   dostring("x \v\f = \t\r 'a\0a' \v\f\f")
+    # which feeds source containing \v / \f back through load() → lexer.
+    test "skips vertical tab between tokens" do
+      assert {:ok, [{:number, 1, _}, {:number, 2, _}, {:eof, _}]} = Lexer.tokenize("1\v2")
+
+      assert {:ok, [{:identifier, "x", _}, {:operator, :assign, _}, {:number, 1, _}, {:eof, _}]} =
+               Lexer.tokenize("x\v=\v1")
+    end
+
+    test "skips form feed between tokens" do
+      assert {:ok, [{:number, 1, _}, {:number, 2, _}, {:eof, _}]} = Lexer.tokenize("1\f2")
+
+      assert {:ok, [{:identifier, "x", _}, {:operator, :assign, _}, {:number, 1, _}, {:eof, _}]} =
+               Lexer.tokenize("x\f=\f1")
+    end
+
+    test "handles mixed VT, FF, space, tab, CR between tokens" do
+      # Inner Lua source from literals.lua:11 (the literal payload only —
+      # we stop at the embedded null byte so \0 doesn't confuse the lexer
+      # state machine; \v\f after the value still needs to be eaten).
+      assert {:ok, tokens} = Lexer.tokenize("x \v\f = \t\r 1 \v\f\f")
+
+      assert [
+               {:identifier, "x", _},
+               {:operator, :assign, _},
+               {:number, 1, _},
+               {:eof, _}
+             ] = tokens
     end
 
     test "handles newlines" do
