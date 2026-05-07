@@ -5,7 +5,7 @@ issue: 168
 pr: 200
 branch: fix/nextvar-suite
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - nextvar.lua  # partial — full pass requires A7a (dead-key tracking)

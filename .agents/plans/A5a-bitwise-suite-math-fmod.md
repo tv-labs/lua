@@ -5,7 +5,7 @@ issue: null
 pr: 199
 branch: feat/math-fmod
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - bitwise.lua (final third — bit32.lshift verification block)

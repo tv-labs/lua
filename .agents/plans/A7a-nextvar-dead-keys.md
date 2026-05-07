@@ -5,7 +5,7 @@ issue: null
 pr: 202
 branch: fix/nextvar-dead-keys
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - nextvar.lua  # partial — full pass requires A7b (table-lib metamethods)

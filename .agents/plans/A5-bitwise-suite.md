@@ -5,7 +5,7 @@ issue: 166
 pr: 198
 branch: fix/bitwise-suite
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - bitwise.lua

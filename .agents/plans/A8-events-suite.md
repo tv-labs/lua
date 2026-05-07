@@ -5,7 +5,7 @@ issue: 169
 pr: 203
 branch: fix/events-suite
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - events.lua

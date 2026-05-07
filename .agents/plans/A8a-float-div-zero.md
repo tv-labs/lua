@@ -5,7 +5,7 @@ issue: null
 pr: 204
 branch: fix/float-div-zero
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - events.lua (line 156: `assert(a // (1/0) == a)`)
