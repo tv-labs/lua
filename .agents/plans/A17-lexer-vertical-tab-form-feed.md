@@ -2,10 +2,10 @@
 id: A17
 title: Lexer accepts vertical tab and form feed as inter-token whitespace
 issue: 205
-pr: null
+pr: 206
 branch: fix/lexer-vt-ff-whitespace
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - literals.lua  # partial — unblocks line 11; full pass depends on later content
@@ -120,3 +120,44 @@ mix run /tmp/triage_dostring.exs   # should print "x = a a   len: 3"
   existing assertion to invalidate.
 - The `\z` change is effectively dead code unless someone writes
   `"foo\z\vbar"` — but it's the right fix and is one line each.
+
+## Discoveries
+
+- **`literals.lua` now progresses from line 11 to line 15+.** The fix
+  unblocks the suite-file's first `dostring()` call. The next failure
+  is unrelated — a multi-line string literal parse error — and is the
+  next plan, not this one.
+
+- **The `Lua.new(exclude: [...])` exclude-list does not actually exclude
+  `load` (or apparently other entries).** Calling `Lua.new(exclude: [[:load]])`
+  still leaves `load` callable. The suite runner depends on this current
+  behavior because suite files like `literals.lua` use `dostring`/`load`
+  to feed sub-scripts back through the lexer. Flipping the exclude
+  semantics independently would break the suite runner. Out of scope
+  for this PR; worth a separate triage and a coordinated fix.
+
+## What changed
+
+Files touched:
+
+- `lib/lua/lexer.ex` — extended the inter-token whitespace guard from
+  `[?\s, ?\t]` to `[?\s, ?\t, ?\v, ?\f]`; added two new clauses to
+  `skip_whitespace_in_string/2` for `\v` and `\f`. Total: +13 / -2 lines.
+- `test/lua/lexer_test.exs` — added three new tests under
+  `describe "whitespace"` covering VT, FF, and mixed-whitespace
+  scenarios; extended the existing `\z` test with one new assertion
+  covering `\z` followed by VT/FF. Total: +39 / 0 lines.
+
+Test deltas:
+
+- `mix test`: 1481 → 1484 (+3 net new tests; the `\z` test gained one
+  assertion but is still one test). 0 failures, 31 skipped (unchanged).
+- `mix test --only lua53`: 5/29 ready, 24 skipped — unchanged.
+  `literals.lua` is still in `@skipped_tests` because it now fails at a
+  different line, not because of any regression.
+
+Follow-ups (not opened as issues):
+
+- Triage `literals.lua` line ~15: multi-line string literal parse error.
+- Triage the `Lua.new(exclude: [...])` quirk where excludes don't
+  actually exclude.
