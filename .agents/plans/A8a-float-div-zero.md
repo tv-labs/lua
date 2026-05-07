@@ -2,10 +2,10 @@
 id: A8a
 title: Float division by zero must yield ±inf, not raise
 issue: null
-pr: null
+pr: 204
 branch: fix/float-div-zero
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - events.lua (line 156: `assert(a // (1/0) == a)`)
@@ -86,3 +86,30 @@ metamethod calling convention fixed, events.lua advances from line 15
 to line 156. Line 156 is `assert(a // (1/0) == a)`, which fails because
 `1/0` raises rather than producing `inf`. This is a stdlib-level Lua
 semantics gap, distinct from metamethod dispatch.
+
+## What changed
+
+PR: https://github.com/tv-labs/lua/pull/204
+
+Files touched:
+- `lib/lua/vm/executor.ex`: `safe_divide/2` returns `1.0e308`/`-1.0e308`/`:nan`
+  instead of raising; new `lua_equal/2` helper handles NaN inequality;
+  `equal` and `not_equal` opcodes routed through it.
+- `test/lua/vm/float_div_zero_test.exs`: new file, 14 tests pinning the
+  Lua 5.3 §3.4.1 contract.
+- `test/lua/vm/arithmetic_test.exs`: updated two pre-existing tests that
+  asserted `5/0` and `-5/0` raise (with a comment acknowledging the
+  divergence) to assert the new contract.
+
+Test deltas:
+- `mix test`: 1467 → 1481 passing (+14 new), 0 failures.
+- `mix test --only lua53`: 5 ready / 24 skipped (no change in suite count;
+  events.lua advances past line 156 but does not pass end-to-end).
+
+events.lua remains in `@skipped_tests` — it now fails further down at
+"attempt to index a function value", a separate downstream issue.
+
+Follow-ups noted in the PR Discoveries section:
+1. events.lua's downstream function-indexing failure (separate plan).
+2. `//` and `%` with float-zero divisor still raise (separate plan).
+3. `~=` opcode bypasses `__eq` metamethod dispatch (separate plan).
