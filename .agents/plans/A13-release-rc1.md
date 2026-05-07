@@ -1,9 +1,9 @@
 ---
 id: A13
-title: Cut 0.5.0-rc.1
+title: Cut 1.0.0-rc.1
 issue: 174
 pr: null
-branch: release/0-5-0-rc-1
+branch: release/1-0-0-rc-1
 base: main
 status: blocked
 direction: A
@@ -11,24 +11,29 @@ direction: A
 
 ## Goal
 
-Publish `0.5.0-rc.1` to Hex.pm. This is the final plan in Direction A and
-gates on the rest of the milestone closing.
+Publish `1.0.0-rc.1` to Hex.pm. This is the final plan in Direction A and
+gates on the rest of the milestone closing. The major version bump
+reflects the magnitude of the VM rewrite (Luerl → Elixir-native) and a
+commitment to public API stability.
 
 ## Out of scope
 
-- New features (must be in by now or wait for 0.5.0 final).
-- Documentation rewrites beyond what A12 ships.
+- New features (must be in by now or wait for 1.0.0 final).
+- Documentation rewrites beyond what A12 ships (note: A12 already bumps
+  `mix.exs` and writes the CHANGELOG entry — this plan only needs to
+  date the entry, tag, and publish).
 
 ## Success criteria
 
-- [ ] `mix.exs` `@version` bumped to `0.5.0-rc.1`.
-- [ ] `CHANGELOG.md` has a `0.5.0-rc.1` section dated and entry-listed.
-- [ ] All `0.5.0` milestone issues closed or moved to `0.5.x`.
-- [ ] `mix test` passes (≥ 1273)
-- [ ] `mix test --only lua53` passes ≥ 12/24 files (target)
-- [ ] `mix docs` builds cleanly.
-- [ ] Tag created: `git tag v0.5.0-rc.1`
-- [ ] Pushed: `git push origin v0.5.0-rc.1`
+- [x] `mix.exs` `@version` bumped to `1.0.0-rc.1` (done in A12 / PR #201).
+- [x] `CHANGELOG.md` has a `1.0.0-rc.1` section (done in A12 / PR #201).
+- [ ] CHANGELOG entry's date is the actual publish date.
+- [ ] All `1.0.0` milestone issues closed or moved to `1.0.x`.
+- [ ] `mix test` passes (≥ 1420).
+- [ ] `mix test --only lua53` passes (target: improve on 5/29).
+- [ ] `mix docs` does not introduce new warnings.
+- [ ] Tag created: `git tag v1.0.0-rc.1`
+- [ ] Pushed: `git push origin v1.0.0-rc.1`
 - [ ] Published: `mix hex.publish` (manual; pre-release flag).
 
 ## Blocked on
@@ -59,9 +64,11 @@ mix hex.build
 
 ## Risks
 
-- Pre-release semver (`0.5.0-rc.1`) may not be visible by default in Hex
+- Pre-release semver (`1.0.0-rc.1`) may not be visible by default in Hex
   resolvers; the user should know.
 - Anything broken in the doctest set will break `mix hex.publish`.
+- Going to 1.0 commits to API stability. Any breaking change after this
+  requires a 2.0.
 
 ## Discoveries
 
