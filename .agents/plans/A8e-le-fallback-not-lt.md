@@ -5,7 +5,7 @@ issue: null
 pr: 213
 branch: fix/le-fallback-not-lt
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - events.lua advances past line 258 (`assert((Set{1,2,3,4} <= Set{1,2,3,4}))`)

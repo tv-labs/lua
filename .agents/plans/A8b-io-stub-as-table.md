@@ -5,7 +5,7 @@ issue: null
 pr: 210
 branch: fix/io-stub-as-table
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - events.lua advances past line 188 (`assert(not pcall(rawlen, io.stdin))`)

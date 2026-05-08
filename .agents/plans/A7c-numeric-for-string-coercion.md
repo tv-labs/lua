@@ -5,7 +5,7 @@ issue: null
 pr: 209
 branch: fix/numeric-for-string-coercion
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - nextvar.lua (line 510 — `for i="10","1","-2" do ... end`)

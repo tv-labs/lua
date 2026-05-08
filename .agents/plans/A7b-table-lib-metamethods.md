@@ -5,7 +5,7 @@ issue: null
 pr: 208
 branch: fix/table-lib-metamethods
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - nextvar.lua (partial — combined with A7c, plus a separate line-46 blocker)

@@ -5,7 +5,7 @@ issue: null
 pr: 212
 branch: fix/not-equal-eq-metamethod
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - any code that compares two metamethod-wrapped values with ~=
