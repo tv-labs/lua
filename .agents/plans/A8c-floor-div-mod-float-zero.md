@@ -2,10 +2,10 @@
 id: A8c
 title: "// and % with float-zero divisor return inf/nan, not raise"
 issue: null
-pr: null
+pr: 211
 branch: fix/floor-div-mod-float-zero
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - any code path exercising Lua 5.3 §3.4.1 float semantics for `//`/`%`
@@ -102,3 +102,27 @@ Discovered in A8a's PR Discoveries section as follow-up #2:
 "`//` and `%` with float-zero divisor still raise (separate plan)."
 Re-verified on main on 2026-05-07: both `1.0 // 0.0` and `1.0 % 0.0`
 still raise.
+
+## What changed
+
+PR: [#211](https://github.com/tv-labs/lua/pull/211)
+
+Files touched:
+
+- `lib/lua/vm/executor.ex` — split zero-divisor handling in
+  `safe_floor_divide/2` and `safe_modulo/2` by divisor type. Integer-zero
+  divisors still raise; float-zero divisors produce the inf/nan stand-ins
+  consistent with A8a's `safe_divide` model.
+- `test/lua/vm/float_div_zero_test.exs` — extended with 16 new tests
+  covering pure-float zero divisors (inf/-inf/nan for `//`, nan for `%`),
+  mixed integer/float zero divisors, and the integer-zero-still-raises
+  invariant.
+
+Test counts:
+
+- Before: 1544 tests, 0 failures
+- After: 1560 tests, 0 failures (+16 new, no regressions)
+- `mix test --only lua53`: 29 tests, 0 failures, 24 skipped — unchanged.
+
+No follow-up issues opened. The plan's risk list (negative zero,
+signaling NaN, etc.) is still out of scope and not a regression.
