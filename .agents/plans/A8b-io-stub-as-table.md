@@ -149,11 +149,14 @@ Test delta:
 
 ## Discoveries
 
-- events.lua's next stop after this plan is the `__lt` metamethod
-  dispatch test at ~line 208: `assert(not(Op(1)<Op(1)) ...)` where
-  `Op(x)` returns `setmetatable({x=x}, t)` and `t.__lt` is a function.
-  Comparison operators (`<`, `<=`, `>`, `>=`) don't yet dispatch
-  through `__lt` / `__le` metamethods on table operands; failure is
-  `attempt to compare table with table`. That's a separate VM gap and
-  blocks promoting `events.lua` to `@ready_tests`. Open a follow-up
-  plan (next free id) before re-running the suite for events.lua.
+- events.lua's next stop after this plan is **line 258**:
+  `assert((Set{1,2,3,4} <= Set{1,2,3,4}))`. At that point `t.__lt` is
+  set on `Set`'s metatable but `t.__le` is explicitly `nil`. Per
+  Lua 5.3 §3.4.4, `a <= b` should fall back to `not (b < a)` when
+  `__le` is missing — our VM raises `attempt to compare table with
+  table` instead. `__lt` itself dispatches correctly on table operands
+  (verified with the line 208 pattern in isolation: that assertion
+  passes); only the `__le → not __lt(b, a)` fallback is missing.
+  Tracked in **A8e** (next free id, plan file:
+  `.agents/plans/A8e-le-fallback-not-lt.md`). A8e blocks promoting
+  `events.lua` to `@ready_tests`.
