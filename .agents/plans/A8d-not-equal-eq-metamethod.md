@@ -2,10 +2,10 @@
 id: A8d
 title: "~= opcode dispatches through __eq metamethod"
 issue: null
-pr: null
+pr: 212
 branch: fix/not-equal-eq-metamethod
 base: main
-status: ready
+status: review
 direction: A
 unlocks:
   - any code that compares two metamethod-wrapped values with ~=
@@ -107,3 +107,28 @@ mix test --only lua53
 Discovered in A8a's PR Discoveries section as follow-up #3:
 "`~=` opcode bypasses `__eq` metamethod dispatch (separate plan)."
 Re-verified on main on 2026-05-07: the repro above still fails.
+
+## What changed
+
+PR: https://github.com/tv-labs/lua/pull/212
+
+Files touched:
+
+- `lib/lua/vm/executor.ex` — `:not_equal` clause now reuses
+  `try_equality_metamethod/4` (the same helper `:equal` uses) with
+  `lua_equal/2` as the default, and negates the result. State is threaded
+  through correctly via the helper's existing return shape.
+- `test/lua/vm/metatable_test.exs` — 4 new tests under the
+  `comparison metamethods` describe block:
+  - `~= dispatches through __eq metamethod`
+  - `~= calls __eq exactly once per evaluation`
+  - `~= short-circuits primitive equality without consulting __eq`
+  - `~= falls back to raw inequality when metamethods differ`
+
+Test counts:
+
+- `mix test`: 1560 → 1564 tests, 0 failures.
+- `mix test --only lua53`: 29 tests, 0 failures (no change — no
+  metamethod-using suite file is currently in the passing set).
+
+No follow-up issues opened; plan repro now passes end-to-end.

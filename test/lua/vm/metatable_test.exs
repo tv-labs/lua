@@ -321,6 +321,91 @@ defmodule Lua.VM.MetatableTest do
       assert {:ok, [false], _state} = VM.execute(proto, state)
     end
 
+    test "~= dispatches through __eq metamethod" do
+      code = """
+      local a = {value = 10}
+      local b = {value = 10}
+      local c = {value = 20}
+      local mt = {
+        __eq = function(x, y)
+          return x.value == y.value
+        end
+      }
+      setmetatable(a, mt)
+      setmetatable(b, mt)
+      setmetatable(c, mt)
+      return a ~= b, a ~= c
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      # a ~= b → __eq returns true → ~= is false
+      # a ~= c → __eq returns false → ~= is true
+      assert {:ok, [false, true], _state} = VM.execute(proto, state)
+    end
+
+    test "~= calls __eq exactly once per evaluation" do
+      code = """
+      local count = 0
+      local mt = {
+        __eq = function(x, y)
+          count = count + 1
+          return true
+        end
+      }
+      local a = setmetatable({}, mt)
+      local b = setmetatable({}, mt)
+      local result = a ~= b
+      return result, count
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      # __eq returns true once, ~= negates to false
+      assert {:ok, [false, 1], _state} = VM.execute(proto, state)
+    end
+
+    test "~= short-circuits primitive equality without consulting __eq" do
+      # Per Lua 5.3 §3.4.4, raw-equal primitive values skip __eq.
+      # 1 ~= 1 is false; nil ~= nil is false; "a" ~= "a" is false.
+      # No metamethod can be installed on these primitives, so this
+      # mainly verifies the code path doesn't break for non-table operands.
+      code = """
+      return 1 ~= 1, 1 ~= 2, "a" ~= "a", "a" ~= "b", nil ~= nil, nil ~= false
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [false, true, false, true, false, true], _state} =
+               VM.execute(proto, state)
+    end
+
+    test "~= falls back to raw inequality when metamethods differ" do
+      code = """
+      local a = {value = 10}
+      local b = {value = 10}
+      local mt1 = { __eq = function() return true end }
+      local mt2 = { __eq = function() return true end }
+      setmetatable(a, mt1)
+      setmetatable(b, mt2)
+      -- Different __eq metamethods → fall back to raw equality.
+      -- Two distinct tables are raw-unequal, so ~= is true.
+      return a ~= b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [true], _state} = VM.execute(proto, state)
+    end
+
     test "__lt metamethod" do
       code = """
       local a = {value = 5}
