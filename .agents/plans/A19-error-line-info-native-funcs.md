@@ -1,71 +1,70 @@
 ---
 id: A19
-title: Native function raises (assert, error, stdlib type checks) carry line info
+title: Stdlib bad-argument raises read source position from process dict
 issue: null
 pr: null
-branch: fix/error-line-info-native-funcs
+branch: fix/error-line-info-stdlib
 base: main
-status: blocked
+status: ready
 direction: A
 unlocks:
-  - line numbers on `assert(false)` and `error("msg")` failures
-  - line numbers on bad-argument errors from `table.*`, `string.*`, `math.*`, etc.
+  - line numbers on `string.upper(nil)`, `table.insert(t, nil, 5)`, etc.
+  - consistent line info across all stdlib raise sites
 ---
 
 ## Goal
 
-After A18 lands, every error from a Lua **opcode** carries source/line
-info, but errors from **native functions** (`assert`, `error`, and the
-~100 stdlib functions in `lib/lua/vm/stdlib*.ex`) still raise without
-context. This plan threads the calling line through the native-call
-boundary so those raises can include it too.
+A18 wired `assert` and `error` (the most common stdlib raise paths) to
+the executor's process-dict-backed source position. This plan extends
+that pattern to every other raise site in `lib/lua/vm/stdlib*.ex` —
+mostly bad-argument type checks in `table.*`, `string.*`, `math.*`,
+and `coroutine.*`.
 
 ## Out of scope
 
-- Changing the surface of native functions exposed to users via
-  `Lua.set!/3`. Custom Elixir callbacks remain `fn args, state -> ... end`.
-  We only thread context for the **internal** stdlib path.
-- Anything A18 covered (opcode-level raises).
+- Changing the public Elixir callback signature (`fn args, state -> ... end`).
+- Anything A18 covered (opcode-level raises, `assert`, `error`).
+- New behavior — only the structured fields on existing exceptions.
 
 ## Success criteria
 
 - [ ] `mix test` still passes.
-- [ ] New test: `assert(false, "boom")` from a Lua script raises with
-      `:line` populated to the assert call line, not nil.
-- [ ] New test: `error("boom")` from Lua raises with `:line` populated.
-- [ ] New test: `string.upper(nil)` (or another native bad-arg case)
-      raises a TypeError with `:line` populated.
-- [ ] No measurable perf regression on the bench harness vs A18 baseline.
+- [ ] `mix test --only lua53` passes 5/29 (no regression).
+- [ ] New tests: representative bad-arg raises from each stdlib file
+      have `:line` and `:source` populated.
+      - [ ] `string.upper(nil)` → TypeError with line/source.
+      - [ ] `table.insert(t, nil)` (bad pos) → has line/source.
+      - [ ] `math.floor("x")` → has line/source.
+- [ ] No measurable perf regression on the benchee harness vs A18.
 
 ## Implementation notes
 
-Two viable mechanisms, pick the one that's least invasive:
+Pattern: every `raise TypeError`/`RuntimeError` in `lib/lua/vm/stdlib*.ex`
+(except for `lua_assert` and `lua_error` which A18 already updated)
+should read source position from `Lua.VM.Executor.current_position/0`
+and pass it as `line:`/`source:` opts.
 
-### (1) Push line into State around native calls
+A small helper in stdlib (or each stdlib module) to avoid repetition:
 
-In `executor.ex`'s native-func dispatch (the `{:native_func, fun}`
-clause of `call_value/5`), set `state.current_line` and `state.current_source`
-before invoking the closure, restore on return. Stdlib raises read from
-state instead of arguments. Changes the public Elixir API of native
-funcs minimally (state already has plenty of fields).
-
-### (2) Pass ctx as extra arg
-
-Change the native-func calling convention from `fn args, state -> ... end`
-to `fn args, state, ctx -> ... end`. Backward-compat-breaking for any
-external Lua-on-Elixir code that registers native funcs. Probably a no-go
-for 1.0.
-
-Recommend (1) — internal-only, no public API change.
+```elixir
+defp bad_arg!(msg, kind \\ nil) do
+  {line, source} = Executor.current_position()
+  raise TypeError, value: msg, line: line, source: source, error_kind: kind
+end
+```
 
 ### Files
 
-- `lib/lua/vm/state.ex` — add `current_line`, `current_source` fields.
-- `lib/lua/vm/executor.ex` — set/restore in native-call dispatch
-  (`call_value({:native_func, fun}, ...)` and `call_function/3`).
-- `lib/lua/vm/{assertion_error,runtime_error,type_error}.ex` — already
-  carry the fields, no changes.
-- `lib/lua/vm/stdlib*.ex` — every `raise` site reads context from state.
+- `lib/lua/vm/stdlib.ex` — top-level stdlib raises beyond `assert`/`error`.
+- `lib/lua/vm/stdlib/string.ex` — `string.*` bad-arg raises.
+- `lib/lua/vm/stdlib/table.ex` — `table.*` bad-arg raises.
+- `lib/lua/vm/stdlib/math.ex` — `math.*` bad-arg raises.
+- `lib/lua/vm/stdlib/library.ex` — library helpers.
+- (others as discovered)
+
+The mechanism (process dict written at `:native_func` call boundary,
+restored after) is already in place from A18 — this plan just propagates
+the read pattern through the remaining stdlib raise sites.
 
 ## Verification
 
@@ -78,13 +77,9 @@ mix test --only lua53
 
 ## Risks
 
-- State allocation churn. Setting two fields per native call is cheap
-  but not free; measure on the benchee harness.
-- Reentrancy. If a native func calls back into Lua (e.g. `pcall`), the
-  inner call must save/restore the outer line. Use a stack discipline
-  (push before call, pop on return).
-
-## Blocked on
-
-- A18 lands (this plan reuses A18's wrapper changes and assumes
-  `Lua.RuntimeException` already preserves structured fields).
+- Sprawling change touching ~50 stdlib raise sites. Mostly mechanical
+  but easy to miss one.
+- If a stdlib raise happens outside a Lua execution (e.g. someone calls
+  `Lua.VM.Stdlib.some_helper/2` directly from Elixir), `current_position/0`
+  returns `{nil, nil}` and the message just omits the location. That's
+  the correct behavior — better than crashing.

@@ -209,17 +209,45 @@ Initial audit (before implementation):
   `Lua.eval!`), so it tests the unwrapped exception and didn't catch
   that the public path drops line/source.
 
-Implementation chose **strategy (b)** from the plan — a single
-`with_context/4` private helper in the executor wraps each fallible
-opcode body with try/rescue. The wrapper catches `TypeError`,
-`RuntimeError`, and `AssertionError`, fills in any missing `:line` /
-`:source` / `:call_stack` from the surrounding executor context, and
-re-raises via `add_context/4` + `rebuild_exception/4` so the formatter
-re-runs with the new context (the formatted `:message` string is
-precomputed in `exception/1` and would otherwise stay stale).
+Initial implementation chose **strategy (b)** from the plan — a
+`with_context/4` private helper that wraps each fallible opcode body
+with try/rescue and re-raises with line/source/call_stack populated.
+That worked but **measured at ~9% slowdown on `fib(30)`** in the
+benchee harness, which is unacceptable for a 1.0 library where perf
+is part of the contract.
 
-Tail-call shape was preserved: the wrap only guards the helper call,
-so the outer `do_execute(rest, ...)` recursion remains a tail call.
+Switched to **Hybrid C** instead, after measuring several alternatives:
+
+| Approach | fib(30) slowdown | Notes |
+|---|---|---|
+| `with_context` (closure + try/rescue) per op | ~9% | Original PR — too slow |
+| Process dict at every `:source_line` opcode | ~7% | One Process.put per Lua statement is too frequent |
+| **Hybrid C: extra args + process dict at native boundary** | **~2-3%** | What we shipped |
+| Inline try/rescue per opcode (no closure) | ~5% (1 op only; compounds) | Less invasive but adds up |
+
+**Hybrid C** combines two cheap mechanisms:
+
+1. **In-executor helpers take `line, source` as args.** All `safe_*`
+   arithmetic/compare/bitwise helpers, `concat_coerce`, `to_integer!`,
+   `index_value`, etc. now receive line/source via their existing
+   metamethod-dispatch closures. The closures already captured args
+   pre-A18, so adding two more captures is essentially free on the
+   BEAM (~2-3% on fib).
+2. **Process dict at the native-call boundary only.** When the `:call`
+   opcode invokes a `{:native_func, fun}` (e.g. `assert`, `error`,
+   stdlib type checks), the executor stashes the calling line/source
+   in `Process.put({Lua.VM.Executor, :line/:source}, ...)` first,
+   restores after. Native callbacks read via
+   `Lua.VM.Executor.current_position/0`. The cost is one Process.put
+   per native invocation, which is rare relative to opcode dispatch.
+
+Re-entrancy and isolation between top-level calls are handled by
+save/restore in `Lua.VM.Executor.execute/5`: any prior process-dict
+position is snapshotted on entry and restored in `after`, so a
+sequence of `Lua.eval!` calls or a callback that itself calls
+`Lua.eval!` never see each other's positions.
+
+Tail-call shape on `do_execute/8` is unchanged.
 
 Bonus: `test/support/lua_test_case.ex` now passes the suite filename
 as `source:`, so suite triage gets `at pm.lua:7:` instead of
@@ -248,22 +276,33 @@ but a substantial improvement for anyone reading the failure output.
 
 PR: [#214](https://github.com/tv-labs/lua/pull/214)
 
-Files touched (7):
+Files touched:
 
 - `lib/lua.ex` — wrapper rescue clauses + `eval!` `source:` option.
 - `lib/lua/runtime_exception.ex` — added `line` / `source` /
   `call_stack` fields and propagation in `exception/1`.
-- `lib/lua/vm/executor.ex` — new `with_context/4` wrapper, applied
-  to arithmetic / bitwise / concat / compare / length / negate /
-  get_table / set_table / get_field / set_field / native-function
-  call dispatch.
+- `lib/lua/vm/executor.ex` —
+  - `current_position/0` and process-dict scoping at `execute/5`
+    (save/restore around the run for re-entrancy and post-call cleanup);
+  - source position stashed at every `{:native_func, fun}` call
+    boundary (~3 sites) so `assert`/`error`/stdlib raises pick it up;
+  - `safe_*` arithmetic/compare/concat/bitwise/length helpers, plus
+    `to_integer!`, `float_to_integer!`, `coerce_for_value`, and
+    `index_value` now take `(line, source)` so their raises pin the
+    error to the offending opcode's source position.
+- `lib/lua/vm/stdlib.ex` — `lua_assert` and `lua_error` now read
+  position via `Executor.current_position/0` and attach `line` /
+  `source` to the raised exception.
 - `test/lua/error_messages_test.exs` — 7 new end-to-end tests under
   "Lua.eval! preserves line/source on the public exception".
 - `test/support/lua_test_case.ex` — suite tests now pass the file
   basename as `source:`.
 - `.agents/plans/A18-error-line-source-info.md` — this file.
 - `.agents/plans/A19-error-line-info-native-funcs.md` — drafted
-  follow-up plan for stdlib raise sites; status: blocked on A18.
+  follow-up; A18 already covers most of A19's scope via the native
+  call boundary stashing.
 
 Test count: 1570 → 1577 (+7), 0 failures.
 Suite count: 5/29, unchanged.
+Bench: ~2-3% slowdown on `fib(30)` vs main (down from ~9% in the
+initial `with_context` design).
