@@ -428,9 +428,20 @@ defmodule Lua.VM.Executor do
   # ── numeric_for — CPS ─────────────────────────────────────────────────────
 
   defp do_execute([{:numeric_for, base, loop_var, body} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    counter = elem(regs, base)
-    limit = elem(regs, base + 1)
-    step = elem(regs, base + 2)
+    # Lua 5.3 §3.3.5: the three control values are coerced to numbers using
+    # the same rules as arithmetic operators. If both initial value and step
+    # are integers (after coercion), the loop is done with integers; if
+    # either is a float, all three are promoted to floats. Coerce once at
+    # loop start and write the canonical numbers back into the control
+    # registers so subsequent iterations work on numbers.
+    {counter, limit, step} =
+      coerce_numeric_for_controls(elem(regs, base), elem(regs, base + 1), elem(regs, base + 2))
+
+    regs =
+      regs
+      |> put_elem(base, counter)
+      |> put_elem(base + 1, limit)
+      |> put_elem(base + 2, step)
 
     should_continue =
       if step > 0 do
@@ -1856,6 +1867,47 @@ defmodule Lua.VM.Executor do
   end
 
   defp to_number(v), do: {:error, v}
+
+  # ── Numeric-for control coercion ───────────────────────────────────────────
+
+  # Lua 5.3 §3.3.5: a `for` statement converts each of init, limit, step to
+  # a number using the same rules as arithmetic operators. Then, if both
+  # init and step are integers, the loop runs with integers; otherwise,
+  # init is promoted to float (limit stays as whatever number it parsed
+  # to — counter/limit comparison works numerically across int/float).
+  defp coerce_numeric_for_controls(init, limit, step) do
+    init_n = coerce_for_value(init, "'for' initial value must be a number")
+    limit_n = coerce_for_value(limit, "'for' limit must be a number")
+    step_n = coerce_for_value(step, "'for' step must be a number")
+
+    if is_float(init_n) or is_float(step_n) do
+      {init_n * 1.0, limit_n, step_n * 1.0}
+    else
+      {init_n, limit_n, step_n}
+    end
+  end
+
+  defp coerce_for_value(v, _msg) when is_number(v), do: v
+
+  defp coerce_for_value(v, msg) when is_binary(v) do
+    case Value.parse_number(v) do
+      nil ->
+        raise TypeError,
+          value: msg,
+          error_kind: :for_loop_non_number,
+          value_type: :string
+
+      n ->
+        n
+    end
+  end
+
+  defp coerce_for_value(v, msg) do
+    raise TypeError,
+      value: msg,
+      error_kind: :for_loop_non_number,
+      value_type: value_type(v)
+  end
 
   defp to_integer!(v) when is_integer(v), do: v
   defp to_integer!(v) when is_float(v), do: float_to_integer!(v)

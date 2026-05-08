@@ -2,10 +2,10 @@
 id: A7c
 title: "numeric for coerces string control values to numbers (Lua 5.3 §3.3.5)"
 issue: null
-pr: null
+pr: 209
 branch: fix/numeric-for-string-coercion
 base: main
-status: ready
+status: review
 direction: A
 unlocks:
   - nextvar.lua (line 510 — `for i="10","1","-2" do ... end`)
@@ -116,3 +116,31 @@ Discovered in A7a's Discoveries section
 (`A7c — numeric 'for' string-to-number coercion (Lua 5.3 §3.3.5)`).
 Re-verified on main on 2026-05-07: loop body silently doesn't execute
 when init is a string, and `nextvar.lua` line 510's assert fails.
+
+## What changed
+
+PR: [#209](https://github.com/tv-labs/lua/pull/209)
+
+Files touched:
+
+- `lib/lua/vm/executor.ex` — added `coerce_numeric_for_controls/3` and
+  `coerce_for_value/2` helpers; `:numeric_for` now coerces all three
+  control values once at loop start, writes them back to the control
+  registers, and applies the §3.3.5 int/float typing rule (init promoted
+  to float when init or step is float; limit's type does not affect
+  loop-variable typing). Non-coercible values raise a `TypeError` with
+  the PUC-Lua reference messages: `'for' initial value must be a number`,
+  `'for' limit must be a number`, `'for' step must be a number`.
+- `test/lua/vm/numeric_for_test.exs` — new file, 17 tests across three
+  describe blocks: string coercion (incl. nextvar.lua line 510 verbatim),
+  int/float typing of the loop variable, and TypeError messages.
+
+Suite delta:
+
+- `mix test`: 1507 → 1524 tests, 0 failures (17 new tests, no regressions).
+- `mix test --only lua53`: 5 / 24 (unchanged; nextvar.lua promotion is
+  gated on A7b too — separate plan).
+
+Follow-ups: none opened. The §3.3.5 zero-step rule (`'for' step is zero`)
+is documented as out of scope above; if a suite assertion ever exercises
+it, that's a clean follow-up plan.
