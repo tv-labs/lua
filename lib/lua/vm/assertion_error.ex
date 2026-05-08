@@ -1,16 +1,22 @@
 defmodule Lua.VM.AssertionError do
   @moduledoc """
   Raised by the Lua `assert()` function when the condition is falsy.
+
+  When raised without explicit `:line` / `:source` opts, `exception/1`
+  populates them from the calling Lua source position via
+  `Lua.VM.Executor.current_position/0`.
   """
 
   defexception [:value, :source, :message, :call_stack, :line]
 
   @impl true
   def exception(opts) do
+    {auto_line, auto_source} = Lua.VM.Executor.current_position()
+
     value = Keyword.get(opts, :value)
-    source = Keyword.get(opts, :source)
+    source = Keyword.get(opts, :source) || auto_source
     call_stack = Keyword.get(opts, :call_stack, [])
-    line = Keyword.get(opts, :line)
+    line = Keyword.get(opts, :line) || auto_line
     message = Keyword.get(opts, :message) || format_message(value, source, line, call_stack)
 
     %__MODULE__{

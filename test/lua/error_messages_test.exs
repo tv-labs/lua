@@ -4,6 +4,7 @@ defmodule Lua.ErrorMessagesTest do
   alias Lua.Compiler
   alias Lua.Parser
   alias Lua.VM
+  alias Lua.VM.ArgumentError
   alias Lua.VM.State
   alias Lua.VM.TypeError
 
@@ -343,6 +344,161 @@ defmodule Lua.ErrorMessagesTest do
       assert {[6], _} = Lua.eval!(Lua.new(), "return 1 + 2 + 3")
       assert {[true], _} = Lua.eval!(Lua.new(), "return 'a' == 'a'")
       assert {["hi"], _} = Lua.eval!(Lua.new(), ~s|return "h" .. "i"|)
+    end
+  end
+
+  describe "stdlib bad-argument raises carry line and source" do
+    # A18 wired line/source through every executor raise site and through
+    # `assert`/`error` via the native-call boundary process dict. A19
+    # extended that pattern to every other stdlib raise — `string.*`,
+    # `table.*`, `math.*`, etc. — by having the exception modules
+    # themselves auto-populate from `Executor.current_position/0` when
+    # `:line`/`:source` aren't passed explicitly. These tests pin the
+    # contract: any stdlib bad-arg raise reachable from a Lua execution
+    # carries the correct location.
+
+    test "string.upper(nil) carries line and source" do
+      script = """
+      local x = 1
+      local y = 2
+      return string.upper(nil)
+      """
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script, source: "demo.lua")
+        end
+
+      # The wrapped public exception preserves the structured fields.
+      assert is_integer(e.line) and e.line > 0
+      assert e.source == "demo.lua"
+      assert e.message =~ "demo.lua:#{e.line}"
+      assert e.message =~ "bad argument #1 to 'string.upper'"
+    end
+
+    test "math.floor on string carries line and source" do
+      script = """
+      local greeting = "hello"
+      return math.floor("x")
+      """
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script, source: "demo.lua")
+        end
+
+      assert is_integer(e.line) and e.line > 0
+      assert e.source == "demo.lua"
+      assert e.message =~ "demo.lua:#{e.line}"
+      assert e.message =~ "bad argument #1 to 'math.floor'"
+    end
+
+    test "table.insert with bad pos carries line and source" do
+      script = """
+      local t = {1, 2, 3}
+      table.insert(t, nil, 99)
+      """
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script, source: "demo.lua")
+        end
+
+      assert is_integer(e.line) and e.line > 0
+      assert e.source == "demo.lua"
+      assert e.message =~ "demo.lua:#{e.line}"
+      assert e.message =~ "table.insert"
+    end
+
+    test "select with non-numeric index carries line and source" do
+      script = """
+      local first = 1
+      local r = select("bad", 1, 2, 3)
+      """
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script, source: "demo.lua")
+        end
+
+      assert is_integer(e.line) and e.line > 0
+      assert e.source == "demo.lua"
+      assert e.message =~ "demo.lua:#{e.line}"
+      assert e.message =~ "select"
+    end
+
+    test "setmetatable on non-table carries line and source" do
+      script = """
+      local n = 5
+      setmetatable(n, {})
+      """
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script, source: "demo.lua")
+        end
+
+      assert is_integer(e.line)
+      assert e.source == "demo.lua"
+      assert e.message =~ "demo.lua:"
+      assert e.message =~ "setmetatable"
+    end
+
+    test "ArgumentError raised outside a Lua execution has nil line/source" do
+      # Defensive: if anyone calls a stdlib helper directly from Elixir
+      # outside of `Lua.eval!`, `current_position/0` returns {nil, nil}
+      # and the exception just renders without a location prefix.
+      e =
+        assert_raise ArgumentError, fn ->
+          raise ArgumentError,
+            function_name: "outside_lua",
+            arg_num: 1,
+            expected: "string"
+        end
+
+      assert is_nil(e.line)
+      assert is_nil(e.source)
+      msg = Exception.message(e)
+      assert msg =~ "bad argument #1 to 'outside_lua'"
+      refute msg =~ ~r/at .+:\d+:/
+    end
+
+    test "explicit :line/:source on raise opts override auto-populate" do
+      # If a raise site does pass explicit values (because it's outside
+      # a Lua execution but knows the right answer somehow), those win.
+      e =
+        assert_raise ArgumentError, fn ->
+          raise ArgumentError,
+            function_name: "explicit",
+            arg_num: 1,
+            expected: "string",
+            line: 42,
+            source: "explicit.lua"
+        end
+
+      assert e.line == 42
+      assert e.source == "explicit.lua"
+      assert Exception.message(e) =~ "explicit.lua:42"
+    end
+
+    test "RuntimeError raised from stdlib (e.g. select out of range) carries line and source" do
+      # `select(0, ...)` raises a Lua.VM.RuntimeError with just a value
+      # string, no explicit line/source. The exception should still pick
+      # them up from the calling Lua position via the auto-populate path.
+      script = """
+      local x = 1
+      return select(0, 1, 2, 3)
+      """
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script, source: "demo.lua")
+        end
+
+      assert is_integer(e.line) and e.line > 0
+      assert e.source == "demo.lua"
+      assert e.message =~ "demo.lua:#{e.line}"
+      assert e.message =~ "select"
     end
   end
 end
