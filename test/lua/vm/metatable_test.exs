@@ -449,6 +449,115 @@ defmodule Lua.VM.MetatableTest do
 
       assert {:ok, [true, true, false], _state} = VM.execute(proto, state)
     end
+
+    test "<= falls back to `not (b < a)` when only __lt is defined" do
+      code = """
+      local mt = {
+        __lt = function(a, b) return a.x < b.x end,
+      }
+      local function Op(x) return setmetatable({x = x}, mt) end
+      return Op(1) <= Op(2), Op(2) <= Op(1), Op(1) <= Op(1)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [true, false, true], _state} = VM.execute(proto, state)
+    end
+
+    test ">= falls back via __lt when only __lt is defined" do
+      # a >= b is translated to b <= a, which then falls back to
+      # `not (a < b)` when __le is missing. This exercises the same
+      # path as <= via the :greater_equal opcode.
+      code = """
+      local mt = {
+        __lt = function(a, b) return a.x < b.x end,
+      }
+      local function Op(x) return setmetatable({x = x}, mt) end
+      return Op(2) >= Op(1), Op(1) >= Op(2), Op(1) >= Op(1)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [true, false, true], _state} = VM.execute(proto, state)
+    end
+
+    test "__le is preferred over __lt when both are defined" do
+      # When __le is set it must fire — the fallback to __lt only kicks
+      # in when __le is absent on both operands.
+      code = """
+      local mt = {
+        __lt = function(a, b) error("__lt should not fire") end,
+        __le = function(a, b) return true end,
+      }
+      local function Op(x) return setmetatable({x = x}, mt) end
+      return Op(1) <= Op(2)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [true], _state} = VM.execute(proto, state)
+    end
+
+    test "__le on either operand wins over __lt fallback" do
+      # Only b has __le; a has no metatable. The lookup order in
+      # try_binary_metamethod / compare_le checks a then b, so b's
+      # __le must fire rather than falling back to __lt.
+      code = """
+      local mt_le = {
+        __le = function(x, y) return true end,
+        __lt = function(x, y) error("__lt should not fire") end,
+      }
+      local a = {x = 1}
+      local b = setmetatable({x = 2}, mt_le)
+      return a <= b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [true], _state} = VM.execute(proto, state)
+    end
+
+    test "> dispatches __lt with operands swapped" do
+      # Lua 5.3 §3.4.4 translates `a > b` to `b < a`, so `>` between
+      # tables with __lt set must call __lt(b, a).
+      code = """
+      local mt = {
+        __lt = function(a, b) return a.x < b.x end,
+      }
+      local function Op(x) return setmetatable({x = x}, mt) end
+      return Op(2) > Op(1), Op(1) > Op(2), Op(1) > Op(1)
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [true, false, false], _state} = VM.execute(proto, state)
+    end
+
+    test "<= on incompatible primitive types still raises" do
+      # The fallback to __lt only fires for table operands. Mismatched
+      # primitives must still raise — `1 <= "x"` is an error in Lua.
+      code = """
+      return 1 <= "x"
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert_raise Lua.VM.TypeError, ~r/attempt to compare/, fn ->
+        VM.execute(proto, state)
+      end
+    end
   end
 
   describe "other metamethods" do
