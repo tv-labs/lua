@@ -969,9 +969,14 @@ defmodule Lua.VM.Executor do
   end
 
   defp do_execute([{:not_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    result = not lua_equal(elem(regs, a), elem(regs, b))
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    {eq_result, new_state} =
+      try_equality_metamethod(val_a, val_b, state, fn -> lua_equal(val_a, val_b) end)
+
+    regs = put_elem(regs, dest, not eq_result)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
   # ── Unary operations ───────────────────────────────────────────────────────
