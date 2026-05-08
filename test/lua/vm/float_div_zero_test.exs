@@ -91,4 +91,78 @@ defmodule Lua.VM.FloatDivZeroTest do
       end
     end
   end
+
+  describe "floor div with float-zero divisor (Lua 5.3 §3.4.1)" do
+    test "1.0 // 0.0 equals math.huge" do
+      assert run!("return 1.0 // 0.0 == math.huge") == [true]
+    end
+
+    test "-1.0 // 0.0 equals -math.huge" do
+      assert run!("return -1.0 // 0.0 == -math.huge") == [true]
+    end
+
+    test "any positive float over 0.0 is +inf" do
+      assert run!("return 42.5 // 0.0 == math.huge") == [true]
+    end
+
+    test "any negative float over 0.0 is -inf" do
+      assert run!("return -42.5 // 0.0 == -math.huge") == [true]
+    end
+
+    test "0.0 // 0.0 is NaN — unequal to itself" do
+      assert run!("return 0.0 // 0.0 ~= 0.0 // 0.0") == [true]
+    end
+
+    test "0.0 // 0.0 == 0.0 // 0.0 is false" do
+      assert run!("return 0.0 // 0.0 == 0.0 // 0.0") == [false]
+    end
+  end
+
+  describe "modulo with float-zero divisor (Lua 5.3 §3.4.1)" do
+    test "1.0 % 0.0 is NaN — unequal to itself" do
+      assert run!("return 1.0 % 0.0 ~= 1.0 % 0.0") == [true]
+    end
+
+    test "-1.0 % 0.0 is NaN" do
+      assert run!("return -1.0 % 0.0 ~= -1.0 % 0.0") == [true]
+    end
+
+    test "0.0 % 0.0 is NaN" do
+      assert run!("return 0.0 % 0.0 ~= 0.0 % 0.0") == [true]
+    end
+
+    test "NaN result is unequal to a number" do
+      assert run!("return 1.0 % 0.0 == 1") == [false]
+    end
+  end
+
+  describe "mixed integer/float zero divisors" do
+    test "1 // 0.0 follows the float path and returns +inf" do
+      assert run!("return 1 // 0.0 == math.huge") == [true]
+    end
+
+    test "-1 // 0.0 follows the float path and returns -inf" do
+      assert run!("return -1 // 0.0 == -math.huge") == [true]
+    end
+
+    test "0 // 0.0 follows the float path and returns NaN" do
+      assert run!("return 0 // 0.0 ~= 0 // 0.0") == [true]
+    end
+
+    test "1.0 // 0 still raises — integer divisor" do
+      assert_raise Lua.RuntimeException, ~r/divide by zero/, fn ->
+        Lua.eval!(Lua.new(), "return 1.0 // 0")
+      end
+    end
+
+    test "1 % 0.0 follows the float path and returns NaN" do
+      assert run!("return 1 % 0.0 ~= 1 % 0.0") == [true]
+    end
+
+    test "1.0 % 0 still raises — integer divisor" do
+      assert_raise Lua.RuntimeException, ~r/modulo by zero/, fn ->
+        Lua.eval!(Lua.new(), "return 1.0 % 0")
+      end
+    end
+  end
 end
