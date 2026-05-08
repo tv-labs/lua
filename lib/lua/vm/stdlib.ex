@@ -160,13 +160,21 @@ defmodule Lua.VM.Stdlib do
     {[], state}
   end
 
-  # error(message) — raises a Lua runtime error
+  # error(message) — raises a Lua runtime error.
+  # The executor stashes the calling source position in the process dict
+  # before invoking native callbacks (see `Lua.VM.Executor.execute/5`), so
+  # this raise picks up `at <source>:<line>:` automatically. If the function
+  # is called outside a Lua execution (or from a context where no line was
+  # set), `current_position/0` returns `{nil, nil}` and the message just
+  # omits the location.
   defp lua_error([message | _], _state) do
-    raise RuntimeError, value: message
+    {line, source} = Executor.current_position()
+    raise RuntimeError, value: message, line: line, source: source
   end
 
   defp lua_error([], _state) do
-    raise RuntimeError, value: nil
+    {line, source} = Executor.current_position()
+    raise RuntimeError, value: nil, line: line, source: source
   end
 
   # assert(v [, message]) — raises if v is falsy
@@ -178,14 +186,16 @@ defmodule Lua.VM.Stdlib do
           [] -> "assertion failed!"
         end
 
-      raise AssertionError, value: message
+      {line, source} = Executor.current_position()
+      raise AssertionError, value: message, line: line, source: source
     else
       {[value | rest], state}
     end
   end
 
   defp lua_assert([], _state) do
-    raise AssertionError, value: "assertion failed!"
+    {line, source} = Executor.current_position()
+    raise AssertionError, value: "assertion failed!", line: line, source: source
   end
 
   # pcall(f [, arg1, ...]) — calls function in protected mode
