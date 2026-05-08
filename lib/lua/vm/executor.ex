@@ -1698,15 +1698,32 @@ defmodule Lua.VM.Executor do
     end
   end
 
+  # Lua 5.3 §3.4.1: floor division of floats is `floor(a/b)`. With a float
+  # zero divisor, `a/b` is the inf/nan stand-in produced by `safe_divide`,
+  # and the floor of that flows through to the result:
+  #
+  #   * ` 1.0 // 0.0` → `+math.huge`
+  #   * `-1.0 // 0.0` → `-math.huge`
+  #   * ` 0.0 // 0.0` → `:nan`
+  #
+  # An integer-zero divisor still raises — that's correct per spec, since
+  # `//` between two integers is integer floor division.
   defp safe_floor_divide(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
       cond do
-        nb == 0 or nb == 0.0 ->
+        is_integer(nb) and nb == 0 ->
           raise RuntimeError, value: "attempt to divide by zero"
 
         is_integer(na) and is_integer(nb) ->
           Numeric.to_signed_int64(lua_idiv(na, nb))
+
+        is_float(nb) and nb == 0.0 ->
+          cond do
+            na == 0 or na == 0.0 -> :nan
+            na > 0 -> 1.0e308
+            true -> -1.0e308
+          end
 
         true ->
           Float.floor(na / nb) * 1.0
@@ -1720,15 +1737,21 @@ defmodule Lua.VM.Executor do
     end
   end
 
+  # Lua 5.3 §3.4.1: `a % b = a - floor(a/b)*b`. With a float zero divisor,
+  # `a/0.0` is inf or nan, and `inf * 0.0 = nan`, so `a % 0.0` is always
+  # `:nan` regardless of `a`. An integer-zero divisor still raises.
   defp safe_modulo(a, b) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
       cond do
-        nb == 0 or nb == 0.0 ->
+        is_integer(nb) and nb == 0 ->
           raise RuntimeError, value: "attempt to perform modulo by zero"
 
         is_integer(na) and is_integer(nb) ->
           Numeric.to_signed_int64(na - lua_idiv(na, nb) * nb)
+
+        is_float(nb) and nb == 0.0 ->
+          :nan
 
         true ->
           na - Float.floor(na / nb) * nb
