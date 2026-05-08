@@ -2,10 +2,10 @@
 id: A8b
 title: "io stdlib should be a table of sandboxed functions, not a single function"
 issue: null
-pr: null
+pr: 210
 branch: fix/io-stub-as-table
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - events.lua advances past line 188 (`assert(not pcall(rawlen, io.stdin))`)
@@ -117,3 +117,43 @@ indexes a function value rather than looking up a key in a table.
 
 This re-scopes A8a's first follow-up: the events.lua failure isn't an
 `__index` dispatch bug, it's a stdlib stub-shape bug.
+
+## What changed
+
+PR: [#210](https://github.com/tv-labs/lua/pull/210)
+
+Files touched:
+
+- `lib/lua.ex` — replaced the single `[:io]` entry in
+  `@default_sandbox` with one path per member (`[:io, :stdin]`,
+  `[:io, :stdout]`, `[:io, :stderr]`, `[:io, :read]`, `[:io, :write]`,
+  `[:io, :open]`, `[:io, :close]`, `[:io, :lines]`, `[:io, :popen]`,
+  `[:io, :tmpfile]`, `[:io, :output]`, `[:io, :input]`, `[:io, :flush]`,
+  `[:io, :type]`). The existing `do_set_nested` helper auto-allocates
+  the `io` table and each member becomes a sandbox stub on its own,
+  matching the shape of `os` and `package`.
+- `lib/lua/vm/stdlib.ex` — fixed `lua_rawlen` to raise for non-table,
+  non-string arguments (was silently returning 0). Empty args raise
+  `"bad argument #1 to 'rawlen' (value expected)"`; other types raise
+  `"bad argument #1 to 'rawlen' (table or string expected, got <type>)"`.
+  Required to unblock events.lua line 188 `pcall(rawlen, io.stdin)`.
+- `test/lua/io_stub_test.exs` — new regression test, 20 tests pinning
+  the io table shape, per-member sandbox messages, and the new
+  `rawlen` error semantics.
+
+Test delta:
+
+- `mix test`: 1524 → 1544 tests, 0 failures, 31 skipped (unchanged).
+- `mix test --only lua53`: 29 tests, 0 failures, 24 skipped — same
+  pass count. `events.lua` remains skipped (see Discoveries).
+
+## Discoveries
+
+- events.lua's next stop after this plan is the `__lt` metamethod
+  dispatch test at ~line 208: `assert(not(Op(1)<Op(1)) ...)` where
+  `Op(x)` returns `setmetatable({x=x}, t)` and `t.__lt` is a function.
+  Comparison operators (`<`, `<=`, `>`, `>=`) don't yet dispatch
+  through `__lt` / `__le` metamethods on table operands; failure is
+  `attempt to compare table with table`. That's a separate VM gap and
+  blocks promoting `events.lua` to `@ready_tests`. Open a follow-up
+  plan (next free id) before re-running the suite for events.lua.
