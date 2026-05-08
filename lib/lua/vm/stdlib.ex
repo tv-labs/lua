@@ -256,7 +256,12 @@ defmodule Lua.VM.Stdlib do
     {[tref], state}
   end
 
-  # rawlen(v) — length without metamethods
+  # rawlen(v) — length without metamethods.
+  #
+  # Lua 5.3 reference: rawlen requires a table or string argument and
+  # raises "table or string expected" otherwise. The previous
+  # implementation silently returned 0 for non-table, non-string
+  # values, which broke `pcall(rawlen, ...)` patterns in events.lua.
   defp lua_rawlen([{:tref, id} | _], state) do
     table = Map.fetch!(state.tables, id)
     {[Value.sequence_length(table.data)], state}
@@ -266,7 +271,17 @@ defmodule Lua.VM.Stdlib do
     {[byte_size(v)], state}
   end
 
-  defp lua_rawlen(_, state), do: {[0], state}
+  defp lua_rawlen([], _state) do
+    raise ArgumentError.value_expected("rawlen", 1)
+  end
+
+  defp lua_rawlen([v | _], _state) do
+    raise ArgumentError,
+      function_name: "rawlen",
+      arg_num: 1,
+      expected: "table or string",
+      got: Value.type_name(v)
+  end
 
   # rawequal(a, b) — equality without metamethods
   defp lua_rawequal([a, b | _], state) do

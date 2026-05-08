@@ -24,7 +24,20 @@ defmodule Lua do
   defstruct [:state]
 
   @default_sandbox [
-    [:io],
+    [:io, :stdin],
+    [:io, :stdout],
+    [:io, :stderr],
+    [:io, :read],
+    [:io, :write],
+    [:io, :open],
+    [:io, :close],
+    [:io, :lines],
+    [:io, :popen],
+    [:io, :tmpfile],
+    [:io, :output],
+    [:io, :input],
+    [:io, :flush],
+    [:io, :type],
     [:file],
     [:os, :execute],
     [:os, :exit],

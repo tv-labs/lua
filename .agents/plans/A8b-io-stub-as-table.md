@@ -2,10 +2,10 @@
 id: A8b
 title: "io stdlib should be a table of sandboxed functions, not a single function"
 issue: null
-pr: null
+pr: 210
 branch: fix/io-stub-as-table
 base: main
-status: ready
+status: review
 direction: A
 unlocks:
   - events.lua advances past line 188 (`assert(not pcall(rawlen, io.stdin))`)
@@ -117,3 +117,46 @@ indexes a function value rather than looking up a key in a table.
 
 This re-scopes A8a's first follow-up: the events.lua failure isn't an
 `__index` dispatch bug, it's a stdlib stub-shape bug.
+
+## What changed
+
+PR: [#210](https://github.com/tv-labs/lua/pull/210)
+
+Files touched:
+
+- `lib/lua.ex` — replaced the single `[:io]` entry in
+  `@default_sandbox` with one path per member (`[:io, :stdin]`,
+  `[:io, :stdout]`, `[:io, :stderr]`, `[:io, :read]`, `[:io, :write]`,
+  `[:io, :open]`, `[:io, :close]`, `[:io, :lines]`, `[:io, :popen]`,
+  `[:io, :tmpfile]`, `[:io, :output]`, `[:io, :input]`, `[:io, :flush]`,
+  `[:io, :type]`). The existing `do_set_nested` helper auto-allocates
+  the `io` table and each member becomes a sandbox stub on its own,
+  matching the shape of `os` and `package`.
+- `lib/lua/vm/stdlib.ex` — fixed `lua_rawlen` to raise for non-table,
+  non-string arguments (was silently returning 0). Empty args raise
+  `"bad argument #1 to 'rawlen' (value expected)"`; other types raise
+  `"bad argument #1 to 'rawlen' (table or string expected, got <type>)"`.
+  Required to unblock events.lua line 188 `pcall(rawlen, io.stdin)`.
+- `test/lua/io_stub_test.exs` — new regression test, 20 tests pinning
+  the io table shape, per-member sandbox messages, and the new
+  `rawlen` error semantics.
+
+Test delta:
+
+- `mix test`: 1524 → 1544 tests, 0 failures, 31 skipped (unchanged).
+- `mix test --only lua53`: 29 tests, 0 failures, 24 skipped — same
+  pass count. `events.lua` remains skipped (see Discoveries).
+
+## Discoveries
+
+- events.lua's next stop after this plan is **line 258**:
+  `assert((Set{1,2,3,4} <= Set{1,2,3,4}))`. At that point `t.__lt` is
+  set on `Set`'s metatable but `t.__le` is explicitly `nil`. Per
+  Lua 5.3 §3.4.4, `a <= b` should fall back to `not (b < a)` when
+  `__le` is missing — our VM raises `attempt to compare table with
+  table` instead. `__lt` itself dispatches correctly on table operands
+  (verified with the line 208 pattern in isolation: that assertion
+  passes); only the `__le → not __lt(b, a)` fallback is missing.
+  Tracked in **A8e** (next free id, plan file:
+  `.agents/plans/A8e-le-fallback-not-lt.md`). A8e blocks promoting
+  `events.lua` to `@ready_tests`.
