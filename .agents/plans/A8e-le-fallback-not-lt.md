@@ -237,3 +237,39 @@ So the gap is precisely the §3.4.4 fallback — and only that.
 This plan was opened as the documented follow-up from A8b's
 Discoveries section. PR #210 (A8b) carries a Discoveries pointer to
 this plan id.
+
+## Context for the picking agent
+
+A few cross-plan details worth knowing before starting:
+
+- **A8b's first Discoveries entry was wrong and has been corrected.**
+  It originally claimed `__lt` and `__le` don't dispatch on tables.
+  Re-triage proved that's not true — both dispatch correctly when set.
+  Only the `__le` fallback is missing. The corrected entry in
+  `.agents/plans/A8b-io-stub-as-table.md` and PR #210's body now
+  reflect that. Don't be misled by any earlier draft of the A8b
+  description if you read it via cached state.
+
+- **A8d notes "`__lt` / `__le` are already routed through
+  `try_binary_metamethod`."** That's accurate for *direct* dispatch.
+  A8d is silent on the §3.4.4 fallback path, which is what A8e fills
+  in. There's no conflict between A8d and A8e — they touch different
+  code paths in the same opcode family.
+
+- **The picker order is A8c → A8d → A8e.** A8c (floor-div-mod-float-zero)
+  and A8d (`~=` / `__eq` dispatch) are independent of this plan and
+  can ship first or last. None of the three blocks the others. If the
+  user wants A8e prioritised, they can pick it directly by id.
+
+- **events.lua remains in `@skipped_tests`** in
+  `test/lua53_suite_test.exs:18`. After A8e ships, advance the
+  file-probe past line 258, document the next stop in this plan's
+  Discoveries, and decide whether to promote events.lua to
+  `@ready_tests` or open the next follow-up plan. Promotion is
+  out of scope for A8e itself.
+
+- **Reuse the file-probe pattern** from the `triage-suite-failure`
+  skill if you need to find the next stop. The Background section
+  above already names the truncated-with-`do return end` pattern
+  used to bisect line 258. The same pattern picks up where A8e
+  leaves off.
