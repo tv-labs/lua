@@ -949,23 +949,33 @@ defmodule Lua.VM.Executor do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
-    {result, new_state} =
-      try_binary_metamethod("__le", val_a, val_b, state, fn -> safe_compare_le(val_a, val_b) end)
+    {result, new_state} = compare_le(val_a, val_b, state)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
   defp do_execute([{:greater_than, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    result = safe_compare_gt(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    # Lua 5.3 §3.4.4: a > b is translated to b < a, which dispatches __lt.
+    {result, new_state} =
+      try_binary_metamethod("__lt", val_b, val_a, state, fn -> safe_compare_lt(val_b, val_a) end)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
   defp do_execute([{:greater_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    result = safe_compare_ge(elem(regs, a), elem(regs, b))
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+
+    # Lua 5.3 §3.4.4: a >= b is translated to b <= a.
+    {result, new_state} = compare_le(val_b, val_a, state)
+
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
   defp do_execute([{:not_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
@@ -1582,6 +1592,31 @@ defmodule Lua.VM.Executor do
     invoke_metamethod(metamethod, [a, b], state, default_fn)
   end
 
+  # Lua 5.3 §3.4.4: a <= b is dispatched to __le when present on either
+  # operand. If neither operand has __le, the operation falls back to
+  # `not (b < a)` — i.e. it consults __lt with the operands swapped and
+  # negates the result. Only when neither metamethod is defined does it
+  # fall through to the primitive comparison (which raises on
+  # incompatible types).
+  defp compare_le(a, b, state) do
+    case lookup_metamethod(a, "__le", state) || lookup_metamethod(b, "__le", state) do
+      nil ->
+        case lookup_metamethod(b, "__lt", state) || lookup_metamethod(a, "__lt", state) do
+          nil ->
+            {safe_compare_le(a, b), state}
+
+          lt ->
+            {lt_result, new_state} =
+              invoke_metamethod(lt, [b, a], state, fn -> safe_compare_lt(b, a) end)
+
+            {not Value.truthy?(lt_result), new_state}
+        end
+
+      le ->
+        invoke_metamethod(le, [a, b], state, fn -> safe_compare_le(a, b) end)
+    end
+  end
+
   defp lookup_metamethod(value, name, state) do
     case get_metatable(value, state) do
       nil -> nil
@@ -1842,38 +1877,6 @@ defmodule Lua.VM.Executor do
 
       is_binary(a) and is_binary(b) ->
         a <= b
-
-      true ->
-        raise TypeError,
-          value: "attempt to compare #{Value.type_name(a)} with #{Value.type_name(b)}",
-          error_kind: :compare_incompatible_types,
-          value_type: value_type(a)
-    end
-  end
-
-  defp safe_compare_gt(a, b) do
-    cond do
-      is_number(a) and is_number(b) ->
-        a > b
-
-      is_binary(a) and is_binary(b) ->
-        a > b
-
-      true ->
-        raise TypeError,
-          value: "attempt to compare #{Value.type_name(a)} with #{Value.type_name(b)}",
-          error_kind: :compare_incompatible_types,
-          value_type: value_type(a)
-    end
-  end
-
-  defp safe_compare_ge(a, b) do
-    cond do
-      is_number(a) and is_number(b) ->
-        a >= b
-
-      is_binary(a) and is_binary(b) ->
-        a >= b
 
       true ->
         raise TypeError,

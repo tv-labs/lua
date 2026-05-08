@@ -2,10 +2,10 @@
 id: A8e
 title: "__le falls back to `not (b < a)` when __le is unset"
 issue: null
-pr: null
+pr: 213
 branch: fix/le-fallback-not-lt
 base: main
-status: ready
+status: review
 direction: A
 unlocks:
   - events.lua advances past line 258 (`assert((Set{1,2,3,4} <= Set{1,2,3,4}))`)
@@ -273,3 +273,49 @@ A few cross-plan details worth knowing before starting:
   above already names the truncated-with-`do return end` pattern
   used to bisect line 258. The same pattern picks up where A8e
   leaves off.
+
+## What changed
+
+PR: https://github.com/tv-labs/lua/pull/213
+
+Files touched:
+
+- `lib/lua/vm/executor.ex`: added `compare_le/3` helper implementing
+  the §3.4.4 fallback (`__le` → `__lt(b, a)` negated → primitive
+  `<=`). Routed `:less_equal` through it. Also routed `:greater_equal`
+  through `compare_le(b, a, state)` per `a >= b ⇔ b <= a`, and
+  `:greater_than` through `try_binary_metamethod("__lt", b, a, ...)`
+  per `a > b ⇔ b < a`. Removed now-unreferenced `safe_compare_gt` and
+  `safe_compare_ge`.
+- `test/lua/vm/metatable_test.exs`: 6 new tests pinning the fallback
+  semantics across `<=`, `>=`, `>`, the precedence rules, and the
+  primitive-raise edge case.
+
+Test delta: 1564 → 1570 (+6 new tests), 0 failures, 31 skipped.
+Lua 5.3 suite unchanged: 4/24 ready, 24 skipped.
+
+## Discoveries
+
+- **`:greater_than` skipped metamethod dispatch entirely.** Anticipated
+  in the plan's Risks section. Fixing it was necessary in scope:
+  events.lua's `test()` function calls `Op(1) > Op(1)` etc., which
+  triggered the same "attempt to compare table with table" failure
+  even with `__lt` set. Per spec `a > b ⇔ b < a`, so `:greater_than`
+  now routes through `__lt(b, a)`.
+
+- **`:greater_equal` is a separate opcode, not a desugaring.** Codegen
+  at `lib/lua/compiler/codegen.ex:929` emits `:greater_equal` for `>=`.
+  So mirroring the `:less_equal` fix to `:greater_equal` was required
+  for success criterion #5.
+
+- **events.lua next stop: line 285.** With A8e shipped and A8b
+  patched out (still in review on main), the file probes cleanly
+  through line 284. Line 285 is `assert(Set{1,3,5,1} ==
+  rawSet{3,5,1})` — comparing a table with `__eq` to a raw table.
+  Per Lua 5.3 §3.4.4 this should consult `__eq`. Adjacent to A8d's
+  `~=` / `__eq` dispatch territory; a separate follow-up plan can
+  pick it up. events.lua remains in `@skipped_tests`.
+
+- **events.lua line 188 (`pcall(rawlen, io.stdin)`) still blocks the
+  file** because A8b is in review and not yet merged on main. Once
+  A8b ships, the file should advance through to line 285 in one go.
