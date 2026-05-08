@@ -12,6 +12,7 @@ defmodule Lua.VM.Executor do
     line   — current source line (threaded to avoid State struct allocation)
   """
 
+  alias Lua.VM.AssertionError
   alias Lua.VM.InternalError
   alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
@@ -606,17 +607,19 @@ defmodule Lua.VM.Executor do
 
       {:native_func, fun} ->
         {results, state} =
-          case fun.(args, state) do
-            {r, %State{} = s} when is_list(r) ->
-              {r, s}
+          with_context(line, proto, state, fn ->
+            case fun.(args, state) do
+              {r, %State{} = s} when is_list(r) ->
+                {r, s}
 
-            {r, %State{} = s} ->
-              {List.wrap(r), s}
+              {r, %State{} = s} ->
+                {List.wrap(r), s}
 
-            other ->
-              raise InternalError,
-                value: "native function returned invalid result: #{inspect(other)}, expected {results, state}"
-          end
+              other ->
+                raise InternalError,
+                  value: "native function returned invalid result: #{inspect(other)}, expected {results, state}"
+            end
+          end)
 
         continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, base, result_count)
 
@@ -753,7 +756,9 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__add", val_a, val_b, state, fn -> safe_add(val_a, val_b) end)
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__add", val_a, val_b, state, fn -> safe_add(val_a, val_b) end)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -764,7 +769,9 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__sub", val_a, val_b, state, fn -> safe_subtract(val_a, val_b) end)
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__sub", val_a, val_b, state, fn -> safe_subtract(val_a, val_b) end)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -775,7 +782,9 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__mul", val_a, val_b, state, fn -> safe_multiply(val_a, val_b) end)
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__mul", val_a, val_b, state, fn -> safe_multiply(val_a, val_b) end)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -786,7 +795,9 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__div", val_a, val_b, state, fn -> safe_divide(val_a, val_b) end)
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__div", val_a, val_b, state, fn -> safe_divide(val_a, val_b) end)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -797,8 +808,10 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__idiv", val_a, val_b, state, fn ->
-        safe_floor_divide(val_a, val_b)
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__idiv", val_a, val_b, state, fn ->
+          safe_floor_divide(val_a, val_b)
+        end)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -810,7 +823,9 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__mod", val_a, val_b, state, fn -> safe_modulo(val_a, val_b) end)
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__mod", val_a, val_b, state, fn -> safe_modulo(val_a, val_b) end)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -821,7 +836,9 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__pow", val_a, val_b, state, fn -> safe_power(val_a, val_b) end)
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__pow", val_a, val_b, state, fn -> safe_power(val_a, val_b) end)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -834,8 +851,10 @@ defmodule Lua.VM.Executor do
     right = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__concat", left, right, state, fn ->
-        concat_coerce(left) <> concat_coerce(right)
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__concat", left, right, state, fn ->
+          concat_coerce(left) <> concat_coerce(right)
+        end)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -849,8 +868,10 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__band", val_a, val_b, state, fn ->
-        Numeric.to_signed_int64(Bitwise.band(to_integer!(val_a), to_integer!(val_b)))
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__band", val_a, val_b, state, fn ->
+          Numeric.to_signed_int64(Bitwise.band(to_integer!(val_a), to_integer!(val_b)))
+        end)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -862,8 +883,10 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__bor", val_a, val_b, state, fn ->
-        Numeric.to_signed_int64(Bitwise.bor(to_integer!(val_a), to_integer!(val_b)))
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__bor", val_a, val_b, state, fn ->
+          Numeric.to_signed_int64(Bitwise.bor(to_integer!(val_a), to_integer!(val_b)))
+        end)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -875,8 +898,10 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__bxor", val_a, val_b, state, fn ->
-        Numeric.to_signed_int64(Bitwise.bxor(to_integer!(val_a), to_integer!(val_b)))
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__bxor", val_a, val_b, state, fn ->
+          Numeric.to_signed_int64(Bitwise.bxor(to_integer!(val_a), to_integer!(val_b)))
+        end)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -888,8 +913,10 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__shl", val_a, val_b, state, fn ->
-        lua_shift_left(to_integer!(val_a), to_integer!(val_b))
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__shl", val_a, val_b, state, fn ->
+          lua_shift_left(to_integer!(val_a), to_integer!(val_b))
+        end)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -901,8 +928,10 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__shr", val_a, val_b, state, fn ->
-        lua_shift_right(to_integer!(val_a), to_integer!(val_b))
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__shr", val_a, val_b, state, fn ->
+          lua_shift_right(to_integer!(val_a), to_integer!(val_b))
+        end)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -913,8 +942,10 @@ defmodule Lua.VM.Executor do
     val = elem(regs, source)
 
     {result, new_state} =
-      try_unary_metamethod("__bnot", val, state, fn ->
-        Numeric.to_signed_int64(Bitwise.bnot(to_integer!(val)))
+      with_context(line, proto, state, fn ->
+        try_unary_metamethod("__bnot", val, state, fn ->
+          Numeric.to_signed_int64(Bitwise.bnot(to_integer!(val)))
+        end)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -928,7 +959,9 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_equality_metamethod(val_a, val_b, state, fn -> lua_equal(val_a, val_b) end)
+      with_context(line, proto, state, fn ->
+        try_equality_metamethod(val_a, val_b, state, fn -> lua_equal(val_a, val_b) end)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -939,7 +972,9 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     {result, new_state} =
-      try_binary_metamethod("__lt", val_a, val_b, state, fn -> safe_compare_lt(val_a, val_b) end)
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__lt", val_a, val_b, state, fn -> safe_compare_lt(val_a, val_b) end)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -949,7 +984,8 @@ defmodule Lua.VM.Executor do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
-    {result, new_state} = compare_le(val_a, val_b, state)
+    {result, new_state} =
+      with_context(line, proto, state, fn -> compare_le(val_a, val_b, state) end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -961,7 +997,9 @@ defmodule Lua.VM.Executor do
 
     # Lua 5.3 §3.4.4: a > b is translated to b < a, which dispatches __lt.
     {result, new_state} =
-      try_binary_metamethod("__lt", val_b, val_a, state, fn -> safe_compare_lt(val_b, val_a) end)
+      with_context(line, proto, state, fn ->
+        try_binary_metamethod("__lt", val_b, val_a, state, fn -> safe_compare_lt(val_b, val_a) end)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -972,7 +1010,8 @@ defmodule Lua.VM.Executor do
     val_b = elem(regs, b)
 
     # Lua 5.3 §3.4.4: a >= b is translated to b <= a.
-    {result, new_state} = compare_le(val_b, val_a, state)
+    {result, new_state} =
+      with_context(line, proto, state, fn -> compare_le(val_b, val_a, state) end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -993,7 +1032,12 @@ defmodule Lua.VM.Executor do
 
   defp do_execute([{:negate, dest, source} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val = elem(regs, source)
-    {result, new_state} = try_unary_metamethod("__unm", val, state, fn -> safe_negate(val) end)
+
+    {result, new_state} =
+      with_context(line, proto, state, fn ->
+        try_unary_metamethod("__unm", val, state, fn -> safe_negate(val) end)
+      end)
+
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
@@ -1008,21 +1052,23 @@ defmodule Lua.VM.Executor do
     value = elem(regs, source)
 
     {result, new_state} =
-      try_unary_metamethod("__len", value, state, fn ->
-        case value do
-          {:tref, id} ->
-            table = Map.fetch!(state.tables, id)
-            Value.sequence_length(table.data)
+      with_context(line, proto, state, fn ->
+        try_unary_metamethod("__len", value, state, fn ->
+          case value do
+            {:tref, id} ->
+              table = Map.fetch!(state.tables, id)
+              Value.sequence_length(table.data)
 
-          v when is_binary(v) ->
-            byte_size(v)
+            v when is_binary(v) ->
+              byte_size(v)
 
-          v when is_list(v) ->
-            length(v)
+            v when is_list(v) ->
+              length(v)
 
-          _ ->
-            0
-        end
+            _ ->
+              0
+          end
+        end)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1043,7 +1089,8 @@ defmodule Lua.VM.Executor do
     table_val = elem(regs, table_reg)
     key = elem(regs, key_reg)
 
-    {value, state} = index_value(table_val, key, state)
+    {value, state} =
+      with_context(line, proto, state, fn -> index_value(table_val, key, state) end)
 
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
@@ -1056,7 +1103,11 @@ defmodule Lua.VM.Executor do
     key = elem(regs, key_reg)
     value = elem(regs, value_reg)
 
-    state = table_newindex(elem(regs, table_reg), key, value, state)
+    state =
+      with_context(line, proto, state, fn ->
+        table_newindex(elem(regs, table_reg), key, value, state)
+      end)
+
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
@@ -1065,7 +1116,8 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:get_field, dest, table_reg, name} | rest], regs, upvalues, proto, state, cont, frames, line) do
     table_val = elem(regs, table_reg)
 
-    {value, state} = index_value(table_val, name, state)
+    {value, state} =
+      with_context(line, proto, state, fn -> index_value(table_val, name, state) end)
 
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
@@ -1077,7 +1129,11 @@ defmodule Lua.VM.Executor do
     {:tref, _} = elem(regs, table_reg)
     value = elem(regs, value_reg)
 
-    state = table_newindex(elem(regs, table_reg), name, value, state)
+    state =
+      with_context(line, proto, state, fn ->
+        table_newindex(elem(regs, table_reg), name, value, state)
+      end)
+
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
@@ -2010,4 +2066,73 @@ defmodule Lua.VM.Executor do
   defp value_type({:lua_closure, _, _}), do: :function
   defp value_type({:native_func, _}), do: :function
   defp value_type(_), do: :unknown
+
+  # ── Error context wrapper ──────────────────────────────────────────────────
+  #
+  # Many fallible helpers (`safe_*`, `concat_coerce`, `to_integer!`, the
+  # `try_*_metamethod` dispatchers) raise `TypeError`/`RuntimeError` without
+  # knowing the source position they're being called from. This wrapper
+  # catches those exceptions at the opcode-dispatch level and re-raises
+  # them with `:line`, `:source`, and `:call_stack` populated from the
+  # surrounding executor context.
+  #
+  # Tail-call shape: `with_context/4` is *not* in tail position relative to
+  # `do_execute/8`'s recursive call — the wrapper just guards the helper
+  # invocation. The outer `do_execute(rest, ...)` after a successful return
+  # remains a tail call.
+
+  defp with_context(line, proto, state, fun) do
+    fun.()
+  rescue
+    e in [TypeError, RuntimeError, AssertionError] ->
+      reraise add_context(e, line, proto, state), __STACKTRACE__
+  end
+
+  defp add_context(e, line, proto, state) do
+    # Only fill in fields the original raise site didn't supply, so a helper
+    # that already knew its own line (call_value/5, etc.) wins.
+    line = Map.get(e, :line) || line
+    source = Map.get(e, :source) || proto.source
+
+    call_stack =
+      case Map.get(e, :call_stack) do
+        nil -> state.call_stack
+        [] -> state.call_stack
+        existing -> existing
+      end
+
+    # The exception's :message is precomputed in exception/1, so we can't
+    # patch fields and expect the formatted string to update. Re-build via
+    # the constructor so the formatter re-runs with the new context.
+    rebuild_exception(e, line, source, call_stack)
+  end
+
+  defp rebuild_exception(%TypeError{} = e, line, source, call_stack) do
+    TypeError.exception(
+      value: e.value,
+      source: source,
+      line: line,
+      call_stack: call_stack,
+      error_kind: e.error_kind,
+      value_type: e.value_type
+    )
+  end
+
+  defp rebuild_exception(%RuntimeError{} = e, line, source, call_stack) do
+    RuntimeError.exception(
+      value: e.value,
+      source: source,
+      line: line,
+      call_stack: call_stack
+    )
+  end
+
+  defp rebuild_exception(%AssertionError{} = e, line, source, call_stack) do
+    AssertionError.exception(
+      value: e.value,
+      source: source,
+      line: line,
+      call_stack: call_stack
+    )
+  end
 end

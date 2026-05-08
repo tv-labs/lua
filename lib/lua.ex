@@ -431,6 +431,9 @@ defmodule Lua do
   * `:decode` - (default `true`) By default, all values returned from Lua scripts are decoded.
                 This may not be desirable if you need to modify a table reference or access a function call.
                 Pass `decode: false` as an option to return encoded values
+  * `:source` - (default `"<eval>"`) Source name attached to the compiled chunk. Surfaces in
+                runtime errors as `at <source>:<line>:` and in stack traces. Pick a name that
+                identifies where this script came from (e.g. `"my_script.lua"`).
   """
   def eval!(script) do
     eval!(new(), script, [])
@@ -445,11 +448,11 @@ defmodule Lua do
   end
 
   def eval!(%__MODULE__{state: state} = lua, script, opts) when is_binary(script) do
-    opts = Keyword.validate!(opts, decode: true)
+    opts = Keyword.validate!(opts, decode: true, source: "<eval>")
 
     case Lua.Parser.parse(script) do
       {:ok, ast} ->
-        case Lua.Compiler.compile(ast) do
+        case Lua.Compiler.compile(ast, source: opts[:source]) do
           {:ok, proto} ->
             {:ok, results, new_state} = Lua.VM.execute(proto, state)
 
@@ -473,14 +476,11 @@ defmodule Lua do
     e in [Lua.RuntimeException, Lua.CompilerException] ->
       reraise e, __STACKTRACE__
 
-    e in [RuntimeError] ->
-      reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
-
-    e in [TypeError] ->
-      reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
-
-    e in [AssertionError] ->
-      reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
+    # Pass the VM exception itself (not just its message) so the
+    # `Lua.RuntimeException.exception/1` clause for arbitrary exceptions
+    # picks up `:line`, `:source`, and `:call_stack`.
+    e in [RuntimeError, TypeError, AssertionError] ->
+      reraise Lua.RuntimeException, e, __STACKTRACE__
 
     e ->
       reraise Lua.RuntimeException, e, __STACKTRACE__
@@ -503,14 +503,11 @@ defmodule Lua do
     e in [Lua.RuntimeException, Lua.CompilerException] ->
       reraise e, __STACKTRACE__
 
-    e in [RuntimeError] ->
-      reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
-
-    e in [TypeError] ->
-      reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
-
-    e in [AssertionError] ->
-      reraise Lua.RuntimeException, Exception.message(e), __STACKTRACE__
+    # Pass the VM exception itself (not just its message) so the
+    # `Lua.RuntimeException.exception/1` clause for arbitrary exceptions
+    # picks up `:line`, `:source`, and `:call_stack`.
+    e in [RuntimeError, TypeError, AssertionError] ->
+      reraise Lua.RuntimeException, e, __STACKTRACE__
 
     e ->
       reraise Lua.RuntimeException, e, __STACKTRACE__

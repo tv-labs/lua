@@ -30,8 +30,10 @@ defmodule Lua.TestCase do
     # Install test helpers
     lua = install_test_helpers(lua)
 
-    # Execute the test file
-    {_results, _lua} = Lua.eval!(lua, source)
+    # Execute the test file. Pass the file path as `source:` so any
+    # runtime error includes the actual filename (e.g. "pm.lua:7") in
+    # the error message, instead of the default "<eval>".
+    {_results, _lua} = Lua.eval!(lua, source, source: Path.basename(path))
     :ok
   end
 

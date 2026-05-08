@@ -2,7 +2,7 @@ defmodule Lua.RuntimeException do
   @moduledoc false
   alias Lua.Util
 
-  defexception [:message, :original, :state]
+  defexception [:message, :original, :state, :line, :source, :call_stack]
 
   @impl true
   def exception({:lua_error, error, _state}) do
@@ -42,8 +42,25 @@ defmodule Lua.RuntimeException do
         inspect(error)
       end
 
-    %__MODULE__{original: error, message: "Lua runtime error: #{message}"}
+    # Copy structured fields off VM exceptions (TypeError, RuntimeError,
+    # AssertionError) so consumers can pattern-match on `:line` / `:source`
+    # without having to re-parse the message string.
+    {line, source, call_stack} = extract_context(error)
+
+    %__MODULE__{
+      original: error,
+      message: "Lua runtime error: #{message}",
+      line: line,
+      source: source,
+      call_stack: call_stack
+    }
   end
+
+  defp extract_context(error) when is_struct(error) do
+    {Map.get(error, :line), Map.get(error, :source), Map.get(error, :call_stack)}
+  end
+
+  defp extract_context(_), do: {nil, nil, nil}
 
   defp format_function([], function), do: "#{function}()"
 

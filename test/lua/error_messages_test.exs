@@ -241,4 +241,108 @@ defmodule Lua.ErrorMessagesTest do
       assert formatted =~ "helper"
     end
   end
+
+  describe "Lua.eval! preserves line/source on the public exception" do
+    test "arithmetic on string carries line and source" do
+      script = """
+      local x = 1
+      local s = "hello"
+      print(s * x)
+      """
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script, source: "demo.lua")
+        end
+
+      # The structured fields survive the wrapper. Without these, agents
+      # and IDE integrations can only string-scrape the formatted message.
+      assert is_integer(e.line) and e.line > 0
+      assert e.source == "demo.lua"
+      assert e.message =~ "demo.lua:#{e.line}"
+      assert e.message =~ "attempt to perform arithmetic on a string value"
+    end
+
+    test "indexing a nil value carries line and source" do
+      script = """
+      local x = nil
+      print(x.field)
+      """
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script, source: "demo.lua")
+        end
+
+      assert is_integer(e.line) and e.line > 0
+      assert e.source == "demo.lua"
+      assert e.message =~ "demo.lua:#{e.line}"
+    end
+
+    test "calling a nil value carries line and source" do
+      script = """
+      local f = nil
+      f()
+      """
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script, source: "demo.lua")
+        end
+
+      assert is_integer(e.line) and e.line > 0
+      assert e.source == "demo.lua"
+      assert e.message =~ "demo.lua:#{e.line}"
+      assert e.message =~ "attempt to call a nil value"
+    end
+
+    test "assert(false) from Lua carries line and source" do
+      script = """
+      local x = -5
+      assert(x > 0, "must be positive")
+      """
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script, source: "check.lua")
+        end
+
+      assert is_integer(e.line) and e.line > 0
+      assert e.source == "check.lua"
+      assert e.message =~ "check.lua:#{e.line}"
+      assert e.message =~ "must be positive"
+    end
+
+    test "default source name is <eval> when no source: given" do
+      script = "local x = nil\nx()"
+
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), script)
+        end
+
+      assert e.source == "<eval>"
+      assert e.message =~ "<eval>:"
+    end
+
+    test "source: option threads through to the compiled chunk" do
+      e =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.eval!(Lua.new(), "local z = nil\nz()", source: "user_input.lua")
+        end
+
+      assert e.source == "user_input.lua"
+      assert e.message =~ "user_input.lua:"
+    end
+
+    test "successful eval doesn't pay any line-tracking cost on the public path" do
+      # Sanity check that wrapping the hot path in try/rescue didn't break
+      # successful execution. If this regresses we'll likely see fallout
+      # in the rest of the suite, but having the assertion here pins the
+      # contract: line tracking is invisible on success.
+      assert {[6], _} = Lua.eval!(Lua.new(), "return 1 + 2 + 3")
+      assert {[true], _} = Lua.eval!(Lua.new(), "return 'a' == 'a'")
+      assert {["hi"], _} = Lua.eval!(Lua.new(), ~s|return "h" .. "i"|)
+    end
+  end
 end
