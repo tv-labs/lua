@@ -86,9 +86,29 @@ wraps.
 
 ## Deferred (intentional, not in 1.0)
 
+These suite files exercise capabilities that conflict with this library's
+role as a sandboxed embedded Lua VM. They are tracked as deliberate
+non-goals, not "missing features we'd take a PR for". Per-file rationale
+lives alongside the `@deferred_permanent` map in
+`test/lua53_suite_test.exs`.
+
+- **Standalone interpreter** (`main.lua`) — shells out via `os.execute`,
+  writes Lua programs to temp files, invokes `lua` as a subprocess. We
+  are an embedded VM with no shell-out and no standalone interpreter.
+- **File I/O** (`files.lua`) — `io.open`, `io.input`, `io.output`,
+  `io.lines`, `io.read`, `io.write`, `io.tmpfile`, plus `os.getenv`,
+  `os.remove`, `os.rename`. `io.*` is a stub by design.
+- **`require` semantics that need filesystem I/O** (`attrib.lua`) — writes
+  `libs/A.lua`, `libs/B.lua`, etc. to disk and dynamically loads them.
+- **>64K constants harness via tmpfile + dofile** (`verybig.lua`) — the RK/
+  large-constants behaviour is interesting, but the harness writes a
+  generated program with `os.tmpname()`/`io.output()` and `dofile`s it.
+  A future plan could stub these for the suite runner only.
+
+Other deferrals in this milestone:
+
 - **Coroutines** (`coroutine.lua`) — full continuation/process model, weeks of work.
 - **Garbage collection / weak tables** (`gc.lua`).
-- **File I/O** (`files.lua`).
 - **Full debug library** (`db.lua`).
 - **C-stack tests** (`cstack.lua`).
 - **Backward `goto` and goto-out-of-conditional** (3 skipped unit tests in
