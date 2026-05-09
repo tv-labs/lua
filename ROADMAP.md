@@ -33,7 +33,7 @@ The new Elixir-native VM (replacing Luerl) is built up through:
 
 ## In flight: Direction A — Suite Triage (milestone `1.0.0`)
 
-**Goal**: push the official Lua 5.3 test suite from 5/29 to a healthier
+**Goal**: push the official Lua 5.3 test suite from 6/29 to a healthier
 pass rate, without regressing unit tests, then cut `1.0.0-rc.1`.
 
 The version jump from `0.4` to `1.0` reflects the magnitude of the VM
@@ -113,8 +113,6 @@ Other deferrals in this milestone:
 - **C-stack tests** (`cstack.lua`).
 - **Backward `goto` and goto-out-of-conditional** (3 skipped unit tests in
   `test/lua/compiler/integration_test.exs`).
-- **`string.pack` / `unpack` / `packsize`** (`tpack.lua`) — mechanical, but not
-  blocking 0.5.
 
 ## Glossary
 
