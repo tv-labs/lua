@@ -12,10 +12,15 @@ defmodule Lua.VM.ArgumentError do
     - `:expected` - What type or value was expected (e.g., "number", "string")
     - `:got` - What was actually received (optional, e.g., "nil", "boolean")
     - `:details` - Additional details about the error (optional)
+    - `:line` - Source line where the call originated (auto-populated from
+      `Lua.VM.Executor.current_position/0` when not given explicitly)
+    - `:source` - Source name where the call originated (auto-populated)
+    - `:call_stack` - Call stack frames at the raise site (default `[]`)
 
   ## Examples
 
-      # Basic type error
+      # Basic type error — line/source filled in automatically when raised
+      # from inside a Lua execution.
       raise ArgumentError,
         function_name: "string.rep",
         arg_num: 2,
@@ -36,31 +41,47 @@ defmodule Lua.VM.ArgumentError do
         details: "value out of range"
   """
 
-  defexception [:function_name, :arg_num, :expected, :got, :details]
+  defexception [
+    :function_name,
+    :arg_num,
+    :expected,
+    :got,
+    :details,
+    :line,
+    :source,
+    :call_stack
+  ]
 
   @impl true
   def exception(opts) do
+    {auto_line, auto_source} = Lua.VM.Executor.current_position()
+
     function_name = Keyword.fetch!(opts, :function_name)
-    arg_num = Keyword.get(opts, :arg_num)
-    expected = Keyword.get(opts, :expected)
-    got = Keyword.get(opts, :got)
-    details = Keyword.get(opts, :details)
 
     %__MODULE__{
       function_name: function_name,
-      arg_num: arg_num,
-      expected: expected,
-      got: got,
-      details: details
+      arg_num: Keyword.get(opts, :arg_num),
+      expected: Keyword.get(opts, :expected),
+      got: Keyword.get(opts, :got),
+      details: Keyword.get(opts, :details),
+      line: Keyword.get(opts, :line) || auto_line,
+      source: Keyword.get(opts, :source) || auto_source,
+      call_stack: Keyword.get(opts, :call_stack, [])
     }
   end
 
   @impl true
-  def message(%__MODULE__{function_name: function_name, arg_num: arg_num, expected: expected, got: got, details: details}) do
-    build_message(function_name, arg_num, expected, got, details)
+  def message(%__MODULE__{} = e) do
+    base = build_base(e.function_name, e.arg_num, e.expected, e.got, e.details)
+
+    Lua.VM.ErrorFormatter.format(:type_error, base,
+      source: e.source,
+      line: e.line,
+      call_stack: e.call_stack
+    )
   end
 
-  defp build_message(function_name, arg_num, expected, got, details) do
+  defp build_base(function_name, arg_num, expected, got, details) do
     base =
       if arg_num do
         "bad argument ##{arg_num} to '#{function_name}'"
