@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: feat/string-pack-unpack
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - tpack.lua
