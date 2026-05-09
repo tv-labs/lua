@@ -2,10 +2,10 @@
 id: A27
 title: Inspect protocol for VM values
 issue: null
-pr: null
+pr: 218
 branch: dx/inspect-protocol
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - readable iex output for Lua values
@@ -202,4 +202,46 @@ iex> f
 
 ## Discoveries
 
-(populated during implementation)
+- `Lua.Table` already exists as a public utility module (for casting
+  decoded tables to lists/maps). Display structs live under
+  `Lua.VM.Display.*` to avoid the collision; the inspect output still
+  uses the short forms (`#Lua.Table<...>`, etc.).
+- Closures need source/line/arity at display time. The existing
+  `Lua.Compiler.Prototype` struct carries `:source`, `:lines`,
+  `:param_count`, and `:is_vararg` — no proto changes needed.
+- Round-trip support (`Lua.set!/3`, `Lua.encode!/2`, `Lua.decode!/2`,
+  `Lua.call_function/3`) had to be added to keep the wrap transparent
+  for existing flows. Each entry point calls `Display.unwrap/1`. A
+  public `Lua.unwrap/1` is also exposed for callers that need the raw
+  VM tag directly.
+- `Lua.encode!/2` got an opportunistic `Util.encoded?/1` shortcut so
+  unwrapping a table struct (whose `:ref` is `{:tref, _}`, already
+  encoded) does not try to re-encode through `Value.encode/2`.
+- Two pre-existing tests pattern-matched on `{:tref, _}` from
+  `decode: false` (`test/lua/util_test.exs` and `test/lua_test.exs`).
+  Both updated to match the new `%Lua.VM.Display.Table{}` shape and
+  exercise `Lua.unwrap/1`. No other downstream pattern matches in
+  the suite.
+
+## What changed
+
+PR: [#218](https://github.com/tv-labs/lua/pull/218)
+
+Files touched:
+
+- `lib/lua/vm/display.ex` (new)
+- `lib/lua/vm/display/table.ex` (new)
+- `lib/lua/vm/display/closure.ex` (new)
+- `lib/lua/vm/display/native_func.ex` (new)
+- `lib/lua/vm/display/userdata.ex` (new)
+- `lib/lua.ex` — wraps results on `eval/eval!` return; unwraps on
+  `set!`, `encode!`, `decode!`, `call_function`; adds public
+  `Lua.unwrap/1`.
+- `test/lua/vm/display_test.exs` (new) — 28 tests covering each
+  Inspect impl, the boundary wrap, round-tripping, and decode-mode
+  invariants.
+- `test/lua/util_test.exs`, `test/lua_test.exs` — updated to match
+  the new `decode: false` wrap shape.
+
+Suite delta: 1626 → 1654 tests, 0 failures (no Lua 5.3 suite
+regressions).
