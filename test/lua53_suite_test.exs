@@ -15,7 +15,7 @@ defmodule Lua.Lua53SuiteTest do
              |> Enum.sort()
 
   # Tests that are ready to run (not skipped).
-  @ready_tests ["simple_test.lua", "api.lua", "bitwise.lua", "code.lua", "vararg.lua"]
+  @ready_tests ["simple_test.lua", "api.lua", "bitwise.lua", "code.lua", "tpack.lua", "vararg.lua"]
 
   # Suite files that we have deliberately decided not to support.
   #

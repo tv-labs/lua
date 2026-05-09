@@ -32,6 +32,7 @@ defmodule Lua.VM.Stdlib.String do
   alias Lua.VM.Executor
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Pattern
+  alias Lua.VM.Stdlib.String.Pack
   alias Lua.VM.Stdlib.Util
 
   @impl true
@@ -153,24 +154,22 @@ defmodule Lua.VM.Stdlib.String do
 
   # string.rep(s, n [, sep]) - repeats string s n times with optional separator
   defp string_rep([str, n | rest], state) when is_binary(str) and is_integer(n) do
-    sep = Enum.at(rest, 0, "")
+    do_string_rep(str, n, rest, state)
+  end
 
-    if !is_binary(sep) do
+  # Lua 5.3 accepts floats with integer values as integer args. `2^3`
+  # always yields the float 8.0 in Lua, so without this coercion
+  # `string.rep("x", 2^3)` rejects an obviously-valid count.
+  defp string_rep([str, n | rest], state) when is_binary(str) and is_float(n) do
+    if n == Float.floor(n) do
+      do_string_rep(str, trunc(n), rest, state)
+    else
       raise ArgumentError,
         function_name: "string.rep",
-        arg_num: 3,
-        expected: "string",
-        got: Util.typeof(sep)
+        arg_num: 2,
+        expected: "number",
+        got: "number has no integer representation"
     end
-
-    result =
-      if n <= 0 do
-        ""
-      else
-        Enum.map_join(1..n, sep, fn _ -> str end)
-      end
-
-    {[result], state}
   end
 
   defp string_rep([str, n | _], _state) when is_binary(str) do
@@ -196,9 +195,33 @@ defmodule Lua.VM.Stdlib.String do
     raise_arg_expected(1, "rep")
   end
 
-  # string.reverse(s) - reverses a string
+  defp do_string_rep(str, n, rest, state) do
+    sep = Enum.at(rest, 0, "")
+
+    if !is_binary(sep) do
+      raise ArgumentError,
+        function_name: "string.rep",
+        arg_num: 3,
+        expected: "string",
+        got: Util.typeof(sep)
+    end
+
+    result =
+      if n <= 0 do
+        ""
+      else
+        Enum.map_join(1..n, sep, fn _ -> str end)
+      end
+
+    {[result], state}
+  end
+
+  # string.reverse(s) - reverses a string byte-by-byte (Lua strings are
+  # byte arrays, not codepoint sequences — so a NUL or non-UTF-8 byte
+  # must come back at the mirror position).
   defp string_reverse([str | _], state) when is_binary(str) do
-    {[String.reverse(str)], state}
+    reversed = str |> :binary.bin_to_list() |> Enum.reverse() |> :binary.list_to_bin()
+    {[reversed], state}
   end
 
   defp string_reverse([other | _], _state) do
@@ -829,41 +852,40 @@ defmodule Lua.VM.Stdlib.String do
     raise ArgumentError.value_expected("string.#{func_name}", arg_num)
   end
 
-  # string.packsize(fmt) — returns size in bytes for the given format string
-  # Supports basic format codes used in Lua 5.3
+  # string.pack(fmt, v1, v2, ...) — pack values per fmt
+  defp string_pack([fmt | args], state) when is_binary(fmt) do
+    {[Pack.pack(fmt, args)], state}
+  end
+
+  defp string_pack([other | _], _state), do: raise_string_expected(1, "pack", other)
+  defp string_pack([], _state), do: raise_arg_expected(1, "pack")
+
+  # string.unpack(fmt, s [, pos]) — unpack values; returns vN..., next_pos
+  defp string_unpack([fmt, s | rest], state) when is_binary(fmt) and is_binary(s) do
+    pos =
+      case rest do
+        [] -> 1
+        [p | _] when is_integer(p) -> p
+        [p | _] when is_float(p) -> trunc(p)
+        _ -> raise ArgumentError, function_name: "string.unpack", arg_num: 3, expected: "number"
+      end
+
+    results = Pack.unpack(fmt, s, pos)
+    {results, state}
+  end
+
+  defp string_unpack([fmt, other | _], _state) when is_binary(fmt) do
+    raise_string_expected(2, "unpack", other)
+  end
+
+  defp string_unpack([other | _], _state), do: raise_string_expected(1, "unpack", other)
+  defp string_unpack([], _state), do: raise_arg_expected(1, "unpack")
+
+  # string.packsize(fmt) — return size in bytes for fixed-size formats
   defp string_packsize([fmt | _], state) when is_binary(fmt) do
-    size = compute_pack_size(fmt, 0)
-    {[size], state}
+    {[Pack.packsize(fmt)], state}
   end
 
-  defp compute_pack_size("", acc), do: acc
-  defp compute_pack_size(<<"b", rest::binary>>, acc), do: compute_pack_size(rest, acc + 1)
-  defp compute_pack_size(<<"B", rest::binary>>, acc), do: compute_pack_size(rest, acc + 1)
-  defp compute_pack_size(<<"h", rest::binary>>, acc), do: compute_pack_size(rest, acc + 2)
-  defp compute_pack_size(<<"H", rest::binary>>, acc), do: compute_pack_size(rest, acc + 2)
-  defp compute_pack_size(<<"i", rest::binary>>, acc), do: compute_pack_size(rest, acc + 4)
-  defp compute_pack_size(<<"I", rest::binary>>, acc), do: compute_pack_size(rest, acc + 4)
-  defp compute_pack_size(<<"l", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
-  defp compute_pack_size(<<"L", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
-  defp compute_pack_size(<<"j", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
-  defp compute_pack_size(<<"J", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
-  defp compute_pack_size(<<"n", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
-  defp compute_pack_size(<<"N", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
-  defp compute_pack_size(<<"f", rest::binary>>, acc), do: compute_pack_size(rest, acc + 4)
-  defp compute_pack_size(<<"d", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
-  defp compute_pack_size(<<"T", rest::binary>>, acc), do: compute_pack_size(rest, acc + 8)
-  defp compute_pack_size(<<" ", rest::binary>>, acc), do: compute_pack_size(rest, acc)
-  defp compute_pack_size(<<"<", rest::binary>>, acc), do: compute_pack_size(rest, acc)
-  defp compute_pack_size(<<">", rest::binary>>, acc), do: compute_pack_size(rest, acc)
-  defp compute_pack_size(<<"=", rest::binary>>, acc), do: compute_pack_size(rest, acc)
-
-  # string.pack — stub
-  defp string_pack(_args, _state) do
-    raise Lua.RuntimeException, "string.pack not yet implemented"
-  end
-
-  # string.unpack — stub
-  defp string_unpack(_args, _state) do
-    raise Lua.RuntimeException, "string.unpack not yet implemented"
-  end
+  defp string_packsize([other | _], _state), do: raise_string_expected(1, "packsize", other)
+  defp string_packsize([], _state), do: raise_arg_expected(1, "packsize")
 end

@@ -2,10 +2,10 @@
 id: A25
 title: Implement string.pack, string.unpack, string.packsize
 issue: null
-pr: null
+pr: 217
 branch: feat/string-pack-unpack
 base: main
-status: ready
+status: review
 direction: A
 unlocks:
   - tpack.lua
@@ -34,22 +34,24 @@ encodings.
 
 ## Success criteria
 
-- [ ] `string.pack`, `string.unpack`, `string.packsize` exist in
-      `lib/lua/vm/stdlib/string.ex` and are reachable from Lua.
-- [ ] All format options from Lua 5.3 §6.4.2 are supported:
-      - [ ] `<` `>` `=` `!` (endian and alignment)
-      - [ ] `b` `B` `h` `H` `i` `I` `l` `L` `j` `J` `T` (signed/
+- [x] `string.pack`, `string.unpack`, `string.packsize` exist in
+      `lib/lua/vm/stdlib/string.ex` and are reachable from Lua
+      (delegating to `Lua.VM.Stdlib.String.Pack`).
+- [x] All format options from Lua 5.3 §6.4.2 are supported:
+      - [x] `<` `>` `=` `!` (endian and alignment)
+      - [x] `b` `B` `h` `H` `i` `I` `l` `L` `j` `J` `T` (signed/
             unsigned integers, with sized variants)
-      - [ ] `f` `d` `n` (floats)
-      - [ ] `s` `s1`-`s8` (string with length prefix)
-      - [ ] `z` (zero-terminated string)
-      - [ ] `x` (padding byte)
-      - [ ] `X<op>` (alignment to op's natural alignment)
-      - [ ] `c<n>` (fixed-size string)
-      - [ ] ` ` (space, ignored)
-- [ ] `tpack.lua` passes.
-- [ ] `mix test` count goes up by at least 5 (new unit tests).
-- [ ] No regression elsewhere.
+      - [x] `f` `d` `n` (floats)
+      - [x] `s` `s1`-`s8` (string with length prefix)
+      - [x] `z` (zero-terminated string)
+      - [x] `x` (padding byte)
+      - [x] `X<op>` (alignment to op's natural alignment)
+      - [x] `c<n>` (fixed-size string)
+      - [x] ` ` (space, ignored)
+- [x] `tpack.lua` passes (promoted to `@ready_tests` in the suite).
+- [x] `mix test` count goes up by at least 5 (added 41 unit tests
+      covering each option, alignment edge cases, packsize errors).
+- [x] No regression elsewhere (1585 → 1626 passing, 0 failures).
 
 ## Implementation notes
 
@@ -125,4 +127,77 @@ iex> Lua.eval!(Lua.new(), ~S{return string.unpack(">i4", "\0\0\0\x05")})
 
 ## Discoveries
 
-(populated during implementation)
+- **`string.reverse` was UTF-8-oriented, not byte-oriented.** PUC-Lua's
+  `string.reverse` works on bytes; ours called `String.reverse/1`, which
+  reverses codepoints and silently mangles non-UTF-8 binaries (including
+  any string containing a NUL byte mid-stream). `tpack.lua` exercises
+  byte reversal via `s2:reverse()` on packed integer bytes, so the bug
+  was on the critical path for this plan. Fixed in scope by switching
+  to `:binary.bin_to_list/1` + `Enum.reverse/1` + `:binary.list_to_bin/1`.
+
+- **`string.rep` rejected float counts.** Lua 5.3 always returns float
+  from `^`, so `string.rep("c268435456", 2^3)` (from `tpack.lua`'s
+  `if packsize("i") == 4 then` branch) was rejected as "number expected,
+  got number". Fixed in scope by adding a float-with-integer-value
+  coercion clause; consistent with PUC-Lua's `lua_tointegerx`.
+
+- **Alignment must be computed at runtime, not parse time.** The first
+  pass of the parser folded alignment padding into the op stream using
+  a parser-side running position. That works for fixed-size formats but
+  breaks for variable-length ones (`s`, `z`): `pack(">!4 c3 c4 c2 z i4 …")`
+  has an `i4` whose alignment depends on the actual length of the `z`
+  payload, which the parser cannot know. The parser now emits explicit
+  `{:align, n}` ops; pack/unpack/packsize each track their own running
+  byte position and compute padding when they hit `:align`. PUC-Lua does
+  the same (alignment is computed against `totalsize` in `getdetails`).
+
+- **`unpack` cast semantics for size > SZINT and size == SZINT.**
+  PUC-Lua's `unpackint` always casts the read `lua_Unsigned` to
+  `lua_Integer` at the end (bit-pattern reinterpretation in C). This
+  matters for two cases:
+  1. `size > 8`: the low 8 bytes are read *as signed* regardless of the
+     `signed?` flag; the flag only changes the expected sign-extension
+     byte for the high bytes.
+  2. `size == 8` with `I`/`J`/`L`/`T`/`s8`: an unsigned read whose value
+     exceeds `2^63-1` wraps to its signed-64-bit equivalent. The suite
+     exercises this with `unpack("<J", pack("<j", -1)) == -1`.
+  Encoded in `decode_int_with_overflow_check/4` and
+  `wrap_to_lua_integer/1`.
+
+- **BEAM has no IEEE ±Infinity, but the suite round-trips `1/0` through
+  `pack("f", …)`.** The Lua VM's `safe_divide/4` returns the finite
+  stand-ins `±1.0e308` for `±1/0` (see `Lua.VM.Executor.safe_divide/4`).
+  When packed as 32-bit float, `1.0e308` overflows to `0x7F800000` (the
+  IEEE +Inf bit pattern); decoding those bytes back through Erlang's
+  binary syntax raises `MatchError` because the BEAM has no float value
+  for inf. `decode_float/3` now recognises the four ±Inf bit patterns
+  (32-bit and 64-bit, both endians) and returns the matching stand-in,
+  so the round-trip closes.
+
+  Limitations: this only handles ±Inf bit patterns. NaN bit patterns
+  still raise from Erlang's binary decode. The suite doesn't exercise
+  NaN through `pack`/`unpack`, so this is an accepted gap consistent
+  with the existing `safe_divide/4` accepted-divergence note.
+
+## What changed
+
+Files touched:
+
+- `lib/lua/vm/stdlib/string/pack.ex` (new, 619 lines) — format-string
+  parser and pack/unpack/packsize evaluators.
+- `lib/lua/vm/stdlib/string.ex` — wired the three native functions
+  through to the new module; replaced `string.reverse` with a
+  byte-oriented implementation; added a float-count clause to
+  `string.rep`.
+- `test/lua/vm/stdlib/string_pack_test.exs` (new, 312 lines) — 41
+  unit tests covering each option, alignment edge cases, and packsize
+  errors.
+- `test/lua53_suite_test.exs` — promoted `tpack.lua` from
+  `@skipped_tests` (computed) to `@ready_tests`.
+- `.agents/plans/A25-string-pack-unpack.md` — this file.
+
+Suite delta: 5/24 ready → 6/24 ready. New ready file: `tpack.lua`.
+
+Test count delta: 1585 → 1626 (+41 unit tests). All passing.
+
+PR: tv-labs/lua#217.
