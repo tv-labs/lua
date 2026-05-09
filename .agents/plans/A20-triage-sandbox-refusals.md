@@ -2,10 +2,10 @@
 id: A20
 title: Triage cluster — sandbox-refusal suite files
 issue: null
-pr: null
+pr: 216
 branch: triage/sandbox-refusals
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - main.lua
@@ -36,17 +36,22 @@ pretend to have these, or are they explicit non-goals?
 
 ## Success criteria
 
-- [ ] Each of `main.lua`, `verybig.lua`, `files.lua`, `attrib.lua` has
-      a documented decision.
-- [ ] For files marked "skip permanently": `test/lua53_suite_test.exs`
+- [x] Each of `main.lua`, `verybig.lua`, `files.lua`, `attrib.lua` has
+      a documented decision. All four are skip-permanently; reasons
+      live in `test/lua53_suite_test.exs` `@deferred_permanent` map.
+- [x] For files marked "skip permanently": `test/lua53_suite_test.exs`
       gains a comment explaining *why* alongside the `@tag :skip`, and
-      this is reflected in CHANGELOG / README's "supported coverage"
-      section.
-- [ ] For files marked "fix-now": a follow-up plan (`A20a`, `A20b`, …)
+      this is reflected in CHANGELOG and ROADMAP "Deferred" section.
+      (README does not have a "supported coverage" section; ROADMAP is
+      the canonical place — see Discoveries.)
+- [x] For files marked "fix-now": a follow-up plan (`A20a`, `A20b`, …)
       is written under `.agents/plans/` describing the suite-runner
       config or stub strategy, with its own success criteria.
-- [ ] No regression in other suite files. `mix test --include skip`
-      shows the same total pass count or higher.
+      None needed — all four are skip-permanently.
+- [x] No regression in other suite files. `mix test --include skip`
+      shows the same total pass count or higher. Suite test still
+      reports 29 tests, 0 failures, 24 skipped (5 ready). Full
+      `mix test`: 1585 tests, 0 failures, 31 skipped (no change).
 
 ## Implementation notes
 
@@ -97,4 +102,58 @@ the rest of the suite.
 
 ## Discoveries
 
-(populated during triage)
+- The plan's premise that all four files fail with `os.execute()` /
+  `os.tmpname()` / `os.getenv(_)` was correct for `main.lua`,
+  `verybig.lua`, `files.lua`. `attrib.lua` is a *different* sandbox
+  policy: it dies on `require"io"` because there is no `io` global to
+  cache (see A4 plan Discoveries — A4 already noted this). The cluster
+  framing still holds — all four exercise capabilities that conflict
+  with our sandbox role — but the failure mechanism for `attrib.lua` is
+  package/loader-driven, not `os.*`-driven.
+
+- `verybig.lua` is the most interesting of the four. The first ~140
+  lines are testing genuinely useful VM behaviour (RK opcodes, >64K
+  constants, large-table iteration), but they live inside a generated
+  Lua program that gets written to a temp file via `os.tmpname()` /
+  `io.output()` and executed with `dofile()`. A future plan could stub
+  these three primitives in the suite runner only (in-memory file
+  handle + in-memory `dofile`) to unlock that coverage. Not in scope
+  here, but worth recording: roughly 30 lines in
+  `test/support/lua_test_case.ex`, scoped to suite use only.
+
+- The plan asked for a "supported coverage" section in CHANGELOG /
+  README. README has no such section and adding one would duplicate
+  what's already in `ROADMAP.md`'s "Deferred (intentional, not in 1.0)"
+  list. Updated ROADMAP and CHANGELOG instead; the per-file reasons
+  also live inline in `test/lua53_suite_test.exs` so the rationale
+  travels with the test.
+
+- The pre-existing test file structure (single `@skipped_tests` list)
+  conflated "feature not yet implemented" with "deliberate non-goal".
+  Split into `@skipped_tests` (the former, still subject to future
+  plans) and `@deferred_permanent` (the latter, with reasons) so future
+  triage doesn't re-investigate the same four files.
+
+## What changed
+
+Files touched:
+- `test/lua53_suite_test.exs` — split `@skipped_tests` into a two-tier
+  structure: `@deferred_permanent` (a `%{file => reason}` map for the
+  four sandbox-refusal files plus future deliberate non-goals) and
+  `@skipped_tests` (everything else, still addressable). New describe
+  block "Deferred (Intentional Non-Goals)" surfaces the per-file reason
+  in the test name.
+- `ROADMAP.md` — expanded the "Deferred (intentional, not in 1.0)"
+  section with per-file rationale for `main.lua`, `files.lua`,
+  `attrib.lua`, `verybig.lua`. Renamed the existing items into a
+  follow-up "Other deferrals in this milestone" sublist.
+- `CHANGELOG.md` — added an Unreleased entry under Changed describing
+  the new tier and pointing readers at the suite test file and ROADMAP
+  for rationale.
+
+Suite delta: no change (5/29 ready). Coverage classification refined:
+24 skipped → 4 deferred-permanent + 20 missing-feature. Same total.
+
+Tests: 1585 passing, 0 failing, 31 skipped (no change).
+
+PR: https://github.com/tv-labs/lua/pull/216
