@@ -2,10 +2,10 @@
 id: A25
 title: Implement string.pack, string.unpack, string.packsize
 issue: null
-pr: null
+pr: 217
 branch: feat/string-pack-unpack
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - tpack.lua
@@ -178,3 +178,26 @@ iex> Lua.eval!(Lua.new(), ~S{return string.unpack(">i4", "\0\0\0\x05")})
   still raise from Erlang's binary decode. The suite doesn't exercise
   NaN through `pack`/`unpack`, so this is an accepted gap consistent
   with the existing `safe_divide/4` accepted-divergence note.
+
+## What changed
+
+Files touched:
+
+- `lib/lua/vm/stdlib/string/pack.ex` (new, 619 lines) — format-string
+  parser and pack/unpack/packsize evaluators.
+- `lib/lua/vm/stdlib/string.ex` — wired the three native functions
+  through to the new module; replaced `string.reverse` with a
+  byte-oriented implementation; added a float-count clause to
+  `string.rep`.
+- `test/lua/vm/stdlib/string_pack_test.exs` (new, 312 lines) — 41
+  unit tests covering each option, alignment edge cases, and packsize
+  errors.
+- `test/lua53_suite_test.exs` — promoted `tpack.lua` from
+  `@skipped_tests` (computed) to `@ready_tests`.
+- `.agents/plans/A25-string-pack-unpack.md` — this file.
+
+Suite delta: 5/24 ready → 6/24 ready. New ready file: `tpack.lua`.
+
+Test count delta: 1585 → 1626 (+41 unit tests). All passing.
+
+PR: tv-labs/lua#217.
