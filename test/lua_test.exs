@@ -328,7 +328,13 @@ defmodule LuaTest do
       {[decoded], _} = Lua.eval!(chunk, decode: true)
       assert Enum.sort(decoded) == [{"a", 1}, {"b", 2}]
 
-      assert {[{:tref, _}], _} = Lua.eval!(chunk, decode: false)
+      # decode: false now wraps tref in a `Lua.VM.Display.Table` for
+      # friendly inspect output. The underlying ref is preserved on
+      # the struct and reachable via `Lua.unwrap/1`.
+      assert {[%Lua.VM.Display.Table{ref: {:tref, _}} = wrapped], _} =
+               Lua.eval!(chunk, decode: false)
+
+      assert match?({:tref, _}, Lua.unwrap(wrapped))
     end
 
     test "invalid functions raise" do

@@ -23,7 +23,9 @@ defmodule Lua.UtilTest do
       {func, _lua} = Lua.encode!(Lua.new(), fn a -> a end)
       assert Lua.Util.encoded?(func)
 
-      # Lua closure
+      # Lua closure — eval/eval! wraps closures in `Lua.VM.Display.Closure`
+      # for friendly inspect output. `Util.encoded?/1` operates on the
+      # raw VM tags, so unwrap before checking.
       {[closure], _lua} =
         Lua.eval!(
           """
@@ -36,7 +38,7 @@ defmodule Lua.UtilTest do
           decode: false
         )
 
-      assert Lua.Util.encoded?(closure)
+      assert Lua.Util.encoded?(Lua.unwrap(closure))
     end
 
     test "returns false for non decoded values" do

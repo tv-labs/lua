@@ -8,6 +8,7 @@ defmodule Lua do
 
   alias Lua.Util
   alias Lua.VM.AssertionError
+  alias Lua.VM.Display
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Table
@@ -276,6 +277,7 @@ defmodule Lua do
 
   def set!(%__MODULE__{} = lua, keys, value) do
     keys = keys |> List.wrap() |> Enum.map(&to_lua_key/1)
+    value = Display.unwrap(value)
 
     {encoded, state} =
       if Util.encoded?(value) do
@@ -463,6 +465,8 @@ defmodule Lua do
                 results
               end
 
+            results = Display.wrap_results(results, new_state, opts[:decode])
+
             {results, %{lua | state: new_state}}
 
           {:error, msg} ->
@@ -497,6 +501,8 @@ defmodule Lua do
       else
         results
       end
+
+    results = Display.wrap_results(results, new_state, opts[:decode])
 
     {results, %{lua | state: new_state}}
   rescue
@@ -597,6 +603,14 @@ defmodule Lua do
       42
 
   """
+  def call_function(%__MODULE__{} = lua, %Display.Closure{ref: ref}, args) do
+    call_function(lua, ref, args)
+  end
+
+  def call_function(%__MODULE__{} = lua, %Display.NativeFunc{ref: ref}, args) do
+    call_function(lua, ref, args)
+  end
+
   def call_function(%__MODULE__{state: state} = lua, func, args) when is_tuple(func) do
     case do_call_function(func, args, state) do
       {:ok, results, new_state} -> {:ok, results, %{lua | state: new_state}}
@@ -679,6 +693,30 @@ defmodule Lua do
   end
 
   @doc """
+  Returns the underlying VM tag tuple for a display struct returned by
+  `Lua.eval/2` / `Lua.eval!/2` in `decode: false` mode. Returns
+  values unchanged if they are not display structs, so it is safe to
+  apply unconditionally to any value flowing back from `eval`.
+
+      iex> {[t], _lua} = Lua.eval!(Lua.new(), "return {1, 2, 3}", decode: false)
+      iex> match?({:tref, _}, Lua.unwrap(t))
+      true
+
+      iex> {[c], _} = Lua.eval!(Lua.new(), "return function() end")
+      iex> match?({:lua_closure, _, _}, Lua.unwrap(c))
+      true
+
+      iex> Lua.unwrap(42)
+      42
+
+  Useful when you need to pass an `eval`-returned closure or table
+  reference to a tool that expects the raw VM tag (for example, an
+  internal helper or a custom `deflua`).
+  """
+  @spec unwrap(term()) :: term()
+  defdelegate unwrap(value), to: Display
+
+  @doc """
   Encodes a Lua value into its internal form
 
       <!-- Old Luerl implementation returned specific tref IDs: {encoded, _} = Lua.encode!(Lua.new(), %{a: 1}); encoded => {:tref, 14} -->
@@ -692,8 +730,14 @@ defmodule Lua do
   end
 
   def encode!(%__MODULE__{state: state} = lua, value) do
-    {encoded, state} = Value.encode(value, state)
-    {encoded, %{lua | state: state}}
+    value = Display.unwrap(value)
+
+    if Util.encoded?(value) do
+      {value, lua}
+    else
+      {encoded, state} = Value.encode(value, state)
+      {encoded, %{lua | state: state}}
+    end
   rescue
     _e in [ArgumentError] ->
       reraise Lua.RuntimeException, "Failed to encode #{inspect(value)}", __STACKTRACE__
@@ -722,6 +766,8 @@ defmodule Lua do
 
   """
   def decode!(%__MODULE__{state: state}, value) do
+    value = Display.unwrap(value)
+
     if not Util.encoded?(value) do
       raise Lua.RuntimeException, "Failed to decode #{inspect(value)}"
     end
