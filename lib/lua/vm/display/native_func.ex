@@ -1,8 +1,7 @@
 defmodule Lua.VM.Display.NativeFunc do
   @moduledoc """
   Display wrapper for a native Elixir-backed Lua function
-  (`{:native_func, fun}`) returned across the `Lua.eval/2` /
-  `Lua.eval!/2` boundary.
+  (`{:native_func, fun}`) returned across the `Lua.eval!/2` boundary.
 
   Carries the underlying function so the `Inspect` impl can render
   the captured `module/function/arity`, falling back to the fun's

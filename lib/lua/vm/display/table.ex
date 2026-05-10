@@ -1,7 +1,7 @@
 defmodule Lua.VM.Display.Table do
   @moduledoc """
   Display wrapper for a Lua table reference returned across the
-  `Lua.eval/2` / `Lua.eval!/2` boundary in `decode: false` mode.
+  `Lua.eval!/2` boundary in `decode: false` mode.
 
   Carries a snapshot of the table's contents (`:peek`) so the
   `Inspect` impl does not need access to live VM state. The wrap is

@@ -1,7 +1,7 @@
 defmodule Lua.VM.Display.Closure do
   @moduledoc """
   Display wrapper for a Lua closure (`{:lua_closure, proto, upvalues}`)
-  returned across the `Lua.eval/2` / `Lua.eval!/2` boundary.
+  returned across the `Lua.eval!/2` boundary.
 
   Carries the closure's source, line, and arity for human display.
   The wrap fires in both `decode: true` and `decode: false` modes

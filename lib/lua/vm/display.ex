@@ -1,7 +1,7 @@
 defmodule Lua.VM.Display do
   @moduledoc """
   Boundary wrappers that turn opaque VM value tags into display
-  structs at the `Lua.eval/2` / `Lua.eval!/2` return path.
+  structs at the `Lua.eval!/2` return path.
 
   The internal VM continues to use the tagged-tuple representation
   (`{:tref, id}`, `{:lua_closure, proto, upvalues}`,
