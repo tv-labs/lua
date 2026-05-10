@@ -20,9 +20,9 @@ deliverables:
 1. **`Lua.dbg/2`** — a debug helper that runs Lua with stdout/stderr
    captured and prints a structured summary (return values, state
    diff, time elapsed, captured prints).
-2. **Doctest support** — `Lua.eval/2` examples in module docs run as
-   doctests with deterministic output. The output formatting must be
-   stable enough to commit.
+2. **Doctest support** — `Lua.eval!/2` examples in module docs run
+   as doctests with deterministic output. The output formatting must
+   be stable enough to commit.
 3. **Recipes** — a short guide showing how to poke at a `Lua` state
    from iex (read globals, call functions, list tables).
 
@@ -35,7 +35,7 @@ deliverables:
 
 ## Success criteria
 
-- [ ] `Lua.dbg(state, source)` returns the same as `Lua.eval/2` but
+- [ ] `Lua.dbg(state, source)` returns the same as `Lua.eval!/2` but
       also prints a summary to stdout including:
       - source preview (first 2 lines of input).
       - return values.
@@ -57,31 +57,63 @@ deliverables:
 def dbg(state \\ Lua.new(), source) when is_binary(source) do
   start = System.monotonic_time()
 
-  # Capture stdout from print() calls.
-  {output, {result, new_state}} =
-    ExUnit.CaptureIO.with_io(fn -> Lua.eval(state, source) end)
+  # Capture stdout from print() by temporarily swapping the calling
+  # process's group leader to a StringIO process. Lua's `print`
+  # writes through Erlang's normal IO protocol, which honours the
+  # caller's group leader, so all output flows into our buffer.
+  {:ok, capture} = StringIO.open("")
+  original_gl = Process.group_leader()
 
-  elapsed_ms = System.convert_time_unit(
-    System.monotonic_time() - start, :native, :millisecond
-  )
+  result =
+    try do
+      Process.group_leader(self(), capture)
+      Lua.eval!(state, source)
+    after
+      Process.group_leader(self(), original_gl)
+    end
 
-  IO.puts("""
-  --- Lua.dbg ---
-  source:  #{preview(source)}
-  return:  #{inspect(result, pretty: true, limit: 10)}
-  elapsed: #{elapsed_ms} ms
-  prints:  #{output |> String.trim() |> indent(2)}
-  ---------------
-  """)
+  {output, _} = StringIO.contents(capture)
+  StringIO.close(capture)
 
-  {result, new_state}
+  {return, new_state} = result
+
+  elapsed_ms =
+    System.convert_time_unit(
+      System.monotonic_time() - start,
+      :native,
+      :millisecond
+    )
+
+  IO.puts(format_summary(source, return, elapsed_ms, output))
+
+  {return, new_state}
 end
 ```
 
-`ExUnit.CaptureIO` is a runtime dep (`:ex_unit` is always loaded);
-keep this fine for now. If we want a non-ExUnit version, defer.
+#### Why not `ExUnit.CaptureIO`
+
+The original draft of this plan suggested wrapping eval in
+`ExUnit.CaptureIO.with_io/1`. We rejected that: pulling
+`:ex_unit` into a runtime/production code path is a non-starter
+for an embedded library. Group-leader swap is plain OTP, no test
+infra, and works because Lua's `print` is synchronous and runs in
+the calling process — anything it emits goes through that
+process's group leader.
+
+#### Caveats of the group-leader approach
+
+- It only captures output emitted from `self()`. If a future
+  feature has `print` spawn a task and write from there, capture
+  breaks. Currently `Lua.VM.Stdlib.lua_print/2` is synchronous
+  in-process, so this is fine.
+- The group leader is restored in an `after` block so a Lua error
+  during eval still leaves the process's IO untouched on the way
+  out.
 
 ### Doctest examples
+
+The repo's public eval function is `Lua.eval!/2` (the bang variant).
+There is no non-bang `Lua.eval/2`. Doctests use `eval!`:
 
 ```elixir
 @doc """
@@ -89,26 +121,38 @@ Evaluates a Lua source string.
 
 ## Examples
 
-    iex> {result, _state} = Lua.eval(Lua.new(), "return 1 + 2")
+    iex> {result, _state} = Lua.eval!(Lua.new(), "return 1 + 2")
     iex> result
     [3]
 
-    iex> {[table], _} = Lua.eval(Lua.new(), "return {a = 1, b = 2}")
-    iex> Lua.unwrap(table)
-    %{"a" => 1, "b" => 2}
+    iex> {[table], lua} = Lua.eval!(Lua.new(), "return {a = 1, b = 2}", decode: false)
+    iex> Lua.decode!(lua, table) |> Enum.sort()
+    [{"a", 1}, {"b", 2}]
 """
 ```
 
-A27's `Inspect` polish makes some of these renderable. Where a value
-needs to be unwrapped for display, use `Lua.unwrap/1` (add this
-helper if not present).
+A27 shipped `Lua.unwrap/1` and the four `Lua.VM.Display.*` structs,
+so closures, tables, native funcs, and userdata already render
+legibly in `iex`. Doctests can rely on those impls without any
+extra work. For values that are sensitive to map-iteration order
+(stdlib globals, table contents), wrap the assertion in `Enum.sort/1`
+or pin a specific key to keep doctests deterministic.
 
 ### Files
 
-- `lib/lua.ex` — add `dbg/1,2` + at least 3 doctests on public funcs.
-- `lib/lua/vm.ex` — at least 2 doctests on public funcs.
-- `guides/iex_recipes.md` (new) — recipes.
+- `lib/lua.ex` — add `dbg/1,2` + at least 5 doctests across the
+  public eval/encode/decode/get/set/call_function surface. The plan
+  originally asked for ≥3 here and ≥2 on `lib/lua/vm.ex`, but
+  `Lua.VM.execute/2` takes a compiled `Prototype` which is awkward
+  to build in a 1–2 line doctest setup. Concentrating on `Lua.*`
+  reads more naturally and keeps the doctest count at the same
+  bar (5+).
+- `guides/iex_recipes.md` (new) — recipes for reading globals,
+  calling functions, inspecting tables, modifying state and
+  re-running.
 - `test/lua/dbg_test.exs` (new) — covers `Lua.dbg/2` output shape.
+  Uses `ExUnit.CaptureIO` (test-only, fine) to assert on the dbg
+  summary that `dbg` prints to stdout.
 
 ## Verification
 
@@ -129,17 +173,29 @@ return:  [1, 2]
 elapsed: 1 ms
 prints:  hi
 ---------------
-{[1, 2], #Lua.State<...>}
+{[1, 2], #Lua<>}
 ```
 
 ## Risks
 
 - `Lua.dbg/2` printing to stdout in test environments could make
-  test output noisy. Mitigation: it's `dbg`, users will only call it
-  from iex.
-- Doctests with non-deterministic output (`elapsed`, table order) are
-  flaky. Stick to determinism: only test return values, never the
+  test output noisy. Mitigation: it's `dbg`, users only call it from
+  iex; tests for `dbg` itself capture stdout to assert on the
   formatted summary.
+- The group-leader swap relies on `print` running synchronously in
+  the calling process. Documented as a known limitation — if a
+  future feature makes `print` spawn a task and write from there,
+  capture would silently miss those writes. Worth a comment in the
+  `dbg` source pointing at this assumption.
+- Doctests with non-deterministic output (`elapsed`, table iteration
+  order, function references) flake. Stick to deterministic shape:
+  pin specific keys, sort lists before comparing, never test the
+  formatted dbg summary text.
+- Capturing IO via group leader is per-process. If `Lua.dbg/2` is
+  called concurrently from the same process (it cannot be, since
+  Elixir is single-threaded per process, but worth noting), the
+  second call's group-leader swap would clobber the first. The
+  `try/after` ensures restoration but does not provide reentrancy.
 
 ## Discoveries
 
