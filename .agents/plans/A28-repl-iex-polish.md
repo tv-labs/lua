@@ -199,4 +199,31 @@ prints:  hi
 
 ## Discoveries
 
-(populated during implementation)
+- `IO.puts/1` writes to `:stdio`, which IS the calling process's
+  group leader — but `StringIO.contents/1` returns `{input, output}`,
+  not `{output, input}`. The first draft of `dbg/2` reversed those
+  and saw an empty capture. Fixed by destructuring `{_input, output}`.
+- `Kernel.dbg/2` exists in Elixir 1.14+, so `defmodule Lua` had to
+  `import Kernel, except: [dbg: 2]` to shadow it.
+- `inspect/1` formats lists of small integers as charlists by
+  default (`[7]` → `~c"\a"`). The dbg summary uses
+  `inspect(x, charlists: :as_lists)` to keep return values
+  unambiguous.
+- A27's `Lua.VM.Display.peek_table/3` recurses into nested tables.
+  This deadlocks when applied to self-referential tables like `_G`
+  (where `_G._G == _G`). Discovered while drafting the `_G` recipe;
+  worked around in the recipe by encouraging users to iterate with
+  `pairs(library)` in Lua and only return the keys. The recursion
+  bug itself is filed as a follow-up plan: `A27a-display-cycle-guard.md`.
+- The `eval!/2` doctest pattern needed adjustment for tables: I
+  added 3 new doctests covering multi-return, table decode, and the
+  closure-display struct — all using `Enum.sort/1` on table results
+  to keep iteration order out of the assertion.
+- ExUnit.CaptureIO is fine in test files (it's exactly what it's for)
+  but the dbg `iex>` doctest had to become a fenced non-iex example
+  in the docstring, because doctest parsing recognises `iex>` lines
+  inside fenced blocks too.
+
+## What changed
+
+(populated when PR opens)
