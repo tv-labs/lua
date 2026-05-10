@@ -2,10 +2,10 @@
 id: A28
 title: REPL/iex polish — Lua.dbg, doctest support, debugging recipes
 issue: null
-pr: null
+pr: 219
 branch: dx/iex-polish
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - cleaner debugging from iex
@@ -226,4 +226,28 @@ prints:  hi
 
 ## What changed
 
-(populated when PR opens)
+PR: [#219](https://github.com/tv-labs/lua/pull/219)
+
+Files touched:
+
+- `lib/lua.ex` — `dbg/1,2` implementation (group-leader swap with
+  StringIO capture, restored in an `after` block); imports
+  `Kernel, except: [dbg: 2]` to shadow `Kernel.dbg/2`; three new
+  doctests on `eval!/2` covering multi-return, table decode, and
+  the closure display struct.
+- `test/lua/dbg_test.exs` (new) — 14 tests covering output shape,
+  capture, the error path, group-leader restoration on error, and
+  the `dbg/1` default-state form.
+- `guides/iex_recipes.md` (new) — self-contained recipes for
+  reading globals, calling Lua functions, inspecting tables in
+  both decode modes, modifying state, dbg debugging, skimming a
+  library via `pairs()`, and exposing an Elixir tool function.
+- `lib/lua/vm/display/{closure,native_func,table,userdata}.ex`,
+  `lib/lua/vm/display.ex` — drop stale `Lua.eval/2` doc references
+  (function is the bang variant; `mix docs` was warning).
+- `.agents/plans/A27a-display-cycle-guard.md` (new) — follow-up
+  plan for the cyclic-peek bug discovered while drafting the `_G`
+  recipe.
+
+Suite delta: 1626 → 1668 tests passing, 0 failures (no Lua 5.3
+suite regressions; lua53 still 29 passing, 23 skipped).
