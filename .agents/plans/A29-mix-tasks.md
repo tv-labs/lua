@@ -145,4 +145,27 @@ mix lua.suite
 
 ## Discoveries
 
-(populated during implementation)
+- **No `Lua.eval/2`** — only `Lua.eval!/2,3` exists. The plan's sketch
+  showed `case Lua.eval(...) do {result, _state} -> ...; {:error, _} -> ...`,
+  but in reality `eval!` raises `Lua.CompilerException` or
+  `Lua.RuntimeException`. `Mix.Tasks.Lua.Eval` uses `try/rescue` and
+  exits `{:shutdown, 1}` on error, writing the message to stderr.
+- **Default `inspect` treats `[42]` as a charlist** (`~c"*"` for the
+  ASCII `*`). `Mix.Tasks.Lua.Eval` forces `charlists: :as_lists` so
+  numeric return values render as actual lists.
+- **Suite needs per-file timeouts.** The first full-suite smoke test
+  hung indefinitely on `big.lua` / `closure.lua` (well-known
+  long-runners on this VM). Added `--timeout MS` (default 30000) that
+  wraps `Lua.SuiteRunner.run_file/1` in a `Task` and kills it on
+  expiry, reporting `timeout:` in the summary.
+- **Sandbox config was test-only.** The shared sandbox setup
+  (unsandbox `package`/`require`, install `dostring`/`load`/`checkerr`
+  helpers) lived in `test/support/lua_test_case.ex`, which isn't on
+  the `:dev`/`:prod` compile path. Extracted into a new
+  `Lua.SuiteRunner` module under `lib/lua/` so both `Lua.TestCase`
+  and `Mix.Tasks.Lua.Suite` can share it without duplication.
+- **Skipped the `--vs luerl|puc-lua|both` flag.** The plan suggested
+  it, but every benchmark script in `benchmarks/` already runs all
+  three targets unconditionally (with luaport gracefully skipping if
+  C Lua isn't available). The flag would have no current effect.
+  Added `--list` and `--workload NAME` (repeatable) instead.
