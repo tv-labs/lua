@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: dx/mix-tasks
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - one-line invocations from a Mix project
