@@ -2,10 +2,10 @@
 id: A29
 title: Mix tasks — lua.eval, lua.bench, lua.suite
 issue: null
-pr: null
+pr: 220
 branch: dx/mix-tasks
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - one-line invocations from a Mix project
@@ -142,6 +142,22 @@ mix lua.suite
 - `benchmarks/` might require deps that aren't in the default env.
   If so, the task should refuse with a clear message ("run `mix
   deps.get` in `:benchmark` env first") rather than crash.
+
+## What changed
+
+- New `lib/mix/tasks/lua.eval.ex`, `lib/mix/tasks/lua.suite.ex`,
+  `lib/mix/tasks/lua.bench.ex`.
+- New shared module `lib/lua/suite_runner.ex` extracted from
+  `test/support/lua_test_case.ex` so the Mix suite task and the
+  ExUnit suite test share one sandbox implementation.
+- `test/support/lua_test_case.ex` shrinks from ~127 to ~25 lines and
+  delegates to `Lua.SuiteRunner`.
+- New tests: 9 in `test/mix/tasks/lua.eval_test.exs`, 6 in
+  `lua.suite_test.exs`, 2 in `lua.bench_test.exs`. Total mix test
+  count: 1654 → 1671, 0 failures.
+- New guide: `guides/mix_tasks.md`.
+- No regression in `mix test --only lua53` (6 passing, 23 skipped,
+  same as before).
 
 ## Discoveries
 
