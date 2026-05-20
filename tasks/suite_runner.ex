@@ -1,12 +1,12 @@
 defmodule Lua.SuiteRunner do
-  @moduledoc """
-  Runs Lua 5.3 official test suite files under a shared sandbox config.
+  @moduledoc false
 
-  Used by `Mix.Tasks.Lua.Suite` and `Lua.TestCase`. Centralises the
-  sandbox tweaks (un-sandbox `package`/`require`) and the test helpers
-  (`dostring`, `load`, `checkerr`) so both entry points produce
-  identical results for the same file.
-  """
+  # Runs Lua 5.3 official test suite files under a shared sandbox config.
+  #
+  # Internal helper used by `Mix.Tasks.Lua.Suite` and `Lua.TestCase`.
+  # Lives in `tasks/` rather than `lib/` because both consumers are
+  # contributor-only — this module is intentionally not part of the
+  # public API and is not shipped to Hex.
 
   alias Lua.VM.RuntimeError, as: VMRuntimeError
 

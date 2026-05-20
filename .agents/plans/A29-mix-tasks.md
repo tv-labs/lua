@@ -145,17 +145,24 @@ mix lua.suite
 
 ## What changed
 
-- New `lib/mix/tasks/lua.eval.ex`, `lib/mix/tasks/lua.suite.ex`,
-  `lib/mix/tasks/lua.bench.ex`.
-- New shared module `lib/lua/suite_runner.ex` extracted from
-  `test/support/lua_test_case.ex` so the Mix suite task and the
-  ExUnit suite test share one sandbox implementation.
+- New `lib/mix/tasks/lua.eval.ex` — the only task shipped to Hex.
+- New `tasks/lua.suite.ex`, `tasks/lua.bench.ex`,
+  `tasks/lua.get_tests.ex` — contributor-only Mix tasks. `tasks/` is
+  already on the `:dev` (and therefore `:test`) compile path
+  (`mix.exs:39`), but isn't in the `package.files` whitelist, so
+  these tasks are available locally and excluded from the Hex
+  release.
+- New shared module `tasks/suite_runner.ex` (`Lua.SuiteRunner`)
+  extracted from `test/support/lua_test_case.ex` so the Mix suite
+  task and the ExUnit suite test share one sandbox implementation.
+  Marked `@moduledoc false` because it's internal to this repo.
 - `test/support/lua_test_case.ex` shrinks from ~127 to ~25 lines and
-  delegates to `Lua.SuiteRunner`.
+  delegates to `Lua.SuiteRunner`. Also marked `@moduledoc false`.
 - New tests: 9 in `test/mix/tasks/lua.eval_test.exs`, 6 in
   `lua.suite_test.exs`, 2 in `lua.bench_test.exs`. Total mix test
   count: 1654 → 1671, 0 failures.
-- New guide: `guides/mix_tasks.md`.
+- New guide: `guides/mix_tasks.md`. Reworded to make the
+  "ships to Hex" vs "contributor-only" split explicit.
 - No regression in `mix test --only lua53` (6 passing, 23 skipped,
   same as before).
 
@@ -185,3 +192,19 @@ mix lua.suite
   three targets unconditionally (with luaport gracefully skipping if
   C Lua isn't available). The flag would have no current effect.
   Added `--list` and `--workload NAME` (repeatable) instead.
+- **Only `lua.eval` belongs in the Hex package.** Initial review
+  shipped `lua.bench`, `lua.suite`, `lua.get_tests`, and
+  `Lua.SuiteRunner` from `lib/`, which means they would have been
+  published to Hex. All three are broken-by-design for downstream
+  consumers:
+    * `lua.bench` hardcodes `benchmarks/` (resolved against the
+      consumer's CWD, not this repo) and shells out to
+      `MIX_ENV=benchmark` for deps the consumer doesn't have.
+    * `lua.suite` defaults to `test/lua53_tests/` and references
+      `mix lua.get_tests` to populate it — both of which only make
+      sense inside this repo.
+    * `Lua.SuiteRunner` installs `dostring`/`load`/`checkerr` globals
+      specific to the PUC-Lua 5.3 official test suite.
+  Moved all four files under `tasks/`, which is on the `:dev`/`:test`
+  compile path but not in `package.files`. Verified with
+  `mix hex.build` that only `lib/mix/tasks/lua.eval.ex` ships.

@@ -1,8 +1,15 @@
 defmodule Mix.Tasks.Lua.Suite do
-  @shortdoc "Runs the Lua 5.3 official test suite"
+  @shortdoc "Runs the Lua 5.3 official test suite (contributors only)"
   @moduledoc """
   Runs every `.lua` file in `test/lua53_tests/` against this VM and
   prints a pass/fail summary.
+
+  > #### Contributor-only task {: .info}
+  >
+  > This task is intended for development of the `:lua` library itself.
+  > It is not shipped to Hex: the suite files under `test/lua53_tests/`
+  > are downloaded into this repo via `mix lua.get_tests` and are not
+  > part of the Hex package.
 
   Unlike `mix test --only lua53`, this task does not consult the
   hand-curated `@ready_tests` / `@deferred_permanent` lists in

@@ -1,7 +1,15 @@
 defmodule Mix.Tasks.Lua.Bench do
-  @shortdoc "Runs the benchmarks harness in benchmarks/"
+  @shortdoc "Runs the benchmarks harness in benchmarks/ (contributors only)"
   @moduledoc """
   Runs one of the Benchee scripts in `benchmarks/`.
+
+  > #### Contributor-only task {: .info}
+  >
+  > This task is intended for development of the `:lua` library itself.
+  > It is not shipped to Hex: it shells out to `mix run` under
+  > `MIX_ENV=benchmark`, which requires Benchee/Luerl/luaport deps that
+  > only exist in this repo's `mix.exs`, and it reads from
+  > `benchmarks/`, which is not part of the Hex package.
 
   Each script is a standalone `.exs` file that already compares this
   VM against Luerl (and C Lua via `:luaport` when available). The

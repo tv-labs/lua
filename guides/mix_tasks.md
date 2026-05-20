@@ -1,8 +1,13 @@
 # Mix tasks
 
-Three Mix tasks ship with this library for working with Lua from the
-command line and from CI. None of them require code; they are thin
-wrappers over the public API and the test suite.
+One Mix task ships with this library — `mix lua.eval` — for running
+Lua source from the command line.
+
+The repository also includes three contributor-only tasks
+(`mix lua.suite`, `mix lua.bench`, and `mix lua.get_tests`) used to
+develop the library itself. They live in `tasks/` rather than `lib/`
+because they depend on fixtures, deps, and `MIX_ENV`s that only exist
+inside this repo, so they are not packaged in the Hex release.
 
 ## `mix lua.eval` — run a Lua file
 
@@ -45,7 +50,13 @@ The task runs in your default Mix environment. Calls to `require`,
 `io.*`, `file.*`, most of `os.*`, and a few others are sandboxed by
 default — see `Lua.new/1`'s `:sandboxed` option.
 
-## `mix lua.suite` — run the Lua 5.3 official suite
+## Contributor-only tasks
+
+The following tasks are only available when working inside a checkout
+of this repository. They are not shipped to Hex and won't be visible
+to projects that depend on `:lua`.
+
+### `mix lua.suite` — run the Lua 5.3 official suite
 
 Runs every `.lua` file in `test/lua53_tests/` against this VM and
 prints a pass / fail / timeout summary. Use it to spot newly-passing
@@ -104,7 +115,7 @@ Exit status:
 - `1` — directory missing, filter matched nothing, or no files
   passed.
 
-## `mix lua.bench` — run benchmark workloads
+### `mix lua.bench` — run benchmark workloads
 
 Wraps the Benchee scripts under `benchmarks/`. Each script compares
 this VM against [Luerl](https://github.com/rvirding/luerl), and
