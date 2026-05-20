@@ -61,7 +61,14 @@ defmodule Mix.Tasks.Lua.Eval do
 
   defp read_source(["-"], opts) do
     name = Keyword.get(opts, :source, "<stdin>")
-    {:stdio |> IO.read(:eof) |> to_string(), name}
+
+    source =
+      case IO.read(:stdio, :eof) do
+        :eof -> ""
+        data -> to_string(data)
+      end
+
+    {source, name}
   end
 
   defp read_source([path], opts) do

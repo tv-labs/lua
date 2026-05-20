@@ -110,10 +110,22 @@ defmodule Mix.Tasks.Lua.Suite do
     task = Task.async(fn -> Lua.SuiteRunner.run_file(path) end)
 
     case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, :ok} -> {:pass, file}
-      {:ok, {:error, e}} -> {:fail, file, e}
-      nil -> {:timeout, file, timeout}
-      {:exit, reason} -> {:fail, file, %RuntimeError{message: "exited: #{inspect(reason)}"}}
+      {:ok, :ok} ->
+        {:pass, file}
+
+      {:ok, {:error, e}} ->
+        {:fail, file, e}
+
+      # Task was still running when we called shutdown — treat as timeout
+      # regardless of whether brutal_kill returns nil or {:exit, :killed}.
+      nil ->
+        {:timeout, file, timeout}
+
+      {:exit, :killed} ->
+        {:timeout, file, timeout}
+
+      {:exit, reason} ->
+        {:fail, file, %Lua.RuntimeException{message: "exited: #{inspect(reason)}"}}
     end
   end
 

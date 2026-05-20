@@ -52,6 +52,15 @@ defmodule Mix.Tasks.Lua.EvalTest do
       assert output =~ "[3]"
     end
 
+    test "treats empty stdin as empty source (prints empty list)" do
+      output =
+        capture_io("", fn ->
+          Eval.run(["-"])
+        end)
+
+      assert output =~ "[]"
+    end
+
     test "honours --source option for error attribution" do
       stderr =
         capture_io(:stderr, fn ->

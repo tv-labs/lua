@@ -58,6 +58,9 @@ defmodule Mix.Tasks.Lua.SuiteTest do
       assert output =~ ~r/timeout:\s*1/
       assert output =~ "loop.lua"
       assert output =~ "passing files: ok"
+      # Loop must NOT appear in the failing section — brutal_kill returning
+      # {:exit, :killed} or nil must be categorised as timeout, not fail.
+      refute output =~ "failing files"
     end
 
     test "exits 1 when --filter matches no files" do

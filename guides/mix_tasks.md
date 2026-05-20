@@ -96,8 +96,8 @@ failing files (top reason):
   ...
 
 timed out:
-  big.lua      > 30000ms
   closure.lua  > 30000ms
+  strings.lua  > 30000ms
 ```
 
 Each file is run in its own monitored task so an infinite loop in
