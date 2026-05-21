@@ -37,8 +37,7 @@ defmodule Lua.VM.Executor do
   # per native function invocation — far less than per `:source_line`
   # opcode, which would fire ~5M times in a recursive workload like fib.
 
-  @line_key {__MODULE__, :line}
-  @source_key {__MODULE__, :source}
+  @position_key {__MODULE__, :position}
   @unset :__unset__
 
   @doc """
@@ -53,7 +52,10 @@ defmodule Lua.VM.Executor do
   """
   @spec current_position() :: {nil | integer(), nil | binary()}
   def current_position do
-    {Process.get(@line_key), Process.get(@source_key)}
+    case Process.get(@position_key) do
+      nil -> {nil, nil}
+      pos -> pos
+    end
   end
 
   @doc """
@@ -68,33 +70,24 @@ defmodule Lua.VM.Executor do
   @spec execute([tuple()], tuple(), list(), map(), State.t()) ::
           {list(), tuple(), State.t()}
   def execute(instructions, registers, upvalues, proto, state) do
-    prev_line = Process.get(@line_key, @unset)
-    prev_source = Process.get(@source_key, @unset)
+    prev = Process.get(@position_key, @unset)
 
     try do
       state = %{state | open_upvalues: %{}}
       do_execute(instructions, registers, upvalues, proto, state, [], [], 0)
     after
-      restore_position(prev_line, prev_source)
+      restore_position(prev)
     end
   end
 
   defp set_position(line, source) do
-    Process.put(@line_key, line)
-    Process.put(@source_key, source)
+    # Single tuple in the process dict keeps the position bridge to one
+    # `Process.put`/`Process.get` pair per native callback instead of two.
+    Process.put(@position_key, {line, source})
   end
 
-  defp restore_position(line, source) do
-    case line do
-      @unset -> Process.delete(@line_key)
-      v -> Process.put(@line_key, v)
-    end
-
-    case source do
-      @unset -> Process.delete(@source_key)
-      v -> Process.put(@source_key, v)
-    end
-  end
+  defp restore_position(@unset), do: Process.delete(@position_key)
+  defp restore_position(pos), do: Process.put(@position_key, pos)
 
   @doc """
   Calls a Lua function value with the given arguments.
@@ -257,10 +250,7 @@ defmodule Lua.VM.Executor do
         if should_continue do
           regs = put_elem(regs, loop_var, new_counter)
 
-          state = %{
-            state
-            | open_upvalues: Map.reject(state.open_upvalues, fn {reg, _} -> reg >= loop_var end)
-          }
+          state = close_open_upvalues_at_or_above(state, loop_var)
 
           loop_exit_cont = [{:loop_exit, rest} | outer_cont]
           body_done = {:cps_numeric_for, base, loop_var, body, rest, outer_cont}
@@ -289,11 +279,7 @@ defmodule Lua.VM.Executor do
             |> Enum.reduce(regs, fn {var_reg, i}, r -> put_elem(r, var_reg, Enum.at(results, i)) end)
 
           first_var_reg = List.first(var_regs)
-
-          state = %{
-            state
-            | open_upvalues: Map.reject(state.open_upvalues, fn {reg, _} -> reg >= first_var_reg end)
-          }
+          state = close_open_upvalues_at_or_above(state, first_var_reg)
 
           loop_exit_cont = [{:loop_exit, rest} | outer_cont]
           body_done = {:cps_generic_for, base, var_regs, body, rest, outer_cont}
@@ -517,10 +503,7 @@ defmodule Lua.VM.Executor do
     if should_continue do
       regs = put_elem(regs, loop_var, counter)
 
-      state = %{
-        state
-        | open_upvalues: Map.reject(state.open_upvalues, fn {reg, _} -> reg >= loop_var end)
-      }
+      state = close_open_upvalues_at_or_above(state, loop_var)
 
       loop_exit_cont = [{:loop_exit, rest} | cont]
       body_done = {:cps_numeric_for, base, loop_var, body, rest, cont}
@@ -553,11 +536,7 @@ defmodule Lua.VM.Executor do
         end)
 
       first_var_reg = List.first(var_regs)
-
-      state = %{
-        state
-        | open_upvalues: Map.reject(state.open_upvalues, fn {reg, _} -> reg >= first_var_reg end)
-      }
+      state = close_open_upvalues_at_or_above(state, first_var_reg)
 
       loop_exit_cont = [{:loop_exit, rest} | cont]
       body_done = {:cps_generic_for, base, var_regs, body, rest, cont}
@@ -605,41 +584,39 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:call, base, arg_count, result_count} | rest], regs, upvalues, proto, state, cont, frames, line) do
     func_value = elem(regs, base)
 
-    args =
+    # Resolve the number of args without materializing a list. Negative arg
+    # counts and `{:multi, _}` both fold in `state.multi_return_count`. For
+    # the Lua-closure path we can copy directly from caller regs into the
+    # callee's freshly-built register tuple; building the intermediate args
+    # list (which fib calls 100k+ times) was a major source of allocation
+    # churn (Range/with_index/reduce/take/slice/at in the profile).
+    total_args =
       case arg_count do
-        {:multi, fixed_count} ->
-          multi_count = state.multi_return_count
-          total = fixed_count + multi_count
-          if total > 0, do: for(i <- 1..total, do: elem(regs, base + i)), else: []
-
-        n when is_integer(n) and n > 0 ->
-          for i <- 1..n, do: elem(regs, base + i)
-
-        n when is_integer(n) and n < 0 ->
-          fixed_arg_count = -(n + 1)
-          total_args = fixed_arg_count + state.multi_return_count
-          if total_args > 0, do: for(i <- 1..total_args, do: elem(regs, base + i)), else: []
-
-        0 ->
-          []
+        {:multi, fixed_count} -> fixed_count + state.multi_return_count
+        n when is_integer(n) and n > 0 -> n
+        n when is_integer(n) and n < 0 -> -(n + 1) + state.multi_return_count
+        0 -> 0
       end
 
     case func_value do
       {:lua_closure, callee_proto, callee_upvalues} ->
-        callee_regs =
-          Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 16)
+        param_count = callee_proto.param_count
 
         callee_regs =
-          args
-          |> Enum.with_index()
-          |> Enum.reduce(callee_regs, fn {arg, i}, r ->
-            if i < callee_proto.param_count, do: put_elem(r, i, arg), else: r
-          end)
+          Tuple.duplicate(nil, max(callee_proto.max_registers, param_count) + 16)
+
+        # Copy directly from caller regs[base+1..] into callee regs[0..param_count-1].
+        # Fast path for the common 0/1/2-arg cases avoids the loop overhead.
+        callee_regs = copy_args_to_regs(regs, base + 1, callee_regs, 0, min(total_args, param_count))
 
         callee_proto =
-          if callee_proto.is_vararg,
-            do: %{callee_proto | varargs: Enum.drop(args, callee_proto.param_count)},
-            else: callee_proto
+          if callee_proto.is_vararg do
+            vararg_count = max(total_args - param_count, 0)
+            varargs = collect_args(regs, base + 1 + param_count, vararg_count)
+            %{callee_proto | varargs: varargs}
+          else
+            callee_proto
+          end
 
         frame = %{
           rest: rest,
@@ -669,14 +646,16 @@ defmodule Lua.VM.Executor do
         )
 
       {:native_func, fun} ->
+        # Native callbacks still consume args as a list — materialize it here.
+        args = collect_args(regs, base + 1, total_args)
+
         # Stash the calling Lua position in the process dict so the native
         # callback can read it via `current_position/0` if it raises (e.g.
         # `assert`, `error`, stdlib type checks). The values are restored
         # after the call so nested native invocations don't leak. Doing
         # this only at the native boundary — instead of on every
         # `:source_line` opcode — keeps the success path fast.
-        prev_line = Process.get(@line_key, @unset)
-        prev_source = Process.get(@source_key, @unset)
+        prev_pos = Process.get(@position_key, @unset)
         set_position(line, proto.source)
 
         {results, state} =
@@ -693,7 +672,7 @@ defmodule Lua.VM.Executor do
                   value: "native function returned invalid result: #{inspect(other)}, expected {results, state}"
             end
           after
-            restore_position(prev_line, prev_source)
+            restore_position(prev_pos)
           end
 
         continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, base, result_count)
@@ -732,6 +711,7 @@ defmodule Lua.VM.Executor do
                   value_type: value_type(other)
 
               call_mm ->
+                args = collect_args(regs, base + 1, total_args)
                 {results, state} = call_function(call_mm, [other | args], state)
                 continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, base, result_count)
             end
@@ -798,6 +778,18 @@ defmodule Lua.VM.Executor do
 
   # ── return ─────────────────────────────────────────────────────────────────
 
+  # Fast path: single-value return is by far the most common return shape
+  # (every fib/factorial style recursion hits this every call). Avoid the
+  # comprehension and Range allocation; just read one element.
+  defp do_execute([{:return, base, 1} | _rest], regs, _upvalues, _proto, state, _cont, frames, line) do
+    results = [elem(regs, base)]
+
+    case frames do
+      [] -> {results, regs, state}
+      [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line)
+    end
+  end
+
   defp do_execute([{:return, base, count} | _rest], regs, _upvalues, _proto, state, _cont, frames, line) do
     results =
       cond do
@@ -807,15 +799,10 @@ defmodule Lua.VM.Executor do
         count < 0 ->
           init_count = -(count + 1)
           total = init_count + state.multi_return_count
-
-          if total > 0 do
-            for i <- 0..(total - 1), do: elem(regs, base + i)
-          else
-            []
-          end
+          collect_args(regs, base, total)
 
         count > 0 ->
-          for i <- 0..(count - 1), do: elem(regs, base + i)
+          collect_args(regs, base, count)
       end
 
     case frames do
@@ -825,41 +812,87 @@ defmodule Lua.VM.Executor do
   end
 
   # ── Arithmetic operations ──────────────────────────────────────────────────
+  #
+  # Fast paths: when both operands are already numbers, skip the metamethod
+  # lookup machinery entirely — numbers cannot carry metatables in Lua, so
+  # the `try_binary_metamethod` dispatch is pure overhead. Same idea for
+  # comparisons below. Integer-integer add/sub/mul go through `to_signed_int64`
+  # for Lua 5.3 §3.4.1 wrap-around; mixed and float-only fall through to
+  # native `+`/`-`/`*`.
+
+  defp do_execute([{:add, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line)
+       when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
+    sum = :erlang.element(a + 1, regs) + :erlang.element(b + 1, regs)
+    regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(sum))
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+  end
 
   defp do_execute([{:add, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    src = proto.source
 
-    {result, new_state} =
-      try_binary_metamethod("__add", val_a, val_b, state, fn -> safe_add(val_a, val_b, line, src) end)
+    if is_number(val_a) and is_number(val_b) do
+      regs = put_elem(regs, dest, val_a + val_b)
+      do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+    else
+      src = proto.source
 
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+      {result, new_state} =
+        try_binary_metamethod("__add", val_a, val_b, state, fn -> safe_add(val_a, val_b, line, src) end)
+
+      regs = put_elem(regs, dest, result)
+      do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+    end
+  end
+
+  defp do_execute([{:subtract, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line)
+       when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
+    diff = :erlang.element(a + 1, regs) - :erlang.element(b + 1, regs)
+    regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(diff))
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
   defp do_execute([{:subtract, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    src = proto.source
 
-    {result, new_state} =
-      try_binary_metamethod("__sub", val_a, val_b, state, fn -> safe_subtract(val_a, val_b, line, src) end)
+    if is_number(val_a) and is_number(val_b) do
+      regs = put_elem(regs, dest, val_a - val_b)
+      do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+    else
+      src = proto.source
 
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+      {result, new_state} =
+        try_binary_metamethod("__sub", val_a, val_b, state, fn -> safe_subtract(val_a, val_b, line, src) end)
+
+      regs = put_elem(regs, dest, result)
+      do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+    end
+  end
+
+  defp do_execute([{:multiply, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line)
+       when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
+    prod = :erlang.element(a + 1, regs) * :erlang.element(b + 1, regs)
+    regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(prod))
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
   defp do_execute([{:multiply, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    src = proto.source
 
-    {result, new_state} =
-      try_binary_metamethod("__mul", val_a, val_b, state, fn -> safe_multiply(val_a, val_b, line, src) end)
+    if is_number(val_a) and is_number(val_b) do
+      regs = put_elem(regs, dest, val_a * val_b)
+      do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+    else
+      src = proto.source
 
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+      {result, new_state} =
+        try_binary_metamethod("__mul", val_a, val_b, state, fn -> safe_multiply(val_a, val_b, line, src) end)
+
+      regs = put_elem(regs, dest, result)
+      do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+    end
   end
 
   defp do_execute([{:divide, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
@@ -917,15 +950,34 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:concatenate, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     left = elem(regs, a)
     right = elem(regs, b)
-    src = proto.source
 
-    {result, new_state} =
-      try_binary_metamethod("__concat", left, right, state, fn ->
-        concat_coerce(left, line, src) <> concat_coerce(right, line, src)
-      end)
+    # Fast path: when both operands are already binary, the metamethod
+    # dispatch is wasted work — the string metatable typically has no
+    # `__concat` (its purpose is to expose `string.*` indexing). The OOP
+    # benchmark hammered this with `name .. " says " .. sound`. Numbers
+    # also concatenate without metamethods.
+    cond do
+      is_binary(left) and is_binary(right) ->
+        regs = put_elem(regs, dest, left <> right)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+      (is_binary(left) or is_number(left)) and (is_binary(right) or is_number(right)) ->
+        src = proto.source
+        result = concat_coerce(left, line, src) <> concat_coerce(right, line, src)
+        regs = put_elem(regs, dest, result)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+      true ->
+        src = proto.source
+
+        {result, new_state} =
+          try_binary_metamethod("__concat", left, right, state, fn ->
+            concat_coerce(left, line, src) <> concat_coerce(right, line, src)
+          end)
+
+        regs = put_elem(regs, dest, result)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+    end
   end
 
   # ── Bitwise operations ─────────────────────────────────────────────────────
@@ -1015,72 +1067,143 @@ defmodule Lua.VM.Executor do
 
   # ── Comparison operations ──────────────────────────────────────────────────
 
+  # Comparison fast paths: number-vs-number and string-vs-string skip the
+  # metamethod machinery — neither primitive type can carry __eq/__lt/__le.
+
   defp do_execute([{:equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
-    {result, new_state} =
-      try_equality_metamethod(val_a, val_b, state, fn -> lua_equal(val_a, val_b) end)
+    cond do
+      is_number(val_a) and is_number(val_b) ->
+        regs = put_elem(regs, dest, val_a == val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+      is_binary(val_a) and is_binary(val_b) ->
+        regs = put_elem(regs, dest, val_a == val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+      true ->
+        {result, new_state} =
+          try_equality_metamethod(val_a, val_b, state, fn -> lua_equal(val_a, val_b) end)
+
+        regs = put_elem(regs, dest, result)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+    end
   end
 
   defp do_execute([{:less_than, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    src = proto.source
 
-    {result, new_state} =
-      try_binary_metamethod("__lt", val_a, val_b, state, fn -> safe_compare_lt(val_a, val_b, line, src) end)
+    cond do
+      is_number(val_a) and is_number(val_b) ->
+        regs = put_elem(regs, dest, val_a < val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+      is_binary(val_a) and is_binary(val_b) ->
+        regs = put_elem(regs, dest, val_a < val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+      true ->
+        src = proto.source
+
+        {result, new_state} =
+          try_binary_metamethod("__lt", val_a, val_b, state, fn -> safe_compare_lt(val_a, val_b, line, src) end)
+
+        regs = put_elem(regs, dest, result)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+    end
   end
 
   defp do_execute([{:less_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
-    {result, new_state} = compare_le(val_a, val_b, state, line, proto.source)
+    cond do
+      is_number(val_a) and is_number(val_b) ->
+        regs = put_elem(regs, dest, val_a <= val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+      is_binary(val_a) and is_binary(val_b) ->
+        regs = put_elem(regs, dest, val_a <= val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+      true ->
+        {result, new_state} = compare_le(val_a, val_b, state, line, proto.source)
+
+        regs = put_elem(regs, dest, result)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+    end
   end
 
   defp do_execute([{:greater_than, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
-    src = proto.source
 
-    # Lua 5.3 §3.4.4: a > b is translated to b < a, which dispatches __lt.
-    {result, new_state} =
-      try_binary_metamethod("__lt", val_b, val_a, state, fn -> safe_compare_lt(val_b, val_a, line, src) end)
+    cond do
+      is_number(val_a) and is_number(val_b) ->
+        regs = put_elem(regs, dest, val_a > val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+      is_binary(val_a) and is_binary(val_b) ->
+        regs = put_elem(regs, dest, val_a > val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+      true ->
+        src = proto.source
+
+        # Lua 5.3 §3.4.4: a > b is translated to b < a, which dispatches __lt.
+        {result, new_state} =
+          try_binary_metamethod("__lt", val_b, val_a, state, fn -> safe_compare_lt(val_b, val_a, line, src) end)
+
+        regs = put_elem(regs, dest, result)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+    end
   end
 
   defp do_execute([{:greater_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
-    # Lua 5.3 §3.4.4: a >= b is translated to b <= a.
-    {result, new_state} = compare_le(val_b, val_a, state, line, proto.source)
+    cond do
+      is_number(val_a) and is_number(val_b) ->
+        regs = put_elem(regs, dest, val_a >= val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+      is_binary(val_a) and is_binary(val_b) ->
+        regs = put_elem(regs, dest, val_a >= val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+      true ->
+        # Lua 5.3 §3.4.4: a >= b is translated to b <= a.
+        {result, new_state} = compare_le(val_b, val_a, state, line, proto.source)
+
+        regs = put_elem(regs, dest, result)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+    end
   end
 
   defp do_execute([{:not_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
-    {eq_result, new_state} =
-      try_equality_metamethod(val_a, val_b, state, fn -> lua_equal(val_a, val_b) end)
+    cond do
+      is_number(val_a) and is_number(val_b) ->
+        regs = put_elem(regs, dest, val_a != val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
-    regs = put_elem(regs, dest, not eq_result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+      is_binary(val_a) and is_binary(val_b) ->
+        regs = put_elem(regs, dest, val_a != val_b)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+      true ->
+        {eq_result, new_state} =
+          try_equality_metamethod(val_a, val_b, state, fn -> lua_equal(val_a, val_b) end)
+
+        regs = put_elem(regs, dest, not eq_result)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+    end
   end
 
   # ── Unary operations ───────────────────────────────────────────────────────
@@ -1138,10 +1261,36 @@ defmodule Lua.VM.Executor do
     table_val = elem(regs, table_reg)
     key = elem(regs, key_reg)
 
-    {value, state} = index_value(table_val, key, state, line, proto.source)
+    case table_val do
+      {:tref, id} when is_integer(key) or is_binary(key) ->
+        # Fast path mirroring get_field: integer/string key on a tref. Skip
+        # normalize_key (no-op for these) and the full index_value pipeline
+        # when the entry is present or no metatable is set.
+        table = :erlang.map_get(id, state.tables)
 
-    regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+        case :erlang.map_get(:data, table) do
+          %{^key => value} ->
+            regs = put_elem(regs, dest, value)
+            do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+          _data ->
+            case :erlang.map_get(:metatable, table) do
+              nil ->
+                regs = put_elem(regs, dest, nil)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+              _ ->
+                {value, state} = index_value(table_val, key, state, line, proto.source)
+                regs = put_elem(regs, dest, value)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+            end
+        end
+
+      _ ->
+        {value, state} = index_value(table_val, key, state, line, proto.source)
+        regs = put_elem(regs, dest, value)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+    end
   end
 
   # ── set_table ──────────────────────────────────────────────────────────────
@@ -1160,10 +1309,38 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:get_field, dest, table_reg, name} | rest], regs, upvalues, proto, state, cont, frames, line) do
     table_val = elem(regs, table_reg)
 
-    {value, state} = index_value(table_val, name, state, line, proto.source)
+    case table_val do
+      {:tref, id} ->
+        table = :erlang.map_get(id, state.tables)
 
-    regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+        # Fast path: table value present and (in the metatable check) no
+        # metatable, so __index dispatch is irrelevant. `name` is always a
+        # binary at codegen time, so normalize_key is a no-op — skip it.
+        # Avoids the full table_index/index_value pipeline for the dominant
+        # case (global lookups, plain field access).
+        case :erlang.map_get(:data, table) do
+          %{^name => value} ->
+            regs = put_elem(regs, dest, value)
+            do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+          _data ->
+            case :erlang.map_get(:metatable, table) do
+              nil ->
+                regs = put_elem(regs, dest, nil)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+              _ ->
+                {value, state} = index_value(table_val, name, state, line, proto.source)
+                regs = put_elem(regs, dest, value)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+            end
+        end
+
+      _ ->
+        {value, state} = index_value(table_val, name, state, line, proto.source)
+        regs = put_elem(regs, dest, value)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+    end
   end
 
   # ── set_field ──────────────────────────────────────────────────────────────
@@ -1282,29 +1459,38 @@ defmodule Lua.VM.Executor do
       -2 ->
         # Multi-return expansion: place all results into caller regs from base
         results_list = List.wrap(results)
-        caller_regs = ensure_regs_capacity(caller_regs, base + length(results_list))
+        count = length(results_list)
+        caller_regs = ensure_regs_capacity(caller_regs, base + count)
+        caller_regs = write_list_to_regs(caller_regs, base, results_list)
 
-        caller_regs =
-          results_list
-          |> Enum.with_index()
-          |> Enum.reduce(caller_regs, fn {val, i}, r -> put_elem(r, base + i, val) end)
-
-        state = %{state | multi_return_count: length(results_list)}
+        state = %{state | multi_return_count: count}
         do_execute(rest, caller_regs, caller_upvalues, caller_proto, state, caller_cont, rest_frames, line)
 
       0 ->
         # No results captured
         do_execute(rest, caller_regs, caller_upvalues, caller_proto, state, caller_cont, rest_frames, line)
 
+      1 ->
+        # Fast path: single-result return (the overwhelmingly common case,
+        # e.g. `return fib(n-1) + fib(n-2)` in fib). Skip the loop overhead.
+        # `results` may be an empty list (function fell off end with no
+        # explicit return) — Lua spec says missing returns yield nil.
+        first =
+          case results do
+            [] -> nil
+            [v | _] -> v
+            v -> v
+          end
+
+        caller_regs = ensure_regs_capacity(caller_regs, base + 1)
+        caller_regs = :erlang.setelement(base + 1, caller_regs, first)
+        do_execute(rest, caller_regs, caller_upvalues, caller_proto, state, caller_cont, rest_frames, line)
+
       n when n > 0 ->
         # Fixed count: place first n results into caller regs from base
         results_list = List.wrap(results)
         caller_regs = ensure_regs_capacity(caller_regs, base + n)
-
-        caller_regs =
-          Enum.reduce(0..(n - 1), caller_regs, fn i, r ->
-            put_elem(r, base + i, Enum.at(results_list, i))
-          end)
+        caller_regs = write_list_to_regs_n(caller_regs, base, results_list, n)
 
         do_execute(rest, caller_regs, caller_upvalues, caller_proto, state, caller_cont, rest_frames, line)
     end
@@ -1323,27 +1509,32 @@ defmodule Lua.VM.Executor do
 
       -2 ->
         results_list = List.wrap(results)
-        regs = ensure_regs_capacity(regs, base + length(results_list))
+        count = length(results_list)
+        regs = ensure_regs_capacity(regs, base + count)
+        regs = write_list_to_regs(regs, base, results_list)
 
-        regs =
-          results_list
-          |> Enum.with_index()
-          |> Enum.reduce(regs, fn {val, i}, r -> put_elem(r, base + i, val) end)
-
-        state = %{state | multi_return_count: length(results_list)}
+        state = %{state | multi_return_count: count}
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
       0 ->
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
+      1 ->
+        first =
+          case results do
+            [] -> nil
+            [v | _] -> v
+            v -> v
+          end
+
+        regs = ensure_regs_capacity(regs, base + 1)
+        regs = :erlang.setelement(base + 1, regs, first)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
       n when n > 0 ->
         results_list = List.wrap(results)
         regs = ensure_regs_capacity(regs, base + n)
-
-        regs =
-          Enum.reduce(0..(n - 1), regs, fn i, r ->
-            put_elem(r, base + i, Enum.at(results_list, i))
-          end)
+        regs = write_list_to_regs_n(regs, base, results_list, n)
 
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
     end
@@ -1436,8 +1627,7 @@ defmodule Lua.VM.Executor do
   defp call_value({:native_func, fun}, args, proto, state, line) do
     # Same source-position bridge as the `:call` opcode's native dispatch.
     # Used by `for` loop iteration when the iterator is native.
-    prev_line = Process.get(@line_key, @unset)
-    prev_source = Process.get(@source_key, @unset)
+    prev_pos = Process.get(@position_key, @unset)
     set_position(line, proto.source)
 
     try do
@@ -1449,7 +1639,7 @@ defmodule Lua.VM.Executor do
           {List.wrap(results), new_state}
       end
     after
-      restore_position(prev_line, prev_source)
+      restore_position(prev_pos)
     end
   end
 
@@ -1627,19 +1817,27 @@ defmodule Lua.VM.Executor do
 
     table = Map.fetch!(state.tables, id)
 
-    if Table.has_data?(table.data, key) do
-      State.update_table(state, {:tref, id}, fn t -> Table.put(t, key, value) end)
-    else
-      case table.metatable do
-        nil ->
-          State.update_table(state, {:tref, id}, fn t -> Table.put(t, key, value) end)
+    # Fast path: no metatable means no `__newindex` to consult and no need
+    # to look up the key first to decide whether the metamethod applies.
+    # This is the overwhelmingly common case for plain tables and benchmarks
+    # like `t[i] = ...` in a tight loop. Skips a `has_data?` lookup and the
+    # nested case scrutiny.
+    case table.metatable do
+      nil ->
+        updated = Table.put(table, key, value)
+        %{state | tables: Map.put(state.tables, id, updated)}
 
-        {:tref, mt_id} ->
+      {:tref, mt_id} ->
+        if Table.has_data?(table.data, key) do
+          updated = Table.put(table, key, value)
+          %{state | tables: Map.put(state.tables, id, updated)}
+        else
           mt = Map.fetch!(state.tables, mt_id)
 
           case Map.get(mt.data, "__newindex") do
             nil ->
-              State.update_table(state, {:tref, id}, fn t -> Table.put(t, key, value) end)
+              updated = Table.put(table, key, value)
+              %{state | tables: Map.put(state.tables, id, updated)}
 
             {:tref, _} = newindex_table ->
               table_newindex(newindex_table, key, value, state, depth + 1)
@@ -1648,7 +1846,7 @@ defmodule Lua.VM.Executor do
               {_results, state} = call_function(func, [{:tref, id}, key, value], state)
               state
           end
-      end
+        end
     end
   end
 
@@ -2112,4 +2310,74 @@ defmodule Lua.VM.Executor do
   defp value_type({:lua_closure, _, _}), do: :function
   defp value_type({:native_func, _}), do: :function
   defp value_type(_), do: :unknown
+
+  # ── Close upvalue cells whose source register is at or above `threshold` ──
+  #
+  # Lua 5.3 §3.4.10: when a local variable goes out of scope, its upvalue
+  # cell (if any closure has captured it) must be closed so subsequent
+  # accesses see the final value. Each loop iteration nominally re-binds
+  # the loop-variable registers and any locals declared inside the body,
+  # so we sweep open_upvalues for entries at or above that threshold.
+  #
+  # Fast path: the overwhelming majority of loops never produce any open
+  # upvalues (no nested closures capture a loop-local), so we short-circuit
+  # on the empty map. Previously the `Map.reject` was eating ~8.5% of the
+  # table_build benchmark's runtime because it built an iterator and
+  # walked the empty map per iteration.
+  defp close_open_upvalues_at_or_above(%{open_upvalues: ou} = state, _threshold) when map_size(ou) == 0 do
+    state
+  end
+
+  defp close_open_upvalues_at_or_above(%{open_upvalues: ou} = state, threshold) do
+    %{state | open_upvalues: Map.reject(ou, fn {reg, _} -> reg >= threshold end)}
+  end
+
+  # ── Call helpers: copy args without allocating an intermediate list ────────
+  #
+  # `copy_args_to_regs` moves `count` values from `src_regs[src_off..]` into
+  # `dst_regs[dst_off..]`. Used when entering a Lua closure: we know the
+  # callee's freshly-allocated register tuple and the contiguous slot in the
+  # caller's regs where the args live, so we can splice them across without
+  # building an args list.
+  #
+  # `collect_args` walks the same range but produces a list, for the cases
+  # that still need one (native function calls, `__call` dispatch, varargs).
+
+  defp copy_args_to_regs(_src_regs, _src_off, dst_regs, _dst_off, 0), do: dst_regs
+
+  defp copy_args_to_regs(src_regs, src_off, dst_regs, dst_off, count) do
+    dst_regs = :erlang.setelement(dst_off + 1, dst_regs, :erlang.element(src_off + 1, src_regs))
+    copy_args_to_regs(src_regs, src_off + 1, dst_regs, dst_off + 1, count - 1)
+  end
+
+  defp collect_args(_regs, _off, 0), do: []
+
+  defp collect_args(regs, off, count) do
+    collect_args_rev(regs, off + count - 1, count, [])
+  end
+
+  defp collect_args_rev(_regs, _off, 0, acc), do: acc
+
+  defp collect_args_rev(regs, off, count, acc) do
+    collect_args_rev(regs, off - 1, count - 1, [:erlang.element(off + 1, regs) | acc])
+  end
+
+  # ── Return helpers: write a list of values into a contiguous register range ─
+
+  defp write_list_to_regs(regs, _off, []), do: regs
+
+  defp write_list_to_regs(regs, off, [v | rest]) do
+    write_list_to_regs(:erlang.setelement(off + 1, regs, v), off + 1, rest)
+  end
+
+  # Bounded version: writes at most `n` values, padding missing slots with nil.
+  defp write_list_to_regs_n(regs, _off, _list, 0), do: regs
+
+  defp write_list_to_regs_n(regs, off, [], n) do
+    write_list_to_regs_n(:erlang.setelement(off + 1, regs, nil), off + 1, [], n - 1)
+  end
+
+  defp write_list_to_regs_n(regs, off, [v | rest], n) do
+    write_list_to_regs_n(:erlang.setelement(off + 1, regs, v), off + 1, rest, n - 1)
+  end
 end

@@ -309,6 +309,20 @@ defmodule Lua.VM.Stdlib do
     key = List.first(rest)
     table = Map.fetch!(state.tables, id)
 
+    # Eagerly flush any deferred-append `order_tail` so subsequent
+    # iteration steps don't re-merge on every call. The first call to
+    # `lua_next` for a given iteration pays the cost once; the rest see
+    # a clean `order` list.
+    {table, state} =
+      case table.order_tail do
+        [] ->
+          {table, state}
+
+        _ ->
+          flushed = Table.flush_order(table)
+          {flushed, %{state | tables: Map.put(state.tables, id, flushed)}}
+      end
+
     case Table.next_entry(table, key) do
       :invalid_key ->
         raise ArgumentError,
