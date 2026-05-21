@@ -1273,12 +1273,6 @@ defmodule Lua.Parser do
     )
   end
 
-  # Legacy two-tuple shape, kept for any older error tuple. New sites
-  # use the three-tuple shape above so position can be carried through.
-  defp convert_error({:unexpected_end, message}, _code) do
-    convert_error({:unexpected_end, message, nil}, nil)
-  end
-
   defp convert_error({:bare_expression, pos, expr_struct}, _code) do
     {message, suggestion} = bare_expression_message(expr_struct)
     Error.new(:invalid_syntax, message, pos, suggestion: suggestion)

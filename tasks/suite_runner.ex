@@ -70,14 +70,9 @@ defmodule Lua.SuiteRunner do
     Lua.set!(lua, ["dostring"], fn [code], state ->
       case Lua.Parser.parse(code) do
         {:ok, ast} ->
-          case Lua.Compiler.compile(ast, source: "<dostring>") do
-            {:ok, proto} ->
-              {:ok, results, state} = Lua.VM.execute(proto, state)
-              {results, state}
-
-            {:error, error} ->
-              raise VMRuntimeError, value: "compile error: #{inspect(error)}"
-          end
+          proto = Lua.Compiler.compile!(ast, source: "<dostring>")
+          {:ok, results, state} = Lua.VM.execute(proto, state)
+          {results, state}
 
         {:error, error} ->
           raise VMRuntimeError, value: "parse error: #{inspect(error)}"
@@ -92,14 +87,9 @@ defmodule Lua.SuiteRunner do
 
       case Lua.Parser.parse(code) do
         {:ok, ast} ->
-          case Lua.Compiler.compile(ast, source: chunk_name) do
-            {:ok, proto} ->
-              closure = {:lua_closure, proto, {}}
-              {[closure], state}
-
-            {:error, error} ->
-              {[nil, "compile error: #{inspect(error)}"], state}
-          end
+          proto = Lua.Compiler.compile!(ast, source: chunk_name)
+          closure = {:lua_closure, proto, {}}
+          {[closure], state}
 
         {:error, error} ->
           {[nil, "parse error: #{inspect(error)}"], state}
