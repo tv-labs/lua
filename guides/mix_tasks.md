@@ -3,12 +3,6 @@
 One Mix task ships with this library — `mix lua.eval` — for running
 Lua source from the command line.
 
-The repository also includes three contributor-only tasks
-(`mix lua.suite`, `mix lua.bench`, and `mix lua.get_tests`) used to
-develop the library itself. They live in `tasks/` rather than `lib/`
-because they depend on fixtures, deps, and `MIX_ENV`s that only exist
-inside this repo, so they are not packaged in the Hex release.
-
 ## `mix lua.eval` — run a Lua file
 
 Evaluates a Lua source file (or stdin) in a fresh `Lua.new()` VM and
