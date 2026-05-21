@@ -562,13 +562,13 @@ defmodule Lua.VM.Stdlib.String.Pack do
   # remainder. Layout depends on endianness: little-endian keeps the
   # leading bytes, big-endian keeps the trailing bytes.
   defp split_value_extra(bytes, :little, keep) do
-    <<value::binary-size(keep), extra::binary>> = bytes
+    <<value::binary-size(^keep), extra::binary>> = bytes
     {value, extra}
   end
 
   defp split_value_extra(bytes, :big, keep) do
     skip = byte_size(bytes) - keep
-    <<extra::binary-size(skip), value::binary>> = bytes
+    <<extra::binary-size(^skip), value::binary>> = bytes
     {value, extra}
   end
 
