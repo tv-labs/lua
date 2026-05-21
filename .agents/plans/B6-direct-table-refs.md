@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: perf/direct-table-refs
 base: main
-status: ready
+status: deferred
 direction: B
 unlocks:
   - measurable reduction in Map.get/2,3 cost across all table-heavy
@@ -209,4 +209,35 @@ mix run benchmarks/oop.exs
 
 ## Discoveries
 
-(populated during implementation)
+Deferred after profile re-baseline post-PR #223 / PR #227. The plan's
+hypothesis (per-tref `Map.fetch!(state.tables, id)` is the dominant
+table-access cost) no longer matches the data:
+
+- **fib(22)**: `Map.get/2 + Map.get/3` combined is **3.28%** (1.62 + 1.66),
+  not the plan's claimed 6.4%. PR #223's fast paths already trimmed the
+  worst offenders. The plan's stretch target was "< 3% combined" — we're
+  already 0.3 percentage points away from that with no work.
+- **OOP (50 instances)**: `Map.get/2 + Map.get/3` is **2.81%**. Matches the
+  plan's 2.6% claim. A 0.3-point improvement at best, on a workload where
+  the bottleneck is elsewhere (`do_execute` 42.7%, `setelement` 20.9%,
+  `continue_after_call` 2.7%).
+- **table_build (n=500)**: `Map.get` combined is **0.04%**. Not a target
+  worth chasing. The real hot spots on this workload are:
+    - `:erlang.setelement/3` — 17.5%
+    - `Lua.VM.Table.insert/3` — 11.8%
+    - `Lua.VM.Table.put/3` — 6.5%
+    - `Lua.VM.Value.do_sequence_length/2` — 4.0%
+    - `Lua.VM.Table.normalize_key/1` — 3.3%
+
+  Those are all internal to `Lua.VM.Table` and `Lua.VM.Value` — B7's
+  territory (array+hash split eliminates `do_sequence_length`,
+  `normalize_key`, and the per-key `Map.put` on contiguous integer
+  keys).
+
+B6 would touch ~12 sites in `executor.ex` and ~15 more in stdlib for a
+projected wall-clock win below 1% — inside benchee's deviation band on
+every measured workload. Audit cleanup is still arguably worth it
+later, but not as a perf plan and not before B7.
+
+Skip-to-B7 decision recorded by Dave on 2026-05-21 after re-profiling
+post-B8.
