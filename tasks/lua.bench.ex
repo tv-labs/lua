@@ -22,11 +22,12 @@ defmodule Mix.Tasks.Lua.Bench do
 
   ## Usage
 
-      mix lua.bench                          # run all workloads
+      mix lua.bench                          # run all workloads (quick mode)
       mix lua.bench --workload fibonacci     # run one
       mix lua.bench --list                   # print available workloads
       mix lua.bench --workload fibonacci --workload closures
                                              # run several
+      LUA_BENCH_MODE=full mix lua.bench      # long runs + memory_time + n-sweep
 
   ## Options
 
@@ -34,6 +35,20 @@ defmodule Mix.Tasks.Lua.Bench do
       `benchmarks/`, without the `.exs`). May be repeated; if omitted,
       every workload is run.
     * `--list` — Print the available workloads and exit.
+
+  ## Run modes
+
+  The benchmark scripts read the `LUA_BENCH_MODE` environment variable
+  (see `benchmarks/helpers.exs`):
+
+    * **default (`quick`)** — short Benchee windows (1 s warmup, 3 s
+      measurement, memory_time off) for fast development iteration.
+      Each workload takes ~16 s; the full suite is ~80 s wall clock.
+    * **`full`** — long windows (2 s warmup, 10 s measurement, memory
+      time on) plus a sweep of multiple input sizes for the table
+      workloads. Use this for any numbers you publish (PR descriptions,
+      ROADMAP.md). Each workload takes a minute or two; the full suite
+      runs ~15+ minutes.
 
   ## Notes
 

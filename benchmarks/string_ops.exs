@@ -17,6 +17,8 @@
 #   MIX_ENV=benchmark mix run benchmarks/string_ops.exs
 # If luaport fails to start, the benchmark prints a notice and skips it.
 
+Code.require_file("helpers.exs", __DIR__)
+
 Application.ensure_all_started(:luerl)
 
 string_def = """
@@ -68,7 +70,7 @@ luerl_state = :luerl.init()
       {%{}, %{}, fn -> :ok end}
   end
 
-IO.puts("\n=== String Concatenation via table.concat (n=100) ===\n")
+Bench.banner("String Concatenation via table.concat (n=100)")
 
 Benchee.run(
   Map.merge(
@@ -79,12 +81,10 @@ Benchee.run(
     },
     c_lua_concat
   ),
-  time: 10,
-  warmup: 2,
-  memory_time: 1
+  Bench.opts()
 )
 
-IO.puts("\n=== String Formatting via string.format (n=100) ===\n")
+Bench.banner("String Formatting via string.format (n=100)")
 
 Benchee.run(
   Map.merge(
@@ -95,9 +95,7 @@ Benchee.run(
     },
     c_lua_format
   ),
-  time: 10,
-  warmup: 2,
-  memory_time: 1
+  Bench.opts()
 )
 
 c_lua_cleanup.()

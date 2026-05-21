@@ -13,6 +13,8 @@
 #   MIX_ENV=benchmark mix run benchmarks/fibonacci.exs
 # If luaport fails to start, the benchmark prints a notice and skips it.
 
+Code.require_file("helpers.exs", __DIR__)
+
 Application.ensure_all_started(:luerl)
 
 fib_def = """
@@ -61,9 +63,7 @@ Benchee.run(
     },
     c_lua_benchmarks
   ),
-  time: 10,
-  warmup: 2,
-  memory_time: 1
+  Bench.opts()
 )
 
 c_lua_cleanup.()
