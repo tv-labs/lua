@@ -15,10 +15,13 @@
 #   - Luerl (Erlang-based Lua 5.3 implementation)
 #   - C Lua 5.4 via luaport (port-based; results include IPC overhead)
 #
-# NOTE: luaport requires C Lua development headers. On macOS with Homebrew:
-#   PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig mix deps.compile luaport
-# Then run:
-#   PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig mix run benchmarks/oop.exs
+# NOTE: luaport requires C Lua 5.4 development headers and a small in-tree
+# patch (its 1.6.3 release defaults to LuaJIT and uses LUA_GLOBALSINDEX which
+# was removed in Lua 5.2). On macOS:
+#   brew install lua@5.4
+#   ./benchmarks/setup_luaport.sh           # idempotent; patches + builds
+#   MIX_ENV=benchmark mix run benchmarks/oop.exs
+# If luaport fails to start, the benchmark prints a notice and skips it.
 
 Application.ensure_all_started(:luerl)
 
