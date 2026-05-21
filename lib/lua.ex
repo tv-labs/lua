@@ -9,6 +9,7 @@ defmodule Lua do
   alias Lua.Util
   alias Lua.VM.AssertionError
   alias Lua.VM.Display
+  alias Lua.VM.InternalError
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Table
@@ -480,14 +481,19 @@ defmodule Lua do
     e in [Lua.RuntimeException, Lua.CompilerException] ->
       reraise e, __STACKTRACE__
 
+    # Library bug, not a Lua program error — keep the full Elixir
+    # stack so the failing internal call site is visible.
+    e in [InternalError] ->
+      reraise Lua.RuntimeException, e, __STACKTRACE__
+
     # Pass the VM exception itself (not just its message) so the
     # `Lua.RuntimeException.exception/1` clause for arbitrary exceptions
     # picks up `:line`, `:source`, and `:call_stack`.
     e in [RuntimeError, TypeError, AssertionError] ->
-      reraise Lua.RuntimeException, e, __STACKTRACE__
+      reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__)
 
     e ->
-      reraise Lua.RuntimeException, e, __STACKTRACE__
+      reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__)
   end
 
   def eval!(%__MODULE__{state: state} = lua, %Lua.Chunk{prototype: proto}, opts) do
@@ -509,14 +515,64 @@ defmodule Lua do
     e in [Lua.RuntimeException, Lua.CompilerException] ->
       reraise e, __STACKTRACE__
 
+    # Library bug, not a Lua program error — keep the full Elixir
+    # stack so the failing internal call site is visible.
+    e in [InternalError] ->
+      reraise Lua.RuntimeException, e, __STACKTRACE__
+
     # Pass the VM exception itself (not just its message) so the
     # `Lua.RuntimeException.exception/1` clause for arbitrary exceptions
     # picks up `:line`, `:source`, and `:call_stack`.
     e in [RuntimeError, TypeError, AssertionError] ->
-      reraise Lua.RuntimeException, e, __STACKTRACE__
+      reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__)
 
     e ->
-      reraise Lua.RuntimeException, e, __STACKTRACE__
+      reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__)
+  end
+
+  # Internal-namespace prefixes whose frames are noise to a Lua program
+  # author. We match exact module prefixes (with a trailing dot) so a
+  # user's own `Lua.MyApp.Something` is never collateral damage. The
+  # top-level `Lua.` API surface (e.g. `Lua.eval!/3`) is preserved.
+  @internal_module_prefixes [
+    "Elixir.Lua.VM.",
+    "Elixir.Lua.Compiler.",
+    "Elixir.Lua.Parser.",
+    "Elixir.Lua.Lexer."
+  ]
+
+  # Removes internal executor / compiler / parser / lexer frames from a
+  # rescued stacktrace so the user sees only frames they can act on:
+  # their own call site and the public `Lua.eval!` boundary.
+  #
+  # Set `LUA_DEBUG_STACK=1` in the environment to disable pruning when
+  # debugging library bugs.
+  @doc false
+  def prune_lua_internals(stacktrace) do
+    if debug_stack?() do
+      stacktrace
+    else
+      Enum.reject(stacktrace, &internal_frame?/1)
+    end
+  end
+
+  defp debug_stack? do
+    System.get_env("LUA_DEBUG_STACK") in ["1", "true"]
+  end
+
+  defp internal_frame?({mod, _fun, _arity, _loc}) when is_atom(mod) do
+    internal_module?(mod)
+  end
+
+  defp internal_frame?({mod, _fun, _arity, _loc, _meta}) when is_atom(mod) do
+    internal_module?(mod)
+  end
+
+  defp internal_frame?(_), do: false
+
+  defp internal_module?(mod) do
+    mod_str = Atom.to_string(mod)
+    Enum.any?(@internal_module_prefixes, &String.starts_with?(mod_str, &1))
   end
 
   @doc """
