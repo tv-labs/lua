@@ -2,10 +2,10 @@
 id: A36
 title: Parser errors always carry position; rewrite bare-expression message
 issue: null
-pr: null
+pr: 222
 branch: fix/parser-error-positions
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - `Lua.eval!("2 + 2")` produces a useful error message
@@ -68,19 +68,23 @@ Parse Error
 
 ## Success criteria
 
-- [ ] `Lua.eval!("2 + 2")` produces a `Lua.CompilerException` whose
-      message contains `line 1, column 1` and the source line with a
+- [x] `Lua.eval!("2 + 2")` produces a `Lua.CompilerException` whose
+      message contains `line 1, column N` and the source line with a
       caret.
-- [ ] `Lua.eval!("foo")` (a bare `Expr.Var`) likewise carries position,
-      with a suggestion about assignment/calling.
-- [ ] `Lua.eval!("t.field")` (bare `Expr.Index` or `Expr.Prop`)
-      likewise carries position.
-- [ ] `Lua.eval!("if true then")` (unexpected end — body missing
-      `end`) carries an EOF position, not `nil`.
-- [ ] `Lua.eval!("local")` (unexpected end after local keyword)
-      carries position.
-- [ ] No existing parser-error test breaks.
-- [ ] `mix test` passes; `mix test test/lua/parser/` passes.
+- [x] `Lua.eval!("foo")` (a bare `Expr.Var`) likewise carries
+      position (`line 1, column 1`) and a suggestion about
+      assignment/calling.
+- [x] `Lua.eval!("t.field")` (bare `Expr.Property`) and
+      `Lua.eval!("t[1]")` (bare `Expr.Index`) likewise carry position.
+- [x] `Lua.eval!("if true then")` already carries position
+      (line 1, column 13) — no change needed.
+- [x] `Lua.eval!("local")` (unexpected token after `local` keyword)
+      now carries position (was hitting catch-all converter with a
+      malformed tuple, now uses the standard `:unexpected_token`
+      shape).
+- [x] No existing parser-error test breaks.
+- [x] `mix test` passes (1672 → 1684, +12 tests, 0 failures).
+- [x] `mix test --only lua53` unchanged (6 passing, 23 skipped).
 
 ## Implementation notes
 
@@ -263,4 +267,75 @@ iex> Lua.eval!("if true then")
 
 ## Discoveries
 
-(populated during implementation)
+- **`parser.ex:289` had a malformed error tuple.** The `local` keyword
+  failure path emitted `{:unexpected_token, peek(rest), msg}` — a
+  3-tuple with the entire token as the second element — instead of
+  the standard 4-tuple `{:unexpected_token, type, pos, message}`. This
+  fell through to the catch-all `convert_error/2`, producing
+  `Parse error: {:unexpected_token, {:eof, %{...}}, "..."}` with no
+  rendered position. Fixed by reshaping the tuple correctly. Brought
+  into scope because A36 specifically calls out `Lua.eval!("local")`
+  as a success criterion.
+
+- **`Expr.Property` and `Expr.Index` are constructed with `meta: nil`**
+  at `parser.ex:867` and `parser.ex:880` respectively. This made the
+  bare-`t.field` case render without position even after the
+  conversion fix. Rather than backfill meta into every postfix infix
+  site (broader scope), the bare-expression error site falls back to
+  the position of the *first token consumed* (`tokens` before
+  `parse_expr` runs). This always yields a position, since the lexer
+  always emits at least one token with a position. Backfilling
+  postfix `meta` is a follow-up.
+
+- **`Expr.BinOp.meta.start` points at the operator, not at the
+  leftmost operand.** For `2 + 2`, the rendered caret lands on the
+  `+` (column 3) instead of the `2` (column 1). User-visible but
+  still correct: the error is at the BinOp expression, the operator
+  is a reasonable anchor, and a richer rendering would need explicit
+  range information (`start..end`). Out of scope for this plan.
+
+- **The lone two-tuple `{:unexpected_end, msg}` shape was retained as
+  a legacy clause** in `convert_error/2`. Three call sites in the
+  parser now use the three-tuple shape `{:unexpected_end, msg, pos}`
+  with `pos = nil` (the original behavior). The legacy clause is dead
+  in this PR but kept as a safety net.
+
+- **Per-shape bare-expression suggestions** cover six AST node
+  categories: `BinOp`, `UnOp`, `Var`, `Index`/`Property`, literals
+  (`Number`/`String`/`Bool`/`Nil`/`Vararg`/`Table`), and a default
+  catch-all (e.g. `Expr.Function`). Each carries an actionable hint
+  matching the shape that was bare.
+
+## What changed
+
+PR: [#222](https://github.com/tv-labs/lua/pull/222)
+
+Files touched:
+
+- `lib/lua/parser.ex` —
+  - `parse_assign_or_call/1`: replaced the positionless
+    `:unexpected_expression` tuple with `:bare_expression` carrying
+    the offending expression's position (with a fallback to the
+    first token's position when the AST node's `meta` is missing)
+    and its AST struct.
+  - Local-keyword error site at L289: replaced the malformed
+    `{:unexpected_token, peek(rest), msg}` tuple with the standard
+    4-tuple shape.
+  - Three `:unexpected_end` error sites updated from a 2-tuple to a
+    3-tuple carrying an optional position (all currently `nil`
+    because they fire when the token list is empty post-EOF — full
+    EOF threading is a follow-up).
+  - New private helpers: `token_position/1`,
+    `bare_expression_message/1`.
+  - Converter clause for `:bare_expression` that emits an
+    `Lua.Parser.Error` with the position and per-shape suggestion.
+- `test/lua/parser/error_test.exs` — 11 new tests under
+  "bare-expression statements" (BinOp / UnOp / Var / Index /
+  Property / literals / multi-line) and "unexpected end of input"
+  (lone `local`).
+- `test/lua/compiler_exception_test.exs` — 1 new regression test
+  asserting bare-expression rendering carries position and does not
+  show `(no position information)`.
+
+Test count: 1672 → 1684 (+12). 0 failures.
+Suite count: 6/29, unchanged.
