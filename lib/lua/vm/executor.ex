@@ -581,7 +581,16 @@ defmodule Lua.VM.Executor do
 
   # ── call — Lua closures via CPS frames; native functions inline ────────────
 
-  defp do_execute([{:call, base, arg_count, result_count, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute(
+         [{:call, base, arg_count, result_count, name_hint} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line
+       ) do
     func_value = elem(regs, base)
 
     # Resolve the number of args without materializing a list. Negative arg
@@ -1257,7 +1266,16 @@ defmodule Lua.VM.Executor do
 
   # ── get_table ──────────────────────────────────────────────────────────────
 
-  defp do_execute([{:get_table, dest, table_reg, key_reg, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute(
+         [{:get_table, dest, table_reg, key_reg, name_hint} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line
+       ) do
     table_val = elem(regs, table_reg)
     key = elem(regs, key_reg)
 
@@ -1295,7 +1313,16 @@ defmodule Lua.VM.Executor do
 
   # ── set_table ──────────────────────────────────────────────────────────────
 
-  defp do_execute([{:set_table, table_reg, key_reg, value_reg, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute(
+         [{:set_table, table_reg, key_reg, value_reg, name_hint} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line
+       ) do
     table_val = elem(regs, table_reg)
 
     case table_val do
@@ -1312,7 +1339,16 @@ defmodule Lua.VM.Executor do
 
   # ── get_field ──────────────────────────────────────────────────────────────
 
-  defp do_execute([{:get_field, dest, table_reg, name, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute(
+         [{:get_field, dest, table_reg, name, name_hint} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line
+       ) do
     table_val = elem(regs, table_reg)
 
     case table_val do
@@ -1351,7 +1387,16 @@ defmodule Lua.VM.Executor do
 
   # ── set_field ──────────────────────────────────────────────────────────────
 
-  defp do_execute([{:set_field, table_reg, name, value_reg, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute(
+         [{:set_field, table_reg, name, value_reg, name_hint} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line
+       ) do
     table_val = elem(regs, table_reg)
 
     case table_val do
@@ -1426,7 +1471,16 @@ defmodule Lua.VM.Executor do
 
   # ── self ───────────────────────────────────────────────────────────────────
 
-  defp do_execute([{:self, base, obj_reg, method_name, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute(
+         [{:self, base, obj_reg, method_name, name_hint} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line
+       ) do
     obj = elem(regs, obj_reg)
     {func, state} = index_value(obj, method_name, state, line, proto.source, name_hint)
 
@@ -1770,9 +1824,21 @@ defmodule Lua.VM.Executor do
   defp format_target_hint({:upvalue, name}), do: " (upvalue '#{name}')"
   defp format_target_hint({:field, name}), do: " (field '#{name}')"
   defp format_target_hint({:method, name}), do: " (method '#{name}')"
+  defp format_target_hint({:field, name, nil}), do: " (field '#{name}')"
+  defp format_target_hint({:method, name, nil}), do: " (method '#{name}')"
+  defp format_target_hint({:field, name, receiver}), do: " (field '#{name}' on #{format_receiver(receiver)})"
+  defp format_target_hint({:method, name, receiver}), do: " (method '#{name}' on #{format_receiver(receiver)})"
+
+  defp format_receiver({:global, name}), do: "global '#{name}'"
+  defp format_receiver({:local, name}), do: "local '#{name}'"
+  defp format_receiver({:upvalue, name}), do: "upvalue '#{name}'"
+  defp format_receiver({:field, name}), do: "field '#{name}'"
+  defp format_receiver({:field, name, _}), do: "field '#{name}'"
+  defp format_receiver({:method, name}), do: "method '#{name}'"
+  defp format_receiver({:method, name, _}), do: "method '#{name}'"
 
   defp hint_name(nil), do: nil
-  defp hint_name({_kind, name}), do: name
+  defp hint_name(hint) when is_tuple(hint), do: elem(hint, 1)
 
   @doc """
   Reads `t[key]` honoring the `__index` metamethod chain.

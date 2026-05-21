@@ -82,14 +82,12 @@ defmodule Lua.Compiler.Instruction do
 
   # Functions
   def closure(dest, proto_index), do: {:closure, dest, proto_index}
-  def call(base, arg_count, result_count, name_hint \\ nil),
-    do: {:call, base, arg_count, result_count, name_hint}
+  def call(base, arg_count, result_count, name_hint \\ nil), do: {:call, base, arg_count, result_count, name_hint}
 
   def tail_call(base, arg_count, name_hint \\ nil), do: {:tail_call, base, arg_count, name_hint}
   def return_instr(base, count), do: {:return, base, count}
   def return_vararg, do: {:return_vararg}
-  def self_instr(base, object, method_name, name_hint \\ nil),
-    do: {:self, base, object, method_name, name_hint}
+  def self_instr(base, object, method_name, name_hint \\ nil), do: {:self, base, object, method_name, name_hint}
   def vararg(base, count), do: {:vararg, base, count}
 
   # Debug

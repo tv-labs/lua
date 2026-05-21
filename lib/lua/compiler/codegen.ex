@@ -1317,7 +1317,7 @@ defmodule Lua.Compiler.Codegen do
       end)
 
     # Call with arg_count + 1 for self
-    call_instruction = Instruction.call(base_reg, arg_count + 1, 1, {:method, method})
+    call_instruction = Instruction.call(base_reg, arg_count + 1, 1, {:method, method, obj_hint})
 
     {object_instructions ++
        [self_instruction] ++
@@ -1561,7 +1561,13 @@ defmodule Lua.Compiler.Codegen do
     end
   end
 
-  defp name_hint(%Expr.Property{field: field}, _ctx), do: {:field, field}
-  defp name_hint(%Expr.Index{key: %Expr.String{value: name}}, _ctx), do: {:field, name}
+  defp name_hint(%Expr.Property{table: table_expr, field: field}, ctx) do
+    {:field, field, name_hint(table_expr, ctx)}
+  end
+
+  defp name_hint(%Expr.Index{table: table_expr, key: %Expr.String{value: name}}, ctx) do
+    {:field, name, name_hint(table_expr, ctx)}
+  end
+
   defp name_hint(_, _ctx), do: nil
 end
