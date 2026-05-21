@@ -39,6 +39,8 @@ defmodule Lua.VM.Numeric do
   @max_int 0x7FFFFFFFFFFFFFFF
   @min_int -0x8000000000000000
 
+  @compile {:inline, signed?: 1, to_signed_int64: 1}
+
   @doc "Maximum signed 64-bit integer (`2^63 - 1`)."
   @spec max_int() :: integer()
   def max_int, do: @max_int
@@ -68,6 +70,10 @@ defmodule Lua.VM.Numeric do
       -1
   """
   @spec to_signed_int64(integer()) :: integer()
+  def to_signed_int64(n) when is_integer(n) and n >= @min_int and n <= @max_int do
+    n
+  end
+
   def to_signed_int64(n) when is_integer(n) do
     masked = band(n, @uint64_mask)
     if masked >= @sign_bit, do: masked - @uint64_modulus, else: masked
