@@ -2,10 +2,10 @@
 id: B8
 title: Inline `to_signed_int64/1` for the in-range fast path
 issue: null
-pr: null
+pr: 227
 branch: perf/inline-numeric-narrowing
 base: main
-status: in-progress
+status: review
 direction: B
 unlocks:
   - small but free win on all integer-arithmetic workloads
@@ -155,4 +155,34 @@ Lua.eval!(lua, chunk)
 
 ## Discoveries
 
-(populated during implementation)
+- `@compile {:inline, ...}` only inlines within the same module. Cross-module
+  callers in `Lua.VM.Executor` and `Lua.VM.Value` still trip a function
+  boundary on every call. tprof call count stayed at 85,968 before/after,
+  confirming no inlining happened at the dispatch sites. This caps the
+  realized win below the plan's stretch target — the gain comes entirely
+  from the guard short-circuit, not from inlining at call sites.
+- Profile self-time on fib(22) moved 3.82% → 3.38%, a 12% relative drop
+  on the function itself. Plan's stretch target of < 1.5% was not hit
+  because it implicitly required cross-module inlining.
+- Wall-clock win on fib(30) is real: lua (chunk) 873.4ms → 844.8ms
+  (**-3.3%**), well outside the ±0.5% deviation band. luerl (control)
+  did not move. The plan's 3% stretch floor on fib was met.
+
+## What changed
+
+- `lib/lua/vm/numeric.ex` — added in-range guard clause to
+  `to_signed_int64/1`; added `@compile {:inline, signed?: 1,
+  to_signed_int64: 1}`.
+
+PR: #227
+
+Suite delta: 1692 tests passing → 1692 tests passing (no regression).
+lua53 suite: 29 tests, 0 failures (matches main).
+
+Benchmarks (fib(30), 10s benchee, 2s warmup):
+
+| benchmark    | baseline    | after        | delta  |
+|--------------|-------------|--------------|--------|
+| lua (chunk)  | 873.36 ms   | 844.76 ms    | -3.3%  |
+| lua (eval)   | 876.74 ms   | 852.21 ms    | -2.8%  |
+| luerl (ctl)  | 730.87 ms   | 731.78 ms    | noise  |
