@@ -1,7 +1,6 @@
 defmodule Lua.RuntimeExceptionTest do
   use ExUnit.Case, async: true
 
-  alias Lua.MyApp.Something
   alias Lua.RuntimeException
   alias Lua.VM.Executor
   alias Lua.VM.State
@@ -510,51 +509,18 @@ defmodule Lua.RuntimeExceptionTest do
              end)
     end
 
-    test "LUA_DEBUG_STACK=1 restores executor frames" do
-      lua = Lua.new()
+    test "debug: true restores executor frames" do
+      lua = Lua.new(debug: true)
 
-      prev = System.get_env("LUA_DEBUG_STACK")
-      System.put_env("LUA_DEBUG_STACK", "1")
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "return 'string' + 5")
+        end)
 
-      try do
-        stack =
-          rescued_stacktrace(fn ->
-            Lua.eval!(lua, "return 'string' + 5")
-          end)
+      modules = stacktrace_modules(stack)
 
-        modules = stacktrace_modules(stack)
-
-        assert Enum.any?(modules, &(&1 == Executor)),
-               "expected Lua.VM.Executor frame with LUA_DEBUG_STACK=1 set"
-      after
-        case prev do
-          nil -> System.delete_env("LUA_DEBUG_STACK")
-          val -> System.put_env("LUA_DEBUG_STACK", val)
-        end
-      end
-    end
-
-    test "LUA_DEBUG_STACK=true also restores executor frames" do
-      lua = Lua.new()
-
-      prev = System.get_env("LUA_DEBUG_STACK")
-      System.put_env("LUA_DEBUG_STACK", "true")
-
-      try do
-        stack =
-          rescued_stacktrace(fn ->
-            Lua.eval!(lua, "return 'string' + 5")
-          end)
-
-        modules = stacktrace_modules(stack)
-
-        assert Executor in modules
-      after
-        case prev do
-          nil -> System.delete_env("LUA_DEBUG_STACK")
-          val -> System.put_env("LUA_DEBUG_STACK", val)
-        end
-      end
+      assert Enum.any?(modules, &(&1 == Executor)),
+             "expected Lua.VM.Executor frame with debug: true"
     end
 
     test "InternalError keeps the full stack (library bug, not Lua program error)" do
@@ -577,37 +543,41 @@ defmodule Lua.RuntimeExceptionTest do
              "InternalError should keep Lua.VM.Executor frame for library debugging"
     end
 
-    test "prune_lua_internals/1 handles 5-tuple frames defensively" do
-      # Some OTP versions emit 5-tuple frames. The helper handles both.
-      stack = [
-        {Executor, :do_execute, 8, [file: ~c"x", line: 1], %{}},
-        {Lua, :eval!, 3, [file: ~c"x", line: 1]},
-        {:elixir_compiler, :dispatch, 4, [file: ~c"x", line: 1]}
-      ]
+    test "executor frames are pruned and Lua boundary frame is preserved (debug: false)" do
+      # Confirms both the 4-tuple and general pruning path through eval!.
+      lua = Lua.new()
 
-      pruned = Lua.prune_lua_internals(stack)
-      modules = stacktrace_modules(pruned)
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "return 'string' + 5")
+        end)
+
+      modules = stacktrace_modules(stack)
 
       refute Executor in modules
       assert Lua in modules
-      assert :elixir_compiler in modules
     end
 
-    test "prune_lua_internals/1 preserves a user module under a Lua.* namespace" do
-      # A user app module named e.g. `Lua.MyApp.Something` must not be
-      # pruned. We only target the four internal prefixes.
-      stack = [
-        {Something, :work, 1, [file: ~c"app.ex", line: 10]},
-        {Executor, :do_execute, 8, [file: ~c"x", line: 1]},
-        {Lua, :eval!, 3, [file: ~c"x", line: 1]}
-      ]
+    test "user module not under an internal prefix is preserved through eval!" do
+      # Registers a Lua-callable implemented in a module that is NOT under
+      # any internal prefix. It must survive pruning so the user can trace
+      # calls into their own code.
+      defmodule MyApp.LuaHelper do
+        @moduledoc false
+        def call(_args, _state), do: raise(RuntimeError, "boom from user code")
+      end
 
-      pruned = Lua.prune_lua_internals(stack)
-      modules = stacktrace_modules(pruned)
+      lua = Lua.set!(Lua.new(), [:my_helper], &MyApp.LuaHelper.call/2)
 
-      assert Something in modules
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "return my_helper()")
+        end)
+
+      modules = stacktrace_modules(stack)
+
       refute Executor in modules
-      assert Lua in modules
+      assert MyApp.LuaHelper in modules
     end
   end
 end
