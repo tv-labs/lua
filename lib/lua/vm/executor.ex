@@ -581,7 +581,7 @@ defmodule Lua.VM.Executor do
 
   # ── call — Lua closures via CPS frames; native functions inline ────────────
 
-  defp do_execute([{:call, base, arg_count, result_count} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:call, base, arg_count, result_count, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
     func_value = elem(regs, base)
 
     # Resolve the number of args without materializing a list. Negative arg
@@ -629,7 +629,7 @@ defmodule Lua.VM.Executor do
           open_upvalues: state.open_upvalues
         }
 
-        call_info = %{source: proto.source, line: line, name: nil}
+        call_info = %{source: proto.source, line: line, name: hint_name(name_hint)}
 
         state = %{state | call_stack: [call_info | state.call_stack], open_upvalues: %{}}
 
@@ -679,7 +679,7 @@ defmodule Lua.VM.Executor do
 
       nil ->
         raise TypeError,
-          value: "attempt to call a nil value",
+          value: "attempt to call a nil value" <> format_target_hint(name_hint),
           source: proto.source,
           call_stack: state.call_stack,
           line: line,
@@ -690,7 +690,7 @@ defmodule Lua.VM.Executor do
         case get_metatable(other, state) do
           nil ->
             raise TypeError,
-              value: "attempt to call a #{Value.type_name(other)} value",
+              value: "attempt to call a #{Value.type_name(other)} value" <> format_target_hint(name_hint),
               source: proto.source,
               call_stack: state.call_stack,
               line: line,
@@ -703,7 +703,7 @@ defmodule Lua.VM.Executor do
             case Map.get(mt.data, "__call") do
               nil ->
                 raise TypeError,
-                  value: "attempt to call a #{Value.type_name(other)} value",
+                  value: "attempt to call a #{Value.type_name(other)} value" <> format_target_hint(name_hint),
                   source: proto.source,
                   call_stack: state.call_stack,
                   line: line,
@@ -1257,7 +1257,7 @@ defmodule Lua.VM.Executor do
 
   # ── get_table ──────────────────────────────────────────────────────────────
 
-  defp do_execute([{:get_table, dest, table_reg, key_reg} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:get_table, dest, table_reg, key_reg, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
     table_val = elem(regs, table_reg)
     key = elem(regs, key_reg)
 
@@ -1280,14 +1280,14 @@ defmodule Lua.VM.Executor do
                 do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
               _ ->
-                {value, state} = index_value(table_val, key, state, line, proto.source)
+                {value, state} = index_value(table_val, key, state, line, proto.source, name_hint)
                 regs = put_elem(regs, dest, value)
                 do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
             end
         end
 
       _ ->
-        {value, state} = index_value(table_val, key, state, line, proto.source)
+        {value, state} = index_value(table_val, key, state, line, proto.source, name_hint)
         regs = put_elem(regs, dest, value)
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
     end
@@ -1295,18 +1295,24 @@ defmodule Lua.VM.Executor do
 
   # ── set_table ──────────────────────────────────────────────────────────────
 
-  defp do_execute([{:set_table, table_reg, key_reg, value_reg} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    {:tref, _} = elem(regs, table_reg)
-    key = elem(regs, key_reg)
-    value = elem(regs, value_reg)
+  defp do_execute([{:set_table, table_reg, key_reg, value_reg, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
+    table_val = elem(regs, table_reg)
 
-    state = table_newindex(elem(regs, table_reg), key, value, state)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+    case table_val do
+      {:tref, _} ->
+        key = elem(regs, key_reg)
+        value = elem(regs, value_reg)
+        state = table_newindex(table_val, key, value, state)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+      _ ->
+        raise_index_type_error(table_val, line, proto.source, name_hint)
+    end
   end
 
   # ── get_field ──────────────────────────────────────────────────────────────
 
-  defp do_execute([{:get_field, dest, table_reg, name} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:get_field, dest, table_reg, name, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
     table_val = elem(regs, table_reg)
 
     case table_val do
@@ -1330,14 +1336,14 @@ defmodule Lua.VM.Executor do
                 do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
               _ ->
-                {value, state} = index_value(table_val, name, state, line, proto.source)
+                {value, state} = index_value(table_val, name, state, line, proto.source, name_hint)
                 regs = put_elem(regs, dest, value)
                 do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
             end
         end
 
       _ ->
-        {value, state} = index_value(table_val, name, state, line, proto.source)
+        {value, state} = index_value(table_val, name, state, line, proto.source, name_hint)
         regs = put_elem(regs, dest, value)
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
     end
@@ -1345,12 +1351,18 @@ defmodule Lua.VM.Executor do
 
   # ── set_field ──────────────────────────────────────────────────────────────
 
-  defp do_execute([{:set_field, table_reg, name, value_reg} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    {:tref, _} = elem(regs, table_reg)
-    value = elem(regs, value_reg)
+  defp do_execute([{:set_field, table_reg, name, value_reg, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
+    table_val = elem(regs, table_reg)
 
-    state = table_newindex(elem(regs, table_reg), name, value, state)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+    case table_val do
+      {:tref, _} ->
+        value = elem(regs, value_reg)
+        state = table_newindex(table_val, name, value, state)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+      _ ->
+        raise_index_type_error(table_val, line, proto.source, name_hint)
+    end
   end
 
   # ── set_list (multi-return variant) ───────────────────────────────────────
@@ -1414,9 +1426,9 @@ defmodule Lua.VM.Executor do
 
   # ── self ───────────────────────────────────────────────────────────────────
 
-  defp do_execute([{:self, base, obj_reg, method_name} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:self, base, obj_reg, method_name, name_hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
     obj = elem(regs, obj_reg)
-    {func, state} = index_value(obj, method_name, state, line, proto.source)
+    {func, state} = index_value(obj, method_name, state, line, proto.source, name_hint)
 
     regs = put_elem(regs, base + 1, obj)
     regs = put_elem(regs, base, func)
@@ -1713,21 +1725,21 @@ defmodule Lua.VM.Executor do
 
   defp get_metatable(_value, _state), do: nil
 
-  defp index_value({:tref, _} = tref, key, state, _line, _source) do
+  defp index_value({:tref, _} = tref, key, state, _line, _source, _name_hint) do
     table_index(tref, key, state)
   end
 
-  defp index_value(value, key, state, line, source) do
+  defp index_value(value, key, state, line, source, name_hint) do
     case get_metatable(value, state) do
       nil ->
-        raise_index_type_error(value, line, source)
+        raise_index_type_error(value, line, source, name_hint)
 
       {:tref, mt_id} ->
         mt = Map.fetch!(state.tables, mt_id)
 
         case Map.get(mt.data, "__index") do
           nil ->
-            raise_index_type_error(value, line, source)
+            raise_index_type_error(value, line, source, name_hint)
 
           {:tref, _} = idx_tbl ->
             table_index(idx_tbl, key, state)
@@ -1739,14 +1751,28 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  defp raise_index_type_error(value, line, source) do
+  defp raise_index_type_error(value, line, source, name_hint) do
     raise TypeError,
-      value: "attempt to index a #{Value.type_name(value)} value",
+      value: "attempt to index a #{Value.type_name(value)} value" <> format_target_hint(name_hint),
       line: line,
       source: source,
       error_kind: :index_non_table,
       value_type: value_type(value)
   end
+
+  # Formats a `name_hint` tagged-tuple (or `nil`) as the
+  # " (global 'foo')"-style suffix appended to call/index error messages.
+  # Mirrors PUC-Lua's per-instruction debug name recovery, but resolved at
+  # compile time and threaded through on the relevant bytecode ops.
+  defp format_target_hint(nil), do: ""
+  defp format_target_hint({:global, name}), do: " (global '#{name}')"
+  defp format_target_hint({:local, name}), do: " (local '#{name}')"
+  defp format_target_hint({:upvalue, name}), do: " (upvalue '#{name}')"
+  defp format_target_hint({:field, name}), do: " (field '#{name}')"
+  defp format_target_hint({:method, name}), do: " (method '#{name}')"
+
+  defp hint_name(nil), do: nil
+  defp hint_name({_kind, name}), do: name
 
   @doc """
   Reads `t[key]` honoring the `__index` metamethod chain.

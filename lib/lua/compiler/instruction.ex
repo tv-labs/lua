@@ -30,10 +30,10 @@ defmodule Lua.Compiler.Instruction do
   # Table operations
   def new_table(dest, array_hint \\ 0, hash_hint \\ 0), do: {:new_table, dest, array_hint, hash_hint}
 
-  def get_table(dest, table, key), do: {:get_table, dest, table, key}
-  def set_table(table, key, value), do: {:set_table, table, key, value}
-  def get_field(dest, table, name), do: {:get_field, dest, table, name}
-  def set_field(table, name, value), do: {:set_field, table, name, value}
+  def get_table(dest, table, key, name_hint \\ nil), do: {:get_table, dest, table, key, name_hint}
+  def set_table(table, key, value, name_hint \\ nil), do: {:set_table, table, key, value, name_hint}
+  def get_field(dest, table, name, name_hint \\ nil), do: {:get_field, dest, table, name, name_hint}
+  def set_field(table, name, value, name_hint \\ nil), do: {:set_field, table, name, value, name_hint}
   def set_list(table, start, count, offset), do: {:set_list, table, start, count, offset}
 
   # Arithmetic
@@ -82,11 +82,14 @@ defmodule Lua.Compiler.Instruction do
 
   # Functions
   def closure(dest, proto_index), do: {:closure, dest, proto_index}
-  def call(base, arg_count, result_count), do: {:call, base, arg_count, result_count}
-  def tail_call(base, arg_count), do: {:tail_call, base, arg_count}
+  def call(base, arg_count, result_count, name_hint \\ nil),
+    do: {:call, base, arg_count, result_count, name_hint}
+
+  def tail_call(base, arg_count, name_hint \\ nil), do: {:tail_call, base, arg_count, name_hint}
   def return_instr(base, count), do: {:return, base, count}
   def return_vararg, do: {:return_vararg}
-  def self_instr(base, object, method_name), do: {:self, base, object, method_name}
+  def self_instr(base, object, method_name, name_hint \\ nil),
+    do: {:self, base, object, method_name, name_hint}
   def vararg(base, count), do: {:vararg, base, count}
 
   # Debug
