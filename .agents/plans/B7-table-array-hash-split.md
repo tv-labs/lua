@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: perf/table-array-hash-split
 base: main
-status: ready
+status: in-progress
 direction: B
 unlocks:
   - O(1) `t[#t + 1] = x` (supersedes A10b)
