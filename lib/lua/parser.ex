@@ -286,7 +286,19 @@ defmodule Lua.Parser do
         end
 
       _ ->
-        {:error, {:unexpected_token, peek(rest), "Expected identifier or 'function' after 'local'"}}
+        # Build the standard 4-tuple shape so the renderer can show
+        # position. `peek(rest)` may return a real token, an EOF token,
+        # or `nil` (after EOF is consumed). Handle all three.
+        case peek(rest) do
+          {type, _value, pos} ->
+            {:error, {:unexpected_token, type, pos, "Expected identifier or 'function' after 'local'"}}
+
+          {:eof, pos} ->
+            {:error, {:unexpected_token, :eof, pos, "Expected identifier or 'function' after 'local'"}}
+
+          nil ->
+            {:error, {:unexpected_end, "Expected identifier or 'function' after 'local'", nil}}
+        end
     end
   end
 
@@ -547,6 +559,8 @@ defmodule Lua.Parser do
   defp parse_assign_or_call(tokens) do
     # This is the most complex case - we need to parse a potential lvalue or call
     # Start by parsing an expression (which could be a variable, call, property access, etc.)
+    starting_pos = token_position(peek(tokens))
+
     case parse_expr(tokens) do
       {:ok, expr, rest} ->
         case peek(rest) do
@@ -567,8 +581,19 @@ defmodule Lua.Parser do
               %Expr.MethodCall{} = call ->
                 {:ok, %Statement.CallStmt{call: call, meta: nil}, rest}
 
-              _ ->
-                {:error, {:unexpected_expression, "Expression statement must be a function call"}}
+              other ->
+                # Prefer the AST node's meta when populated; some postfix
+                # expressions (e.g. Property, Index) currently have
+                # `meta: nil`, so fall back to the position of the first
+                # token we consumed.
+                pos =
+                  case other do
+                    %{meta: %Meta{start: %{} = p}} -> p
+                    %{meta: %{start: %{} = p}} -> p
+                    _ -> starting_pos
+                  end
+
+                {:error, {:bare_expression, pos, other.__struct__}}
             end
         end
 
@@ -734,7 +759,7 @@ defmodule Lua.Parser do
         {:error, {:unexpected_token, type, pos, "Expected expression"}}
 
       nil ->
-        {:error, {:unexpected_end, "Expected expression"}}
+        {:error, {:unexpected_end, "Expected expression", nil}}
     end
   end
 
@@ -1171,6 +1196,14 @@ defmodule Lua.Parser do
   defp consume([token | rest]), do: {token, rest}
   defp consume([]), do: {nil, []}
 
+  # Extracts the position map from a lexer token. Tokens come in two
+  # shapes: 3-tuples `{type, value, pos}` for most tokens and 2-tuples
+  # `{type, pos}` for `:eof`. Returns `nil` when no position is
+  # available (empty token list).
+  defp token_position({_type, _value, pos}) when is_map(pos), do: pos
+  defp token_position({_type, pos}) when is_map(pos), do: pos
+  defp token_position(_), do: nil
+
   # Drop leading comment tokens from a token stream.
   #
   # The lexer emits `{:comment, type, text, pos}` tuples (deliberately, so
@@ -1198,7 +1231,7 @@ defmodule Lua.Parser do
         {:error, {:unexpected_token, type, pos, "Expected #{inspect(expected_type)}, got #{inspect(type)}"}}
 
       nil ->
-        {:error, {:unexpected_end, "Expected #{inspect(expected_type)}"}}
+        {:error, {:unexpected_end, "Expected #{inspect(expected_type)}", nil}}
     end
   end
 
@@ -1221,7 +1254,7 @@ defmodule Lua.Parser do
           "Expected #{inspect(expected_type)}:#{inspect(expected_value)}, got #{inspect(type)}"}}
 
       nil ->
-        {:error, {:unexpected_end, "Expected #{inspect(expected_type)}:#{inspect(expected_value)}"}}
+        {:error, {:unexpected_end, "Expected #{inspect(expected_type)}:#{inspect(expected_value)}", nil}}
     end
   end
 
@@ -1231,8 +1264,8 @@ defmodule Lua.Parser do
     Error.new(:unexpected_token, message, pos, suggestion: suggest_for_token_error(type, message))
   end
 
-  defp convert_error({:unexpected_end, message}, _code) do
-    Error.new(:unexpected_end, message, nil,
+  defp convert_error({:unexpected_end, message, pos}, _code) do
+    Error.new(:unexpected_end, message, pos,
       suggestion: """
       The parser reached the end of the file unexpectedly.
       Check for missing closing delimiters or keywords like 'end', ')', '}', or ']'.
@@ -1240,12 +1273,52 @@ defmodule Lua.Parser do
     )
   end
 
-  defp convert_error({:unexpected_expression, message}, _code) do
-    Error.new(:invalid_syntax, message, nil)
+  defp convert_error({:bare_expression, pos, expr_struct}, _code) do
+    {message, suggestion} = bare_expression_message(expr_struct)
+    Error.new(:invalid_syntax, message, pos, suggestion: suggestion)
   end
 
   defp convert_error(other, _code) do
     Error.new(:invalid_syntax, "Parse error: #{inspect(other)}", nil)
+  end
+
+  # Picks a message and suggestion specific to the AST shape that
+  # appeared as a bare statement. The fallback covers literals,
+  # function expressions, and any future expression types we haven't
+  # special-cased.
+  defp bare_expression_message(Expr.BinOp) do
+    {"A bare arithmetic or logical expression isn't a Lua statement.",
+     "Did you mean to assign or return the result? For example, 'return <expression>'."}
+  end
+
+  defp bare_expression_message(Expr.UnOp) do
+    {"A bare unary expression isn't a Lua statement.",
+     "Did you mean to assign or return the result? For example, 'return <expression>'."}
+  end
+
+  defp bare_expression_message(Expr.Var) do
+    {"A bare variable reference isn't a Lua statement.",
+     "To call it as a function, add parentheses: 'name(...)'. " <>
+       "To assign to it, write 'name = value'."}
+  end
+
+  defp bare_expression_message(struct) when struct in [Expr.Index, Expr.Property] do
+    {"A bare table-access expression isn't a Lua statement.",
+     "Did you mean to assign or read this field? " <>
+       "For an assignment: 't.field = value'. To call: 't.field(...)'."}
+  end
+
+  defp bare_expression_message(struct)
+       when struct in [Expr.Number, Expr.String, Expr.Bool, Expr.Nil, Expr.Vararg, Expr.Table] do
+    {"A bare literal isn't a Lua statement.",
+     "Lua statements are assignments, function calls, or control flow. " <>
+       "To use this value, return it or assign it to a name."}
+  end
+
+  defp bare_expression_message(_struct) do
+    {"This expression isn't a Lua statement.",
+     "Lua statements are assignments, function calls, or control flow. " <>
+       "To use this expression, return it or assign it to a name."}
   end
 
   defp convert_lexer_error({:unexpected_character, char, pos}, _code) do

@@ -54,4 +54,25 @@ defmodule Lua.CompilerExceptionTest do
     assert msg =~ "one"
     assert msg =~ "two"
   end
+
+  test "bare expression at statement level renders with location" do
+    # Regression: this case previously produced
+    # `(no position information)` because the parser dropped the
+    # offending expression's position when raising the
+    # `:unexpected_expression` error.
+    e =
+      try do
+        Lua.eval!(Lua.new(), "2 + 2")
+      rescue
+        e in Lua.CompilerException -> e
+      end
+
+    msg = Exception.message(e)
+
+    assert msg =~ "Failed to compile Lua!"
+    assert msg =~ ~r/line\s+1/
+    assert msg =~ ~r/column\s+\d+/
+    assert msg =~ "bare arithmetic"
+    refute msg =~ "(no position information)"
+  end
 end

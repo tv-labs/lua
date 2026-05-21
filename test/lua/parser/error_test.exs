@@ -178,4 +178,102 @@ defmodule Lua.Parser.ErrorTest do
       assert chunk.__struct__ == Lua.AST.Chunk
     end
   end
+
+  describe "bare-expression statements" do
+    # A bare expression at statement level (e.g. `2 + 2` with no
+    # `return`, no assignment, and no function call) is invalid Lua.
+    # Every shape must produce a positioned error with a suggestion
+    # specific to the expression shape.
+
+    test "bare arithmetic expression carries position and arithmetic suggestion" do
+      assert {:error, msg} = Parser.parse("2 + 2")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1"
+      assert msg =~ "column"
+      assert msg =~ "bare arithmetic"
+      assert msg =~ "return"
+    end
+
+    test "bare unary expression carries position and unary suggestion" do
+      assert {:error, msg} = Parser.parse("-x")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1"
+      assert msg =~ "column"
+      assert msg =~ "bare unary"
+      assert msg =~ "return"
+    end
+
+    test "bare variable carries position and call/assign suggestion" do
+      assert {:error, msg} = Parser.parse("foo")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1, column 1"
+      assert msg =~ "bare variable"
+      assert msg =~ "name(...)"
+      assert msg =~ "name = value"
+    end
+
+    test "bare property access carries position and table-access suggestion" do
+      assert {:error, msg} = Parser.parse("t.field")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1, column 1"
+      assert msg =~ "bare table-access"
+      assert msg =~ "t.field = value"
+    end
+
+    test "bare index access carries position and table-access suggestion" do
+      assert {:error, msg} = Parser.parse("t[1]")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1, column 1"
+      assert msg =~ "bare table-access"
+    end
+
+    test "bare literal carries position and literal-specific suggestion" do
+      assert {:error, msg} = Parser.parse("42")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1, column 1"
+      assert msg =~ "bare literal"
+    end
+
+    test "bare string literal also classifies as a bare literal" do
+      assert {:error, msg} = Parser.parse(~S("hello"))
+      assert msg =~ "Parse Error"
+      assert msg =~ "bare literal"
+    end
+
+    test "bare boolean classifies as a bare literal" do
+      assert {:error, msg} = Parser.parse("true")
+      assert msg =~ "Parse Error"
+      assert msg =~ "bare literal"
+    end
+
+    test "bare expression on a later line reports the right line number" do
+      code = """
+      local x = 1
+      local y = 2
+      x + y
+      """
+
+      assert {:error, msg} = Parser.parse(code)
+      assert msg =~ "line 3"
+      assert msg =~ "bare arithmetic"
+    end
+
+    test "the source line is echoed below the error" do
+      assert {:error, msg} = Parser.parse("2 + 2")
+      # The renderer strips ANSI in plain inspection but keeps the
+      # source text. Look for the echo of the offending input.
+      assert msg =~ "2 + 2"
+    end
+  end
+
+  describe "unexpected end of input" do
+    test "lone 'local' keyword carries position, not '(no position information)'" do
+      assert {:error, msg} = Parser.parse("local")
+      assert msg =~ "Parse Error"
+      refute msg =~ "(no position information)"
+      assert msg =~ "line 1"
+      assert msg =~ "column"
+      assert msg =~ "after 'local'"
+    end
+  end
 end
