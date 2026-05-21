@@ -2,10 +2,10 @@
 id: B7
 title: Split table storage into array + hash parts
 issue: null
-pr: null
+pr: 229
 branch: perf/table-array-hash-split
 base: main
-status: in-progress
+status: review
 direction: B
 unlocks:
   - O(1) `t[#t + 1] = x` (supersedes A10b)
@@ -250,4 +250,75 @@ IO.puts("delta=#{after_mem - before_mem}B")
 
 ## Discoveries
 
-(populated during implementation)
+- The first iteration used `:erlang.append_element/2` for every
+  append. That's O(n) per call (copies the tuple), so a 500-element
+  build is O(n²). Result: +12% slower than baseline, +160% memory.
+  The plan's risks section explicitly warned about this; exponential
+  growth was the cited mitigation. Switching to capacity-doubling
+  (floor 4) with `setelement/3` into pre-nil slots made the path
+  amortized O(1) and is what landed.
+- The first version eagerly demoted array slots to the hash part when
+  `t[k] = nil` punched a hole. That broke
+  `for k,v in pairs(t) do t[k] = nil end` because the cleared key was
+  no longer findable for `next(t, k)` to advance past it. PUC-Lua's
+  nil-as-hole semantics (set the slot to nil in place, flip an
+  `array_has_holes` flag) is both simpler and correct. `Table.length/1`
+  consults the flag and stays O(1) for the dominant no-holes case.
+- Most of the plan's projected wins assumed the dominant
+  per-write cost was `Map.put` on the data map. In the post-B8 profile
+  the picture was more diffuse: `setelement/3` (register writes) is
+  still the biggest line item, and the per-key `Map.put`/`order_tail`/
+  `dead` pipeline only accounts for ~25% of write cost. So the array
+  split removed the most fixable share but couldn't move the bigger
+  cost line.
+- B6 (direct table refs) was deferred in this same branch after the
+  post-B8 profile showed `Map.get/2,3` combined was already at 3.28%
+  on fib(22) (plan claimed 6.4%) and 0.04% on table_build. Recorded
+  in `.agents/plans/B6-direct-table-refs.md`.
+
+## What changed
+
+- `lib/lua/vm/table.ex` — bulk of the change. Added `array`,
+  `array_len`, `array_has_holes` fields; added `get/2`, `has?/2`,
+  `length/1`, `to_map/1`, `keys/1` helpers; rewrote `put/3` to route
+  integer writes through the array part with exponential growth;
+  rewrote `next_entry/2` to walk array then hash, skipping nil slots.
+- `lib/lua/vm/executor.ex` — `get_table` fast path now checks the
+  array part for positive integer keys; `table_index`, `table_newindex`,
+  `table_length`, and the `:length` opcode call the new helpers.
+- `lib/lua/vm/stdlib.ex` — `rawget`, `rawlen`, `ipairs` migrated to
+  helpers. `cache_module_result` now goes through `Table.put/3` instead
+  of mutating `data` directly.
+- `lib/lua.ex` — `set_in_table`/`get_in_table` traversal calls
+  `Table.get/2` so integer-key paths see array entries.
+- `lib/lua/vm/state.ex` — `globals/1` returns `Table.to_map(table)`.
+- `lib/lua/vm/value.ex`, `lib/lua/vm/display.ex` — full-table decoders
+  use `Table.to_map/1`.
+- `test/lua/vm/value_test.exs` — two implementation-coupled assertions
+  on `table.data[N]` for integer keys were updated to use `Table.get/2`.
+
+PR: #229
+
+Also in this PR:
+- B6 deferred (`.agents/plans/B6-direct-table-refs.md`) — profile
+  doesn't support the hypothesis after PR #223 / #227 / #229.
+- B8 marked merged (`.agents/plans/B8-inline-numeric-narrowing.md`,
+  shipped via #227).
+
+Suite delta: 1692 tests passing → 1692 tests passing (no regression).
+lua53 suite: 29 tests, 0 failures (matches main).
+
+Benchmarks vs baseline (lua chunk path):
+
+| workload | baseline | after B7 | delta | beats luerl? |
+|---|---|---|---|---|
+| Table Build | 89.45 µs | 83.80 µs | -6.3% | **yes** |
+| Table Sort  | 245.45 µs | 191.93 µs | -21.8% | no (was 2.2x, now 1.7x) |
+| Iterate/Sum | 129.91 µs | 117.19 µs | -9.8% | **yes** |
+| Map+Reduce  | 277.32 µs | 249.02 µs | -10.2% | **yes** |
+| OOP         | 135.69 µs | 122.26 µs | -10% | no (was 1.27x, now 1.14x) |
+| table.concat | 44.21 µs | 32.22 µs | -27% | **yes** |
+| fib(30) chunk | 873 ms | ~860 ms | within noise (±3%) | — |
+
+Memory regressed ~2-3x on table-heavy workloads (e.g. table_build
+0.65 MB → 1.68 MB). Bounded by BEAM immutable-tuple semantics.
