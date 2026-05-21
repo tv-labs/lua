@@ -76,7 +76,6 @@ defmodule Lua.Lua53SuiteTest do
   describe "Lua 5.3 Test Suite - Deferred (Intentional Non-Goals)" do
     for {test_file, reason} <- @deferred_permanent do
       @test_file test_file
-      @reason reason
       @tag :skip
       @tag :deferred_permanent
       test "#{test_file} — #{reason}" do

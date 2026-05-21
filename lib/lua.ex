@@ -9,6 +9,7 @@ defmodule Lua do
   alias Lua.Util
   alias Lua.VM.AssertionError
   alias Lua.VM.Display
+  alias Lua.VM.InternalError
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Table
@@ -22,7 +23,7 @@ defmodule Lua do
   # for future-proofing. Suppress dialyzer warnings on those defensive branches.
   @dialyzer {:no_match, eval!: 2, eval!: 3, parse_chunk: 1}
 
-  defstruct [:state]
+  defstruct [:state, debug: false]
 
   @default_sandbox [
     [:io, :stdin],
@@ -82,17 +83,20 @@ defmodule Lua do
   ## Options
   * `:sandboxed` - list of paths to be sandboxed, e.g. `sandboxed: [[:require], [:os, :exit]]`
   * `:exclude` - list of paths to exclude from the sandbox, e.g. `exclude: [[:require], [:package]]`
+  * `:debug` - (default `false`) when `true`, internal Lua VM frames are preserved in stack traces
+    instead of being pruned. Useful when debugging library bugs.
   """
   def new(opts \\ []) do
-    opts = Keyword.validate!(opts, sandboxed: @default_sandbox, exclude: [])
+    opts = Keyword.validate!(opts, sandboxed: @default_sandbox, exclude: [], debug: false)
     exclude = Keyword.fetch!(opts, :exclude)
+    debug = Keyword.fetch!(opts, :debug)
 
     state = Lua.VM.Stdlib.install(State.new())
 
     opts
     |> Keyword.fetch!(:sandboxed)
     |> Enum.reject(fn path -> path in exclude end)
-    |> Enum.reduce(%__MODULE__{state: state}, &sandbox(&2, &1))
+    |> Enum.reduce(%__MODULE__{state: state, debug: debug}, &sandbox(&2, &1))
   end
 
   @doc """
@@ -480,14 +484,19 @@ defmodule Lua do
     e in [Lua.RuntimeException, Lua.CompilerException] ->
       reraise e, __STACKTRACE__
 
+    # Library bug, not a Lua program error — keep the full Elixir
+    # stack so the failing internal call site is visible.
+    e in [InternalError] ->
+      reraise Lua.RuntimeException, e, __STACKTRACE__
+
     # Pass the VM exception itself (not just its message) so the
     # `Lua.RuntimeException.exception/1` clause for arbitrary exceptions
     # picks up `:line`, `:source`, and `:call_stack`.
     e in [RuntimeError, TypeError, AssertionError] ->
-      reraise Lua.RuntimeException, e, __STACKTRACE__
+      reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__, lua.debug)
 
     e ->
-      reraise Lua.RuntimeException, e, __STACKTRACE__
+      reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__, lua.debug)
   end
 
   def eval!(%__MODULE__{state: state} = lua, %Lua.Chunk{prototype: proto}, opts) do
@@ -509,14 +518,59 @@ defmodule Lua do
     e in [Lua.RuntimeException, Lua.CompilerException] ->
       reraise e, __STACKTRACE__
 
+    # Library bug, not a Lua program error — keep the full Elixir
+    # stack so the failing internal call site is visible.
+    e in [InternalError] ->
+      reraise Lua.RuntimeException, e, __STACKTRACE__
+
     # Pass the VM exception itself (not just its message) so the
     # `Lua.RuntimeException.exception/1` clause for arbitrary exceptions
     # picks up `:line`, `:source`, and `:call_stack`.
     e in [RuntimeError, TypeError, AssertionError] ->
-      reraise Lua.RuntimeException, e, __STACKTRACE__
+      reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__, lua.debug)
 
     e ->
-      reraise Lua.RuntimeException, e, __STACKTRACE__
+      reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__, lua.debug)
+  end
+
+  # Internal-namespace prefixes whose frames are noise to a Lua program
+  # author. We match exact module prefixes (with a trailing dot) so a
+  # user's own `Lua.MyApp.Something` is never collateral damage. The
+  # top-level `Lua.` API surface (e.g. `Lua.eval!/3`) is preserved.
+  @internal_module_prefixes [
+    "Elixir.Lua.VM.",
+    "Elixir.Lua.Compiler.",
+    "Elixir.Lua.Parser.",
+    "Elixir.Lua.Lexer."
+  ]
+
+  # Removes internal executor / compiler / parser / lexer frames from a
+  # rescued stacktrace so the user sees only frames they can act on:
+  # their own call site and the public `Lua.eval!` boundary.
+  #
+  # When `debug` is `true` (set via `Lua.new(debug: true)`), pruning is
+  # skipped so the full internal stack is visible for library debugging.
+  defp prune_lua_internals(stacktrace, debug) do
+    if debug do
+      stacktrace
+    else
+      Enum.reject(stacktrace, &internal_frame?/1)
+    end
+  end
+
+  defp internal_frame?({mod, _fun, _arity, _loc}) when is_atom(mod) do
+    internal_module?(mod)
+  end
+
+  defp internal_frame?({mod, _fun, _arity, _loc, _meta}) when is_atom(mod) do
+    internal_module?(mod)
+  end
+
+  defp internal_frame?(_), do: false
+
+  defp internal_module?(mod) do
+    mod_str = Atom.to_string(mod)
+    Enum.any?(@internal_module_prefixes, &String.starts_with?(mod_str, &1))
   end
 
   @doc """

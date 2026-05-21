@@ -2,6 +2,7 @@ defmodule Lua.RuntimeExceptionTest do
   use ExUnit.Case, async: true
 
   alias Lua.RuntimeException
+  alias Lua.VM.Executor
   alias Lua.VM.State
 
   describe "exception/1 with {:lua_error, error, state}" do
@@ -429,6 +430,154 @@ defmodule Lua.RuntimeExceptionTest do
       assert_raise RuntimeException, fn ->
         Lua.eval!(lua, "test_func()")
       end
+    end
+  end
+
+  describe "stack trace pruning" do
+    # The rescued Elixir stacktrace should not contain frames from the
+    # VM, compiler, parser, or lexer internals — those are noise to a
+    # Lua program author. The user's calling frame and the public
+    # `Lua.eval!` boundary must remain visible.
+
+    defp rescued_stacktrace(fun) do
+      fun.()
+    rescue
+      _ -> __STACKTRACE__
+    end
+
+    defp stacktrace_modules(stacktrace) do
+      Enum.flat_map(stacktrace, fn
+        {mod, _fun, _arity, _loc} -> [mod]
+        {mod, _fun, _arity, _loc, _meta} -> [mod]
+        _ -> []
+      end)
+    end
+
+    test "executor frames are pruned from runtime errors" do
+      lua = Lua.new()
+
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "return 'string' + 5")
+        end)
+
+      modules = stacktrace_modules(stack)
+
+      refute Executor in modules
+      refute Lua.VM.Stdlib in modules
+    end
+
+    test "public Lua boundary frames are preserved" do
+      lua = Lua.new()
+
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "return 'string' + 5")
+        end)
+
+      modules = stacktrace_modules(stack)
+
+      assert Enum.any?(modules, &(&1 == Lua)),
+             "expected Lua.eval! frame to be preserved, got modules: #{inspect(modules)}"
+    end
+
+    test "executor frames are pruned when assert(false) raises" do
+      lua = Lua.new()
+
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "assert(false, 'nope')")
+        end)
+
+      assert Enum.all?(stacktrace_modules(stack), fn mod ->
+               mod_str = Atom.to_string(mod)
+               not String.starts_with?(mod_str, "Elixir.Lua.VM.")
+             end)
+    end
+
+    test "executor frames are pruned when error() is called" do
+      lua = Lua.new()
+
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "error('boom')")
+        end)
+
+      assert Enum.all?(stacktrace_modules(stack), fn mod ->
+               mod_str = Atom.to_string(mod)
+               not String.starts_with?(mod_str, "Elixir.Lua.VM.")
+             end)
+    end
+
+    test "debug: true restores executor frames" do
+      lua = Lua.new(debug: true)
+
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "return 'string' + 5")
+        end)
+
+      modules = stacktrace_modules(stack)
+
+      assert Enum.any?(modules, &(&1 == Executor)),
+             "expected Lua.VM.Executor frame with debug: true"
+    end
+
+    test "InternalError keeps the full stack (library bug, not Lua program error)" do
+      # Synthesise an InternalError by registering a Lua-callable that
+      # returns the wrong shape — this trips the InternalError raise at
+      # executor.ex:692 ("native function returned invalid result").
+      lua =
+        Lua.set!(Lua.new(), [:bad_native], fn _args, _state ->
+          :not_a_valid_return
+        end)
+
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "return bad_native()")
+        end)
+
+      modules = stacktrace_modules(stack)
+
+      assert Enum.any?(modules, &(&1 == Executor)),
+             "InternalError should keep Lua.VM.Executor frame for library debugging"
+    end
+
+    test "executor frames are pruned and Lua boundary frame is preserved (debug: false)" do
+      # Confirms both the 4-tuple and general pruning path through eval!.
+      lua = Lua.new()
+
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "return 'string' + 5")
+        end)
+
+      modules = stacktrace_modules(stack)
+
+      refute Executor in modules
+      assert Lua in modules
+    end
+
+    test "user module not under an internal prefix is preserved through eval!" do
+      # Registers a Lua-callable implemented in a module that is NOT under
+      # any internal prefix. It must survive pruning so the user can trace
+      # calls into their own code.
+      defmodule MyApp.LuaHelper do
+        @moduledoc false
+        def call(_args, _state), do: raise(RuntimeError, "boom from user code")
+      end
+
+      lua = Lua.set!(Lua.new(), [:my_helper], &MyApp.LuaHelper.call/2)
+
+      stack =
+        rescued_stacktrace(fn ->
+          Lua.eval!(lua, "return my_helper()")
+        end)
+
+      modules = stacktrace_modules(stack)
+
+      refute Executor in modules
+      assert MyApp.LuaHelper in modules
     end
   end
 end
