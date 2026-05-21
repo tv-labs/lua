@@ -2,10 +2,10 @@
 id: A29
 title: Mix tasks — lua.eval, lua.bench, lua.suite
 issue: null
-pr: null
+pr: 220
 branch: dx/mix-tasks
 base: main
-status: ready
+status: review
 direction: A
 unlocks:
   - one-line invocations from a Mix project
@@ -143,6 +143,68 @@ mix lua.suite
   If so, the task should refuse with a clear message ("run `mix
   deps.get` in `:benchmark` env first") rather than crash.
 
+## What changed
+
+- New `lib/mix/tasks/lua.eval.ex` — the only task shipped to Hex.
+- New `tasks/lua.suite.ex`, `tasks/lua.bench.ex`,
+  `tasks/lua.get_tests.ex` — contributor-only Mix tasks. `tasks/` is
+  already on the `:dev` (and therefore `:test`) compile path
+  (`mix.exs:39`), but isn't in the `package.files` whitelist, so
+  these tasks are available locally and excluded from the Hex
+  release.
+- New shared module `tasks/suite_runner.ex` (`Lua.SuiteRunner`)
+  extracted from `test/support/lua_test_case.ex` so the Mix suite
+  task and the ExUnit suite test share one sandbox implementation.
+  Marked `@moduledoc false` because it's internal to this repo.
+- `test/support/lua_test_case.ex` shrinks from ~127 to ~25 lines and
+  delegates to `Lua.SuiteRunner`. Also marked `@moduledoc false`.
+- New tests: 9 in `test/mix/tasks/lua.eval_test.exs`, 6 in
+  `lua.suite_test.exs`, 2 in `lua.bench_test.exs`. Total mix test
+  count: 1654 → 1671, 0 failures.
+- New guide: `guides/mix_tasks.md`. Reworded to make the
+  "ships to Hex" vs "contributor-only" split explicit.
+- No regression in `mix test --only lua53` (6 passing, 23 skipped,
+  same as before).
+
 ## Discoveries
 
-(populated during implementation)
+- **No `Lua.eval/2`** — only `Lua.eval!/2,3` exists. The plan's sketch
+  showed `case Lua.eval(...) do {result, _state} -> ...; {:error, _} -> ...`,
+  but in reality `eval!` raises `Lua.CompilerException` or
+  `Lua.RuntimeException`. `Mix.Tasks.Lua.Eval` uses `try/rescue` and
+  exits `{:shutdown, 1}` on error, writing the message to stderr.
+- **Default `inspect` treats `[42]` as a charlist** (`~c"*"` for the
+  ASCII `*`). `Mix.Tasks.Lua.Eval` forces `charlists: :as_lists` so
+  numeric return values render as actual lists.
+- **Suite needs per-file timeouts.** The first full-suite smoke test
+  hung indefinitely on `big.lua` / `closure.lua` (well-known
+  long-runners on this VM). Added `--timeout MS` (default 30000) that
+  wraps `Lua.SuiteRunner.run_file/1` in a `Task` and kills it on
+  expiry, reporting `timeout:` in the summary.
+- **Sandbox config was test-only.** The shared sandbox setup
+  (unsandbox `package`/`require`, install `dostring`/`load`/`checkerr`
+  helpers) lived in `test/support/lua_test_case.ex`, which isn't on
+  the `:dev`/`:prod` compile path. Extracted into a new
+  `Lua.SuiteRunner` module under `lib/lua/` so both `Lua.TestCase`
+  and `Mix.Tasks.Lua.Suite` can share it without duplication.
+- **Skipped the `--vs luerl|puc-lua|both` flag.** The plan suggested
+  it, but every benchmark script in `benchmarks/` already runs all
+  three targets unconditionally (with luaport gracefully skipping if
+  C Lua isn't available). The flag would have no current effect.
+  Added `--list` and `--workload NAME` (repeatable) instead.
+- **Only `lua.eval` belongs in the Hex package.** Initial review
+  shipped `lua.bench`, `lua.suite`, `lua.get_tests`, and
+  `Lua.SuiteRunner` from `lib/`, which means they would have been
+  published to Hex. All three are broken-by-design for downstream
+  consumers:
+    * `lua.bench` hardcodes `benchmarks/` (resolved against the
+      consumer's CWD, not this repo) and shells out to
+      `MIX_ENV=benchmark` for deps the consumer doesn't have.
+    * `lua.suite` defaults to `test/lua53_tests/` and references
+      `mix lua.get_tests` to populate it — both of which only make
+      sense inside this repo.
+    * `Lua.SuiteRunner` installs `dostring`/`load`/`checkerr` globals
+      specific to the PUC-Lua 5.3 official test suite.
+  Moved all four files under `tasks/`, which is on the `:dev`/`:test`
+  compile path but not in `package.files`. Verified with
+  `mix hex.build` that only `lib/mix/tasks/lua.eval.ex` ships.

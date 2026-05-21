@@ -1,7 +1,13 @@
 defmodule Mix.Tasks.Lua.GetTests do
-  @shortdoc "Downloads the Lua 5.3 test suite"
+  @shortdoc "Downloads the Lua 5.3 test suite (contributors only)"
   @moduledoc """
   Downloads the official Lua 5.3 test suite.
+
+  > #### Contributor-only task {: .info}
+  >
+  > This task is intended for development of the `:lua` library itself.
+  > It is not shipped to Hex: it populates this repo's
+  > `test/lua53_tests/` from https://www.lua.org/tests/.
 
   The test suite is downloaded from https://www.lua.org/tests/ and
   extracted to test/lua53_tests/.
