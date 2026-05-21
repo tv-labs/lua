@@ -136,7 +136,7 @@ defmodule Lua.VM.Display do
   defp peek_table(state, id, decode?) do
     case Map.fetch(state.tables, id) do
       {:ok, table} ->
-        data = table.data
+        data = Lua.VM.Table.to_map(table)
 
         if sequence_like?(data) do
           Enum.map(1..map_size(data), &wrap_value(Map.fetch!(data, &1), state, decode?))

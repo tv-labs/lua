@@ -81,7 +81,7 @@ defmodule Lua.VM.State do
   @spec globals(t()) :: map()
   def globals(%__MODULE__{g_ref: g_ref} = state) when not is_nil(g_ref) do
     table = get_table(state, g_ref)
-    table.data
+    Table.to_map(table)
   end
 
   @doc """

@@ -1230,7 +1230,7 @@ defmodule Lua.VM.Executor do
         case value do
           {:tref, id} ->
             table = Map.fetch!(state.tables, id)
-            Value.sequence_length(table.data)
+            Table.length(table)
 
           v when is_binary(v) ->
             byte_size(v)
@@ -1262,10 +1262,55 @@ defmodule Lua.VM.Executor do
     key = elem(regs, key_reg)
 
     case table_val do
-      {:tref, id} when is_integer(key) or is_binary(key) ->
-        # Fast path mirroring get_field: integer/string key on a tref. Skip
-        # normalize_key (no-op for these) and the full index_value pipeline
-        # when the entry is present or no metatable is set.
+      {:tref, id} when is_integer(key) and key >= 1 ->
+        # Fast path: positive integer key on a tref. Check the array part
+        # first (constant-time `element/2`); fall back to the hash side or
+        # the full index_value pipeline if missing.
+        table = :erlang.map_get(id, state.tables)
+        array_len = :erlang.map_get(:array_len, table)
+
+        if key <= array_len do
+          case :erlang.element(key, :erlang.map_get(:array, table)) do
+            nil ->
+              # Hole in the array part — fall through to metatable check.
+              case :erlang.map_get(:metatable, table) do
+                nil ->
+                  regs = put_elem(regs, dest, nil)
+                  do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+                _ ->
+                  {value, state} = index_value(table_val, key, state, line, proto.source)
+                  regs = put_elem(regs, dest, value)
+                  do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+              end
+
+            value ->
+              regs = put_elem(regs, dest, value)
+              do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+          end
+        else
+          case :erlang.map_get(:data, table) do
+            %{^key => value} ->
+              regs = put_elem(regs, dest, value)
+              do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+            _data ->
+              case :erlang.map_get(:metatable, table) do
+                nil ->
+                  regs = put_elem(regs, dest, nil)
+                  do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+                _ ->
+                  {value, state} = index_value(table_val, key, state, line, proto.source)
+                  regs = put_elem(regs, dest, value)
+                  do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+              end
+          end
+        end
+
+      {:tref, id} when is_binary(key) ->
+        # Binary keys never live in the array part, so the hash-side fast
+        # path is unchanged.
         table = :erlang.map_get(id, state.tables)
 
         case :erlang.map_get(:data, table) do
@@ -1769,7 +1814,7 @@ defmodule Lua.VM.Executor do
 
     table = Map.fetch!(state.tables, id)
 
-    case Table.get_data(table.data, key) do
+    case Table.get(table, key) do
       nil ->
         case table.metatable do
           nil ->
@@ -1828,7 +1873,7 @@ defmodule Lua.VM.Executor do
         %{state | tables: Map.put(state.tables, id, updated)}
 
       {:tref, mt_id} ->
-        if Table.has_data?(table.data, key) do
+        if Table.has?(table, key) do
           updated = Table.put(table, key, value)
           %{state | tables: Map.put(state.tables, id, updated)}
         else
@@ -1854,7 +1899,7 @@ defmodule Lua.VM.Executor do
   Returns the integer length of `tref`, honoring `__len`.
 
   When `__len` is defined the metamethod is invoked and its result is
-  coerced to an integer. Otherwise falls back to `Value.sequence_length/1`.
+  coerced to an integer. Otherwise falls back to `Lua.VM.Table.length/1`.
 
   Returns `{integer_length, state}`. Raises `TypeError` when `__len`
   returns a value that cannot be coerced to an integer (matching
@@ -1867,7 +1912,7 @@ defmodule Lua.VM.Executor do
       try_unary_metamethod("__len", tref, state, fn ->
         {:tref, id} = tref
         table = Map.fetch!(state.tables, id)
-        Value.sequence_length(table.data)
+        Table.length(table)
       end)
 
     case raw do

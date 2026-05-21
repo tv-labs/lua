@@ -326,7 +326,7 @@ defmodule Lua do
   defp set_in_table(state, tref, [key | rest], value) do
     table = State.get_table(state, tref)
 
-    case Map.get(table.data, key) do
+    case Table.get(table, key) do
       {:tref, _} = child_tref ->
         set_in_table(state, child_tref, rest, value)
 
@@ -399,13 +399,13 @@ defmodule Lua do
 
   defp get_in_table(state, tref, [key]) do
     table = State.get_table(state, tref)
-    Map.get(table.data, key)
+    Table.get(table, key)
   end
 
   defp get_in_table(state, tref, [key | rest]) do
     table = State.get_table(state, tref)
 
-    case Map.get(table.data, key) do
+    case Table.get(table, key) do
       {:tref, _} = child_tref ->
         get_in_table(state, child_tref, rest)
 
