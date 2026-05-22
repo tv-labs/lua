@@ -2,10 +2,10 @@
 id: B5a
 title: Erlang codegen foundation — compile arithmetic + control flow prototypes to BEAM modules
 issue: null
-pr: null
+pr: 235
 branch: perf/erlang-codegen-foundation
 base: main
-status: in-progress
+status: review
 direction: B
 unlocks:
   - B5b (lifecycle), B5c (tables), B5d (closures), B5e (errors)
@@ -360,4 +360,73 @@ IO.puts("table fallback OK")
 
 ## Discoveries
 
-(populated during implementation)
+### Perf reality vs spike — the 5x target was not hit
+
+Spike measured 12.4x faster than interpreter on fib(25). Production
+codegen achieves only ~1.4x faster on fib(30) (1.07x vs Luerl). The
+gap traces to three sources:
+
+1. **`throw/catch` for non-tail `:return`** — every `:return` inside
+   a `:test` branch becomes `throw({:b5_return, _, _})` caught at the
+   function entry. Spike fib uses Erlang clause-matching to express
+   the base case, so it never throws. Tail-position `:return` is now
+   optimised to a natural return, saving roughly half the throws on
+   fib (the recursive-case return). Returns inside branches still
+   throw — fib hits this on every base-case exit.
+
+2. **`setelement/3` per register write** — 22% of profile time, ~2.2M
+   calls for fib(25). Equivalent to the interpreter's register-tuple
+   cost; eliminated only by SSA promotion of registers to Erlang
+   variables (deferred follow-up).
+
+3. **Slow-path fallback for `apply_arith_op` etc.** — the integer
+   fast path is inlined for `:add`/`:subtract`/`:multiply` and
+   comparison, but `:divide` and friends always call into Executor.
+   For fib all arithmetic stays on the fast path, so this is small.
+   `apply_compare_op` is consulted only for `:equal`/`:not_equal`.
+
+### Sub-prototype compile-status cascade
+
+Original B5 plan said "if any sub-prototype falls back, the parent
+falls back too." Spike honoured this rule. Real-world Lua almost
+always wraps function definitions in chunks that use unsupported
+opcodes (`:set_field` for `function f(...) end` writing to `_ENV`).
+That cascade made every function compile-eligible code fall back.
+
+Fix: sub-prototypes compile independently. The parent's `:closure`
+opcode (interpreter side, since `:closure` itself isn't B5a-covered
+yet) checks `nested_proto.compiled_module` and emits either
+`{:compiled_closure, ...}` or `{:lua_closure, ...}`. After this
+change fib's `function fib(...)` compiles even though the chunk that
+defines it doesn't.
+
+### `:compiled_closure` is a 5-tuple, not 4
+
+Initial design: `{:compiled_closure, mod, fun, upvalues}`. Display
+needed the prototype back (for source/line/arity metadata). Rather
+than carry a separate proto lookup table, the value tuple gained a
+5th element holding the source `%Prototype{}`. Execution itself
+ignores it; only Display and `debug.getinfo` use it.
+
+### `unsafe_var` lint warning in some `:test` shapes
+
+When a `:test` branch writes a register and the function continues
+past the branch, Erlang's lint reports `unsafe_var` (the register
+variable is "exported" from a case branch). Currently those
+prototypes fail to load and fall back. The `:test` lowering should
+fork ctx per branch and emit phi-style register reconciliation;
+deferred to a follow-up.
+
+### Open-cell upvalue lowering needed per-clause variables
+
+`:get_open_upvalue` initially used `:__OpenCellRef` as the bind name
+in both case clauses. Erlang's lint flagged this as unsafe (variable
+defined in one clause used in another). Fixed by minting a fresh
+per-call `OpenRef_<n>` atom.
+
+### Lua binary literals must round-trip byte-by-byte
+
+`String.to_charlist/1` raises on non-UTF-8 binaries. Lua strings can
+hold arbitrary bytes. The codegen's binary-literal lowering now emits
+each byte as a separate `bin_element` rather than going through the
+string-as-charlist encoding.
