@@ -2,10 +2,10 @@
 id: B7
 title: Split table storage into array + hash parts
 issue: null
-pr: null
+pr: 229
 branch: perf/table-array-hash-split
 base: main
-status: ready
+status: deferred
 direction: B
 unlocks:
   - O(1) `t[#t + 1] = x` (supersedes A10b)
@@ -250,4 +250,71 @@ IO.puts("delta=#{after_mem - before_mem}B")
 
 ## Discoveries
 
-(populated during implementation)
+Implemented in PR #229; closed unmerged after multi-n measurement
+(enabled by the bench harness in PR #230) revealed a hard crossover.
+
+### What landed in #229
+
+- `Lua.VM.Table` gained `array :: tuple()`, `array_len :: non_neg_integer()`,
+  and `array_has_holes :: boolean()` fields.
+- Reads go through new `Table.get/2`, `Table.has?/2`, `Table.length/1`,
+  `Table.to_map/1`, `Table.keys/1` helpers that consult both parts.
+- Integer-keyed writes route through `put_integer/3` with exponential
+  capacity growth (doubling, floor 4) so sequential `t[i] = ...` is
+  amortized O(1).
+- Every site that previously read `table.data` for an integer key was
+  migrated to the new helpers (executor, stdlib, lua.ex, display).
+
+### Why we closed it
+
+Full-mode benchmarks on the merged bench harness (#230) showed:
+
+| workload @ n  | main      | B7        | delta   |
+|---------------|-----------|-----------|---------|
+| Build n=100   | 17.09 µs  | 14.03 µs  | -18%    |
+| Build n=1000  | 197.96 µs | 265.82 µs | **+34%** |
+| Sort n=100    | 34.91 µs  | 27.57 µs  | -21%    |
+| Sort n=1000   | 490.49 µs | 655.72 µs | **+34%** |
+| Iterate n=100 | 24.59 µs  | 21.11 µs  | -14%    |
+| Iterate n=1000| 276.74 µs | 358.64 µs | **+30%** |
+| Map+Red n=100 | 49.79 µs  | 42.78 µs  | -14%    |
+| Map+Red n=1000| 603.93 µs | 843.57 µs | **+40%** |
+
+Memory regressed 3-5× at n=1000 (e.g. Sort 2.08 MB → 12.40 MB).
+
+The crossover is fundamental: exponential-growth tuples win over
+`Map.put` at small n (where `setelement/3`'s constant-factor advantage
+matters), but lose at large n (where every `setelement/3` copies the
+whole tuple). PUC-Lua avoids this with in-place mutation in C; the
+BEAM cannot.
+
+The single n=500 number that originally motivated B7 was right at
+the crossover, which explains the inconsistent run-to-run results
+before #230 enabled multi-n measurement.
+
+### Conditions for reconsidering
+
+A future plan could revisit this with **threshold-based promotion**:
+keep contiguous integer keys in the hash map until `array_len` reaches
+some threshold (e.g. 256), then promote. That preserves the small-table
+wins (-14% to -21%) without taking the large-table hit. If we open such
+a plan, it should:
+
+- Decide the promotion threshold empirically (n where setelement
+  cost crosses Map.put cost on the target hardware).
+- Account for memory: even at threshold, the tuple still allocates
+  more than the equivalent map at the same size.
+- Keep the helpers (`get/2`, `has?/2`, `length/1`, `to_map/1`,
+  `keys/1`) we'd reuse — they're the call-site contract.
+
+Until that plan is written and shipped, the durable wins on table
+workloads have to come from elsewhere (e.g. attacking `setelement/3`
+register-write cost via Erlang codegen — B5 — or by reducing the
+number of writes per opcode).
+
+### Suite/test impact
+
+All 1692 tests + 29 lua53 suite tests passed on the B7 branch, so the
+correctness work (helpers, nil-as-hole semantics, dead-key iteration)
+is sound. None of that ships with this deferral — but the patterns
+proved out and would be reusable in a future threshold-based attempt.
