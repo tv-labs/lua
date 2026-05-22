@@ -13,9 +13,22 @@ defmodule Lua.VM do
   Executes a compiled prototype.
 
   Returns {:ok, results, state} on success.
+
+  When `proto.compiled_module` is set (the Erlang codegen accepted
+  the prototype) execution dispatches directly to the loaded BEAM
+  module. Otherwise the interpreter executes the instruction stream
+  as usual.
   """
   @spec execute(Prototype.t(), State.t()) :: {:ok, list(), State.t()}
-  def execute(%Prototype{} = proto, state \\ State.new()) do
+  def execute(%Prototype{compiled_module: {mod, fun}}, state) do
+    # No upvalues at the top-level chunk; the chunk's `_ENV` is set up
+    # at codegen time via the upvalue chain on inner prototypes. For
+    # the chunk itself, pass an empty upvalues tuple.
+    {results, final_state} = apply(mod, fun, [[], {}, state])
+    {:ok, results, final_state}
+  end
+
+  def execute(%Prototype{} = proto, state) do
     # Create register file sized to the prototype's needs.
     # The +16 buffer covers multi-return expansion slots that the codegen doesn't
     # always track in max_registers (call results can land beyond the stated max).
@@ -27,4 +40,6 @@ defmodule Lua.VM do
 
     {:ok, results, final_state}
   end
+
+  def execute(%Prototype{} = proto), do: execute(proto, State.new())
 end

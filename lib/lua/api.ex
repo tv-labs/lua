@@ -141,7 +141,8 @@ defmodule Lua.API do
   Is the value a reference to a Lua function?
   """
   defguard is_lua_func(value)
-           when is_tuple(value) and tuple_size(value) == 3 and elem(value, 0) == :lua_closure
+           when (is_tuple(value) and tuple_size(value) == 3 and elem(value, 0) == :lua_closure) or
+                  (is_tuple(value) and tuple_size(value) == 5 and elem(value, 0) == :compiled_closure)
 
   @doc """
   Is the value a reference to an Erlang / Elixir function?

@@ -12,6 +12,7 @@ defmodule Lua.VM.Stdlib.Util do
   def typeof(v) when is_binary(v), do: "string"
   def typeof({:tref, _}), do: "table"
   def typeof({:lua_closure, _, _}), do: "function"
+  def typeof({:compiled_closure, _, _, _, _}), do: "function"
   def typeof({:native_func, _}), do: "function"
   def typeof(_), do: "unknown"
 

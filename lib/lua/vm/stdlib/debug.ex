@@ -67,6 +67,18 @@ defmodule Lua.VM.Stdlib.Debug do
             "isvararg" => if(Map.get(proto, :is_vararg, false), do: true, else: false)
           }
 
+        {:compiled_closure, _mod, _fun, _upvalues, proto} ->
+          %{
+            "source" => Map.get(proto, :source, "=?"),
+            "currentline" => -1,
+            "what" => "Lua",
+            "name" => nil,
+            "linedefined" => elem(Map.get(proto, :lines, {0, 0}), 0),
+            "lastlinedefined" => elem(Map.get(proto, :lines, {0, 0}), 1),
+            "nparams" => Map.get(proto, :param_count, 0),
+            "isvararg" => if(Map.get(proto, :is_vararg, false), do: true, else: false)
+          }
+
         {:native_func, _} ->
           %{
             "source" => "=[C]",

@@ -20,7 +20,8 @@ defmodule Lua.Compiler.Prototype do
           is_vararg: boolean(),
           max_registers: non_neg_integer(),
           source: binary(),
-          lines: {non_neg_integer(), non_neg_integer()}
+          lines: {non_neg_integer(), non_neg_integer()},
+          compiled_module: {module(), atom()} | nil
         }
 
   defstruct instructions: [],
@@ -31,7 +32,8 @@ defmodule Lua.Compiler.Prototype do
             max_registers: 0,
             source: <<"-no-source-">>,
             lines: {0, 0},
-            varargs: []
+            varargs: [],
+            compiled_module: nil
 
   @doc """
   Creates a new prototype with the given options.

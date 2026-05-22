@@ -9,6 +9,7 @@ defmodule Lua do
   alias Lua.Util
   alias Lua.VM.AssertionError
   alias Lua.VM.Display
+  alias Lua.VM.Executor
   alias Lua.VM.InternalError
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
@@ -713,8 +714,15 @@ defmodule Lua do
       end)
 
     {results, _regs, new_state} =
-      Lua.VM.Executor.execute(proto.instructions, callee_regs, upvalues, proto, state)
+      Executor.execute(proto.instructions, callee_regs, upvalues, proto, state)
 
+    {:ok, results, new_state}
+  rescue
+    e -> {:error, Exception.message(e), state}
+  end
+
+  defp do_call_function({:compiled_closure, _, _, _, _} = closure, args, state) do
+    {results, new_state} = Executor.call_function(closure, args, state)
     {:ok, results, new_state}
   rescue
     e -> {:error, Exception.message(e), state}
@@ -757,7 +765,8 @@ defmodule Lua do
       true
 
       iex> {[c], _} = Lua.eval!(Lua.new(), "return function() end")
-      iex> match?({:lua_closure, _, _}, Lua.unwrap(c))
+      iex> match?({:lua_closure, _, _}, Lua.unwrap(c)) or
+      ...>   match?({:compiled_closure, _, _, _, _}, Lua.unwrap(c))
       true
 
       iex> Lua.unwrap(42)

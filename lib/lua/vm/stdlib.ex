@@ -421,6 +421,10 @@ defmodule Lua.VM.Stdlib do
     load_from_reader(reader, state)
   end
 
+  defp lua_load([{:compiled_closure, _, _, _, _} = reader | _rest], state) do
+    load_from_reader(reader, state)
+  end
+
   defp lua_load([{:native_func, _} = reader | _rest], state) do
     load_from_reader(reader, state)
   end
@@ -476,7 +480,13 @@ defmodule Lua.VM.Stdlib do
         # Compiler currently never returns errors, always succeeds — see
         # `Lua.Compiler.compile!/2` for the matching note.
         {:ok, prototype} = Lua.Compiler.compile(ast)
-        closure = {:lua_closure, prototype, {}}
+
+        closure =
+          case prototype.compiled_module do
+            {mod, fun} -> {:compiled_closure, mod, fun, {}, prototype}
+            nil -> {:lua_closure, prototype, {}}
+          end
+
         {[closure], state}
 
       {:error, reason} ->

@@ -776,7 +776,8 @@ defmodule Lua.VM.Stdlib.String do
             {value, st}
           end
 
-        match?({:lua_closure, _, _}, repl) or match?({:native_func, _}, repl) ->
+        match?({:lua_closure, _, _}, repl) or match?({:compiled_closure, _, _, _, _}, repl) or
+            match?({:native_func, _}, repl) ->
           fn args, st ->
             {results, st} = Executor.call_function(repl, args, st)
             result = List.first(results)
