@@ -3,10 +3,15 @@ defmodule Lua.ErrorMessagesTest do
 
   alias Lua.Compiler
   alias Lua.Parser
+  alias Lua.RuntimeException
   alias Lua.VM
   alias Lua.VM.ArgumentError
   alias Lua.VM.State
   alias Lua.VM.TypeError
+
+  defp error_message(code) do
+    Exception.message(assert_raise(RuntimeException, fn -> Lua.eval!(code) end))
+  end
 
   describe "beautiful error messages" do
     test "calling nil value shows helpful error" do
@@ -90,6 +95,83 @@ defmodule Lua.ErrorMessagesTest do
       # Should have call stack
       assert is_list(error.call_stack)
       assert length(error.call_stack) > 0
+    end
+
+    test "call-nil error names a global" do
+      assert error_message("return foo()") =~ "attempt to call a nil value (global 'foo')"
+    end
+
+    test "call-nil error names a local" do
+      assert error_message("local x = nil\nx()") =~ "attempt to call a nil value (local 'x')"
+    end
+
+    test "call-nil error names an upvalue" do
+      code = """
+      local x = nil
+      local function inner()
+        return x()
+      end
+      return inner()
+      """
+
+      assert error_message(code) =~ "attempt to call a nil value (upvalue 'x')"
+    end
+
+    test "call-nil error names a field and its receiver" do
+      assert error_message("local t = {}\nt.bar()") =~
+               "attempt to call a nil value (field 'bar' on local 't')"
+    end
+
+    test "call-nil error names a method and its receiver" do
+      assert error_message("local t = {}\nt:baz()") =~
+               "attempt to call a nil value (method 'baz' on local 't')"
+    end
+
+    test "call-nil error names a field on a global receiver" do
+      assert error_message("foo = {}\nfoo.bar()") =~
+               "attempt to call a nil value (field 'bar' on global 'foo')"
+    end
+
+    test "call-nil error names a method on a global receiver" do
+      assert error_message("foo = {}\nfoo:baz()") =~
+               "attempt to call a nil value (method 'baz' on global 'foo')"
+    end
+
+    test "call-nil error on field with anonymous receiver omits receiver clause" do
+      msg = error_message("local function f() return {} end\nf().bar()")
+
+      assert msg =~ "attempt to call a nil value (field 'bar')"
+      refute msg =~ "on local"
+      refute msg =~ "on global"
+    end
+
+    test "call non-function error names the callee" do
+      assert error_message("x = 5\nx()") =~
+               "attempt to call a number value (global 'x')"
+    end
+
+    test "index error on undefined global names it" do
+      assert error_message("foo.bar()") =~
+               "attempt to index a nil value (global 'foo')"
+    end
+
+    test "index error on nil local names it (set side)" do
+      assert error_message("local t = nil\nt.x = 1") =~
+               "attempt to index a nil value (local 't')"
+    end
+
+    test "index error on non-table local names it" do
+      assert error_message("local n = 5\nreturn n.x") =~
+               "attempt to index a number value (local 'n')"
+    end
+
+    test "anonymous callee has no name hint" do
+      msg = error_message("local t = {}\n;(t.x or t.y)()")
+
+      assert msg =~ "attempt to call a nil value"
+      refute msg =~ "(global"
+      refute msg =~ "(field"
+      refute msg =~ "(local"
     end
 
     test "concatenation type error" do
@@ -252,7 +334,7 @@ defmodule Lua.ErrorMessagesTest do
       """
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script, source: "demo.lua")
         end
 
@@ -271,7 +353,7 @@ defmodule Lua.ErrorMessagesTest do
       """
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script, source: "demo.lua")
         end
 
@@ -287,7 +369,7 @@ defmodule Lua.ErrorMessagesTest do
       """
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script, source: "demo.lua")
         end
 
@@ -304,7 +386,7 @@ defmodule Lua.ErrorMessagesTest do
       """
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script, source: "check.lua")
         end
 
@@ -318,7 +400,7 @@ defmodule Lua.ErrorMessagesTest do
       script = "local x = nil\nx()"
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script)
         end
 
@@ -328,7 +410,7 @@ defmodule Lua.ErrorMessagesTest do
 
     test "source: option threads through to the compiled chunk" do
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), "local z = nil\nz()", source: "user_input.lua")
         end
 
@@ -365,7 +447,7 @@ defmodule Lua.ErrorMessagesTest do
       """
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script, source: "demo.lua")
         end
 
@@ -383,7 +465,7 @@ defmodule Lua.ErrorMessagesTest do
       """
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script, source: "demo.lua")
         end
 
@@ -400,7 +482,7 @@ defmodule Lua.ErrorMessagesTest do
       """
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script, source: "demo.lua")
         end
 
@@ -417,7 +499,7 @@ defmodule Lua.ErrorMessagesTest do
       """
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script, source: "demo.lua")
         end
 
@@ -434,7 +516,7 @@ defmodule Lua.ErrorMessagesTest do
       """
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script, source: "demo.lua")
         end
 
@@ -491,7 +573,7 @@ defmodule Lua.ErrorMessagesTest do
       """
 
       e =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.eval!(Lua.new(), script, source: "demo.lua")
         end
 

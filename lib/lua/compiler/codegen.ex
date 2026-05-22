@@ -270,11 +270,11 @@ defmodule Lua.Compiler.Codegen do
 
               call_instr =
                 case List.last(call_instr) do
-                  {:call, cb, arg_count, _result_count} ->
+                  {:call, cb, arg_count, _result_count, hint} ->
                     List.replace_at(
                       call_instr,
                       length(call_instr) - 1,
-                      {:call, cb, arg_count, max(needed, 1)}
+                      {:call, cb, arg_count, max(needed, 1), hint}
                     )
 
                   _ ->
@@ -385,11 +385,11 @@ defmodule Lua.Compiler.Codegen do
 
           call_instr =
             case List.last(call_instr) do
-              {:call, cb, arg_count, _result_count} ->
+              {:call, cb, arg_count, _result_count, hint} ->
                 List.replace_at(
                   call_instr,
                   length(call_instr) - 1,
-                  {:call, cb, arg_count, max(needed, 1)}
+                  {:call, cb, arg_count, max(needed, 1), hint}
                 )
 
               _ ->
@@ -554,11 +554,11 @@ defmodule Lua.Compiler.Codegen do
           # Patch the call instruction to request 3 results
           iter_instr =
             case List.last(iter_instr) do
-              {:call, call_base, arg_count, _result_count} ->
+              {:call, call_base, arg_count, _result_count, hint} ->
                 List.replace_at(
                   iter_instr,
                   length(iter_instr) - 1,
-                  {:call, call_base, arg_count, 3}
+                  {:call, call_base, arg_count, 3, hint}
                 )
 
               _ ->
@@ -568,7 +568,7 @@ defmodule Lua.Compiler.Codegen do
           # Move the 3 results (at call_base, call_base+1, call_base+2) into base, base+1, base+2
           call_base =
             case List.last(iter_instr) do
-              {:call, cb, _, _} -> cb
+              {:call, cb, _, _, _} -> cb
               _ -> base
             end
 
@@ -617,11 +617,11 @@ defmodule Lua.Compiler.Codegen do
     # Patch the last instruction to request 0 results
     call_instructions =
       case List.last(call_instructions) do
-        {:call, base, arg_count, _result_count} ->
+        {:call, base, arg_count, _result_count, hint} ->
           List.replace_at(
             call_instructions,
             length(call_instructions) - 1,
-            {:call, base, arg_count, 0}
+            {:call, base, arg_count, 0, hint}
           )
 
         _ ->
@@ -775,17 +775,19 @@ defmodule Lua.Compiler.Codegen do
   end
 
   defp gen_assign_target(%Expr.Property{table: table_expr, field: field}, value_reg, ctx) do
+    hint = name_hint(table_expr, ctx)
     {table_instructions, table_reg, ctx} = gen_expr(table_expr, ctx)
-    {table_instructions ++ [Instruction.set_field(table_reg, field, value_reg)], ctx}
+    {table_instructions ++ [Instruction.set_field(table_reg, field, value_reg, hint)], ctx}
   end
 
   defp gen_assign_target(%Expr.Index{table: table_expr, key: key_expr}, value_reg, ctx) do
+    hint = name_hint(table_expr, ctx)
     {table_instructions, table_reg, ctx} = gen_expr(table_expr, ctx)
     {key_instructions, key_reg, ctx} = gen_expr(key_expr, ctx)
 
     {table_instructions ++
        key_instructions ++
-       [Instruction.set_table(table_reg, key_reg, value_reg)], ctx}
+       [Instruction.set_table(table_reg, key_reg, value_reg, hint)], ctx}
   end
 
   # Helper functions for if statement code generation
@@ -992,6 +994,10 @@ defmodule Lua.Compiler.Codegen do
     # Allocate base register for the call
     base_reg = ctx.next_reg
 
+    # Classify the callee expression so the executor can name it in
+    # "attempt to call a nil value (global 'foo')"-style runtime errors.
+    name_hint = name_hint(func_expr, ctx)
+
     # Generate code for the function expression
     {function_instructions, func_reg, ctx} = gen_expr(func_expr, ctx)
 
@@ -1037,7 +1043,7 @@ defmodule Lua.Compiler.Codegen do
 
         vararg_base = base_reg + 1 + arg_count
         vararg_instruction = Instruction.vararg(vararg_base, 0)
-        call_instruction = Instruction.call(base_reg, -(arg_count + 1), 1)
+        call_instruction = Instruction.call(base_reg, -(arg_count + 1), 1, name_hint)
 
         {function_instructions ++
            move_function ++
@@ -1071,7 +1077,7 @@ defmodule Lua.Compiler.Codegen do
         inner_call_instructions = patch_call_result_count(inner_call_instructions, -2)
 
         # Outer call uses {:multi, fixed_count} to collect fixed + expanded args
-        call_instruction = Instruction.call(base_reg, {:multi, fixed_count}, 1)
+        call_instruction = Instruction.call(base_reg, {:multi, fixed_count}, 1, name_hint)
 
         {function_instructions ++
            move_function ++
@@ -1093,7 +1099,7 @@ defmodule Lua.Compiler.Codegen do
 
         move_instructions = gen_move_args(arg_regs, base_reg + 1)
 
-        call_instruction = Instruction.call(base_reg, arg_count, 1)
+        call_instruction = Instruction.call(base_reg, arg_count, 1, name_hint)
 
         {function_instructions ++
            move_function ++
@@ -1253,19 +1259,21 @@ defmodule Lua.Compiler.Codegen do
   end
 
   defp gen_expr(%Expr.Property{table: table_expr, field: field}, ctx) do
+    hint = name_hint(table_expr, ctx)
     {table_instructions, table_reg, ctx} = gen_expr(table_expr, ctx)
     dest = ctx.next_reg
     ctx = %{ctx | next_reg: dest + 1}
-    {table_instructions ++ [Instruction.get_field(dest, table_reg, field)], dest, ctx}
+    {table_instructions ++ [Instruction.get_field(dest, table_reg, field, hint)], dest, ctx}
   end
 
   defp gen_expr(%Expr.Index{table: table_expr, key: key_expr}, ctx) do
+    hint = name_hint(table_expr, ctx)
     {table_instructions, table_reg, ctx} = gen_expr(table_expr, ctx)
     {key_instructions, key_reg, ctx} = gen_expr(key_expr, ctx)
     dest = ctx.next_reg
     ctx = %{ctx | next_reg: dest + 1}
 
-    {table_instructions ++ key_instructions ++ [Instruction.get_table(dest, table_reg, key_reg)], dest, ctx}
+    {table_instructions ++ key_instructions ++ [Instruction.get_table(dest, table_reg, key_reg, hint)], dest, ctx}
   end
 
   defp gen_expr(%Expr.MethodCall{object: obj_expr, method: method, args: args}, ctx) do
@@ -1273,11 +1281,14 @@ defmodule Lua.Compiler.Codegen do
     # Layout: R[base] = obj["method"], R[base+1] = obj (self), R[base+2..] = args
     base_reg = ctx.next_reg
 
+    # Hint for "attempt to index a nil value (...)" if `obj` is nil/non-table.
+    obj_hint = name_hint(obj_expr, ctx)
+
     # Compile the object expression
     {object_instructions, obj_reg, ctx} = gen_expr(obj_expr, ctx)
 
     # self instruction: R[base+1] = obj, R[base] = obj["method"]
-    self_instruction = Instruction.self_instr(base_reg, obj_reg, method)
+    self_instruction = Instruction.self_instr(base_reg, obj_reg, method, obj_hint)
 
     ctx = %{ctx | next_reg: base_reg + 2}
 
@@ -1306,7 +1317,7 @@ defmodule Lua.Compiler.Codegen do
       end)
 
     # Call with arg_count + 1 for self
-    call_instruction = Instruction.call(base_reg, arg_count + 1, 1)
+    call_instruction = Instruction.call(base_reg, arg_count + 1, 1, {:method, method, obj_hint})
 
     {object_instructions ++
        [self_instruction] ++
@@ -1417,14 +1428,14 @@ defmodule Lua.Compiler.Codegen do
     {load_instrs, env_reg, ctx} = gen_load_env(env_ref, ctx)
     dest = ctx.next_reg
     ctx = %{ctx | next_reg: dest + 1}
-    {load_instrs ++ [Instruction.get_field(dest, env_reg, name)], dest, ctx}
+    {load_instrs ++ [Instruction.get_field(dest, env_reg, name, {:global, name})], dest, ctx}
   end
 
   # Emit a `_ENV` lookup followed by a `set_field` writing `value_reg` into
   # `_ENV[name]`.
   defp gen_env_field_set(env_ref, name, value_reg, ctx) do
     {load_instrs, env_reg, ctx} = gen_load_env(env_ref, ctx)
-    {load_instrs ++ [Instruction.set_field(env_reg, name, value_reg)], ctx}
+    {load_instrs ++ [Instruction.set_field(env_reg, name, value_reg, {:global, name})], ctx}
   end
 
   # Load `_ENV` into a register based on its `var_ref`. Returns the
@@ -1523,15 +1534,40 @@ defmodule Lua.Compiler.Codegen do
   # Patch the last {:call, ...} instruction's result_count
   defp patch_call_result_count(instructions, new_result_count) do
     case List.last(instructions) do
-      {:call, base, arg_count, _old_result_count} ->
+      {:call, base, arg_count, _old_result_count, name_hint} ->
         List.replace_at(
           instructions,
           length(instructions) - 1,
-          {:call, base, arg_count, new_result_count}
+          {:call, base, arg_count, new_result_count, name_hint}
         )
 
       _ ->
         instructions
     end
   end
+
+  # Classify an expression for use as the `name_hint` on `:call` /
+  # `:get_field` / `:set_field` / `:get_table` / `:set_table` instructions.
+  # The executor formats the hint into "attempt to call/index ... (global 'foo')"
+  # runtime errors, mirroring PUC-Lua. `nil` means "no useful name" (e.g.
+  # anonymous callee like `(f or g)()`).
+  defp name_hint(%Expr.Var{} = var, ctx) do
+    case Map.get(ctx.scope.var_map, var) do
+      {:env_field, _env_ref, name} -> {:global, name}
+      {:upvalue, _index} -> {:upvalue, var.name}
+      {:register, _reg} -> {:local, var.name}
+      {:captured_local, _reg} -> {:local, var.name}
+      _ -> nil
+    end
+  end
+
+  defp name_hint(%Expr.Property{table: table_expr, field: field}, ctx) do
+    {:field, field, name_hint(table_expr, ctx)}
+  end
+
+  defp name_hint(%Expr.Index{table: table_expr, key: %Expr.String{value: name}}, ctx) do
+    {:field, name, name_hint(table_expr, ctx)}
+  end
+
+  defp name_hint(_, _ctx), do: nil
 end
