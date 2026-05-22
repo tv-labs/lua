@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: perf/flat-instruction-stream
 base: main
-status: ready
+status: deferred
 direction: B
 unlocks:
   - B5 (Erlang-function compilation builds on flat layout)
@@ -232,4 +232,94 @@ mix profile.tprof -e 'lua = Lua.new(); {_, lua} = Lua.eval!(lua, "function fib(n
 
 ## Discoveries
 
-(populated during implementation)
+Implemented end-to-end on a throwaway branch and benchmarked. All 1705
+tests + 29 lua53 suite tests passed. Closed without merging because the
+projected perf wins did not materialize.
+
+### What was implemented
+
+- `Lua.Compiler.Linearize` lifted every nested-body opcode (`:test`,
+  `:test_and`, `:test_or`, `:while_loop`, `:repeat_loop`, `:numeric_for`,
+  `:generic_for`) into the flat top-level instruction stream with
+  explicit jump targets (`:test_pc`, `:goto_pc`, `:while_test_pc`,
+  `:numeric_for_step_pc`, ...). Labels and `:break` resolved to PCs at
+  compile time, so `find_label/2` and `find_loop_exit/1` became dead
+  code.
+- `Lua.Compiler.Prototype` gained a `labels` field and changed
+  `instructions` from `list` to `tuple()`.
+- `Lua.VM.Executor.do_execute/8` was rewritten from 64 list-cons
+  `defp` clauses into one function whose body is a single `case
+  :erlang.element(pc + 1, instrs) do ... end` with one arm per opcode.
+- The CPS continuation stack (`cont`) was removed entirely — back-edges
+  in loops became explicit `:goto_pc` jumps; CPS frames for loops were
+  replaced by `:numeric_for_step_pc` / `:generic_for_step_pc` opcodes
+  emitted by the linearizer at the end of each loop body.
+- A new synth opcode `:end_of_function` was added so the linearizer
+  could safely append a terminator (functions falling off the end yield
+  zero results, distinct from explicit `return` which yields a single
+  nil).
+
+### Why we closed it
+
+Benchmarks on the same machine, medians of multiple runs (quick mode
+via `benchmarks/helpers.exs`):
+
+| workload         | main      | B4        | delta   |
+|------------------|-----------|-----------|---------|
+| fib(30) chunk    | ~850 ms   | ~875 ms   | **+3%** ⚠️ |
+| OOP n=50         | 137 µs    | 137 µs    | flat    |
+| Table Build n=100| 17.33 µs  | 16.44 µs  | -5%     |
+| Table Sort n=100 | 34.83 µs  | 36.24 µs  | +4%     |
+| Table Iterate    | 24.17 µs  | 23.01 µs  | -5%     |
+| Table Map+Reduce | ~50 µs    | 49.06 µs  | -2%     |
+
+Profile: `do_execute/8` self-time was 50.64% under B4 vs 50.83% on
+main — essentially unchanged. The dispatch shape change did not move
+the needle, and the plan's stretch target (20% reduction in fib(25))
+required exactly that kind of move.
+
+The plan's risks section anticipated this exact outcome:
+
+> If the post-merge profile shows no improvement (or worse, a
+> regression), the structural change isn't paying for itself and B5
+> (Erlang functions) is the better lever.
+
+Concretely on the BEAM, `[head | rest]` head-match destructures the
+list head and tail in a single op, while
+`case :erlang.element(pc + 1, instrs) do` is two ops (element fetch
+plus case discrimination). The hoped-for jump-table optimization on
+the `case` did not produce a net win vs the optimized list-cons path,
+and the extra `instrs` argument threaded through every recursive call
+added register pressure.
+
+### What survives from this work
+
+Nothing landed, but the work is not entirely throwaway:
+
+- The `Lua.Compiler.Linearize` design is the input format B5 needs to
+  translate prototypes into Erlang functions. When B5 is started, the
+  linearizer can be reintroduced (most likely **only** at compile time,
+  feeding the B5 codegen) without touching the runtime executor —
+  keeping the list-cons dispatch and its proven perf.
+- The discoveries here clarify the dispatch shape question: on the
+  BEAM, list-cons head-matching is competitive with `case`-on-tuple-
+  element. So if B5 makes any architectural choices about dispatch
+  shape, this null result should inform them.
+- The CPS-frame-elimination design (replace runtime CPS with codegen-
+  emitted PC jumps) is sound — all 1705 tests passed under it. If
+  there's ever a reason to revisit dispatch shape, the linearizer
+  design can be re-applied.
+
+### Conditions for reopening
+
+A future plan could revisit this if:
+
+- BEAM/OTP gets a tuple-element-case optimization that closes the gap
+  against list head-match (unlikely soon).
+- B5 ships and the resulting profile makes the remaining dispatch
+  loop overhead the bottleneck (then a smaller, targeted dispatch
+  cleanup would apply).
+- A specific workload appears where the list-cons traversal is a
+  measurable bottleneck. Currently it isn't.
+
+Closed: 2026-05-21 by Dave after measurement.
