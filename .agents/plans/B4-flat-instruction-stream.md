@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: perf/flat-instruction-stream
 base: main
-status: ready
+status: deferred
 direction: B
 unlocks:
   - B5 (Erlang-function compilation builds on flat layout)
@@ -232,4 +232,92 @@ mix profile.tprof -e 'lua = Lua.new(); {_, lua} = Lua.eval!(lua, "function fib(n
 
 ## Discoveries
 
-(populated during implementation)
+Deferred without implementation after a pre-flight spike falsified the
+plan's core dispatch hypothesis.
+
+### The spike
+
+Before committing to the ~2,400-line rewrite (executor + codegen + all
+loop opcodes + label resolution), a synthetic microbench compared the
+two dispatch shapes on identical work:
+
+- **list-cons (current shape)** — `defp run([{:tag, ...} | rest], regs)`.
+- **pc+elem `case` (proposed shape)** — `defp run(pc, instrs, regs) ...
+  case elem(instrs, pc) do {:tag, ...} -> ...`.
+- **pc+elem multi-head variant** — `do_step(elem(instrs, pc), pc, ...)`
+  with multi-head dispatch on the step function.
+
+Tagged-tuple shape, register layout, opcode mix (add/sub/mul/mov/load),
+and per-op work were identical across all three. Only the dispatch
+read changed. Stream length: 10,000 instructions. Stable over multiple
+runs.
+
+### Result
+
+| Dispatch | IPS | Mean | vs current |
+|---|---|---|---|
+| list-cons (current) | 13.86 K | 72.13 µs | baseline |
+| pc+elem `case` (proposed) | 12.69 K | 78.83 µs | **1.09x slower** |
+| pc+elem multi-head | 12.10 K | 82.65 µs | **1.15x slower** |
+
+Memory: identical to three decimal places.
+
+### Why
+
+The tagged-tuple jump table is the same in both shapes — BEAM compiles
+both into a jump on the tag of the matched tuple. The only difference
+is the dispatch read itself:
+
+- `[h | t]` is a single indirect load. The BEAM is heavily tuned for
+  cons-list iteration; it is the native iteration idiom on the platform.
+- `elem(instrs, pc)` is a bounds-checked indirect load plus integer
+  arithmetic.
+
+Cons-list iteration wins by 9-15% on raw dispatch. In retrospect this
+is unsurprising — but it had to be measured to be sure.
+
+### Baseline confirms the dispatch problem is real
+
+fib(22), main @ bc69a2e:
+
+```
+Lua.VM.Executor.do_execute/8       802388  50.98% self
+:erlang.setelement/3               601788  25.49%
+Lua.VM.Executor.do_frame_return/6   57313   5.96%
+Lua.VM.Executor.copy_args_to_regs/5 114626   4.94%
+Lua.VM.Numeric.to_signed_int64/1    85968   3.35%
+```
+
+`do_execute/8` is 51% of fib self-time (the plan referenced 43.6% from
+an older baseline; PR #223 sharpened the surrounding code so the
+proportional cost is higher now). The structural argument for attacking
+dispatch was correct — *the right target* — but the proposed *shape*
+doesn't help. The proposed shape makes it worse.
+
+The plan's secondary wins also don't pay for the rewrite on this
+benchmark: `find_label` and `find_loop_exit` do not appear in the
+top hot functions, because fib has no `goto`/`break`/loops.
+
+### What this means for the next move
+
+The plan called this out explicitly under Risks #1:
+
+> If the post-merge profile shows no improvement (or worse, a
+> regression), the structural change isn't paying for itself and B5
+> (Erlang functions) is the better lever.
+
+That exit condition is met pre-merge. The right lever for the 51% is
+**compiling instruction streams to native Erlang functions (B5)**,
+which collapses dispatch entirely into the BEAM's function-call
+mechanism — the BEAM-tuned operation we just measured beats every
+data-shape alternative we tried.
+
+### Conditions for reconsidering
+
+A future plan could revisit B4 *as a structural prerequisite for B5*
+(if compiling to Erlang functions wants integer entry points/labels
+in the source representation). In that case the goal is not "dispatch
+faster" — that's already disproven — but "lay out the IR for codegen
+to Erlang." The success criteria would change accordingly: the bar
+is "B5 compiles cleanly from the new layout," not "dispatch gets
+faster."
