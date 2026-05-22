@@ -19,6 +19,8 @@
 #   MIX_ENV=benchmark mix run benchmarks/table_ops.exs
 # If luaport fails to start, the benchmark prints a notice and skips it.
 
+Code.require_file("helpers.exs", __DIR__)
+
 Application.ensure_all_started(:luerl)
 
 table_def = """
@@ -68,105 +70,83 @@ function run_table_map_reduce(n)
 end
 """
 
-n = 500
-
-call_build = "return run_table_build(#{n})"
-call_sort = "return run_table_sort(#{n})"
-call_sum = "return run_table_sum(#{n})"
-call_map_reduce = "return run_table_map_reduce(#{n})"
-
 # --- This Lua implementation ---
 lua = Lua.new()
 {_, lua} = Lua.eval!(lua, table_def)
-{build_chunk, _} = Lua.load_chunk!(lua, call_build)
-{sort_chunk, _} = Lua.load_chunk!(lua, call_sort)
-{sum_chunk, _} = Lua.load_chunk!(lua, call_sum)
-{map_reduce_chunk, _} = Lua.load_chunk!(lua, call_map_reduce)
+
+# Pre-compile chunks per (operation, n) pair so the chunk path doesn't
+# pay the compile cost during measurement. Inputs ship through Benchee's
+# `inputs:` mechanism so all sizes share warmup/measurement state.
+sizes = Bench.table_inputs()
+
+build_chunks =
+  Map.new(sizes, fn {label, n} ->
+    {chunk, _} = Lua.load_chunk!(lua, "return run_table_build(#{n})")
+    {label, {chunk, "return run_table_build(#{n})", n}}
+  end)
+
+sort_chunks =
+  Map.new(sizes, fn {label, n} ->
+    {chunk, _} = Lua.load_chunk!(lua, "return run_table_sort(#{n})")
+    {label, {chunk, "return run_table_sort(#{n})", n}}
+  end)
+
+sum_chunks =
+  Map.new(sizes, fn {label, n} ->
+    {chunk, _} = Lua.load_chunk!(lua, "return run_table_sum(#{n})")
+    {label, {chunk, "return run_table_sum(#{n})", n}}
+  end)
+
+map_reduce_chunks =
+  Map.new(sizes, fn {label, n} ->
+    {chunk, _} = Lua.load_chunk!(lua, "return run_table_map_reduce(#{n})")
+    {label, {chunk, "return run_table_map_reduce(#{n})", n}}
+  end)
 
 # --- Luerl ---
 luerl_state = :luerl.init()
 {:ok, _, luerl_state} = :luerl.do(table_def, luerl_state)
 
 # --- C Lua via luaport (optional) ---
-{c_lua_build, c_lua_sort, c_lua_sum, c_lua_map_reduce, c_lua_cleanup} =
+{c_lua_call, c_lua_cleanup} =
   case Application.ensure_all_started(:luaport) do
     {:ok, _} ->
       scripts_dir = Path.join(__DIR__, "scripts")
       {:ok, port_pid, _} = :luaport.spawn(:table_bench, to_charlist(scripts_dir))
       :luaport.load(port_pid, table_def)
 
-      mk = fn func -> %{"C Lua (luaport)" => fn -> :luaport.call(port_pid, func, [n]) end} end
-
       {
-        mk.(:run_table_build),
-        mk.(:run_table_sort),
-        mk.(:run_table_sum),
-        mk.(:run_table_map_reduce),
+        fn func, n -> :luaport.call(port_pid, func, [n]) end,
         fn -> :luaport.despawn(:table_bench) end
       }
 
     {:error, reason} ->
       IO.puts("luaport not available (#{inspect(reason)}) — skipping C Lua benchmarks")
-      empty = %{}
-      {empty, empty, empty, empty, fn -> :ok end}
+      {nil, fn -> :ok end}
   end
 
-benchee_opts = [time: 10, warmup: 2, memory_time: 1]
+bench = fn name, chunks_map, lua_func ->
+  Bench.banner(name)
 
-IO.puts("\n=== Table Build (n=#{n}) ===\n")
+  jobs = %{
+    "lua (eval)" => fn {_chunk, call_str, _n} -> Lua.eval!(lua, call_str) end,
+    "lua (chunk)" => fn {chunk, _call_str, _n} -> Lua.eval!(lua, chunk) end,
+    "luerl" => fn {_chunk, call_str, _n} -> :luerl.do(call_str, luerl_state) end
+  }
 
-Benchee.run(
-  Map.merge(
-    %{
-      "lua (eval)" => fn -> Lua.eval!(lua, call_build) end,
-      "lua (chunk)" => fn -> Lua.eval!(lua, build_chunk) end,
-      "luerl" => fn -> :luerl.do(call_build, luerl_state) end
-    },
-    c_lua_build
-  ),
-  benchee_opts
-)
+  jobs =
+    if c_lua_call do
+      Map.put(jobs, "C Lua (luaport)", fn {_chunk, _call_str, n} -> c_lua_call.(lua_func, n) end)
+    else
+      jobs
+    end
 
-IO.puts("\n=== Table Sort (n=#{n}) ===\n")
+  Benchee.run(jobs, [{:inputs, chunks_map} | Bench.opts()])
+end
 
-Benchee.run(
-  Map.merge(
-    %{
-      "lua (eval)" => fn -> Lua.eval!(lua, call_sort) end,
-      "lua (chunk)" => fn -> Lua.eval!(lua, sort_chunk) end,
-      "luerl" => fn -> :luerl.do(call_sort, luerl_state) end
-    },
-    c_lua_sort
-  ),
-  benchee_opts
-)
-
-IO.puts("\n=== Table Iterate/Sum (n=#{n}) ===\n")
-
-Benchee.run(
-  Map.merge(
-    %{
-      "lua (eval)" => fn -> Lua.eval!(lua, call_sum) end,
-      "lua (chunk)" => fn -> Lua.eval!(lua, sum_chunk) end,
-      "luerl" => fn -> :luerl.do(call_sum, luerl_state) end
-    },
-    c_lua_sum
-  ),
-  benchee_opts
-)
-
-IO.puts("\n=== Table Map + Reduce (n=#{n}) ===\n")
-
-Benchee.run(
-  Map.merge(
-    %{
-      "lua (eval)" => fn -> Lua.eval!(lua, call_map_reduce) end,
-      "lua (chunk)" => fn -> Lua.eval!(lua, map_reduce_chunk) end,
-      "luerl" => fn -> :luerl.do(call_map_reduce, luerl_state) end
-    },
-    c_lua_map_reduce
-  ),
-  benchee_opts
-)
+bench.("Table Build", build_chunks, :run_table_build)
+bench.("Table Sort", sort_chunks, :run_table_sort)
+bench.("Table Iterate/Sum", sum_chunks, :run_table_sum)
+bench.("Table Map + Reduce", map_reduce_chunks, :run_table_map_reduce)
 
 c_lua_cleanup.()

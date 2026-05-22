@@ -16,6 +16,12 @@
 #   ./benchmarks/setup_luaport.sh           # idempotent; patches + builds
 #   MIX_ENV=benchmark mix run benchmarks/closures.exs
 # If luaport fails to start, the benchmark prints a notice and skips it.
+#
+# Run modes (see benchmarks/helpers.exs):
+#   default                — quick mode (~4 s per Benchee.run)
+#   LUA_BENCH_MODE=full    — long windows + memory_time, for publishable numbers
+
+Code.require_file("helpers.exs", __DIR__)
 
 Application.ensure_all_started(:luerl)
 
@@ -83,9 +89,7 @@ Benchee.run(
     },
     c_lua_benchmarks
   ),
-  time: 10,
-  warmup: 2,
-  memory_time: 1
+  Bench.opts()
 )
 
 c_lua_cleanup.()
