@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: perf/dispatcher-foundation
 base: main
-status: ready
+status: in-progress
 direction: B
 unlocks:
   - B5b-v2 (table opcodes), B5c-v2 (closures), B5d-v2 (error fidelity)
