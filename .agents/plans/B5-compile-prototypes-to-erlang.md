@@ -1,18 +1,52 @@
 ---
 id: B5
-title: Compile Lua prototypes to Erlang functions (executor JIT)
+title: Compile Lua prototypes to Erlang functions (executor JIT) — SUPERSEDED
 issue: null
-pr: null
-branch: perf/compile-to-erlang
+pr: 235 (closed unmerged)
+branch: n/a
 base: main
-status: blocked
+status: superseded
 direction: B
-unlocks:
-  - sub-Luerl latency on tight numeric/call workloads
-  - "perf parity with Luerl, ±10%" 1.0 commitment headroom
+superseded_by: B5-dispatcher-and-bytecode
 ---
 
-## Blocked on
+## Status: superseded by B5-dispatcher-and-bytecode
+
+This plan committed to lowering each `%Prototype{}` to a fresh BEAM
+module via `:compile.forms/2` + `:code.load_binary/3`. A prototype
+build of that approach shipped to PR #235 and met its functional bar
+(1.07x faster than Luerl on fib(30)). The PR was closed unmerged
+because the path is fundamentally unsafe for an embedded Lua library
+that exposes runtime compilation via `load()` / `loadstring()`:
+
+- Every successful compile mints a fresh module atom (atoms are
+  never GC'd on the BEAM; default cap ~1M then the VM aborts).
+- Every successful compile loads a BEAM module that sits in the
+  code server until explicitly purged.
+- Purging is not viable: `:code.soft_purge/1` is blocked by any
+  process executing in the module (including Lua coroutines
+  suspended mid-call), and `:code.purge/1` kills those processes.
+
+A Lua program calling `load(untrusted_bytes)` in a loop is an
+atom-table-exhaustion DoS reachable from any host that exposes
+runtime Lua compilation — which is the whole point of an embedded
+Lua.
+
+Luerl, the reference Erlang Lua implementation, never calls
+`compile:*` or `code:*`. Its compiled chunks are plain Erlang data
+walked by a hand-written interpreter (`luerl_emul:emul_1/7`). GC
+reclaims them like any other term.
+
+**See `.agents/plans/B5-dispatcher-and-bytecode.md` for the
+replacement plan.** The replacement adopts Luerl's "no runtime
+BEAM codegen" constraint and ships a single hand-written dispatcher
+module over dense register-based bytecode. The historical record
+below remains useful for context — most of the per-opcode lowering
+decisions port to the new bytecode encoder.
+
+---
+
+## (Historical) Blocked on
 
 - B4 — the flat instruction stream is the natural intermediate
   representation to translate into Erlang. Trying to JIT directly from
