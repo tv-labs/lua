@@ -6,6 +6,7 @@ defmodule Lua.Compiler do
   """
 
   alias Lua.AST.Chunk
+  alias Lua.Compiler.Bytecode
   alias Lua.Compiler.Codegen
   alias Lua.Compiler.Prototype
   alias Lua.Compiler.Scope
@@ -16,11 +17,19 @@ defmodule Lua.Compiler do
 
   @doc """
   Compiles a Lua AST chunk into a prototype.
+
+  After codegen, the prototype is offered to `Lua.Compiler.Bytecode` for
+  dense encoding. Sub-prototypes are encoded independently — the dispatcher
+  takes over per-prototype wherever every opcode in that prototype falls
+  within its coverage; anything else stays on the interpreter. The
+  original instruction stream is preserved either way, so error reporting
+  and tooling continue to work unchanged.
   """
   @spec compile(Chunk.t(), compile_opts()) :: {:ok, Prototype.t()} | {:error, term()}
   def compile(%Chunk{} = chunk, opts \\ []) do
-    with {:ok, scope_state} <- Scope.resolve(chunk, opts) do
-      Codegen.generate(chunk, scope_state, opts)
+    with {:ok, scope_state} <- Scope.resolve(chunk, opts),
+         {:ok, prototype} <- Codegen.generate(chunk, scope_state, opts) do
+      {:ok, Bytecode.compile(prototype)}
     end
   end
 

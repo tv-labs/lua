@@ -97,6 +97,10 @@ defmodule Lua.VM.Display do
     wrap_closure(ref)
   end
 
+  def wrap_value({:compiled_closure, _, _} = ref, _state, _decode?) do
+    wrap_closure(ref)
+  end
+
   def wrap_value({:native_func, fun} = ref, _state, _decode?) do
     %NativeFunc{fun: fun, ref: ref}
   end
@@ -117,7 +121,7 @@ defmodule Lua.VM.Display do
 
   # ---- internal helpers ----
 
-  defp wrap_closure({:lua_closure, proto, _upvalues} = ref) do
+  defp wrap_closure({tag, proto, _upvalues} = ref) when tag in [:lua_closure, :compiled_closure] do
     {first_line, _last_line} = proto.lines || {0, 0}
 
     %Closure{

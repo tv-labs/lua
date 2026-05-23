@@ -21,6 +21,7 @@ defmodule Lua.VM.Value do
   def type_name(v) when is_binary(v), do: "string"
   def type_name({:tref, _}), do: "table"
   def type_name({:lua_closure, _, _}), do: "function"
+  def type_name({:compiled_closure, _, _}), do: "function"
   def type_name({:native_func, _}), do: "function"
   def type_name({:udref, _}), do: "userdata"
   def type_name(_), do: "userdata"
@@ -58,6 +59,7 @@ defmodule Lua.VM.Value do
   def to_string({:tref, id}), do: "table: 0x#{String.pad_leading(Integer.to_string(id, 16), 14, "0")}"
 
   def to_string({:lua_closure, _, _}), do: "function"
+  def to_string({:compiled_closure, _, _}), do: "function"
   def to_string({:native_func, _}), do: "function"
   def to_string(other), do: inspect(other)
 

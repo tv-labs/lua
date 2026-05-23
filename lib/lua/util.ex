@@ -16,6 +16,7 @@ defmodule Lua.Util do
   def encoded?(number) when is_number(number), do: true
   def encoded?({:tref, _}), do: true
   def encoded?({:lua_closure, _, _}), do: true
+  def encoded?({:compiled_closure, _, _}), do: true
   def encoded?({:native_func, _}), do: true
   def encoded?({:udref, _}), do: true
   def encoded?(_), do: false

@@ -55,7 +55,7 @@ defmodule Lua.VM.Stdlib.Debug do
 
     info =
       case func do
-        {:lua_closure, proto, _upvalues} ->
+        {tag, proto, _upvalues} when tag in [:lua_closure, :compiled_closure] ->
           %{
             "source" => Map.get(proto, :source, "=?"),
             "currentline" => -1,
