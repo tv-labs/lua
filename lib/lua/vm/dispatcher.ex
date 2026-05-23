@@ -107,7 +107,12 @@ defmodule Lua.VM.Dispatcher do
   end
 
   defp init_regs(proto, args) do
-    size = max(proto.max_registers, proto.param_count) + 16
+    # The interpreter sizes register tuples with a +16 buffer for
+    # multi-return expansion (`ensure_regs_capacity/2`). The
+    # dispatcher's `:call_one` always wants exactly one result and
+    # the codegen now honestly reports the peak register, so no
+    # buffer is needed at all here.
+    size = max(proto.max_registers, proto.param_count)
     regs = Tuple.duplicate(nil, size)
     copy_args(regs, 0, args, proto.param_count)
   end
@@ -619,7 +624,11 @@ defmodule Lua.VM.Dispatcher do
   end
 
   defp init_callee_regs(callee_proto, src_regs, src_off, arg_count) do
-    size = max(callee_proto.max_registers, callee_proto.param_count) + 16
+    # Same as `init_regs/2`: no buffer needed because the bytecode
+    # encoder rejects multi-return calls (which are the only thing
+    # the interpreter's +16 buffer absorbs) and codegen reports the
+    # honest peak register.
+    size = max(callee_proto.max_registers, callee_proto.param_count)
     regs = Tuple.duplicate(nil, size)
     copy_n = min(arg_count, callee_proto.param_count)
     copy_regs(src_regs, src_off, regs, 0, copy_n)
