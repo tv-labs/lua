@@ -1,0 +1,341 @@
+<Layouts.app flash={@flash} active={:home}>
+  <%!-- ============== HERO ============== --%>
+  <section class="relative overflow-hidden">
+    <div
+      aria-hidden="true"
+      class="absolute inset-0 -z-10 [background:radial-gradient(60%_50%_at_50%_0%,oklch(58%_0.233_277.117/0.18),transparent_70%)]"
+    >
+    </div>
+    <div
+      aria-hidden="true"
+      class="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[520px] bg-[length:24px_24px] [background-image:linear-gradient(to_right,oklch(60%_0.25_292.717/0.05)_1px,transparent_1px),linear-gradient(to_bottom,oklch(60%_0.25_292.717/0.05)_1px,transparent_1px)] [mask-image:linear-gradient(to_bottom,black,transparent)]"
+    >
+    </div>
+
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-16 pb-20 sm:pt-24 sm:pb-28">
+      <div class="grid lg:grid-cols-[1.05fr_1fr] gap-10 items-center">
+        <div>
+          <div class="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary mb-6">
+            <span class="size-2 rounded-full bg-primary animate-pulse"></span>
+            Pure Elixir &middot; Lua 5.3 &middot; runs on the BEAM
+          </div>
+          <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.05]">
+            Lua, on the
+            <span class="bg-gradient-to-br from-primary via-accent to-secondary bg-clip-text text-transparent">
+              BEAM.
+            </span>
+            <br />Scriptable, sandboxed, <span class="italic">stupid fast.</span>
+          </h1>
+          <p class="mt-6 text-lg text-base-content/70 leading-relaxed max-w-xl">
+            An Elixir-native Lua 5.3 virtual machine. Embed user-supplied scripting in
+            your Phoenix app with zero NIFs, zero shelling out, and a beautiful
+            Elixir API. Watch every opcode the VM actually executes.
+          </p>
+
+          <div class="mt-8 flex flex-col sm:flex-row gap-3">
+            <.link navigate={~p"/playground"} class="btn btn-primary btn-lg shadow-lg">
+              <.icon name="hero-play-micro" class="size-5" /> Open the Playground
+            </.link>
+            <.link navigate={~p"/tour"} class="btn btn-ghost btn-lg border border-base-300">
+              Take the Tour <.icon name="hero-arrow-right-micro" class="size-4" />
+            </.link>
+          </div>
+
+          <div class="mt-10 flex items-center gap-6 text-sm text-base-content/60 flex-wrap">
+            <div class="flex items-center gap-2">
+              <.icon name="hero-shield-check-micro" class="size-4 text-success" />
+              <span>Sandboxed by default</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <.icon name="hero-bolt-micro" class="size-4 text-warning" />
+              <span>Register-based VM</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <.icon name="hero-cube-micro" class="size-4 text-info" />
+              <span>Zero NIFs, zero C</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="relative">
+          <div
+            aria-hidden="true"
+            class="absolute -inset-6 rounded-3xl bg-gradient-to-br from-primary/20 via-accent/10 to-transparent blur-2xl"
+          >
+          </div>
+          <div class="relative rounded-2xl border border-base-300/60 bg-base-200/80 backdrop-blur shadow-2xl overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-2 border-b border-base-300/60 bg-base-300/30">
+              <div class="flex items-center gap-2">
+                <span class="size-2.5 rounded-full bg-red-400/70"></span>
+                <span class="size-2.5 rounded-full bg-yellow-400/70"></span>
+                <span class="size-2.5 rounded-full bg-green-400/70"></span>
+              </div>
+              <div class="text-xs font-mono text-base-content/50">script.exs</div>
+              <div class="text-xs font-mono text-success">▶ 4 µs</div>
+            </div>
+            <pre class="px-5 py-4 font-mono text-[13px] leading-6 overflow-x-auto"><code><span class="text-base-content/40">## Embed Lua in your Elixir app</span>
+<span class="text-base-content/40">## with a single function call.</span>
+
+<span class="text-primary">defmodule</span> <span class="text-secondary">MyApp.Rules</span> <span class="text-primary">do</span>
+  <span class="text-primary">use</span> <span class="text-secondary">Lua.API</span>, scope: <span class="text-accent">"rules"</span>
+
+  <span class="text-primary">deflua</span> <span class="text-info">double</span>(n), <span class="text-primary">do</span>: <span class="text-base-content/90">n * 2</span>
+<span class="text-primary">end</span>
+
+<span class="text-base-content/40">## Now your Elixir function is</span>
+<span class="text-base-content/40">## callable from any Lua script:</span>
+
+<span class="text-base-content/90">lua = </span><span class="text-secondary">Lua</span>.<span class="text-info">new</span>() |> <span class="text-secondary">Lua</span>.<span class="text-info">load_api</span>(<span class="text-secondary">MyApp.Rules</span>)
+
+<span class="text-success font-semibold">&#123;[10], _lua&#125; = </span><span class="text-secondary">Lua</span>.<span class="text-info">eval!</span>(lua, <span class="text-accent">"""
+  return rules.double(5)
+"""</span>)
+</code></pre>
+          </div>
+
+          <%!-- floating chip --%>
+          <div class="hidden sm:flex absolute -bottom-4 -left-4 bg-base-100 border border-base-300/60 rounded-xl px-4 py-3 shadow-lg items-center gap-3">
+            <div class="size-9 rounded-lg bg-primary/20 grid place-items-center">
+              <.icon name="hero-command-line-micro" class="size-5 text-primary" />
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-wider text-base-content/50 font-semibold">
+                ~LUA sigil
+              </div>
+              <div class="text-sm font-mono">
+                <span class="text-primary">~LUA</span>[return 2 + 2]<span class="text-accent">c</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%!-- ============== FEATURE GRID ============== --%>
+  <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
+    <div class="text-center mb-12">
+      <div class="inline-block text-xs uppercase tracking-[0.18em] text-primary font-bold mb-3">
+        Why this exists
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">
+        Everything you'd want in a scripting layer
+      </h2>
+      <p class="mt-3 text-base-content/70 max-w-2xl mx-auto">
+        Built to let your users write code inside your product, without ever
+        leaving the safety of the BEAM.
+      </p>
+    </div>
+
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <.feature
+        icon="hero-cpu-chip-micro"
+        title="Pure Elixir VM"
+        accent="primary"
+      >
+        Lexer, parser, register-based VM, and stdlib — all written in idiomatic
+        Elixir. Drops into any Phoenix or OTP release.
+      </.feature>
+
+      <.feature
+        icon="hero-lock-closed-micro"
+        title="Sandboxed by default"
+        accent="success"
+      >
+        <code>io</code>, <code>os</code>, <code>require</code>, and friends are
+        disabled. Expose exactly the surface area you want — nothing more.
+      </.feature>
+
+      <.feature
+        icon="hero-puzzle-piece-micro"
+        title="Elixir ↔ Lua interop"
+        accent="info"
+      >
+        Use <code>deflua</code> to expose any Elixir function. Call Lua back
+        from Elixir with <code>Lua.call_function!/3</code>.
+      </.feature>
+
+      <.feature
+        icon="hero-sparkles-micro"
+        title="Compile-time sigil"
+        accent="accent"
+      >
+        <code>~LUA</code> validates syntax at compile time.
+        Add the <code>c</code> modifier and ship a pre-compiled chunk in your release.
+      </.feature>
+
+      <.feature
+        icon="hero-document-magnifying-glass-micro"
+        title="See the bytecode"
+        accent="warning"
+      >
+        Every Lua chunk compiles to a register-based opcode stream.
+        Inspect every instruction in the <a href="/playground" class="link link-primary">playground</a>.
+      </.feature>
+
+      <.feature
+        icon="hero-academic-cap-micro"
+        title="Beautiful errors"
+        accent="error"
+      >
+        Real stack traces, real source lines, useful messages. Errors blame the
+        callee by name — none of that "attempt to call a nil value" nonsense.
+      </.feature>
+    </div>
+  </section>
+
+  <%!-- ============== COMPILER EXPLORER PROMO ============== --%>
+  <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
+    <div class="rounded-3xl border border-base-300/60 bg-gradient-to-br from-base-200 via-base-200/80 to-base-300/40 overflow-hidden shadow-xl">
+      <div class="grid lg:grid-cols-2 gap-0">
+        <div class="p-8 lg:p-12">
+          <div class="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-accent font-bold mb-4">
+            <.icon name="hero-magnifying-glass-circle-micro" class="size-4" /> Compiler Explorer
+          </div>
+          <h2 class="text-3xl lg:text-4xl font-bold tracking-tight">
+            See your Lua, as the VM sees it.
+          </h2>
+          <p class="mt-4 text-base-content/70 leading-relaxed">
+            Like Godbolt, but for Lua bytecode. Type a snippet on the left, watch
+            the opcodes appear on the right — instruction by instruction,
+            register by register. Toggle prototypes for nested closures and follow
+            every <code class="text-primary">closure</code>, <code class="text-primary">call</code>,
+            and <code class="text-primary">return</code>.
+          </p>
+          <div class="mt-6">
+            <.link navigate={~p"/playground/fib"} class="btn btn-primary">
+              Explore <code>fib(15)</code>
+              bytecode <.icon name="hero-arrow-right-micro" class="size-4" />
+            </.link>
+          </div>
+        </div>
+
+        <div class="bg-base-300/40 border-t lg:border-t-0 lg:border-l border-base-300/60 p-6 lg:p-8 font-mono text-xs leading-6">
+          <div class="grid grid-cols-[1fr_1fr] gap-4">
+            <div>
+              <div class="text-base-content/40 mb-1">-- main.lua</div>
+              <pre class="text-base-content/90"><code>local function fib(n)
+  if n &lt; 2 then return n end
+  return fib(n - 1)
+       + fib(n - 2)
+end
+
+return fib(15)</code></pre>
+            </div>
+            <div>
+              <div class="text-base-content/40 mb-1">; bytecode</div>
+              <div class="space-y-0.5 text-[11px]">
+                <div><span class="text-primary">closure</span> r2, p0</div>
+                <div><span class="text-success">move</span> r1, r2</div>
+                <div><span class="text-primary">get_field</span> r3, r0, "fib"</div>
+                <div><span class="text-info">load_constant</span> r4, 15</div>
+                <div><span class="text-primary font-bold">call</span> r3, 1, 2</div>
+                <div><span class="text-accent font-bold">return</span> r3, 1</div>
+                <div class="text-base-content/40 italic">; proto[0] (fib)</div>
+                <div><span class="text-info">load_constant</span> r2, 2</div>
+                <div><span class="text-warning">less_than</span> r3, r1, r2</div>
+                <div><span class="text-warning font-bold">test</span> r3, …</div>
+                <div><span class="text-accent">return</span> r1, 1</div>
+                <div class="text-base-content/40">…</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%!-- ============== EMBED EXAMPLE ============== --%>
+  <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
+    <div class="grid lg:grid-cols-2 gap-10 items-center">
+      <div>
+        <div class="inline-block text-xs uppercase tracking-[0.18em] text-secondary font-bold mb-3">
+          For your app
+        </div>
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">
+          Drop in. Wire up. Ship.
+        </h2>
+        <p class="mt-4 text-base-content/70 leading-relaxed">
+          Define an API module with <code>use Lua.API</code>. Annotate functions
+          with <code>deflua</code>. Load it into a Lua VM. That's it — your
+          users can now write Lua scripts that call back into your Elixir code,
+          safely.
+        </p>
+        <ul class="mt-6 space-y-3 text-base-content/80">
+          <li class="flex gap-3">
+            <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
+            Reactive workflows, rules engines, plug-in systems
+          </li>
+          <li class="flex gap-3">
+            <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
+            User-supplied formulas inside SaaS dashboards
+          </li>
+          <li class="flex gap-3">
+            <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
+            Game logic, automation, embedded DSLs
+          </li>
+        </ul>
+      </div>
+
+      <div class="rounded-2xl border border-base-300/60 bg-base-200 overflow-hidden shadow-xl">
+        <div class="flex items-center gap-2 px-4 py-2 border-b border-base-300/60 bg-base-300/30">
+          <span class="size-2.5 rounded-full bg-red-400/70"></span>
+          <span class="size-2.5 rounded-full bg-yellow-400/70"></span>
+          <span class="size-2.5 rounded-full bg-green-400/70"></span>
+          <span class="ml-2 text-xs font-mono text-base-content/50">queue.exs</span>
+        </div>
+        <pre class="p-5 font-mono text-[13px] leading-6 overflow-x-auto"><code><span class="text-primary">defmodule</span> <span class="text-secondary">Queue</span> <span class="text-primary">do</span>
+  <span class="text-primary">use</span> <span class="text-secondary">Lua.API</span>, scope: <span class="text-accent">"q"</span>
+
+  <span class="text-primary">deflua</span> <span class="text-info">push</span>(v), state <span class="text-primary">do</span>
+    queue = <span class="text-secondary">Lua</span>.<span class="text-info">get!</span>(state, [<span class="text-accent">:my_queue</span>])
+    &#123;[], state&#125; = <span class="text-secondary">Lua</span>.<span class="text-info">call_function!</span>(
+      state, [<span class="text-accent">:table</span>, <span class="text-accent">:insert</span>], [queue, v]
+    )
+    &#123;[], state&#125;
+  <span class="text-primary">end</span>
+<span class="text-primary">end</span>
+
+lua =
+  <span class="text-secondary">Lua</span>.<span class="text-info">new</span>()
+  |> <span class="text-secondary">Lua</span>.<span class="text-info">load_api</span>(<span class="text-secondary">Queue</span>)
+  |> <span class="text-secondary">Lua</span>.<span class="text-info">set!</span>([<span class="text-accent">:my_queue</span>], [])
+
+<span class="text-secondary">Lua</span>.<span class="text-info">eval!</span>(lua, <span class="text-accent">"""
+  q.push("hello")
+  q.push("world")
+"""</span>)</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <%!-- ============== CTA ============== --%>
+  <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pb-24">
+    <div class="rounded-3xl border border-primary/40 bg-gradient-to-br from-primary/15 via-accent/10 to-secondary/10 p-10 lg:p-14 text-center shadow-xl">
+      <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">
+        Go play. Then read the docs.
+      </h2>
+      <p class="mt-3 text-base-content/70 max-w-xl mx-auto">
+        The fastest way to understand this VM is to write Lua and watch the
+        opcodes flow.
+      </p>
+      <div class="mt-7 flex flex-col sm:flex-row gap-3 justify-center">
+        <.link navigate={~p"/playground"} class="btn btn-primary btn-lg shadow-lg">
+          Open the Playground <.icon name="hero-arrow-right-micro" class="size-4" />
+        </.link>
+        <a
+          href="https://hexdocs.pm/lua"
+          target="_blank"
+          class="btn btn-ghost btn-lg border border-base-300"
+        >
+          <.icon name="hero-book-open-micro" class="size-4" /> Read the docs
+        </a>
+      </div>
+      <div class="mt-8 font-mono text-sm text-base-content/60">
+        <code class="bg-base-100/50 border border-base-300/60 px-3 py-1.5 rounded-md">
+          {"{:lua, \"~> 1.0.0-rc.1\"}"}
+        </code>
+      </div>
+    </div>
+  </section>
+</Layouts.app>
