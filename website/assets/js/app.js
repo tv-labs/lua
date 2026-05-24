@@ -25,59 +25,225 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/website"
 import topbar from "../vendor/topbar"
 
+import {EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars} from "@codemirror/view"
+import {EditorState, Compartment} from "@codemirror/state"
+import {defaultKeymap, history, historyKeymap, indentWithTab} from "@codemirror/commands"
+import {StreamLanguage, syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldKeymap} from "@codemirror/language"
+import {closeBrackets, closeBracketsKeymap} from "@codemirror/autocomplete"
+import {highlightSelectionMatches, searchKeymap} from "@codemirror/search"
+import {lua} from "@codemirror/legacy-modes/mode/lua"
+import {oneDark} from "@codemirror/theme-one-dark"
+
+const themeCompartment = new Compartment()
+
+const editorTheme = EditorView.theme({
+  "&": {
+    height: "100%",
+    fontSize: "13px",
+    backgroundColor: "transparent",
+  },
+  "&.cm-focused": {
+    outline: "none",
+  },
+  ".cm-content": {
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    padding: "12px 0",
+    caretColor: "var(--color-primary, #6366f1)",
+  },
+  ".cm-scroller": {
+    fontFamily: "inherit",
+    overflow: "auto",
+    lineHeight: "1.55",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    border: "none",
+    color: "color-mix(in oklch, currentColor 35%, transparent)",
+  },
+  ".cm-activeLineGutter, .cm-activeLine": {
+    backgroundColor: "color-mix(in oklch, currentColor 6%, transparent)",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    padding: "0 12px 0 8px",
+    minWidth: "2.5em",
+  },
+})
+
+function darkActive() {
+  const t = document.documentElement.dataset.theme
+  if (t === "dark") return true
+  if (t === "light") return false
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+}
+
+function themeExt() {
+  return darkActive() ? oneDark : []
+}
+
 const LuaEditor = {
   mounted() {
-    const ta = this.el.querySelector("textarea")
-    if (!ta) return
+    const textarea = this.el.querySelector("textarea")
+    if (!textarea) return
 
-    ta.addEventListener("keydown", (e) => {
-      // Cmd/Ctrl + Enter -> submit form
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault()
-        const form = ta.closest("form")
-        if (form) form.requestSubmit()
-        return
+    this.textarea = textarea
+    // Hide the underlying textarea but keep it in the form.
+    textarea.style.display = "none"
+    textarea.setAttribute("tabindex", "-1")
+    textarea.setAttribute("aria-hidden", "true")
+
+    const submitForm = () => {
+      const form = this.el.closest("form")
+      if (form) form.requestSubmit()
+      return true
+    }
+
+    const syncToTextarea = () => {
+      const val = this.view.state.doc.toString()
+      if (this.textarea.value !== val) {
+        this.textarea.value = val
+        // Trigger phx-change on the form
+        this.textarea.dispatchEvent(new Event("input", {bubbles: true}))
       }
+    }
 
-      // Tab / Shift+Tab indentation
-      if (e.key === "Tab") {
-        e.preventDefault()
-        const start = ta.selectionStart
-        const end = ta.selectionEnd
-        const before = ta.value.slice(0, start)
-        const sel = ta.value.slice(start, end)
-        const after = ta.value.slice(end)
+    this.view = new EditorView({
+      doc: textarea.value,
+      parent: this.el,
+      extensions: [
+        lineNumbers(),
+        highlightSpecialChars(),
+        history(),
+        drawSelection(),
+        dropCursor(),
+        EditorState.allowMultipleSelections.of(true),
+        indentOnInput(),
+        bracketMatching(),
+        closeBrackets(),
+        rectangularSelection(),
+        crosshairCursor(),
+        highlightActiveLine(),
+        highlightSelectionMatches(),
+        StreamLanguage.define(lua),
+        syntaxHighlighting(defaultHighlightStyle, {fallback: true}),
+        keymap.of([
+          {key: "Mod-Enter", run: submitForm, preventDefault: true},
+          ...closeBracketsKeymap,
+          ...defaultKeymap,
+          ...searchKeymap,
+          ...historyKeymap,
+          ...foldKeymap,
+          indentWithTab,
+        ]),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) syncToTextarea()
+        }),
+        editorTheme,
+        themeCompartment.of(themeExt()),
+      ],
+    })
 
-        if (e.shiftKey) {
-          // De-indent each line in selection by removing up to 2 leading spaces
-          const lineStart = before.lastIndexOf("\n") + 1
-          const block = ta.value.slice(lineStart, end)
-          const dedented = block.replace(/^(  ?)/gm, "")
-          const newVal = ta.value.slice(0, lineStart) + dedented + after
-          ta.value = newVal
-          const delta = block.length - dedented.length
-          ta.selectionStart = Math.max(lineStart, start - 2)
-          ta.selectionEnd = Math.max(lineStart, end - delta)
-        } else if (sel.includes("\n")) {
-          // Indent each line of multi-line selection
-          const lineStart = before.lastIndexOf("\n") + 1
-          const block = ta.value.slice(lineStart, end)
-          const indented = block.replace(/^/gm, "  ")
-          ta.value = ta.value.slice(0, lineStart) + indented + after
-          const delta = indented.length - block.length
-          ta.selectionStart = start + 2
-          ta.selectionEnd = end + delta
-        } else {
-          // Single position: insert two spaces
-          ta.value = before + "  " + after
-          ta.selectionStart = ta.selectionEnd = start + 2
-        }
-        ta.dispatchEvent(new Event("input", {bubbles: true}))
-        return
+    // Sync initial value (in case textarea had different value)
+    syncToTextarea()
+
+    // Listen for server-pushed source updates (e.g. when loading an example)
+    this.handleEvent("lua-editor:set-source", ({source, target}) => {
+      if (target && target !== this.el.id) return
+      const current = this.view.state.doc.toString()
+      if (current === source) return
+      this.view.dispatch({
+        changes: {from: 0, to: this.view.state.doc.length, insert: source},
+      })
+    })
+
+    // Listen for theme changes on the <html> element so highlight updates live.
+    this.themeObserver = new MutationObserver(() => {
+      this.view.dispatch({effects: themeCompartment.reconfigure(themeExt())})
+    })
+    this.themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    })
+  },
+
+  destroyed() {
+    if (this.themeObserver) this.themeObserver.disconnect()
+    if (this.view) this.view.destroy()
+  },
+}
+
+// Manages a multi-snippet code block rendered by
+// `DemoWeb.CoreComponents.code_block/1`. The component renders every
+// snippet server-side, stacked in a single grid cell so the container
+// reserves the tallest snippet's height. This code picks a random
+// initial snippet and wires the dot buttons below the block for
+// manual switching — no auto-advance, no page jumps.
+//
+// Lives outside the LiveView hooks because the marketing pages are
+// controller-rendered, not LiveViews.
+function startCodeRotator(el) {
+  if (el.__codeRotator) return
+  const snippets = Array.from(el.querySelectorAll("[data-snippet-index]"))
+  if (snippets.length < 2) return
+
+  const filename = document.querySelector(
+    `[data-code-filename-for="${el.id}"]`
+  )
+  const dotsContainer = document.querySelector(
+    `[data-code-dots-for="${el.id}"]`
+  )
+  const dots = dotsContainer
+    ? Array.from(dotsContainer.querySelectorAll("[data-snippet-target]"))
+    : []
+
+  const show = (idx) => {
+    snippets.forEach((node, i) => {
+      const active = i === idx
+      node.classList.toggle("invisible", !active)
+      node.setAttribute("aria-hidden", active ? "false" : "true")
+    })
+    dots.forEach((dot, i) => {
+      if (i === idx) {
+        dot.setAttribute("data-active", "")
+      } else {
+        dot.removeAttribute("data-active")
       }
     })
+    if (filename) {
+      const label = snippets[idx].dataset.label
+      if (label) filename.textContent = label
+    }
+  }
+
+  const initial = Math.floor(Math.random() * snippets.length)
+  show(initial)
+
+  const onClick = (event) => {
+    const target = event.target.closest("[data-snippet-target]")
+    if (!target || !dotsContainer.contains(target)) return
+    const idx = parseInt(target.dataset.snippetTarget, 10)
+    if (Number.isFinite(idx)) show(idx)
+  }
+
+  if (dotsContainer) dotsContainer.addEventListener("click", onClick)
+
+  el.__codeRotator = {
+    stop() {
+      if (dotsContainer) dotsContainer.removeEventListener("click", onClick)
+      el.__codeRotator = null
+    },
   }
 }
+
+function initCodeRotators(root = document) {
+  root.querySelectorAll("pre.highlight[data-rotate]").forEach(startCodeRotator)
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => initCodeRotators())
+} else {
+  initCodeRotators()
+}
+window.addEventListener("phx:page-loading-stop", () => initCodeRotators())
 
 const hooks = {...colocatedHooks, LuaEditor}
 
@@ -136,4 +302,3 @@ if (process.env.NODE_ENV === "development") {
     window.liveReloader = reloader
   })
 }
-

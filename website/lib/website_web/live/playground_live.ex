@@ -24,13 +24,17 @@ defmodule DemoWeb.PlaygroundLive do
   def handle_params(params, _url, socket) do
     case params do
       %{"example" => id} ->
-        if Enum.any?(LuaSandbox.examples(), &(&1.id == id)) do
+        if Enum.any?(LuaSandbox.examples(), &(&1.id == id)) and
+             socket.assigns.active_example != id do
+          source = default_source(id)
+
           {:noreply,
            socket
            |> assign(:active_example, id)
-           |> assign(:source, default_source(id))
+           |> assign(:source, source)
            |> assign(:result, nil)
-           |> assign(:selected_block, 0)}
+           |> assign(:selected_block, 0)
+           |> push_event("lua-editor:set-source", %{source: source})}
         else
           {:noreply, socket}
         end
@@ -46,12 +50,15 @@ defmodule DemoWeb.PlaygroundLive do
   end
 
   def handle_event("load-example", %{"id" => id}, socket) do
+    source = default_source(id)
+
     {:noreply,
      socket
      |> assign(:active_example, id)
-     |> assign(:source, default_source(id))
+     |> assign(:source, source)
      |> assign(:result, nil)
      |> assign(:selected_block, 0)
+     |> push_event("lua-editor:set-source", %{source: source})
      |> push_patch(to: ~p"/playground/#{id}")}
   end
 
@@ -85,7 +92,8 @@ defmodule DemoWeb.PlaygroundLive do
      socket
      |> assign(:source, "")
      |> assign(:result, nil)
-     |> assign(:selected_block, 0)}
+     |> assign(:selected_block, 0)
+     |> push_event("lua-editor:set-source", %{source: ""})}
   end
 
   @impl true
@@ -242,13 +250,18 @@ defmodule DemoWeb.PlaygroundLive do
           <% end %>
         </button>
       </div>
-      <div id="editor-wrap" phx-hook="LuaEditor" class="relative">
+      <div
+        id="editor-wrap"
+        phx-hook="LuaEditor"
+        phx-update="ignore"
+        class="relative h-[420px] overflow-hidden"
+      >
         <textarea
           id="lua-source"
           name="source"
           spellcheck="false"
           autocomplete="off"
-          class="w-full h-[420px] font-mono text-sm leading-6 p-4 bg-transparent resize-none focus:outline-none tab-2"
+          class="w-full h-full font-mono text-sm leading-6 p-4 bg-transparent resize-none focus:outline-none"
         ><%= @source %></textarea>
       </div>
     </form>

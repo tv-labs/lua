@@ -63,38 +63,35 @@
             class="absolute -inset-6 rounded-3xl bg-gradient-to-br from-primary/20 via-accent/10 to-transparent blur-2xl"
           >
           </div>
-          <div class="relative rounded-2xl border border-base-300/60 bg-base-200/80 backdrop-blur shadow-2xl overflow-hidden">
+          <div
+            id="hero-code"
+            class="relative rounded-2xl border border-base-300/60 bg-base-200/80 backdrop-blur shadow-2xl overflow-hidden"
+          >
             <div class="flex items-center justify-between px-4 py-2 border-b border-base-300/60 bg-base-300/30">
               <div class="flex items-center gap-2">
                 <span class="size-2.5 rounded-full bg-red-400/70"></span>
                 <span class="size-2.5 rounded-full bg-yellow-400/70"></span>
                 <span class="size-2.5 rounded-full bg-green-400/70"></span>
               </div>
-              <div class="text-xs font-mono text-base-content/50">script.exs</div>
+              <div
+                class="text-xs font-mono text-base-content/50"
+                data-code-filename-for="hero-snippets"
+              >
+                script.exs
+              </div>
               <div class="text-xs font-mono text-success">▶ 4 µs</div>
             </div>
-            <pre class="px-5 py-4 font-mono text-[13px] leading-6 overflow-x-auto"><code><span class="text-base-content/40">## Embed Lua in your Elixir app</span>
-<span class="text-base-content/40">## with a single function call.</span>
-
-<span class="text-primary">defmodule</span> <span class="text-secondary">MyApp.Rules</span> <span class="text-primary">do</span>
-  <span class="text-primary">use</span> <span class="text-secondary">Lua.API</span>, scope: <span class="text-accent">"rules"</span>
-
-  <span class="text-primary">deflua</span> <span class="text-info">double</span>(n), <span class="text-primary">do</span>: <span class="text-base-content/90">n * 2</span>
-<span class="text-primary">end</span>
-
-<span class="text-base-content/40">## Now your Elixir function is</span>
-<span class="text-base-content/40">## callable from any Lua script:</span>
-
-<span class="text-base-content/90">lua = </span><span class="text-secondary">Lua</span>.<span class="text-info">new</span>() |> <span class="text-secondary">Lua</span>.<span class="text-info">load_api</span>(<span class="text-secondary">MyApp.Rules</span>)
-
-<span class="text-success font-semibold">&#123;[10], _lua&#125; = </span><span class="text-secondary">Lua</span>.<span class="text-info">eval!</span>(lua, <span class="text-accent">"""
-  return rules.double(5)
-"""</span>)
-</code></pre>
+            <.code_block
+              id="hero-snippets"
+              language={:elixir}
+              rotate
+              class="px-5 py-4 font-mono text-[13px] leading-6 overflow-x-auto"
+              snippets={DemoWeb.Snippets.hero()}
+            />
           </div>
 
           <%!-- floating chip --%>
-          <div class="hidden sm:flex absolute -bottom-4 -left-4 bg-base-100 border border-base-300/60 rounded-xl px-4 py-3 shadow-lg items-center gap-3">
+          <div class="hidden sm:flex absolute left-0 top-full mt-3 bg-base-100 border border-base-300/60 rounded-xl px-4 py-3 shadow-lg items-center gap-3">
             <div class="size-9 rounded-lg bg-primary/20 grid place-items-center">
               <.icon name="hero-command-line-micro" class="size-5 text-primary" />
             </div>
@@ -214,13 +211,12 @@
           <div class="grid grid-cols-[1fr_1fr] gap-4">
             <div>
               <div class="text-base-content/40 mb-1">-- main.lua</div>
-              <pre class="text-base-content/90"><code>local function fib(n)
-  if n &lt; 2 then return n end
-  return fib(n - 1)
-       + fib(n - 2)
-end
-
-return fib(15)</code></pre>
+              <.code_block
+                id="fib-source"
+                language={:lua}
+                class="text-base-content/90"
+                source={"local function fib(n)\n  if n < 2 then return n end\n  return fib(n - 1)\n       + fib(n - 2)\nend\n\nreturn fib(15)"}
+              />
             </div>
             <div>
               <div class="text-base-content/40 mb-1">; bytecode</div>
@@ -277,34 +273,27 @@ return fib(15)</code></pre>
         </ul>
       </div>
 
-      <div class="rounded-2xl border border-base-300/60 bg-base-200 overflow-hidden shadow-xl">
+      <div
+        id="embed-code"
+        class="rounded-2xl border border-base-300/60 bg-base-200 overflow-hidden shadow-xl"
+      >
         <div class="flex items-center gap-2 px-4 py-2 border-b border-base-300/60 bg-base-300/30">
           <span class="size-2.5 rounded-full bg-red-400/70"></span>
           <span class="size-2.5 rounded-full bg-yellow-400/70"></span>
           <span class="size-2.5 rounded-full bg-green-400/70"></span>
-          <span class="ml-2 text-xs font-mono text-base-content/50">queue.exs</span>
+          <span
+            class="ml-2 text-xs font-mono text-base-content/50"
+            data-code-filename-for="embed-snippets"
+          >
+            queue.exs
+          </span>
         </div>
-        <pre class="p-5 font-mono text-[13px] leading-6 overflow-x-auto"><code><span class="text-primary">defmodule</span> <span class="text-secondary">Queue</span> <span class="text-primary">do</span>
-  <span class="text-primary">use</span> <span class="text-secondary">Lua.API</span>, scope: <span class="text-accent">"q"</span>
-
-  <span class="text-primary">deflua</span> <span class="text-info">push</span>(v), state <span class="text-primary">do</span>
-    queue = <span class="text-secondary">Lua</span>.<span class="text-info">get!</span>(state, [<span class="text-accent">:my_queue</span>])
-    &#123;[], state&#125; = <span class="text-secondary">Lua</span>.<span class="text-info">call_function!</span>(
-      state, [<span class="text-accent">:table</span>, <span class="text-accent">:insert</span>], [queue, v]
-    )
-    &#123;[], state&#125;
-  <span class="text-primary">end</span>
-<span class="text-primary">end</span>
-
-lua =
-  <span class="text-secondary">Lua</span>.<span class="text-info">new</span>()
-  |> <span class="text-secondary">Lua</span>.<span class="text-info">load_api</span>(<span class="text-secondary">Queue</span>)
-  |> <span class="text-secondary">Lua</span>.<span class="text-info">set!</span>([<span class="text-accent">:my_queue</span>], [])
-
-<span class="text-secondary">Lua</span>.<span class="text-info">eval!</span>(lua, <span class="text-accent">"""
-  q.push("hello")
-  q.push("world")
-"""</span>)</code></pre>
+        <.code_block
+          id="embed-snippets"
+          language={:elixir}
+          rotate
+          snippets={DemoWeb.Snippets.embed()}
+        />
       </div>
     </div>
   </section>

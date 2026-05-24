@@ -28,7 +28,7 @@ defmodule DemoWeb.Endpoint do
     raise_on_missing_only: code_reloading?
 
   if Mix.env() == :dev do
-    plug Tidewave
+    plug Tidewave, team: [id: "tv-labs", token: "6jxcajjjd63jqd5yfk7zvvcucgi3lpsf4yoqeuq"]
   end
 
   # Code reloading can be explicitly enabled under the

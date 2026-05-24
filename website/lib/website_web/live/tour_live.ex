@@ -52,10 +52,13 @@ defmodule DemoWeb.TourLive do
   end
 
   def handle_event("reset", _params, socket) do
+    source = socket.assigns.lesson.source
+
     {:noreply,
      socket
-     |> assign(:source, socket.assigns.lesson.source)
-     |> assign(:result, nil)}
+     |> assign(:source, source)
+     |> assign(:result, nil)
+     |> push_event("lua-editor:set-source", %{source: source})}
   end
 
   def handle_event("toggle-bytecode", _, socket) do
@@ -176,12 +179,17 @@ defmodule DemoWeb.TourLive do
                     </button>
                   </div>
                 </div>
-                <div id={"tour-editor-#{@lesson.slug}"} phx-hook="LuaEditor">
+                <div
+                  id={"tour-editor-#{@lesson.slug}"}
+                  phx-hook="LuaEditor"
+                  phx-update="ignore"
+                  class="relative h-[260px] overflow-hidden"
+                >
                   <textarea
                     name="source"
                     spellcheck="false"
                     autocomplete="off"
-                    class="w-full h-[260px] font-mono text-sm leading-6 p-4 bg-transparent resize-none focus:outline-none"
+                    class="w-full h-full font-mono text-sm leading-6 p-4 bg-transparent resize-none focus:outline-none"
                   ><%= @source %></textarea>
                 </div>
               </form>

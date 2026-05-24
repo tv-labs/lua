@@ -103,3 +103,116 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+/* Makeup syntax highlighting — mapped to daisyUI theme tokens so it
+   adapts to both `light` and `dark` themes without two stylesheets.
+   Token classes are Pygments-compatible. */
+.highlight {
+  color: var(--color-base-content);
+}
+
+/* Comments */
+.highlight .c,
+.highlight .c1,
+.highlight .cm,
+.highlight .cs,
+.highlight .ch,
+.highlight .cp,
+.highlight .cpf {
+  color: color-mix(in oklch, var(--color-base-content) 40%, transparent);
+  font-style: italic;
+}
+
+/* Keywords (do, end, defmodule, case, when…) */
+.highlight .k,
+.highlight .kd,
+.highlight .kn,
+.highlight .kp,
+.highlight .kr,
+.highlight .kt {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+/* Pseudo keywords / builtin constants (true, false, nil) */
+.highlight .kc,
+.highlight .bp {
+  color: var(--color-warning);
+}
+
+/* Module names */
+.highlight .nc,
+.highlight .nn {
+  color: var(--color-secondary);
+}
+
+/* Function names */
+.highlight .nf,
+.highlight .fm {
+  color: var(--color-info);
+}
+
+/* Atoms (:foo) */
+.highlight .ss {
+  color: var(--color-accent);
+}
+
+/* Strings */
+.highlight .s,
+.highlight .s1,
+.highlight .s2,
+.highlight .sb,
+.highlight .sc,
+.highlight .sd,
+.highlight .se,
+.highlight .sh,
+.highlight .si,
+.highlight .sx,
+.highlight .sr,
+.highlight .dl {
+  color: var(--color-accent);
+}
+
+/* String interpolation punctuation: visually quieter */
+.highlight .si .o,
+.highlight .si .p {
+  color: color-mix(in oklch, var(--color-accent) 70%, transparent);
+}
+
+/* Numbers */
+.highlight .m,
+.highlight .mi,
+.highlight .mf,
+.highlight .mh,
+.highlight .mo,
+.highlight .mb,
+.highlight .il {
+  color: var(--color-warning);
+}
+
+/* Operators, punctuation: inherit but muted */
+.highlight .o,
+.highlight .ow,
+.highlight .p {
+  color: color-mix(in oklch, var(--color-base-content) 70%, transparent);
+}
+
+/* Variables / identifiers */
+.highlight .n,
+.highlight .nv,
+.highlight .nb,
+.highlight .nl,
+.highlight .py {
+  color: var(--color-base-content);
+}
+
+/* Module attributes (@moduledoc, @spec) */
+.highlight .na {
+  color: var(--color-info);
+}
+
+/* Errors should not vanish silently */
+.highlight .err {
+  color: var(--color-error);
+}
+

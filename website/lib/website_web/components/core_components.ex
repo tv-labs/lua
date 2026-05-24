@@ -452,6 +452,89 @@ defmodule DemoWeb.CoreComponents do
     """
   end
 
+  @doc """
+  Renders a syntax-highlighted code block, optionally rotating through
+  several snippets.
+
+  ## Examples
+
+      <.code_block language={:elixir} source={~S\"\"\"
+      defmodule Foo do
+      end
+      \"\"\"} />
+
+      <.code_block
+        language={:elixir}
+        rotate
+        interval={4500}
+        snippets={[
+          %{label: "queue.exs", source: "..."},
+          %{label: "filter.exs", source: "..."}
+        ]}
+      />
+
+  When `snippets` is given, all snippets are rendered server-side and
+  stacked in a CSS grid cell so the container reserves the height of
+  the tallest snippet. The `CodeRotator` JS hook picks a random initial
+  snippet and renders dots below the code for manual switching. Each
+  snippet may include an optional `:label` that swaps into the chrome
+  filename slot.
+  """
+  attr :id, :string, required: true
+  attr :language, :atom, default: :elixir
+  attr :source, :string, default: nil
+  attr :snippets, :list, default: nil
+  attr :rotate, :boolean, default: false
+  attr :class, :string, default: "p-5 font-mono text-[13px] leading-6 overflow-x-auto"
+  attr :rest, :global
+
+  def code_block(assigns) do
+    snippets =
+      cond do
+        is_list(assigns[:snippets]) and assigns[:snippets] != [] -> assigns.snippets
+        is_binary(assigns[:source]) -> [%{source: assigns.source}]
+        true -> []
+      end
+
+    rotate? = assigns[:rotate] and length(snippets) > 1
+
+    assigns =
+      assigns
+      |> assign(:resolved_snippets, Enum.with_index(snippets))
+      |> assign(:rotate?, rotate?)
+
+    ~H"""
+    <div :if={@rotate?} phx-update="ignore" id={"#{@id}-rotator"}>
+      <pre id={@id} class={["highlight grid grid-cols-1", @class]} data-rotate {@rest}><code
+          :for={{snippet, idx} <- @resolved_snippets}
+          data-snippet-index={idx}
+          data-label={snippet[:label]}
+          class="[grid-area:1/1] invisible"
+          aria-hidden="true"
+        >{DemoWeb.Highlight.to_html(snippet.source, @language)}</code></pre>
+      <div
+        class="flex justify-center gap-2 px-4 py-3 border-t border-base-300/60 bg-base-300/20"
+        data-code-dots-for={@id}
+      >
+        <button
+          :for={{_snippet, idx} <- @resolved_snippets}
+          type="button"
+          data-snippet-target={idx}
+          aria-label={"Show snippet #{idx + 1}"}
+          class="size-2.5 rounded-full bg-base-content/25 hover:bg-base-content/60 transition-colors data-[active]:bg-primary cursor-pointer"
+        >
+        </button>
+      </div>
+    </div>
+    <pre :if={not @rotate?} id={@id} class={["highlight", @class]} {@rest}><code
+        :for={{snippet, idx} <- @resolved_snippets}
+        data-snippet-index={idx}
+        data-label={snippet[:label]}
+        hidden={idx != 0}
+      >{DemoWeb.Highlight.to_html(snippet.source, @language)}</code></pre>
+    """
+  end
+
   ## JS Commands
 
   def show(js \\ %JS{}, selector) do
