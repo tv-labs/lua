@@ -46,7 +46,8 @@ defmodule Lua.Compiler.Bytecode do
   @op_not_equal 22
   @op_not 23
   @op_test 24
-  @op_test_true 25
+  # `25` was `@op_test_true`; codegen never emitted it so it has been
+  # removed. Tag is free for reuse.
   @op_call_one 26
   @op_return_one 27
   @op_return_zero 28
@@ -156,16 +157,6 @@ defmodule Lua.Compiler.Bytecode do
     end
   end
 
-  defp encode({:test_true, reg, then_body}) do
-    case encode_list(then_body, []) do
-      {:ok, then_enc} ->
-        {:ok, {@op_test_true, reg, List.to_tuple(then_enc)}}
-
-      :fallback ->
-        :fallback
-    end
-  end
-
   # `:call` with `result_count == 1` is the dispatcher's only call form.
   # Anything else (multi-return, return-position tail calls, zero-result
   # statement calls) bails out so the interpreter's full machinery handles
@@ -180,15 +171,11 @@ defmodule Lua.Compiler.Bytecode do
   defp encode({:return, base, 1}), do: {:ok, {@op_return_one, base}}
   defp encode({:return, _base, 0}), do: {:ok, {@op_return_zero}}
 
-  # `:source_line` is preserved in the bytecode tuple but ignored at
-  # execution time (line tracking for compiled prototypes is deferred to
-  # B5d-v2). Stripping it would corrupt anyone reading the original
-  # instructions list for debugging; keeping it in bytecode at near-zero
-  # cost preserves the structural correspondence.
-  defp encode({:source_line, line, file}), do: {:ok, {@op_source_line, line, file}}
-
   # Anything else — `:closure`, `:get_table`, `:concatenate`, loops,
   # multi-return calls, vararg, etc. — is out of scope for v2.
+  #
+  # `:source_line` is stripped upstream in `encode_list/2`, so it never
+  # reaches this clause table.
   defp encode(_other), do: :fallback
 
   # ── Opcode tag accessors ────────────────────────────────────────────────
@@ -222,7 +209,6 @@ defmodule Lua.Compiler.Bytecode do
   def op_not_equal, do: @op_not_equal
   def op_not, do: @op_not
   def op_test, do: @op_test
-  def op_test_true, do: @op_test_true
   def op_call_one, do: @op_call_one
   def op_return_one, do: @op_return_one
   def op_return_zero, do: @op_return_zero

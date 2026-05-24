@@ -61,11 +61,14 @@ defmodule Lua.VM.Dispatcher do
   @op_not_equal 22
   @op_not 23
   @op_test 24
-  @op_test_true 25
+  # `25` was `@op_test_true`; codegen never emitted it so it has been
+  # removed. Tag is free for reuse.
   @op_call_one 26
   @op_return_one 27
   @op_return_zero 28
-  @op_source_line 29
+  # `@op_source_line 29` is reserved but never reaches the dispatcher: the
+  # bytecode encoder strips `:source_line` entries in `encode_list/2`.
+  # Line tracking for compiled prototypes is B5d-v2.
 
   @doc """
   Execute a compiled prototype against `args` and `state`.
@@ -136,8 +139,8 @@ defmodule Lua.VM.Dispatcher do
   # exceeds `tuple_size(code)` the current body has finished — pop a
   # continuation from `cont` or unwind through `frames`.
   #
-  # `cont` holds `{code, pc}` resume markers pushed by `:test` /
-  # `:test_true` when descending into a branch body.
+  # `cont` holds `{code, pc}` resume markers pushed by `:test` when
+  # descending into a branch body.
   #
   # `frames` holds dispatcher-side call frames for in-mode calls. Out-of-
   # mode calls (compiled → interpreted) bridge through
@@ -173,7 +176,12 @@ defmodule Lua.VM.Dispatcher do
 
       {@op_get_upvalue, dest, index} ->
         cell_ref = :erlang.element(index + 1, upvalues)
-        v = :erlang.map_get(cell_ref, state.upvalue_cells)
+        # Mirror the interpreter's `Map.get/2` (returns nil for a dangling
+        # cell) rather than `:erlang.map_get/2` (which raises `:badkey`).
+        # Compiled closures should never carry stale cell refs, but the
+        # invariant is the interpreter's, not ours, and the error shape
+        # has to match where it does fire.
+        v = Map.get(state.upvalue_cells, cell_ref)
         regs = :erlang.setelement(dest + 1, regs, v)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
@@ -493,18 +501,6 @@ defmodule Lua.VM.Dispatcher do
 
         dispatch(branch, 1, regs, upvalues, proto, state, [{code, pc + 1} | cont], frames)
 
-      {@op_test_true, reg, then_bc} ->
-        case :erlang.element(reg + 1, regs) do
-          nil ->
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
-
-          false ->
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
-
-          _ ->
-            dispatch(then_bc, 1, regs, upvalues, proto, state, [{code, pc + 1} | cont], frames)
-        end
-
       # ── Calls ───────────────────────────────────────────────────────
       #
       # `:call_one` always asks for exactly one result placed at `base`.
@@ -517,16 +513,12 @@ defmodule Lua.VM.Dispatcher do
         func_value = :erlang.element(base + 1, regs)
 
         case func_value do
+          # Vararg bodies are out of scope for the bytecode encoder
+          # (`:vararg` / `:return_vararg` fall through to `:fallback`),
+          # so a `{:compiled_closure, ...}` is, by construction, never a
+          # vararg function. No varargs collection needed here.
           {:compiled_closure, callee_proto, callee_upvalues} ->
             callee_regs = init_callee_regs(callee_proto, regs, base + 1, arg_count)
-
-            callee_proto =
-              if callee_proto.is_vararg do
-                varargs = collect_varargs(regs, base + 1, arg_count, callee_proto.param_count)
-                %{callee_proto | varargs: varargs}
-              else
-                callee_proto
-              end
 
             # Frame is a tuple, not a map: pattern-matching a tuple in
             # `return_one/3` skips Map.fetch! lookups and lets the BEAM
@@ -575,13 +567,6 @@ defmodule Lua.VM.Dispatcher do
 
       {@op_return_zero} ->
         return_one(nil, state, frames)
-
-      # ── No-ops in execution path ────────────────────────────────────
-
-      {@op_source_line, _line, _file} ->
-        # Line tracking for dispatcher-executed code is deferred; error
-        # attribution for compiled prototypes is the subject of B5d-v2.
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
     end
   end
 
@@ -639,11 +624,6 @@ defmodule Lua.VM.Dispatcher do
   defp copy_regs(src, src_i, dst, dst_i, n) do
     v = :erlang.element(src_i + 1, src)
     copy_regs(src, src_i + 1, :erlang.setelement(dst_i + 1, dst, v), dst_i + 1, n - 1)
-  end
-
-  defp collect_varargs(regs, base, total_args, param_count) do
-    extra = max(total_args - param_count, 0)
-    collect_args(regs, base + param_count, extra)
   end
 
   defp collect_args(_regs, _off, 0), do: []

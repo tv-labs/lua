@@ -34,11 +34,19 @@ cheaper inside a single dispatcher than across a generated-module
 boundary (the original B5e's plan) because no cross-module
 unwinding is needed.
 
+In addition to per-prototype line info, `:call_one` in the
+dispatcher must push a `call_info` frame onto `state.call_stack`
+(matching the interpreter's `executor.ex:777` semantics) and the
+return path must pop it. Without this, `debug.traceback/0` from a
+compiled callee and the stack-trace section of any
+`RuntimeError` / `TypeError` / `ArgumentError` raised from a
+compiled-to-compiled call chain will silently truncate to the
+caller of `Dispatcher.execute/3-4`. The current B5a-v2 PR ships
+the missing frames as a known gap so the perf win can land first.
+See [PR #237 review summary](https://github.com/tv-labs/lua/pull/237).
+
 ## Out of scope
 
-- Stack-trace shape for compiled-to-compiled call chains. The
-  per-call shape from the interpreter survives — `call_function/3`
-  already carries position context.
 - Source-map formats compatible with external debuggers. Not in
   scope for this rewrite.
 

@@ -21,9 +21,11 @@ defmodule Lua.VM.DispatcherTest do
   use ExUnit.Case, async: true
 
   alias Lua.Compiler
+  alias Lua.Compiler.Bytecode
   alias Lua.Compiler.Prototype
   alias Lua.Parser
   alias Lua.VM
+  alias Lua.VM.Dispatcher
   alias Lua.VM.State
   alias Lua.VM.Stdlib
 
@@ -372,6 +374,57 @@ defmodule Lua.VM.DispatcherTest do
       # setmetatable/table-construction opcodes outside coverage.
       _ = proto
       assert results == [30]
+    end
+  end
+
+  describe "upvalues" do
+    test ":get_upvalue reads a captured local through a compiled closure" do
+      # Exercises the dispatcher's :get_upvalue path end-to-end. The
+      # inner `inc` body compiles; the outer closure provides the
+      # cell.
+      {_proto, results} =
+        run!("""
+        local function make()
+          local x = 41
+          return function() return x + 1 end
+        end
+        local inc = make()
+        return inc()
+        """)
+
+      assert results == [42]
+    end
+
+    test ":get_upvalue returns nil for a dangling cell (parity with interpreter)" do
+      # Pins the contract that the dispatcher's :get_upvalue mirrors the
+      # interpreter's Map.get/2 semantics for a missing cell: nil, not a
+      # :badkey raise. Compiled closures should never carry stale refs
+      # in practice, but if one ever does, both executors have to
+      # diverge identically.
+      #
+      # Built by hand because the compiler will not produce a stale ref
+      # — this asserts the dispatcher's *shape*, not a reachable bug.
+      proto = %Prototype{
+        instructions: [
+          {:get_upvalue, 0, 0},
+          {:return, 0, 1}
+        ],
+        bytecode: {
+          {Bytecode.op_get_upvalue(), 0, 0},
+          {Bytecode.op_return_one(), 0}
+        },
+        param_count: 0,
+        max_registers: 1,
+        source: "test-synthetic"
+      }
+
+      # Forge a cell ref that is *not* present in state.upvalue_cells.
+      dangling = make_ref()
+      upvalues = {dangling}
+      state = State.new()
+
+      {results, _state} = Dispatcher.execute(proto, [], upvalues, state)
+      assert results == [nil]
     end
   end
 end
