@@ -7,7 +7,8 @@ defmodule DemoWeb.OpcodesLive do
     %{
       id: "loads",
       title: "Loads & moves",
-      blurb: "Get values into registers — constants, nil, booleans, and register-to-register copies.",
+      blurb:
+        "Get values into registers — constants, nil, booleans, and register-to-register copies.",
       ops: [:load_constant, :load_nil, :load_boolean, :load_env, :move]
     },
     %{
@@ -61,13 +62,15 @@ defmodule DemoWeb.OpcodesLive do
     %{
       id: "control",
       title: "Control flow",
-      blurb: "Loops and structured exits. Most jumps live on the continuation list, not as PC offsets.",
+      blurb:
+        "Loops and structured exits. Most jumps live on the continuation list, not as PC offsets.",
       ops: [:while_loop, :repeat_loop, :numeric_for, :generic_for, :break, :scope]
     },
     %{
       id: "calls",
       title: "Calls & returns",
-      blurb: "Invoke and return — including tail calls, varargs, and the method-shim for `obj:method(...)`.",
+      blurb:
+        "Invoke and return — including tail calls, varargs, and the method-shim for `obj:method(...)`.",
       ops: [:call, :tail_call, :return, :return_vararg, :vararg]
     },
     %{
@@ -111,8 +114,7 @@ defmodule DemoWeb.OpcodesLive do
               </h2>
               <p class="text-sm text-base-content/70 leading-relaxed">
                 Every instruction this VM emits, grouped by what it does.
-                Match the colours from the
-                <.link navigate={~p"/playground"} class="link link-primary">playground</.link>.
+                Match the colours from the <.link navigate={~p"/playground"} class="link link-primary">playground</.link>.
               </p>
             </div>
 
@@ -154,10 +156,10 @@ defmodule DemoWeb.OpcodesLive do
               </h1>
               <p class="mt-3 text-base-content/70 max-w-2xl leading-relaxed">
                 The Lua compiler in this library lowers source to a flat
-                stream of <strong>register-based</strong> opcodes. There
+                stream of <strong>register-based</strong>
+                opcodes. There
                 are no labels and no PC-relative jumps — control flow is
-                threaded through an explicit
-                <code class="text-primary">continuation list</code>
+                threaded through an explicit <code class="text-primary">continuation list</code>
                 inside the executor. The full set of opcodes the
                 disassembler emits is documented below.
               </p>
@@ -222,38 +224,102 @@ defmodule DemoWeb.OpcodesLive do
   # just enough for a reader skimming to know what the args look like.
   defp op_signature(op) do
     case op do
-      :load_constant -> "rD, K"
-      :load_nil -> "rD, N"
-      :load_boolean -> "rD, bool"
-      :load_env -> "rD"
-      :move -> "rD, rS"
-      :get_global -> "rD, name"
-      :set_global -> "name, rS"
-      :get_upvalue -> "rD, up[i]"
-      :set_upvalue -> "up[i], rS"
-      :get_open_upvalue -> "rD, rS"
-      :set_open_upvalue -> "rD, rS"
-      :new_table -> "rD, array, hash"
-      :get_table -> "rD, rT, k"
-      :set_table -> "rT, k, rV"
-      :get_field -> "rD, rT, name"
-      :set_field -> "rT, name, rV"
-      :set_list -> "rT, start, count, off"
-      :self -> "rD, rO, name"
-      :closure -> "rD, proto[i]"
-      :call -> "rB, argc, resc"
-      :tail_call -> "rB, argc"
-      :return -> "rB, count"
-      :return_vararg -> "(varargs)"
-      :vararg -> "rB, count"
-      :test -> "rR"
-      :test_true -> "rR"
-      :test_and -> "rD, rS"
-      :test_or -> "rD, rS"
-      :numeric_for -> "rB"
-      :generic_for -> "rB, vars"
-      :scope -> "registers"
-      :source_line -> "line"
+      :load_constant ->
+        "rD, K"
+
+      :load_nil ->
+        "rD, N"
+
+      :load_boolean ->
+        "rD, bool"
+
+      :load_env ->
+        "rD"
+
+      :move ->
+        "rD, rS"
+
+      :get_global ->
+        "rD, name"
+
+      :set_global ->
+        "name, rS"
+
+      :get_upvalue ->
+        "rD, up[i]"
+
+      :set_upvalue ->
+        "up[i], rS"
+
+      :get_open_upvalue ->
+        "rD, rS"
+
+      :set_open_upvalue ->
+        "rD, rS"
+
+      :new_table ->
+        "rD, array, hash"
+
+      :get_table ->
+        "rD, rT, k"
+
+      :set_table ->
+        "rT, k, rV"
+
+      :get_field ->
+        "rD, rT, name"
+
+      :set_field ->
+        "rT, name, rV"
+
+      :set_list ->
+        "rT, start, count, off"
+
+      :self ->
+        "rD, rO, name"
+
+      :closure ->
+        "rD, proto[i]"
+
+      :call ->
+        "rB, argc, resc"
+
+      :tail_call ->
+        "rB, argc"
+
+      :return ->
+        "rB, count"
+
+      :return_vararg ->
+        "(varargs)"
+
+      :vararg ->
+        "rB, count"
+
+      :test ->
+        "rR"
+
+      :test_true ->
+        "rR"
+
+      :test_and ->
+        "rD, rS"
+
+      :test_or ->
+        "rD, rS"
+
+      :numeric_for ->
+        "rB"
+
+      :generic_for ->
+        "rB, vars"
+
+      :scope ->
+        "registers"
+
+      :source_line ->
+        "line"
+
       op when op in [:add, :subtract, :multiply, :divide, :floor_divide, :modulo, :power] ->
         "rD, rA, rB"
 

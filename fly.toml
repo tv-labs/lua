@@ -1,0 +1,61 @@
+# fly.toml — deflua.com (Lua.ex showcase)
+#
+# Deploy from the lua/ repo root so the Dockerfile can reach the `:lua` path
+# dependency one directory above website/.
+
+app = "deflua"
+primary_region = "ewr"   # change after `fly platform regions` if desired
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PHX_HOST = "deflua.com"
+  PORT = "8080"
+
+[deploy]
+  strategy = "rolling"
+
+# Single HTTP service — Fly's edge handles TLS termination and HTTP/2.
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  auto_stop_machines = "off"     # keep machines warm; HN burst can't wait on cold starts
+  auto_start_machines = true
+  min_machines_running = 2       # always have spare capacity
+
+  # LiveView holds a websocket open for the whole session. Use connection-based
+  # concurrency so Fly's proxy spreads sockets across machines and triggers
+  # autoscale before any one node saturates.
+  [services.concurrency]
+    type = "connections"
+    soft_limit = 1000   # start sending new conns to other machines past this
+    hard_limit = 2000   # refuse new conns past this on a single machine
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  # Cheap liveness probe — `/health` is exempt from force_ssl in prod.exs.
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "get"
+    path = "/health"
+    protocol = "http"
+
+# Default VM. shared-cpu-2x / 1GB handles a Phoenix LiveView site easily.
+# Bump to performance-2x or shared-cpu-4x if BEAM starts saturating.
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 2

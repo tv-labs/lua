@@ -268,9 +268,13 @@ defmodule DemoWeb.TourLive do
             <% @running -> %>
               <span class="text-primary">running…</span>
             <% match?(%{status: :ok}, @result) -> %>
-              <span class="text-success">ok</span>
+              <span class="text-success">
+                ok &middot; {format_us(@result.duration_us)}
+              </span>
             <% match?(%{status: :error}, @result) -> %>
-              <span class="text-error">error</span>
+              <span class="text-error">
+                error &middot; {format_us(@result.duration_us)}
+              </span>
             <% true -> %>
               <span class="text-base-content/40">idle</span>
           <% end %>
@@ -352,6 +356,13 @@ defmodule DemoWeb.TourLive do
     </div>
     """
   end
+
+  defp format_us(us) when is_integer(us) and us < 1_000, do: "#{us} µs"
+
+  defp format_us(us) when is_integer(us) and us < 1_000_000,
+    do: "#{Float.round(us / 1_000, 2)} ms"
+
+  defp format_us(us) when is_integer(us), do: "#{Float.round(us / 1_000_000, 3)} s"
 
   defp render_inline(text) do
     text

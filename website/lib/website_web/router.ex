@@ -15,6 +15,10 @@ defmodule DemoWeb.Router do
   end
 
   scope "/", DemoWeb do
+    get "/health", PageController, :health
+  end
+
+  scope "/", DemoWeb do
     pipe_through :browser
 
     get "/", PageController, :home

@@ -541,13 +541,17 @@ defmodule DemoWeb.PlaygroundLive do
                         <span class={[
                           "text-base-content/40",
                           @hover_line && ins.line == @hover_line && "text-primary font-semibold"
-                        ]}>L{ins.line}</span>
+                        ]}>
+                          L{ins.line}
+                        </span>
                       <% end %>
                     </td>
                     <td class="px-3 py-1">
                       <span class={Bytecode.op_class(ins.op)}>{ins.op}</span>
                       {" "}
-                      <span class="text-base-content/80">{Bytecode.format_args(ins.op, ins.args)}</span>
+                      <span class="text-base-content/80">
+                        {Bytecode.format_args(ins.op, ins.args)}
+                      </span>
                     </td>
                   </tr>
                 <% end %>

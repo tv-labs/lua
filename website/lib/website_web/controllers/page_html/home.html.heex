@@ -286,9 +286,9 @@
           </li>
           <li class="flex gap-2.5">
             <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
-            No <code class="text-primary bg-base-300/40 px-1 rounded">io</code>,
-            <code class="text-primary bg-base-300/40 px-1 rounded">os</code>, or
-            <code class="text-primary bg-base-300/40 px-1 rounded">require</code> by default
+            No <code class="text-primary bg-base-300/40 px-1 rounded">io</code>, <code class="text-primary bg-base-300/40 px-1 rounded">os</code>, or
+            <code class="text-primary bg-base-300/40 px-1 rounded">require</code>
+            by default
           </li>
           <li class="flex gap-2.5">
             <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
@@ -363,7 +363,12 @@
                       <span class="text-base-content/30 select-none w-6 text-right shrink-0">
                         {String.pad_leading(Integer.to_string(ins.pc), 2, "0")}
                       </span>
-                      <span class="truncate"><span class={DemoWeb.Bytecode.op_class(ins.op)}>{ins.op}</span> {DemoWeb.Bytecode.format_args(ins.op, ins.args)}</span>
+                      <span class="truncate">
+                        <span class={DemoWeb.Bytecode.op_class(ins.op)}>{ins.op}</span> {DemoWeb.Bytecode.format_args(
+                          ins.op,
+                          ins.args
+                        )}
+                      </span>
                     </div>
                   <% end %>
                 <% end %>
@@ -457,11 +462,15 @@
             <th class="text-left font-semibold"></th>
             <th class="text-left font-semibold">
               <span class="text-primary font-bold">Lua.ex</span>
-              <span class="block text-xs font-normal text-base-content/50 mt-0.5">this library</span>
+              <span class="block text-xs font-normal text-base-content/50 mt-0.5">
+                this library
+              </span>
             </th>
             <th class="text-left font-semibold">
               Luerl
-              <span class="block text-xs font-normal text-base-content/50 mt-0.5">Erlang-native</span>
+              <span class="block text-xs font-normal text-base-content/50 mt-0.5">
+                Erlang-native
+              </span>
             </th>
             <th class="text-left font-semibold">
               C Lua via NIF/port
@@ -491,15 +500,16 @@
           <tr>
             <td class="font-semibold text-base-content/80">Elixir interop API</td>
             <td>
-              <code>deflua</code> macro,
-              <code>~LUA</code> sigil, <code>Lua.API</code>
+              <code>deflua</code> macro, <code>~LUA</code> sigil, <code>Lua.API</code>
             </td>
             <td>Manual function registration</td>
             <td>Port marshalling</td>
           </tr>
           <tr>
             <td class="font-semibold text-base-content/80">Compile-time validation</td>
-            <td><.icon name="hero-check-circle-micro" class="size-5 text-success" /> <code>~LUA</code>c</td>
+            <td>
+              <.icon name="hero-check-circle-micro" class="size-5 text-success" /> <code>~LUA</code>c
+            </td>
             <td><.icon name="hero-x-mark-micro" class="size-5 text-base-content/30" /></td>
             <td><.icon name="hero-x-mark-micro" class="size-5 text-base-content/30" /></td>
           </tr>

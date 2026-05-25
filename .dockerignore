@@ -1,0 +1,38 @@
+# Build artifacts
+_build/
+deps/
+doc/
+cover/
+
+# Test
+test/
+tasks/
+benchmarks/
+
+# Dev / editor
+.elixir_ls/
+.lexical/
+.git/
+.github/
+.vscode/
+.idea/
+
+# Crash dumps and ephemeral files
+erl_crash.dump
+*.ez
+.fetch
+
+# Website-specific paths
+website/_build/
+website/deps/
+website/doc/
+website/cover/
+website/test/
+website/.elixir_ls/
+website/erl_crash.dump
+website/priv/static/assets/
+website/priv/static/cache_manifest.json
+website/assets/node_modules/
+
+# Local agent / plan files
+.agents/

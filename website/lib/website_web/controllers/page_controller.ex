@@ -14,6 +14,10 @@ defmodule DemoWeb.PageController do
     render(conn, :about, page_title: "About — Lua.ex")
   end
 
+  def health(conn, _params) do
+    send_resp(conn, 200, "ok")
+  end
+
   defp compile_bytecode(source) do
     case Website.LuaSandbox.compile(source) do
       {:ok, _chunk, blocks} -> blocks

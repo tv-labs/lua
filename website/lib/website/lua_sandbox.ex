@@ -524,7 +524,8 @@ defmodule Website.LuaSandbox do
         integers *or* floats — Lua picks whichever fits. Strings are
         interned immutable byte sequences.
         """,
-        exercise: "Add a line that prints `type(3.0 == 3)` and predict the result before running.",
+        exercise:
+          "Add a line that prints `type(3.0 == 3)` and predict the result before running.",
         source: """
         print(type(nil), type(true), type(1), type(1.5))
         print(type("hi"), type(print), type({}))
@@ -555,7 +556,8 @@ defmodule Website.LuaSandbox do
       %{
         slug: "tables",
         title: "Tables are everything",
-        objective: "Understand Lua's one data structure — arrays, records, hashes, all in one shape.",
+        objective:
+          "Understand Lua's one data structure — arrays, records, hashes, all in one shape.",
         body: """
         Tables are *the* data structure: arrays, hash maps, records,
         objects, modules — all tables. Indexed from `1` by convention,
@@ -731,7 +733,8 @@ defmodule Website.LuaSandbox do
       %{
         slug: "stdlib",
         title: "The standard library",
-        objective: "Get comfortable with `string`, `table`, and `math` — the three you'll reach for daily.",
+        objective:
+          "Get comfortable with `string`, `table`, and `math` — the three you'll reach for daily.",
         body: """
         Lua ships a small but well-shaped stdlib. `string` has format,
         upper/lower, find/match/gmatch/gsub, byte/char. `table` has
@@ -739,7 +742,8 @@ defmodule Website.LuaSandbox do
         max/random/sqrt/log/sin/cos. There's no `os` or `io` in this
         sandbox — see the *Sandbox* lesson for why.
         """,
-        exercise: "Sort `nums` in place using `table.sort(nums, function(a,b) return a > b end)` and print it.",
+        exercise:
+          "Sort `nums` in place using `table.sort(nums, function(a,b) return a > b end)` and print it.",
         source: """
         local nums = { 5, 1, 4, 2, 3 }
         print(table.concat(nums, ","))

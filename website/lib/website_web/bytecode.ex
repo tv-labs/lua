@@ -182,8 +182,7 @@ defmodule DemoWeb.Bytecode do
       get_field: "Read t.name (string-keyed field) — faster path than get_table.",
       set_field: "Write t.name from a register.",
       set_list: "Bulk-write a slice of registers into the array part of a table.",
-      self:
-        "Method-call shim: load t and t.name into adjacent registers for `obj:method(...)`.",
+      self: "Method-call shim: load t and t.name into adjacent registers for `obj:method(...)`.",
       closure: "Build a closure from a nested prototype, capturing its upvalues.",
       call: "Call a function. Args/results encoded as fixed counts, multi, or varargs.",
       tail_call: "Tail-position call — replaces the current frame instead of pushing.",
@@ -212,14 +211,11 @@ defmodule DemoWeb.Bytecode do
       shift_right: "Bit shift right (`>>`).",
       test: "If register is truthy, run the next continuation; else fall through.",
       test_true: "If register is truthy, fall through; else skip.",
-      test_and:
-        "Short-circuit AND: if src is falsy, copy to dest and skip; else continue.",
-      test_or:
-        "Short-circuit OR: if src is truthy, copy to dest and skip; else continue.",
+      test_and: "Short-circuit AND: if src is falsy, copy to dest and skip; else continue.",
+      test_or: "Short-circuit OR: if src is truthy, copy to dest and skip; else continue.",
       while_loop: "While-loop control: test, body, jump back.",
       repeat_loop: "Repeat-until control: body, test, jump back.",
-      numeric_for:
-        "Numeric for-loop: increments the loop variable and continues until done.",
+      numeric_for: "Numeric for-loop: increments the loop variable and continues until done.",
       generic_for: "Generic for-loop over an iterator (`pairs`, `ipairs`, custom).",
       break: "Jump out of the nearest enclosing loop.",
       scope: "Allocate a new register-window for the enclosing block.",
