@@ -1,7 +1,10 @@
 defmodule DemoWeb.PlaygroundLive do
   use DemoWeb, :live_view
 
+  alias DemoWeb.Bytecode
   alias Website.LuaSandbox
+
+  @max_shared_bytes 20_000
 
   @impl true
   def mount(_params, _session, socket) do
@@ -16,32 +19,82 @@ defmodule DemoWeb.PlaygroundLive do
       |> assign(:show_bytecode, true)
       |> assign(:selected_block, 0)
       |> assign(:hover_line, nil)
+      |> assign(:shared_source?, false)
 
     {:ok, socket}
   end
 
   @impl true
   def handle_params(params, _url, socket) do
-    case params do
-      %{"example" => id} ->
-        if Enum.any?(LuaSandbox.examples(), &(&1.id == id)) and
-             socket.assigns.active_example != id do
-          source = default_source(id)
+    cond do
+      Map.has_key?(params, "example") ->
+        id = params["example"]
 
-          {:noreply,
-           socket
-           |> assign(:active_example, id)
-           |> assign(:source, source)
-           |> assign(:result, nil)
-           |> assign(:selected_block, 0)
-           |> push_event("lua-editor:set-source", %{source: source})}
-        else
-          {:noreply, socket}
+        cond do
+          not Enum.any?(LuaSandbox.examples(), &(&1.id == id)) ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "No example named \"#{id}\". Showing the default.")
+             |> push_patch(to: ~p"/playground")}
+
+          socket.assigns.active_example == id ->
+            {:noreply, socket}
+
+          true ->
+            source = default_source(id)
+
+            {:noreply,
+             socket
+             |> assign(:active_example, id)
+             |> assign(:source, source)
+             |> assign(:result, nil)
+             |> assign(:selected_block, 0)
+             |> assign(:shared_source?, false)
+             |> push_event("lua-editor:set-source", %{source: source})}
         end
 
-      _ ->
+      Map.has_key?(params, "source") ->
+        case decode_shared_source(params["source"]) do
+          {:ok, source} ->
+            {:noreply,
+             socket
+             |> assign(:active_example, nil)
+             |> assign(:source, source)
+             |> assign(:result, nil)
+             |> assign(:selected_block, 0)
+             |> assign(:shared_source?, true)
+             |> push_event("lua-editor:set-source", %{source: source})}
+
+          :error ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "That shared link is invalid or expired.")
+             |> push_patch(to: ~p"/playground")}
+        end
+
+      true ->
         {:noreply, socket}
     end
+  end
+
+  defp decode_shared_source(encoded) when is_binary(encoded) do
+    with {:ok, gzipped} <- Base.url_decode64(encoded, padding: false),
+         {:ok, source} <- safe_gunzip(gzipped),
+         true <- byte_size(source) <= @max_shared_bytes do
+      {:ok, source}
+    else
+      _ -> :error
+    end
+  end
+
+  defp decode_shared_source(_), do: :error
+
+  defp safe_gunzip(bin) do
+    {:ok, :zlib.gunzip(bin)}
+  rescue
+    _ -> :error
+  catch
+    _, _ -> :error
   end
 
   @impl true
@@ -77,14 +130,18 @@ defmodule DemoWeb.PlaygroundLive do
   end
 
   def handle_event("hover-line", %{"line" => line}, socket) do
-    parsed =
-      case line do
-        nil -> nil
-        "" -> nil
-        s -> String.to_integer(s)
-      end
+    {:noreply, assign(socket, :hover_line, parse_line(line))}
+  end
 
-    {:noreply, assign(socket, :hover_line, parsed)}
+  def handle_event("focus-line", %{"line" => line}, socket) do
+    parsed = parse_line(line)
+
+    socket =
+      socket
+      |> assign(:hover_line, parsed)
+      |> push_event("lua-editor:focus-line", %{line: parsed, target: "editor-wrap"})
+
+    {:noreply, socket}
   end
 
   def handle_event("clear", _params, socket) do
@@ -95,6 +152,11 @@ defmodule DemoWeb.PlaygroundLive do
      |> assign(:selected_block, 0)
      |> push_event("lua-editor:set-source", %{source: ""})}
   end
+
+  defp parse_line(nil), do: nil
+  defp parse_line(""), do: nil
+  defp parse_line(line) when is_binary(line), do: String.to_integer(line)
+  defp parse_line(line) when is_integer(line), do: line
 
   @impl true
   def handle_info({:run, source}, socket) do
@@ -113,6 +175,25 @@ defmodule DemoWeb.PlaygroundLive do
       ex -> ex.source
     end
   end
+
+  defp active_blurb(examples, active_id) do
+    case Enum.find(examples, &(&1.id == active_id)) do
+      %{blurb: blurb} when is_binary(blurb) and blurb != "" -> blurb
+      _ -> nil
+    end
+  end
+
+  defp has_copyable_output?(%{status: :ok, output: out, returns: rets})
+       when out != "" or rets != [],
+       do: true
+
+  defp has_copyable_output?(%{status: :error}), do: true
+  defp has_copyable_output?(_), do: false
+
+  defp empty_source?(nil), do: true
+  defp empty_source?(""), do: true
+  defp empty_source?(source) when is_binary(source), do: String.trim(source) == ""
+  defp empty_source?(_), do: false
 
   @impl true
   def render(assigns) do
@@ -144,7 +225,7 @@ defmodule DemoWeb.PlaygroundLive do
           </div>
         </div>
 
-        <div class="flex gap-2 overflow-x-auto pb-3 -mx-1 px-1 mb-4 scrollbar-thin">
+        <div class="flex gap-2 overflow-x-auto pb-3 -mx-1 px-1 mb-3 scrollbar-thin">
           <%= for ex <- @examples do %>
             <button
               phx-click="load-example"
@@ -159,6 +240,13 @@ defmodule DemoWeb.PlaygroundLive do
             </button>
           <% end %>
         </div>
+
+        <%= if blurb = active_blurb(@examples, @active_example) do %>
+          <div class="mb-4 flex items-start gap-2.5 text-sm text-base-content/70 bg-base-200/40 border border-base-300/40 rounded-lg px-3.5 py-2.5">
+            <.icon name="hero-light-bulb-micro" class="size-4 text-accent shrink-0 mt-0.5" />
+            <span>{raw(blurb)}</span>
+          </div>
+        <% end %>
 
         <div class={[
           "grid gap-4",
@@ -235,25 +323,39 @@ defmodule DemoWeb.PlaygroundLive do
           <span class="size-2 rounded-full bg-green-400/70" />
           <span class="ml-2 font-semibold">main.lua</span>
         </div>
-        <button
-          type="submit"
-          class={[
-            "btn btn-sm btn-primary shadow-sm",
-            @running && "btn-disabled"
-          ]}
-          disabled={@running}
-        >
-          <%= if @running do %>
-            <span class="loading loading-spinner loading-xs" /> Running
-          <% else %>
-            <.icon name="hero-play-micro" class="size-4" /> Run
-          <% end %>
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            id="share-btn"
+            phx-hook="ShareSnippet"
+            class="btn btn-xs btn-ghost border border-base-300/60"
+            aria-label="Copy a shareable URL for this snippet"
+          >
+            <.icon name="hero-link-micro" class="size-3.5" />
+            <span data-share-label>Share</span>
+          </button>
+          <button
+            type="submit"
+            class={[
+              "btn btn-sm btn-primary shadow-sm",
+              (@running or empty_source?(@source)) && "btn-disabled"
+            ]}
+            disabled={@running or empty_source?(@source)}
+            title={if empty_source?(@source), do: "Write some Lua first.", else: nil}
+          >
+            <%= if @running do %>
+              <span class="loading loading-spinner loading-xs" /> Running
+            <% else %>
+              <.icon name="hero-play-micro" class="size-4" /> Run
+            <% end %>
+          </button>
+        </div>
       </div>
       <div
         id="editor-wrap"
         phx-hook="LuaEditor"
         phx-update="ignore"
+        data-storage-key="playground:source"
         class="relative h-[420px] overflow-hidden"
       >
         <textarea
@@ -276,7 +378,7 @@ defmodule DemoWeb.PlaygroundLive do
     <div class="rounded-box border border-base-300/60 bg-base-200/50 overflow-hidden">
       <div class="px-4 py-2 border-b border-base-300/60 bg-base-300/30 flex items-center justify-between">
         <div class="text-sm font-semibold text-base-content/70">Output</div>
-        <div class="text-xs font-mono text-base-content/50">
+        <div class="flex items-center gap-3 text-xs font-mono text-base-content/50">
           <%= cond do %>
             <% @running -> %>
               <span class="text-primary">executing…</span>
@@ -291,9 +393,21 @@ defmodule DemoWeb.PlaygroundLive do
             <% true -> %>
               <span class="text-base-content/40">idle</span>
           <% end %>
+          <%= if has_copyable_output?(@result) do %>
+            <button
+              id="copy-output"
+              phx-hook="CopyButton"
+              data-copy-target="#output-body"
+              class="btn btn-ghost btn-xs gap-1 normal-case"
+              aria-label="Copy output"
+            >
+              <.icon name="hero-clipboard-document-micro" class="size-3.5" />
+              <span data-copy-label>Copy</span>
+            </button>
+          <% end %>
         </div>
       </div>
-      <div class="p-4 font-mono text-sm space-y-2 min-h-[140px]">
+      <div id="output-body" class="p-4 font-mono text-sm space-y-2 min-h-[140px]">
         <%= cond do %>
           <% @running -> %>
             <div class="text-base-content/50">Running on the BEAM…</div>
@@ -408,23 +522,32 @@ defmodule DemoWeb.PlaygroundLive do
             <table class="w-full">
               <tbody>
                 <%= for ins <- block.instructions do %>
-                  <tr class={[
-                    "border-b border-base-300/30 hover:bg-base-300/30",
-                    @hover_line && ins.line == @hover_line && "bg-primary/10",
-                    ins.op == :source_line && "text-base-content/40 italic"
-                  ]}>
+                  <tr
+                    class={[
+                      "border-b border-base-300/30 hover:bg-base-300/30",
+                      ins.line && "cursor-pointer",
+                      @hover_line && ins.line == @hover_line && "bg-primary/15 ring-1 ring-primary/40",
+                      ins.op == :source_line && "text-base-content/40 italic"
+                    ]}
+                    phx-mouseover={ins.line && "focus-line"}
+                    phx-value-line={ins.line}
+                    phx-throttle="40"
+                  >
                     <td class="px-3 py-1 text-base-content/40 select-none text-right w-12">
                       {pad_pc(ins.pc)}
                     </td>
                     <td class="px-2 py-1 text-base-content/40 select-none w-10 text-right">
                       <%= if ins.line do %>
-                        <span class="text-base-content/40">L{ins.line}</span>
+                        <span class={[
+                          "text-base-content/40",
+                          @hover_line && ins.line == @hover_line && "text-primary font-semibold"
+                        ]}>L{ins.line}</span>
                       <% end %>
                     </td>
                     <td class="px-3 py-1">
-                      <span class={op_class(ins.op)}>{ins.op}</span>
+                      <span class={Bytecode.op_class(ins.op)}>{ins.op}</span>
                       {" "}
-                      <span class="text-base-content/80">{format_args(ins.op, ins.args)}</span>
+                      <span class="text-base-content/80">{Bytecode.format_args(ins.op, ins.args)}</span>
                     </td>
                   </tr>
                 <% end %>
@@ -452,157 +575,6 @@ defmodule DemoWeb.PlaygroundLive do
   end
 
   defp pad_pc(n), do: n |> Integer.to_string() |> String.pad_leading(3, "0")
-
-  # Per-opcode rendering — argument positions vary by opcode, so we tag the
-  # ones that are register indices with `r` and leave counts/values bare.
-  defp format_args(op, args), do: do_format(op, args)
-
-  # All-register triadic arithmetic and comparison ops
-  defp do_format(op, [a, b, c])
-       when op in [
-              :add,
-              :subtract,
-              :multiply,
-              :divide,
-              :floor_divide,
-              :modulo,
-              :power,
-              :concatenate,
-              :bitwise_and,
-              :bitwise_or,
-              :bitwise_xor,
-              :shift_left,
-              :shift_right,
-              :equal,
-              :less_than,
-              :less_equal
-            ],
-       do: "r#{a}, r#{b}, r#{c}"
-
-  # Unary register ops
-  defp do_format(op, [a, b])
-       when op in [:negate, :not, :length, :bitwise_not, :move],
-       do: "r#{a}, r#{b}"
-
-  defp do_format(:load_constant, [dest, val]), do: "r#{dest}, #{format_lit(val)}"
-  defp do_format(:load_nil, [dest, count]), do: "r#{dest}, #{count}"
-  defp do_format(:load_boolean, [dest, val]), do: "r#{dest}, #{val}"
-  defp do_format(:load_env, [dest]), do: "r#{dest}"
-
-  defp do_format(:get_upvalue, [dest, idx]), do: "r#{dest}, up[#{idx}]"
-  defp do_format(:set_upvalue, [idx, src]), do: "up[#{idx}], r#{src}"
-  defp do_format(:get_open_upvalue, [dest, reg]), do: "r#{dest}, r#{reg}"
-  defp do_format(:set_open_upvalue, [reg, src]), do: "r#{reg}, r#{src}"
-  defp do_format(:get_global, [dest, name]), do: ~s|r#{dest}, _G["#{name}"]|
-  defp do_format(:set_global, [name, src]), do: ~s|_G["#{name}"], r#{src}|
-
-  defp do_format(:new_table, [dest, a, h]), do: "r#{dest}, array=#{a}, hash=#{h}"
-
-  defp do_format(:get_table, [d, t, k | _]),
-    do: "r#{d}, r#{t}[#{format_arg(k)}]"
-
-  defp do_format(:set_table, [t, k, v | _]),
-    do: "r#{t}[#{format_arg(k)}], r#{v}"
-
-  defp do_format(:get_field, [d, t, name | _]), do: ~s|r#{d}, r#{t}.#{name}|
-  defp do_format(:set_field, [t, name, v | _]), do: ~s|r#{t}.#{name}, r#{v}|
-
-  defp do_format(:set_list, [t, start, count, offset]),
-    do: "r#{t}, start=#{start}, count=#{count}, off=#{offset}"
-
-  defp do_format(:call, [base, argc, resc | _]),
-    do: "r#{base}, args=#{count_fmt(argc)}, results=#{count_fmt(resc)}"
-
-  defp do_format(:tail_call, [base, argc | _]),
-    do: "r#{base}, args=#{count_fmt(argc)}"
-
-  defp do_format(:return, [base, count]), do: "r#{base}, count=#{count_fmt(count)}"
-  defp do_format(:return_vararg, _), do: "(varargs)"
-  defp do_format(:vararg, [base, count]), do: "r#{base}, count=#{count_fmt(count)}"
-  defp do_format(:self, [base, obj, name | _]), do: "r#{base}, r#{obj}, .#{name}"
-  defp do_format(:closure, [dest, proto_idx]), do: "r#{dest}, proto[#{proto_idx}]"
-
-  defp do_format(:test, [reg | _]), do: "r#{reg}"
-  defp do_format(:test_true, [reg | _]), do: "r#{reg}"
-  defp do_format(:test_and, [dest, src | _]), do: "r#{dest}, r#{src}"
-  defp do_format(:test_or, [dest, src | _]), do: "r#{dest}, r#{src}"
-  defp do_format(:numeric_for, [base | _]), do: "r#{base}"
-
-  defp do_format(:generic_for, [base, var_count | _]),
-    do: "r#{base}, vars=#{var_count}"
-
-  defp do_format(:scope, [n | _]), do: "registers=#{n}"
-  defp do_format(:source_line, [ln]), do: "line #{ln}"
-  defp do_format(_, args), do: args |> Enum.map(&format_arg/1) |> Enum.join(", ")
-
-  defp format_arg({:constant, val}), do: format_lit(val)
-  defp format_arg({:global, name}), do: ~s|<#{name}>|
-  defp format_arg(atom) when is_atom(atom), do: inspect(atom)
-  defp format_arg(n) when is_integer(n), do: Integer.to_string(n)
-  defp format_arg(other), do: inspect(other, limit: 20)
-
-  defp format_lit(val) when is_binary(val), do: inspect(val)
-  defp format_lit(val), do: inspect(val, limit: 20)
-
-  defp count_fmt({:multi, n}), do: "multi(#{n})"
-  defp count_fmt(:varargs), do: "..."
-  defp count_fmt(n) when is_integer(n), do: Integer.to_string(n)
-  defp count_fmt(other), do: inspect(other)
-
-  defp op_class(:source_line), do: "text-base-content/40"
-
-  defp op_class(op) when op in [:return, :return_vararg, :tail_call],
-    do: "text-accent font-semibold"
-
-  defp op_class(op)
-       when op in [:call, :closure, :self, :vararg],
-       do: "text-primary font-semibold"
-
-  defp op_class(op)
-       when op in [
-              :test,
-              :test_true,
-              :test_and,
-              :test_or,
-              :while_loop,
-              :repeat_loop,
-              :numeric_for,
-              :generic_for,
-              :break,
-              :scope
-            ],
-       do: "text-warning font-semibold"
-
-  defp op_class(op)
-       when op in [
-              :add,
-              :subtract,
-              :multiply,
-              :divide,
-              :floor_divide,
-              :modulo,
-              :power,
-              :concatenate,
-              :negate,
-              :equal,
-              :less_than,
-              :less_equal,
-              :length,
-              :not,
-              :bitwise_and,
-              :bitwise_or,
-              :bitwise_xor,
-              :shift_left,
-              :shift_right,
-              :bitwise_not
-            ],
-       do: "text-secondary font-semibold"
-
-  defp op_class(op)
-       when op in [:new_table, :set_list, :get_table, :set_table, :get_field, :set_field],
-       do: "text-info font-semibold"
-
-  defp op_class(_), do: "text-success font-semibold"
 
   defp format_us(us) when us < 1_000, do: "#{us} µs"
   defp format_us(us) when us < 1_000_000, do: "#{Float.round(us / 1_000, 2)} ms"

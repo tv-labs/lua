@@ -80,6 +80,9 @@ function themeExt() {
   return darkActive() ? oneDark : []
 }
 
+// localStorage key used by the playground editor's autosave.
+const PLAYGROUND_STORAGE_KEY = "playground:source"
+
 const LuaEditor = {
   mounted() {
     const textarea = this.el.querySelector("textarea")
@@ -90,6 +93,21 @@ const LuaEditor = {
     textarea.style.display = "none"
     textarea.setAttribute("tabindex", "-1")
     textarea.setAttribute("aria-hidden", "true")
+
+    const storageKey = this.el.dataset.storageKey
+    const restoreFromStorage = (() => {
+      if (!storageKey) return null
+      const url = new URL(window.location.href)
+      if (url.pathname !== "/playground") return null
+      if (url.searchParams.has("source")) return null
+      try {
+        const saved = window.localStorage.getItem(storageKey)
+        if (!saved || saved === textarea.value) return null
+        return saved
+      } catch (e) {
+        return null
+      }
+    })()
 
     const submitForm = () => {
       const form = this.el.closest("form")
@@ -104,6 +122,34 @@ const LuaEditor = {
         // Trigger phx-change on the form
         this.textarea.dispatchEvent(new Event("input", {bubbles: true}))
       }
+      if (storageKey) {
+        try {
+          window.localStorage.setItem(storageKey, val)
+        } catch (e) {
+          /* quota or private mode — ignore */
+        }
+      }
+    }
+
+    let lastLine = null
+    const pushLine = (n) => {
+      if (n == null) return
+      if (n === lastLine) return
+      lastLine = n
+      this.pushEvent("hover-line", {line: String(n)})
+    }
+
+    const pushCursorLine = () => {
+      const state = this.view.state
+      const head = state.selection.main.head
+      pushLine(state.doc.lineAt(head).number)
+    }
+
+    const pushHoverLine = (event) => {
+      if (!this.view) return
+      const pos = this.view.posAtCoords({x: event.clientX, y: event.clientY})
+      if (pos == null) return
+      pushLine(this.view.state.doc.lineAt(pos).number)
     }
 
     this.view = new EditorView({
@@ -136,14 +182,27 @@ const LuaEditor = {
         ]),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) syncToTextarea()
+          if (update.docChanged || update.selectionSet) pushCursorLine()
         }),
         editorTheme,
         themeCompartment.of(themeExt()),
       ],
     })
 
+    // Restore from localStorage if applicable, before sync.
+    if (restoreFromStorage) {
+      this.view.dispatch({
+        changes: {from: 0, to: this.view.state.doc.length, insert: restoreFromStorage},
+      })
+    }
+
     // Sync initial value (in case textarea had different value)
     syncToTextarea()
+
+    // Push line on mouse hover so users can scrub the editor and watch
+    // the bytecode panel light up without clicking. Throttled by line.
+    this.view.scrollDOM.addEventListener("mousemove", pushHoverLine)
+    this._hoverHandler = pushHoverLine
 
     // Listen for server-pushed source updates (e.g. when loading an example)
     this.handleEvent("lua-editor:set-source", ({source, target}) => {
@@ -153,6 +212,21 @@ const LuaEditor = {
       this.view.dispatch({
         changes: {from: 0, to: this.view.state.doc.length, insert: source},
       })
+    })
+
+    // Listen for server-pushed cursor focus (e.g. clicking a bytecode row)
+    this.handleEvent("lua-editor:focus-line", ({line, target}) => {
+      if (target && target !== this.el.id) return
+      const lineNum = parseInt(line, 10)
+      if (!Number.isFinite(lineNum)) return
+      const doc = this.view.state.doc
+      if (lineNum < 1 || lineNum > doc.lines) return
+      const info = doc.line(lineNum)
+      this.view.dispatch({
+        selection: {anchor: info.from},
+        effects: EditorView.scrollIntoView(info.from, {y: "center"}),
+      })
+      this.view.focus()
     })
 
     // Listen for theme changes on the <html> element so highlight updates live.
@@ -167,6 +241,9 @@ const LuaEditor = {
 
   destroyed() {
     if (this.themeObserver) this.themeObserver.disconnect()
+    if (this._hoverHandler && this.view) {
+      this.view.scrollDOM.removeEventListener("mousemove", this._hoverHandler)
+    }
     if (this.view) this.view.destroy()
   },
 }
@@ -245,7 +322,129 @@ if (document.readyState === "loading") {
 }
 window.addEventListener("phx:page-loading-stop", () => initCodeRotators())
 
-const hooks = {...colocatedHooks, LuaEditor}
+// Compresses a string with gzip and returns a URL-safe base64 string
+// without padding. Used for `?source=` shareable playground links.
+async function gzipBase64Url(text) {
+  if (typeof CompressionStream === "undefined") {
+    // Fallback for older browsers: raw base64 (no compression).
+    return btoa(unescape(encodeURIComponent(text)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "")
+  }
+  const bytes = new TextEncoder().encode(text)
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"))
+  const gzipped = new Uint8Array(await new Response(stream).arrayBuffer())
+  let bin = ""
+  for (let i = 0; i < gzipped.length; i++) bin += String.fromCharCode(gzipped[i])
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+}
+
+const ShareSnippet = {
+  mounted() {
+    this.el.addEventListener("click", async (e) => {
+      e.preventDefault()
+      const textarea = document.getElementById("lua-source")
+      if (!textarea) return
+      const label = this.el.querySelector("[data-share-label]")
+      const original = label ? label.textContent : null
+      try {
+        const encoded = await gzipBase64Url(textarea.value || "")
+        const url = new URL(window.location.href)
+        url.pathname = "/playground"
+        url.search = "?source=" + encoded
+        const shareUrl = url.toString()
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(shareUrl)
+        } else {
+          // Fallback: temporary textarea + execCommand
+          const t = document.createElement("textarea")
+          t.value = shareUrl
+          t.style.position = "fixed"
+          t.style.opacity = "0"
+          document.body.appendChild(t)
+          t.select()
+          document.execCommand("copy")
+          document.body.removeChild(t)
+        }
+        // Replace current URL silently so the share state survives reloads
+        window.history.replaceState({}, "", shareUrl)
+        if (label) {
+          label.textContent = "Copied!"
+          this.el.classList.add("text-success")
+          setTimeout(() => {
+            label.textContent = original
+            this.el.classList.remove("text-success")
+          }, 1600)
+        }
+      } catch (err) {
+        console.error("Share failed:", err)
+        if (label) label.textContent = "Failed"
+      }
+    })
+  },
+}
+
+// Document-level copy handler. Works for both LiveView- and controller-
+// rendered pages because it delegates on bubbling click events.
+//
+// Usage on any element:
+//   <button data-copy="literal text">Copy</button>
+//   <button data-copy-target="#some-element">Copy</button>
+//
+// Add a <span data-copy-label> child to get a transient "Copied!" label
+// after a successful copy.
+async function doCopy(el) {
+  let text = el.dataset.copy
+  if (!text && el.dataset.copyTarget) {
+    const target = document.querySelector(el.dataset.copyTarget)
+    if (target) text = target.innerText
+  }
+  if (!text) return
+  const label = el.querySelector("[data-copy-label]")
+  const original = label ? label.textContent : null
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const t = document.createElement("textarea")
+      t.value = text
+      t.style.position = "fixed"
+      t.style.opacity = "0"
+      document.body.appendChild(t)
+      t.select()
+      document.execCommand("copy")
+      document.body.removeChild(t)
+    }
+    if (label) {
+      label.textContent = "Copied!"
+      el.classList.add("text-success")
+      setTimeout(() => {
+        label.textContent = original
+        el.classList.remove("text-success")
+      }, 1400)
+    }
+  } catch (err) {
+    console.error("Copy failed:", err)
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-copy], [data-copy-target]")
+  if (!btn) return
+  e.preventDefault()
+  doCopy(btn)
+})
+
+// LiveView hook stub — still useful when a button needs the LiveView
+// lifecycle (e.g. to fire pushEvent after a successful copy).
+const CopyButton = {
+  mounted() {
+    // No-op: the document-level handler above already wires clicks.
+  },
+}
+
+const hooks = {...colocatedHooks, LuaEditor, ShareSnippet, CopyButton}
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {

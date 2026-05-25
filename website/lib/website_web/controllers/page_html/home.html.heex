@@ -8,6 +8,12 @@
     </div>
     <div
       aria-hidden="true"
+      class="pointer-events-none absolute top-[-120px] right-[-200px] -z-10 w-[820px] h-[820px] opacity-[0.12] hidden lg:block dark:opacity-[0.18]"
+    >
+      <Layouts.lua_orbit class="w-full h-full" />
+    </div>
+    <div
+      aria-hidden="true"
       class="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[520px] bg-[length:24px_24px] [background-image:linear-gradient(to_right,oklch(60%_0.25_292.717/0.05)_1px,transparent_1px),linear-gradient(to_bottom,oklch(60%_0.25_292.717/0.05)_1px,transparent_1px)] [mask-image:linear-gradient(to_bottom,black,transparent)]"
     >
     </div>
@@ -17,19 +23,19 @@
         <div>
           <div class="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary mb-6">
             <span class="size-2 rounded-full bg-primary animate-pulse"></span>
-            Pure Elixir &middot; Lua 5.3 &middot; runs on the BEAM
+            Pure Elixir &middot; Lua 5.3 &middot; agent-ready
           </div>
           <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.05]">
             Lua, on the
             <span class="bg-gradient-to-br from-primary via-accent to-secondary bg-clip-text text-transparent">
               BEAM.
             </span>
-            <br />Scriptable, sandboxed, <span class="italic">stupid fast.</span>
+            <br />Scriptable, sandboxed, <span class="italic">stupid easy.</span>
           </h1>
           <p class="mt-6 text-lg text-base-content/70 leading-relaxed max-w-xl">
-            An Elixir-native Lua 5.3 virtual machine. Embed user-supplied scripting in
-            your Phoenix app with zero NIFs, zero shelling out, and a beautiful
-            Elixir API. Watch every opcode the VM actually executes.
+            An Elixir-native Lua 5.3 VM, built for embedding untrusted code &mdash;
+            AI agent tools, user-supplied formulas, per-tenant plugins. Zero NIFs,
+            zero shelling out, every opcode auditable.
           </p>
 
           <div class="mt-8 flex flex-col sm:flex-row gap-3">
@@ -109,6 +115,69 @@
     </div>
   </section>
 
+  <%!-- ============== WHY LUA ============== --%>
+  <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-16">
+    <div class="rounded-3xl border border-base-300/60 bg-base-200/30 p-8 lg:p-10">
+      <div class="grid lg:grid-cols-[1fr_1.4fr] gap-8 items-center">
+        <div>
+          <div class="inline-block text-xs uppercase tracking-[0.18em] text-secondary font-bold mb-3">
+            Why Lua?
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-bold tracking-tight leading-tight">
+            The scripting language the world already trusts.
+          </h2>
+          <p class="mt-4 text-base-content/70 leading-relaxed">
+            Lua is small, fast to learn, and built to be embedded — that's
+            why Neovim, Roblox, World of Warcraft, Redis, Nginx, and
+            Adobe Lightroom all chose it. Now you get the same language,
+            but the host runtime is the BEAM, not a C extension.
+          </p>
+        </div>
+        <div class="grid sm:grid-cols-3 gap-3">
+          <div class="rounded-box border border-base-300/40 bg-base-100/50 p-4">
+            <div class="text-xs uppercase tracking-wider text-base-content/50 font-semibold mb-1">
+              Tiny surface
+            </div>
+            <div class="text-sm text-base-content/80">
+              8 types, ~20 keywords, one core data structure. A weekend to learn.
+            </div>
+          </div>
+          <div class="rounded-box border border-base-300/40 bg-base-100/50 p-4">
+            <div class="text-xs uppercase tracking-wider text-base-content/50 font-semibold mb-1">
+              Built to embed
+            </div>
+            <div class="text-sm text-base-content/80">
+              Designed from day one to live inside a host application — not the other way around.
+            </div>
+          </div>
+          <div class="rounded-box border border-base-300/40 bg-base-100/50 p-4">
+            <div class="text-xs uppercase tracking-wider text-base-content/50 font-semibold mb-1">
+              Battle-tested
+            </div>
+            <div class="text-sm text-base-content/80">
+              Three decades shipping in everything from game engines to load balancers.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-base-content/40 text-sm font-semibold uppercase tracking-[0.2em]">
+        <span>Neovim</span>
+        <span class="hidden sm:inline opacity-50">·</span>
+        <span>Roblox</span>
+        <span class="hidden sm:inline opacity-50">·</span>
+        <span>WoW</span>
+        <span class="hidden sm:inline opacity-50">·</span>
+        <span>Redis</span>
+        <span class="hidden sm:inline opacity-50">·</span>
+        <span>Nginx</span>
+        <span class="hidden sm:inline opacity-50">·</span>
+        <span>Lightroom</span>
+        <span class="hidden sm:inline opacity-50">·</span>
+        <span>Wireshark</span>
+      </div>
+    </div>
+  </section>
+
   <%!-- ============== FEATURE GRID ============== --%>
   <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
     <div class="text-center mb-12">
@@ -181,6 +250,98 @@
     </div>
   </section>
 
+  <%!-- ============== AGENT SANDBOXES ============== --%>
+  <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
+    <div class="text-center mb-12">
+      <div class="inline-block text-xs uppercase tracking-[0.18em] text-accent font-bold mb-3">
+        For AI agents
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">
+        Drop a VM in every agent loop.
+      </h2>
+      <p class="mt-3 text-base-content/70 max-w-2xl mx-auto">
+        Each Lua VM is an immutable Elixir value. Spawn one per conversation,
+        per tool call, per user — throw it away when you're done.
+      </p>
+    </div>
+
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
+      <.feature
+        icon="hero-cube-transparent-micro"
+        title="Per-agent isolation"
+        accent="info"
+      >
+        Every <code>Lua.new/0</code> is a fresh sandbox. State is an immutable
+        struct — fork it, snapshot it, throw it away. No shared globals between
+        agents.
+      </.feature>
+
+      <.feature
+        icon="hero-wrench-screwdriver-micro"
+        title="Tool calling, built in"
+        accent="accent"
+      >
+        Register Elixir functions with <code>deflua</code>. The agent's script
+        calls them like normal Lua. Arguments and returns marshal automatically.
+      </.feature>
+
+      <.feature
+        icon="hero-document-magnifying-glass-micro"
+        title="Audit every opcode"
+        accent="warning"
+      >
+        When an agent does something surprising, replay the exact opcode stream
+        in the <a href="/playground" class="link link-primary">playground</a>.
+        No "what did the LLM run?" mystery.
+      </.feature>
+    </div>
+
+    <div class="grid lg:grid-cols-[1fr_1.1fr] gap-8 items-center rounded-3xl border border-base-300/60 bg-base-200/50 p-6 lg:p-8">
+      <div>
+        <h3 class="text-xl font-semibold tracking-tight mb-3">
+          The canonical agent-tool pattern
+        </h3>
+        <p class="text-base-content/70 leading-relaxed">
+          Define the tools the agent can call. Hand it a VM with those tools
+          loaded. Run whatever Lua the model emits — it can only do what you
+          exposed, nothing else. No subprocess. No NIF. No surprises.
+        </p>
+        <ul class="mt-5 space-y-2 text-sm text-base-content/80">
+          <li class="flex gap-2.5">
+            <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
+            One VM per agent conversation — cheap to spawn, garbage collected
+          </li>
+          <li class="flex gap-2.5">
+            <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
+            Tools are plain Elixir functions, fully type-checked
+          </li>
+          <li class="flex gap-2.5">
+            <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
+            No <code class="text-primary bg-base-300/40 px-1 rounded">io</code>,
+            <code class="text-primary bg-base-300/40 px-1 rounded">os</code>, or
+            <code class="text-primary bg-base-300/40 px-1 rounded">require</code> by default
+          </li>
+        </ul>
+      </div>
+
+      <div class="rounded-2xl border border-base-300/60 bg-base-200 overflow-hidden shadow-xl">
+        <div class="flex items-center gap-2 px-4 py-2 border-b border-base-300/60 bg-base-300/30">
+          <span class="size-2.5 rounded-full bg-red-400/70"></span>
+          <span class="size-2.5 rounded-full bg-yellow-400/70"></span>
+          <span class="size-2.5 rounded-full bg-green-400/70"></span>
+          <span class="ml-2 text-xs font-mono text-base-content/50">
+            agent_tools.exs
+          </span>
+        </div>
+        <.code_block
+          id="agent-tool-code"
+          language={:elixir}
+          source={DemoWeb.Snippets.agent_tool()}
+        />
+      </div>
+    </div>
+  </section>
+
   <%!-- ============== COMPILER EXPLORER PROMO ============== --%>
   <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
     <div class="rounded-3xl border border-base-300/60 bg-gradient-to-br from-base-200 via-base-200/80 to-base-300/40 overflow-hidden shadow-xl">
@@ -208,31 +369,30 @@
         </div>
 
         <div class="bg-base-300/40 border-t lg:border-t-0 lg:border-l border-base-300/60 p-6 lg:p-8 font-mono text-xs leading-6">
-          <div class="grid grid-cols-[1fr_1fr] gap-4">
-            <div>
+          <div class="grid grid-cols-[1fr_1fr] gap-4 min-w-0">
+            <div class="min-w-0">
               <div class="text-base-content/40 mb-1">-- main.lua</div>
               <.code_block
                 id="fib-source"
                 language={:lua}
                 class="text-base-content/90"
-                source={"local function fib(n)\n  if n < 2 then return n end\n  return fib(n - 1)\n       + fib(n - 2)\nend\n\nreturn fib(15)"}
+                source={@fib_source}
               />
             </div>
-            <div>
+            <div class="min-w-0">
               <div class="text-base-content/40 mb-1">; bytecode</div>
-              <div class="space-y-0.5 text-[11px]">
-                <div><span class="text-primary">closure</span> r2, p0</div>
-                <div><span class="text-success">move</span> r1, r2</div>
-                <div><span class="text-primary">get_field</span> r3, r0, "fib"</div>
-                <div><span class="text-info">load_constant</span> r4, 15</div>
-                <div><span class="text-primary font-bold">call</span> r3, 1, 2</div>
-                <div><span class="text-accent font-bold">return</span> r3, 1</div>
-                <div class="text-base-content/40 italic">; proto[0] (fib)</div>
-                <div><span class="text-info">load_constant</span> r2, 2</div>
-                <div><span class="text-warning">less_than</span> r3, r1, r2</div>
-                <div><span class="text-warning font-bold">test</span> r3, …</div>
-                <div><span class="text-accent">return</span> r1, 1</div>
-                <div class="text-base-content/40">…</div>
+              <div class="space-y-0.5 text-[11px] max-h-[280px] overflow-auto pr-1">
+                <%= for block <- @fib_bytecode do %>
+                  <div class="text-base-content/40 italic mt-1 first:mt-0">; {block.name}</div>
+                  <%= for ins <- block.instructions, ins.op != :source_line do %>
+                    <div class="flex gap-2">
+                      <span class="text-base-content/30 select-none w-6 text-right shrink-0">
+                        {String.pad_leading(Integer.to_string(ins.pc), 2, "0")}
+                      </span>
+                      <span class="truncate"><span class={DemoWeb.Bytecode.op_class(ins.op)}>{ins.op}</span> {DemoWeb.Bytecode.format_args(ins.op, ins.args)}</span>
+                    </div>
+                  <% end %>
+                <% end %>
               </div>
             </div>
           </div>
@@ -264,7 +424,10 @@
           </li>
           <li class="flex gap-3">
             <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
-            User-supplied formulas inside SaaS dashboards
+            <span>
+              <strong>AI agent sandboxes</strong> — one Lua VM per conversation,
+              tools exposed via <code>deflua</code>
+            </span>
           </li>
           <li class="flex gap-3">
             <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
@@ -298,6 +461,133 @@
     </div>
   </section>
 
+  <%!-- ============== COMPARISON ============== --%>
+  <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
+    <div class="text-center mb-10">
+      <div class="inline-block text-xs uppercase tracking-[0.18em] text-info font-bold mb-3">
+        How it compares
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">
+        Why this VM, not the others?
+      </h2>
+      <p class="mt-3 text-base-content/70 max-w-2xl mx-auto">
+        Lua on the BEAM isn't new — but the developer experience is.
+        Here's the honest breakdown.
+      </p>
+    </div>
+
+    <div class="overflow-x-auto rounded-2xl border border-base-300/60 bg-base-200/30">
+      <table class="table w-full text-sm">
+        <thead class="bg-base-300/30 text-base-content/70">
+          <tr>
+            <th class="text-left font-semibold"></th>
+            <th class="text-left font-semibold">
+              <span class="text-primary font-bold">Lua.ex</span>
+              <span class="block text-xs font-normal text-base-content/50 mt-0.5">this library</span>
+            </th>
+            <th class="text-left font-semibold">
+              Luerl
+              <span class="block text-xs font-normal text-base-content/50 mt-0.5">Erlang-native</span>
+            </th>
+            <th class="text-left font-semibold">
+              C Lua via NIF/port
+              <span class="block text-xs font-normal text-base-content/50 mt-0.5">native</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody class="[&_td]:align-top">
+          <tr>
+            <td class="font-semibold text-base-content/80">Runtime</td>
+            <td>Pure Elixir on the BEAM</td>
+            <td>Erlang on the BEAM</td>
+            <td>C, called over a port or NIF</td>
+          </tr>
+          <tr>
+            <td class="font-semibold text-base-content/80">Sandboxed by default</td>
+            <td><.icon name="hero-check-circle-micro" class="size-5 text-success" /></td>
+            <td><.icon name="hero-check-circle-micro" class="size-5 text-success" /></td>
+            <td><span class="text-warning">manual</span></td>
+          </tr>
+          <tr>
+            <td class="font-semibold text-base-content/80">Crash isolation</td>
+            <td>Supervised, immutable state</td>
+            <td>Supervised, immutable state</td>
+            <td>NIF crash = VM crash</td>
+          </tr>
+          <tr>
+            <td class="font-semibold text-base-content/80">Elixir interop API</td>
+            <td>
+              <code>deflua</code> macro,
+              <code>~LUA</code> sigil, <code>Lua.API</code>
+            </td>
+            <td>Manual function registration</td>
+            <td>Port marshalling</td>
+          </tr>
+          <tr>
+            <td class="font-semibold text-base-content/80">Compile-time validation</td>
+            <td><.icon name="hero-check-circle-micro" class="size-5 text-success" /> <code>~LUA</code>c</td>
+            <td><.icon name="hero-x-mark-micro" class="size-5 text-base-content/30" /></td>
+            <td><.icon name="hero-x-mark-micro" class="size-5 text-base-content/30" /></td>
+          </tr>
+          <tr>
+            <td class="font-semibold text-base-content/80">Bytecode inspection</td>
+            <td><a href="/playground" class="link link-primary">First-class</a></td>
+            <td>via tracing</td>
+            <td>via <code>luac -l</code></td>
+          </tr>
+          <tr>
+            <td class="font-semibold text-base-content/80">Error messages</td>
+            <td>Source line, blame the callee by name</td>
+            <td>Functional but terse</td>
+            <td>Standard Lua</td>
+          </tr>
+          <tr>
+            <td class="font-semibold text-base-content/80">fib(30) throughput*</td>
+            <td>0.71 ips</td>
+            <td>0.88 ips</td>
+            <td>143 ips</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-3 text-xs text-base-content/50 text-center">
+      *Benchee on Apple M1 Pro, Elixir 1.20.0-rc.4 / Erlang 29. Lua.ex
+      is in the same ballpark as Luerl on tight CPU loops, both ~200×
+      slower than raw C Lua. For the embedded scripting use case —
+      AI tools, formulas, plugins — that gap rarely matters.
+    </p>
+
+    <div class="mt-8 grid sm:grid-cols-3 gap-4">
+      <div class="rounded-2xl border border-base-300/40 bg-base-200/30 p-5">
+        <div class="text-xs uppercase tracking-wider text-base-content/50 font-semibold mb-1">
+          Pick Lua.ex when…
+        </div>
+        <p class="text-sm text-base-content/80">
+          you want ergonomic Elixir interop, compile-time Lua, and
+          beautiful errors — and you control the host application.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-base-300/40 bg-base-200/30 p-5">
+        <div class="text-xs uppercase tracking-wider text-base-content/50 font-semibold mb-1">
+          Pick Luerl when…
+        </div>
+        <p class="text-sm text-base-content/80">
+          you're on the Erlang side and need a mature, battle-tested
+          Lua 5.3 VM with the longest track record on the BEAM.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-base-300/40 bg-base-200/30 p-5">
+        <div class="text-xs uppercase tracking-wider text-base-content/50 font-semibold mb-1">
+          Pick C Lua when…
+        </div>
+        <p class="text-sm text-base-content/80">
+          raw CPU throughput dominates and you can give up BEAM-level
+          isolation, GC, and supervision in exchange.
+        </p>
+      </div>
+    </div>
+  </section>
+
   <%!-- ============== CTA ============== --%>
   <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pb-24">
     <div class="rounded-3xl border border-primary/40 bg-gradient-to-br from-primary/15 via-accent/10 to-secondary/10 p-10 lg:p-14 text-center shadow-xl">
@@ -320,10 +610,23 @@
           <.icon name="hero-book-open-micro" class="size-4" /> Read the docs
         </a>
       </div>
-      <div class="mt-8 font-mono text-sm text-base-content/60">
-        <code class="bg-base-100/50 border border-base-300/60 px-3 py-1.5 rounded-md">
+      <div class="mt-8 flex items-center justify-center gap-2 font-mono text-sm text-base-content/60">
+        <code
+          id="hex-install"
+          class="bg-base-100/50 border border-base-300/60 px-3 py-1.5 rounded-md"
+        >
           {"{:lua, \"~> 1.0.0-rc.1\"}"}
         </code>
+        <button
+          id="copy-hex"
+          phx-hook="CopyButton"
+          data-copy={"{:lua, \"~> 1.0.0-rc.1\"}"}
+          class="btn btn-xs btn-ghost border border-base-300/60 normal-case"
+          aria-label="Copy mix dependency"
+        >
+          <.icon name="hero-clipboard-document-micro" class="size-3.5" />
+          <span data-copy-label>Copy</span>
+        </button>
       </div>
     </div>
   </section>

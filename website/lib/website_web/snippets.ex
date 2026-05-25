@@ -59,6 +59,24 @@ defmodule DemoWeb.Snippets do
 
       # err.message =~ "attempted to call"
       """
+    },
+    %{
+      label: "agent.exs",
+      source: """
+      # Give an LLM a Lua VM with your tools
+      # bound. It can only call what you expose.
+
+      defmodule Agent.Tools do
+        use Lua.API, scope: "tools"
+
+        deflua search(q), do: MyApp.Search.run(q)
+      end
+
+      lua = Lua.new() |> Lua.load_api(Agent.Tools)
+
+      # The model emits Lua. You run it. Done.
+      {:ok, {results, _}} = Lua.eval(lua, llm_script)
+      """
     }
   ]
 
@@ -141,6 +159,30 @@ defmodule DemoWeb.Snippets do
     }
   ]
 
+  @agent_tool """
+  defmodule MyAgent.Tools do
+    use Lua.API, scope: "tools"
+
+    deflua search(query), state do
+      results = MyApp.Search.run(query)
+      {[results], state}
+    end
+
+    deflua send_email(to, body), state do
+      MyApp.Mailer.deliver(to, body)
+      {[:ok], state}
+    end
+  end
+
+  # One VM per agent conversation.
+  lua = Lua.new() |> Lua.load_api(MyAgent.Tools)
+
+  # The agent emits Lua. You run it. It can only
+  # do what you exposed -- nothing else.
+  {:ok, {result, _lua}} = Lua.eval(lua, agent_script)
+  """
+
   def hero, do: @hero
   def embed, do: @embed
+  def agent_tool, do: @agent_tool
 end

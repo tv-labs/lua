@@ -22,6 +22,7 @@ defmodule DemoWeb.Router do
     live "/playground/:example", PlaygroundLive, :example
     live "/tour", TourLive, :index
     live "/tour/:slug", TourLive, :lesson
+    live "/reference/opcodes", OpcodesLive, :index
   end
 
   # Other scopes may use custom stacks.

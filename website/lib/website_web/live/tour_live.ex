@@ -65,9 +65,13 @@ defmodule DemoWeb.TourLive do
     {:noreply, update(socket, :show_bytecode, &(!&1))}
   end
 
+  # The shared LuaEditor hook pushes cursor-line events; tour doesn't
+  # cross-highlight, so just acknowledge.
+  def handle_event("hover-line", _params, socket), do: {:noreply, socket}
+
   @impl true
   def handle_info({:run, source}, socket) do
-    result = LuaSandbox.run(source, timeout_ms: 1000)
+    result = LuaSandbox.run(source, timeout_ms: 1500)
     {:noreply, socket |> assign(:result, result) |> assign(:running, false)}
   end
 
@@ -132,6 +136,16 @@ defmodule DemoWeb.TourLive do
             <h1 class="text-3xl sm:text-4xl font-bold tracking-tight mb-3">
               {@lesson.title}
             </h1>
+
+            <%= if obj = Map.get(@lesson, :objective) do %>
+              <div class="mb-5 flex items-start gap-2.5 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+                <.icon name="hero-flag-micro" class="size-4 text-primary shrink-0 mt-0.5" />
+                <span class="text-sm text-base-content/85">
+                  <span class="text-primary font-semibold">You'll learn:</span> {obj}
+                </span>
+              </div>
+            <% end %>
+
             <div class="prose prose-invert prose-sm max-w-none mb-6 text-base-content/80">
               <%= for paragraph <- String.split(@lesson.body, "\n\n") do %>
                 <p>{raw(render_inline(paragraph))}</p>
@@ -196,6 +210,16 @@ defmodule DemoWeb.TourLive do
             </div>
 
             <.tour_output result={@result} running={@running} />
+
+            <%= if ex = Map.get(@lesson, :exercise) do %>
+              <div class="mt-4 flex items-start gap-2.5 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3">
+                <.icon name="hero-beaker-micro" class="size-4 text-accent shrink-0 mt-0.5" />
+                <div class="text-sm text-base-content/85">
+                  <span class="text-accent font-semibold">Try it:</span>
+                  {raw(render_inline(ex))}
+                </div>
+              </div>
+            <% end %>
 
             <%= if @show_bytecode do %>
               <.tour_bytecode source={@source} result={@result} />

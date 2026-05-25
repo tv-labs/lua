@@ -102,6 +102,41 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+/* Crescent Drop mark — theme-aware CSS variables consumed by the
+   inline SVG defined in DemoWeb.Layouts.lua_mark/1 and lua_orbit/1.
+   Light theme: near-black ink drop with a Phoenix-orange satellite.
+   Dark theme: Elixir-purple drop with a near-white satellite. */
+:root {
+  --lua-drop-from: oklch(22% 0.04 280);
+  --lua-drop-to:   oklch(32% 0.06 280);
+  --lua-satellite: oklch(70% 0.213 47.604);
+}
+[data-theme=dark] {
+  --lua-drop-from: oklch(58% 0.233 277.117);
+  --lua-drop-to:   oklch(60% 0.25 292.717);
+  --lua-satellite: oklch(95% 0.02 280);
+}
+
+/* Orbital satellite — rotates around the SVG's geometric center.
+   `transform-box: view-box` resolves the origin in viewBox units so
+   `transform-origin: 32px 32px` is the center of our 64x64 viewBox. */
+.lua-orbit-satellite {
+  transform-box: view-box;
+  transform-origin: 32px 32px;
+}
+
+@keyframes lua-orbit {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lua-orbit-satellite {
+    animation: lua-orbit 24s linear infinite;
+    animation-delay: -12s;
+  }
+}
+
 /* This file is for your main application CSS */
 
 /* Makeup syntax highlighting — mapped to daisyUI theme tokens so it

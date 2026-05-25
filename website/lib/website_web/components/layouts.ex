@@ -57,14 +57,12 @@ defmodule DemoWeb.Layouts do
           <span class="font-semibold tracking-tight text-lg">
             Lua<span class="text-primary">.ex</span>
           </span>
-          <span class="hidden sm:inline-block badge badge-outline badge-sm font-mono">
-            BEAM
-          </span>
         </a>
 
         <nav class="hidden md:flex items-center gap-1 ml-4">
           <.nav_link href="/playground" active={@active == :playground}>Playground</.nav_link>
           <.nav_link href="/tour" active={@active == :tour}>Tour</.nav_link>
+          <.nav_link href="/reference/opcodes" active={@active == :opcodes}>Opcodes</.nav_link>
           <a
             href="https://hexdocs.pm/lua"
             target="_blank"
@@ -119,19 +117,148 @@ defmodule DemoWeb.Layouts do
 
   def site_footer(assigns) do
     ~H"""
-    <footer class="border-t border-base-300/60 mt-24 py-10 px-4 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-7xl flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-base-content/60">
-        <div class="flex items-center gap-2">
-          <.lua_mark class="h-5 w-5 opacity-70" />
-          <span>
-            <strong class="text-base-content/80">Lua on the BEAM</strong>
-            &middot; an Elixir-native Lua 5.3 VM
-          </span>
+    <footer class="border-t border-base-300/60 mt-24 pt-12 pb-8 px-4 sm:px-6 lg:px-8">
+      <div class="mx-auto max-w-7xl">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-8 mb-10">
+          <div class="col-span-2 sm:col-span-1">
+            <div class="flex items-center gap-2 mb-3">
+              <.lua_mark class="h-6 w-6" />
+              <span class="font-semibold tracking-tight">
+                Lua<span class="text-primary">.ex</span>
+              </span>
+            </div>
+            <p class="text-sm text-base-content/60 leading-relaxed">
+              An Elixir-native Lua 5.3 VM. Scriptable, sandboxed, agent-ready.
+            </p>
+          </div>
+
+          <div>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-base-content/50 mb-3">
+              Product
+            </h4>
+            <ul class="space-y-2 text-sm">
+              <li>
+                <.link navigate={~p"/playground"} class="text-base-content/70 hover:text-primary">
+                  Playground
+                </.link>
+              </li>
+              <li>
+                <.link navigate={~p"/tour"} class="text-base-content/70 hover:text-primary">
+                  Tour
+                </.link>
+              </li>
+              <li>
+                <.link
+                  navigate={~p"/reference/opcodes"}
+                  class="text-base-content/70 hover:text-primary"
+                >
+                  Opcode reference
+                </.link>
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-base-content/50 mb-3">
+              Resources
+            </h4>
+            <ul class="space-y-2 text-sm">
+              <li>
+                <a
+                  href="https://hexdocs.pm/lua"
+                  target="_blank"
+                  class="text-base-content/70 hover:text-primary"
+                >
+                  HexDocs
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://hex.pm/packages/lua"
+                  target="_blank"
+                  class="text-base-content/70 hover:text-primary"
+                >
+                  Hex.pm
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://github.com/tv-labs/lua/blob/main/CHANGELOG.md"
+                  target="_blank"
+                  class="text-base-content/70 hover:text-primary"
+                >
+                  Changelog
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://github.com/tv-labs/lua/blob/main/ROADMAP.md"
+                  target="_blank"
+                  class="text-base-content/70 hover:text-primary"
+                >
+                  Roadmap
+                </a>
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-base-content/50 mb-3">
+              Community
+            </h4>
+            <ul class="space-y-2 text-sm">
+              <li>
+                <a
+                  href="https://github.com/tv-labs/lua"
+                  target="_blank"
+                  class="text-base-content/70 hover:text-primary"
+                >
+                  GitHub
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://github.com/tv-labs/lua/issues"
+                  target="_blank"
+                  class="text-base-content/70 hover:text-primary"
+                >
+                  Report an issue
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://elixirforum.com/"
+                  target="_blank"
+                  class="text-base-content/70 hover:text-primary"
+                >
+                  Elixir Forum
+                </a>
+              </li>
+            </ul>
+          </div>
         </div>
-        <div class="flex items-center gap-4">
-          <a href="https://github.com/tv-labs/lua" class="link link-hover" target="_blank">GitHub</a>
-          <a href="https://hexdocs.pm/lua" class="link link-hover" target="_blank">HexDocs</a>
-          <a href="https://hex.pm/packages/lua" class="link link-hover" target="_blank">Hex.pm</a>
+
+        <div class="pt-6 border-t border-base-300/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-base-content/50">
+          <span>
+            Built at
+            <a
+              href="https://tvlabs.ai"
+              target="_blank"
+              class="link link-hover text-base-content/70"
+            >
+              TV Labs
+            </a>
+            &middot; standing on the shoulders of
+            <a
+              href="https://github.com/rvirding/luerl"
+              target="_blank"
+              class="link link-hover text-base-content/70"
+            >
+              Luerl
+            </a>
+            and three decades of Lua.
+          </span>
+          <span>MIT licensed</span>
         </div>
       </div>
     </footer>
@@ -142,27 +269,70 @@ defmodule DemoWeb.Layouts do
 
   def lua_mark(assigns) do
     ~H"""
-    <svg viewBox="0 0 32 32" class={@class} aria-hidden="true">
+    <svg viewBox="0 0 64 64" class={@class} aria-hidden="true">
       <defs>
-        <linearGradient id="lua-mark-grad" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stop-color="oklch(58% 0.233 277.117)" />
-          <stop offset="100%" stop-color="oklch(60% 0.25 292.717)" />
+        <linearGradient id="lua-mark-grad-sm" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="var(--lua-drop-from)" />
+          <stop offset="100%" stop-color="var(--lua-drop-to)" />
         </linearGradient>
+        <mask id="lua-crescent-mask-sm">
+          <rect width="64" height="64" fill="white" />
+          <circle cx="42" cy="28" r="14" fill="black" />
+        </mask>
       </defs>
-      <circle cx="16" cy="16" r="14" fill="url(#lua-mark-grad)" />
-      <circle cx="22" cy="10" r="3" fill="white" fill-opacity="0.95" />
-      <text
-        x="16"
-        y="22"
-        text-anchor="middle"
-        font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-        font-size="11"
-        font-weight="700"
-        fill="white"
-        fill-opacity="0.95"
-      >
-        Lua
-      </text>
+      <path
+        d="M 32 4 Q 12 24 12 36 A 20 20 0 0 0 52 36 Q 52 24 32 4 Z"
+        fill="url(#lua-mark-grad-sm)"
+        mask="url(#lua-crescent-mask-sm)"
+      />
+      <circle cx="52" cy="12" r="3.25" fill="var(--lua-satellite)" />
+    </svg>
+    """
+  end
+
+  attr :class, :string, default: ""
+
+  def lua_orbit(assigns) do
+    ~H"""
+    <svg viewBox="0 0 64 64" class={["overflow-visible", @class]} aria-hidden="true">
+      <defs>
+        <linearGradient id="lua-mark-grad-lg" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="var(--lua-drop-from)" />
+          <stop offset="100%" stop-color="var(--lua-drop-to)" />
+        </linearGradient>
+        <mask id="lua-crescent-mask-lg">
+          <rect width="64" height="64" fill="white" />
+          <circle cx="42" cy="28" r="14" fill="black" />
+        </mask>
+        <filter id="lua-satellite-glow-lg" x="-200%" y="-200%" width="500%" height="500%">
+          <feGaussianBlur stdDeviation="1.2" />
+        </filter>
+      </defs>
+      <circle
+        cx="32"
+        cy="32"
+        r="28.3"
+        fill="none"
+        stroke="var(--lua-drop-from)"
+        stroke-opacity="0.22"
+        stroke-width="0.4"
+      />
+      <path
+        d="M 32 4 Q 12 24 12 36 A 20 20 0 0 0 52 36 Q 52 24 32 4 Z"
+        fill="url(#lua-mark-grad-lg)"
+        mask="url(#lua-crescent-mask-lg)"
+      />
+      <g class="lua-orbit-satellite">
+        <circle
+          cx="52"
+          cy="12"
+          r="6"
+          fill="var(--lua-satellite)"
+          fill-opacity="0.35"
+          filter="url(#lua-satellite-glow-lg)"
+        />
+        <circle cx="52" cy="12" r="3.25" fill="var(--lua-satellite)" />
+      </g>
     </svg>
     """
   end

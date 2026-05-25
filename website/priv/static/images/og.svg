@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="Lua.ex — Lua on the BEAM">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0d0d12" />
+      <stop offset="100%" stop-color="#16121f" />
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0" r="0.7">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.45" />
+      <stop offset="60%" stop-color="#7c3aed" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="title-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a78bfa" />
+      <stop offset="50%" stop-color="#c084fc" />
+      <stop offset="100%" stop-color="#f0abfc" />
+    </linearGradient>
+    <linearGradient id="lua-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a78bfa" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <mask id="crescent-mask">
+      <rect width="64" height="64" fill="white" />
+      <circle cx="42" cy="28" r="14" fill="black" />
+    </mask>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#7c3aed" stroke-opacity="0.07" stroke-width="1" />
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)" />
+  <rect width="1200" height="630" fill="url(#grid)" />
+  <rect width="1200" height="630" fill="url(#halo)" />
+
+  <!-- Lua logo top-left -->
+  <g transform="translate(72,72) scale(1.15)">
+    <svg viewBox="0 0 64 64" width="48" height="48">
+      <path d="M 32 4 Q 12 24 12 36 A 20 20 0 0 0 52 36 Q 52 24 32 4 Z"
+            fill="url(#lua-grad)" mask="url(#crescent-mask)" />
+      <circle cx="52" cy="12" r="3.5" fill="#f0abfc" />
+    </svg>
+    <text x="64" y="38" font-family="ui-sans-serif, -apple-system, Inter, system-ui" font-size="28" font-weight="700" fill="#e5e7eb" letter-spacing="-0.5">
+      Lua<tspan fill="#a78bfa">.ex</tspan>
+    </text>
+  </g>
+
+  <!-- Title -->
+  <text x="72" y="280" font-family="ui-sans-serif, -apple-system, Inter, system-ui" font-size="100" font-weight="800" fill="#f5f5f5" letter-spacing="-3">
+    Lua, on the
+  </text>
+  <text x="72" y="400" font-family="ui-sans-serif, -apple-system, Inter, system-ui" font-size="140" font-weight="800" fill="url(#title-grad)" letter-spacing="-4">
+    BEAM.
+  </text>
+
+  <!-- Tagline -->
+  <text x="72" y="470" font-family="ui-sans-serif, -apple-system, Inter, system-ui" font-size="32" font-weight="500" fill="#a1a1aa" letter-spacing="-0.5">
+    Scriptable. Sandboxed. Stupid easy.
+  </text>
+
+  <!-- Badges -->
+  <g transform="translate(72, 525)" font-family="ui-sans-serif, -apple-system, Inter, system-ui" font-size="20" font-weight="600">
+    <g>
+      <rect x="0" y="0" width="220" height="42" rx="21" fill="#7c3aed" fill-opacity="0.15" stroke="#7c3aed" stroke-opacity="0.4" />
+      <circle cx="22" cy="21" r="5" fill="#a78bfa" />
+      <text x="38" y="28" fill="#c4b5fd">Pure Elixir VM</text>
+    </g>
+    <g transform="translate(240, 0)">
+      <rect x="0" y="0" width="200" height="42" rx="21" fill="#10b981" fill-opacity="0.13" stroke="#10b981" stroke-opacity="0.4" />
+      <circle cx="22" cy="21" r="5" fill="#10b981" />
+      <text x="38" y="28" fill="#6ee7b7">Sandboxed</text>
+    </g>
+    <g transform="translate(460, 0)">
+      <rect x="0" y="0" width="200" height="42" rx="21" fill="#f59e0b" fill-opacity="0.13" stroke="#f59e0b" stroke-opacity="0.4" />
+      <circle cx="22" cy="21" r="5" fill="#f59e0b" />
+      <text x="38" y="28" fill="#fcd34d">Agent-ready</text>
+    </g>
+  </g>
+
+  <!-- Code preview card on right -->
+  <g transform="translate(720, 130)">
+    <rect x="0" y="0" width="420" height="380" rx="16" fill="#1c1825" stroke="#2d2640" stroke-width="1" />
+    <!-- chrome -->
+    <rect x="0" y="0" width="420" height="36" rx="16" fill="#231d2e" />
+    <rect x="0" y="20" width="420" height="16" fill="#231d2e" />
+    <circle cx="20" cy="18" r="5" fill="#f87171" />
+    <circle cx="38" cy="18" r="5" fill="#fbbf24" />
+    <circle cx="56" cy="18" r="5" fill="#34d399" />
+    <text x="210" y="23" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="13" fill="#71717a">agent_tool.exs</text>
+
+    <!-- code -->
+    <g font-family="ui-monospace, Menlo, monospace" font-size="16" letter-spacing="-0.2">
+      <text x="22" y="72"><tspan fill="#c4b5fd">defmodule</tspan> <tspan fill="#fcd34d">MyAgent.Tools</tspan> <tspan fill="#c4b5fd">do</tspan></text>
+      <text x="22" y="98"><tspan fill="#a1a1aa">  use</tspan> <tspan fill="#fcd34d">Lua.API</tspan><tspan fill="#a1a1aa">,</tspan> scope: <tspan fill="#6ee7b7">"tools"</tspan></text>
+      <text x="22" y="138"><tspan fill="#c4b5fd">  deflua</tspan> <tspan fill="#a78bfa">search</tspan>(query) <tspan fill="#c4b5fd">do</tspan></text>
+      <text x="22" y="164" fill="#a1a1aa">    MyApp.Search.run(query)</text>
+      <text x="22" y="190"><tspan fill="#c4b5fd">  end</tspan></text>
+      <text x="22" y="216"><tspan fill="#c4b5fd">end</tspan></text>
+
+      <text x="22" y="262" fill="#52525b" font-style="italic"># One VM per conversation.</text>
+      <text x="22" y="288" fill="#a1a1aa">lua = <tspan fill="#fcd34d">Lua</tspan>.new()</text>
+      <text x="22" y="314" fill="#a1a1aa">  |&gt; <tspan fill="#fcd34d">Lua</tspan>.load_api(<tspan fill="#fcd34d">MyAgent.Tools</tspan>)</text>
+
+      <text x="22" y="354"><tspan fill="#fcd34d">Lua</tspan>.<tspan fill="#a78bfa">eval!</tspan>(lua, llm_script)</text>
+    </g>
+  </g>
+
+  <!-- footer URL -->
+  <text x="600" y="595" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="20" font-weight="500" fill="#71717a">
+    hexdocs.pm/lua &middot; github.com/tv-labs/lua
+  </text>
+</svg>
