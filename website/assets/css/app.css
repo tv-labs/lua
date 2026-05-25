@@ -147,6 +147,36 @@ details.disclosure:not([open]) > *:not(summary) {
   }
 }
 
+/* Small mark dot — one orbit on load, continuous on hover.
+   Reuses the @keyframes lua-orbit defined above. Scoped via a
+   distinct class so the homepage's always-orbiting background mark
+   (.lua-orbit-satellite) is unaffected. */
+.lua-mark-satellite {
+  transform-box: view-box;
+  transform-origin: 32px 32px;
+}
+
+.lua-mark {
+  transition: filter 120ms ease-out, transform 120ms ease-out;
+}
+
+.group:hover .lua-mark {
+  filter:
+    drop-shadow(0 0 3px var(--lua-satellite))
+    drop-shadow(0 0 9px color-mix(in oklch, var(--lua-satellite) 55%, transparent));
+  transform: scale(1.06);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lua-mark-satellite {
+    animation: lua-orbit 2.4s cubic-bezier(0.4, 0, 0.2, 1) 1;
+  }
+
+  .group:hover .lua-mark-satellite {
+    animation: lua-orbit 1.6s linear infinite;
+  }
+}
+
 /* This file is for your main application CSS */
 
 /* Makeup syntax highlighting — mapped to daisyUI theme tokens so it

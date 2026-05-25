@@ -53,7 +53,7 @@ defmodule DemoWeb.Layouts do
     <header class="sticky top-0 z-30 backdrop-blur-md bg-base-100/70 border-b border-base-300/60">
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center gap-3 sm:gap-6">
         <a href="/" class="flex items-center gap-2.5 group">
-          <.lua_mark class="h-8 w-8 transition-transform group-hover:rotate-12" />
+          <.lua_mark class="h-8 w-8" />
           <span class="font-semibold tracking-tight text-lg">
             Lua<span class="text-primary">.ex</span>
           </span>
@@ -191,7 +191,7 @@ defmodule DemoWeb.Layouts do
       <div class="mx-auto max-w-7xl">
         <div class="grid grid-cols-1 sm:grid-cols-4 gap-y-3 sm:gap-y-6 gap-x-8 mb-8 sm:mb-10">
           <div class="mb-2 sm:mb-0">
-            <div class="flex items-center gap-2 mb-3">
+            <div class="group flex items-center gap-2 mb-3">
               <.lua_mark class="h-6 w-6" />
               <span class="font-semibold tracking-tight">
                 Lua<span class="text-primary">.ex</span>
@@ -360,7 +360,7 @@ defmodule DemoWeb.Layouts do
 
   def lua_mark(assigns) do
     ~H"""
-    <svg viewBox="0 0 64 64" class={@class} aria-hidden="true">
+    <svg viewBox="0 0 64 64" class={["lua-mark overflow-visible", @class]} aria-hidden="true">
       <defs>
         <linearGradient id="lua-mark-grad-sm" x1="0" x2="1" y1="0" y2="1">
           <stop offset="0%" stop-color="var(--lua-drop-from)" />
@@ -376,7 +376,9 @@ defmodule DemoWeb.Layouts do
         fill="url(#lua-mark-grad-sm)"
         mask="url(#lua-crescent-mask-sm)"
       />
-      <circle cx="52" cy="12" r="3.25" fill="var(--lua-satellite)" />
+      <g class="lua-mark-satellite">
+        <circle cx="52" cy="12" r="3.25" fill="var(--lua-satellite)" />
+      </g>
     </svg>
     """
   end
