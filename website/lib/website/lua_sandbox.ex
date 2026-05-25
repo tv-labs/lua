@@ -289,7 +289,9 @@ defmodule Website.LuaSandbox do
   defp format_op_args(:set_table, [t, k, v | _]), do: "r#{t}[#{pretty_arg(k)}], r#{v}"
   defp format_op_args(:get_field, [d, t, name | _]), do: ~s|r#{d}, r#{t}.#{name}|
   defp format_op_args(:set_field, [t, name, v | _]), do: ~s|r#{t}.#{name}, r#{v}|
-  defp format_op_args(:set_list, [t, s, c, o]), do: "r#{t}, start=#{s}, count=#{c}, off=#{o}"
+
+  defp format_op_args(:set_list, [t, s, c, o]),
+    do: "r#{t}, start=#{s}, count=#{count(c)}, off=#{o}"
 
   defp format_op_args(:call, [b, ac, rc | _]),
     do: "r#{b}, args=#{count(ac)}, results=#{count(rc)}"
@@ -508,40 +510,146 @@ defmodule Website.LuaSandbox do
   end
 
   @doc """
-  Returns the ordered list of tour lessons. Each lesson is a small
-  bite-sized snippet with prose and explanation, plus an optional
-  one-sentence learning objective and a "try it" exercise prompt.
+  Ordered chapter metadata for the tour. Each entry is `{slug, title}`.
+
+  The sidebar in `DemoWeb.TourLive` groups lessons by `lesson.chapter`
+  using this list as the section order.
+  """
+  def chapters do
+    [
+      {:basics, "Language basics"},
+      {:idioms, "Idioms & deeper language"},
+      {:stdlib, "The standard library"},
+      {:integration, "Lua.ex integration"},
+      {:internals, "Under the hood"}
+    ]
+  end
+
+  @doc """
+  Human title for a chapter slug. Returns `nil` for unknown slugs so the
+  template can no-op rather than crashing on stale data.
+  """
+  def chapter_title(chapter) when is_atom(chapter) do
+    Enum.find_value(chapters(), fn {slug, title} -> slug == chapter && title end)
+  end
+
+  @doc """
+  Ordered list of tour lessons.
+
+  Each lesson is a map with at least `:slug`, `:title`, `:objective`,
+  `:body`, `:chapter`. Optional keys: `:source` (Lua snippet for the
+  runnable editor — omit for prose-only lessons), `:elixir_source`
+  (the host-side companion shown above the Lua pane in Chapter IV),
+  `:exercise`, `:see_also` (list of related slugs), `:runnable`
+  (default `true`; `false` makes the editor display-only and skips
+  it in `lua_examples_test.exs`), and `:expect`
+  (`:ok | :compile_error | :runtime_error`, default `:ok`).
+
+  Quality rubric (enforced in `lua_examples_test.exs`):
+
+    * `:title` ≤ 32 chars
+    * `:body` ≤ 90 words
+    * `:source` ≤ 18 lines (≤ 12 for `chapter: :integration`)
+    * Every concept named in `:objective` and `:body` must be
+      demonstrated in `:source` (human-reviewed)
+    * `:exercise` must require a concept beyond what `:source` shows
   """
   def tour_lessons do
     [
+      # ----- Chapter I: Language basics -----
       %{
         slug: "values",
         title: "Values & types",
-        objective: "Recognise Lua's eight types and how its dual integer/float numbers behave.",
+        chapter: :basics,
+        objective: "Recognise Lua's eight types and how integer/float numbers behave.",
         body: """
         Lua has just eight types: `nil`, `boolean`, `number`, `string`,
-        `function`, `userdata`, `thread`, and `table`. Numbers are 64-bit
-        integers *or* floats — Lua picks whichever fits. Strings are
-        interned immutable byte sequences.
+        `function`, `userdata`, `thread`, and `table`. Numbers split into
+        two subtypes — 64-bit *integer* and *float* — and Lua tracks which
+        is which. Strings are interned immutable byte sequences.
         """,
         exercise:
           "Add a line that prints `type(3.0 == 3)` and predict the result before running.",
         source: """
         print(type(nil), type(true), type(1), type(1.5))
         print(type("hi"), type(print), type({}))
+        print(math.type(1), math.type(1.0))   -- integer  float
         return 1 + 2, 1 / 2, 1 // 2
+        """,
+        see_also: ["math-and-numbers"]
+      },
+      %{
+        slug: "variables",
+        title: "Locals & assignment",
+        chapter: :basics,
+        objective: "Declare locals, swap with one statement, and scope with `do…end`.",
+        body: """
+        Bare assignment creates a *global* — almost never what you want.
+        Use `local` for everything except top-level configuration.
+        Multiple assignment is first-class: `a, b = 1, 2` (and
+        `a, b = b, a` swaps without a temp). `do…end` opens a fresh
+        scope; locals declared inside vanish after `end`.
+        """,
+        exercise:
+          "Drop the `local` keyword from `x, y` and re-run. Lua quietly created a global — print `_G.x` to confirm.",
+        source: """
+        local x, y = 1, 2
+        print(x, y)
+
+        x, y = y, x                -- swap with no temp
+        print(x, y)
+
+        local outer = "outside"
+        do
+          local inner = "inside the block"
+          print(outer, inner)
+        end
+        print(outer, inner)        -- `inner` is nil here
+        return x, y
+        """
+      },
+      %{
+        slug: "truthiness",
+        title: "Truthiness & `and`/`or`",
+        chapter: :basics,
+        objective: "Use Lua's truthiness rule and the operand-returning behaviour of `and`/`or`.",
+        body: """
+        Only `nil` and `false` are falsy. `0`, `""`, and even `{}` are
+        all truthy — which surprises everyone. `and`/`or` don't return
+        booleans; they return whichever *operand* decided the result.
+        `x or default` is the canonical default-value idiom;
+        `(cond and a) or b` is Lua's ternary expression.
+        """,
+        exercise:
+          "Make `(false and \"a\") or \"b\"` return `\"b\"`. Now make it return `false` when the first branch is false — why is `(c and a) or b` unsafe when `a` can be `false`?",
+        source: """
+        print(0 and "zero is truthy")
+        print("" and "empty string is truthy")
+        print({} and "empty table is truthy too")
+
+        local name = nil
+        print(name or "anonymous")                  -- "anonymous"
+
+        local age = 21
+        local label = (age >= 18 and "adult") or "minor"
+        print(label)
+        return label
         """
       },
       %{
         slug: "control-flow",
         title: "Control flow",
-        objective: "Use `if`/`for`/`while` and learn which values Lua treats as falsy.",
+        chapter: :basics,
+        objective: "Use `if`, `while`, `repeat..until`, and numeric `for` with explicit steps.",
         body: """
-        `if`/`elseif`/`else`, `while`, `repeat..until`, and both numeric
-        and generic `for` loops. Falsy values are `nil` and `false` — only.
-        `0`, `""`, and `{}` are all truthy.
+        `if`/`elseif`/`else` are statements, not expressions. `while`
+        checks before entering the body; `repeat..until` checks after,
+        so the body always runs at least once. Numeric `for` takes
+        `start, stop[, step]` — a negative step counts down. See
+        *Iteration* for the generic `for`.
         """,
-        exercise: "Change the threshold in `sign` so that very-small floats are treated as zero.",
+        exercise:
+          "Rewrite the `while` loop as a `repeat..until`. Then flip the initial value of `i` to `5` — `while` skips, `repeat` still runs once.",
         source: """
         local function sign(n)
           if n > 0 then return 1
@@ -549,61 +657,124 @@ defmodule Website.LuaSandbox do
           else return 0 end
         end
 
-        for i = -2, 2 do print(i, sign(i)) end
-        return sign(42)
+        local i = 0
+        while i < 3 do i = i + 1; print("while", i) end
+
+        repeat
+          i = i - 1
+        until i == 0
+        print("after repeat: i =", i)
+
+        for j = 10, 6, -2 do print("for", j) end
+        return sign(-42)
         """
       },
       %{
         slug: "tables",
         title: "Tables are everything",
+        chapter: :basics,
         objective:
-          "Understand Lua's one data structure — arrays, records, hashes, all in one shape.",
+          "Build arrays, records, and nested tables, and know what `#t` actually counts.",
         body: """
         Tables are *the* data structure: arrays, hash maps, records,
-        objects, modules — all tables. Indexed from `1` by convention,
-        with `#t` giving the length of the array part.
+        modules — all tables. Indexed from `1` by convention. `#t` is
+        defined for *sequences* (`{v1, v2, ..., vn}` with no nils) and
+        unspecified for sparse tables. Mix array and hash keys in one
+        literal.
         """,
-        exercise: "Add `t.kind = 'numeric'` and print `t.kind`. Does `#t` change?",
+        exercise:
+          "Add `user.prefs.shortcuts = { save = \"⌘S\" }` and print `user.prefs.shortcuts.save`. Then add `user[5] = \"trailing\"` — what does `#user` return now?",
+        source: """
+        local user = {
+          "first row",                 -- user[1]
+          "second row",                -- user[2]
+          name  = "Ada",               -- user.name
+          prefs = { theme = "dark" },  -- nested table
+        }
+
+        print(user[1], user.name, user.prefs.theme, #user)
+
+        user.prefs.theme = "light"
+        print(user.prefs.theme)
+
+        local sparse = { [1] = "a", [3] = "c" }
+        print("#sparse =", #sparse, "(implementation-defined)")
+        return user.name
+        """
+      },
+      %{
+        slug: "iteration",
+        title: "Iteration",
+        chapter: :basics,
+        objective:
+          "Use `pairs` for hash walks, `ipairs` for sequences, and write your own iterator.",
+        body: """
+        `ipairs` walks the array part from `1` and stops at the first
+        `nil`. `pairs` walks every key in unspecified order. The generic
+        `for` accepts any *iterator function* — `range(n)` below shows
+        how to write one yourself: return `(iter, state, control)` and
+        Lua takes care of the rest.
+        """,
+        exercise:
+          "Add a `step` parameter to `range` so `range(10, 2)` yields `1, 3, 5, 7, 9` with their squares.",
         source: """
         local t = { 10, 20, 30, name = "trio" }
-        print(t[1], t[2], t[3], t.name, #t)
+        for i, v in ipairs(t) do print("ipairs", i, v) end
+        for k, v in pairs(t)  do print("pairs ", k, v) end
 
-        t[#t + 1] = 40
-        for i, v in ipairs(t) do print(i, v) end
+        local function range(n)
+          return function(_, i)
+            i = i + 1
+            if i <= n then return i, i * i end
+          end, nil, 0
+        end
 
-        return t.name, #t
-        """
+        for i, sq in range(4) do print("range", i, sq) end
+        return "done"
+        """,
+        see_also: ["coroutines", "varargs"]
       },
       %{
         slug: "functions",
         title: "First-class functions",
-        objective: "Pass and return functions, and unpack multiple return values.",
+        chapter: :basics,
+        objective: "Pass and return functions, capture multiple returns, and discard with `_`.",
         body: """
-        Functions are values. They can be passed around, returned,
-        and stored in tables. Multiple return values are first-class:
-        `return a, b, c`.
+        Functions are values: pass them, return them, store them in
+        tables. Multiple return values are first-class. Assigning fewer
+        names drops extras (`local q = divmod(17, 5)`). Use `_` as a
+        discard. Only the *last* call in an expression list flattens —
+        wrap in parens to truncate to one.
         """,
         exercise:
-          "Capture only the *quotient* from `divmod(17, 5)` and discard the remainder — what's the idiomatic way?",
+          "Wrap the last call as `(divmod(100, 7))`. The remainder vanishes from the return — the extra parens force single-value context.",
         source: """
         local function divmod(a, b)
           return a // b, a % b
         end
 
         local q, r = divmod(17, 5)
-        print(q, r)
+        print("q, r =", q, r)
+
+        local _, only_r = divmod(17, 5)
+        print("only r =", only_r)
+
+        -- Only the last call flattens; otherwise extras are dropped.
+        local pair = { divmod(17, 5) }
+        print("#pair =", #pair, pair[1], pair[2])
         return divmod(100, 7)
         """
       },
       %{
         slug: "varargs",
         title: "Varargs & multiple returns",
+        chapter: :basics,
         objective: "Use `...` to accept variable arguments and forward them with `select`.",
         body: """
         A function declared with `...` receives any number of extra
-        arguments. `select("#", ...)` is the count, `select(n, ...)` is
-        the tail starting at position `n`. Multiple returns flatten
-        when they're the last expression in a call.
+        arguments. `select("#", ...)` is the count; `select(n, ...)` is
+        the tail starting at position `n`. Multiple return values
+        flatten when they're the last expression in a call.
         """,
         exercise:
           "Add a `min(...)` function next to `sum` that returns the smallest argument. Use `math.huge` as the seed.",
@@ -620,9 +791,38 @@ defmodule Website.LuaSandbox do
         return sum(10, 20, 30)
         """
       },
+
+      # ----- Chapter II: Idioms & deeper language -----
+      %{
+        slug: "closures",
+        title: "Closures & upvalues",
+        chapter: :idioms,
+        objective:
+          "Capture an outer-scope binding and watch the `closure` op build the function at runtime.",
+        body: """
+        Inner functions capture outer locals *by reference* — these
+        captured bindings are called *upvalues*. Two closures over the
+        same local share that storage. Run this snippet and toggle
+        Bytecode to see the `closure` opcode and the upvalue
+        descriptors on the inner prototype.
+        """,
+        exercise:
+          "Make `make_adder` return *two* closures, one that adds and one that subtracts. They should share the same `n`.",
+        source: """
+        local function make_adder(n)
+          return function(x) return x + n end
+        end
+
+        local add5 = make_adder(5)
+        print(add5(10), add5(100))
+        return add5(0)
+        """,
+        see_also: ["bytecode", "method-syntax"]
+      },
       %{
         slug: "method-syntax",
         title: "Method syntax: `:` vs `.`",
+        chapter: :idioms,
         objective: "Read OO-style Lua and know when `self` is implicitly passed.",
         body: """
         `obj:method(args)` is sugar for `obj.method(obj, args)` — the
@@ -630,7 +830,7 @@ defmodule Website.LuaSandbox do
         when calling methods, and `function T:foo(...)` when declaring
         them. The two forms below produce the same bytecode.
         """,
-        exercise: "Toggle 'Bytecode' on and compare the disassembly for the two `greet` calls.",
+        exercise: "Toggle Bytecode and compare the disassembly for the two `hello` calls.",
         source: """
         local Greeter = { lang = "en" }
 
@@ -645,225 +845,604 @@ defmodule Website.LuaSandbox do
         """
       },
       %{
-        slug: "closures",
-        title: "Closures & upvalues",
+        slug: "metatables-index",
+        title: "Metatables: `__index`",
+        chapter: :idioms,
         objective:
-          "Capture an outer-scope binding and watch the `:closure` op build the function at runtime.",
+          "Use `__index` (table or function) for fallback lookup and single-inheritance chains.",
         body: """
-        Inner functions capture outer locals by reference — these
-        captured bindings are called *upvalues*. Run this snippet and
-        click "Bytecode" to watch the `closure` opcode and the upvalue
-        descriptors on the prototype.
+        Every table can have a *metatable*. When a key is missing on
+        `t`, Lua consults `t`'s metatable's `__index`. If `__index` is a
+        table, lookup recurses there — that's how OO inheritance works.
+        If `__index` is a function, it's called with `(t, key)` — that's
+        how computed/lazy lookups work.
         """,
         exercise:
-          "Make `make_adder` return *two* closures, one that adds and one that subtracts. They should share the same `n`.",
+          "Toggle Bytecode and find the `get_table` op for `rex.kingdom`. It misses on `rex` and `Dog` and lands on `Animal` via two metatable hops.",
         source: """
-        local function make_adder(n)
-          return function(x) return x + n end
+        local Animal = { kingdom = "Animalia" }
+        function Animal:describe()
+          return self.name .. " is a " .. self.species
         end
 
-        local add5 = make_adder(5)
-        print(add5(10), add5(100))
-        return add5(0)
-        """
-      },
-      %{
-        slug: "metatables",
-        title: "Metatables",
-        objective: "Override operators and indexing to build OO-style classes from plain tables.",
-        body: """
-        Every table can have a *metatable* that customises operators,
-        indexing, and tostring. This is how Lua does inheritance,
-        operator overloading, and OO — all from one mechanism.
-        """,
-        exercise:
-          "Add a `__tostring` metamethod on `Stack` that returns `'Stack(n=...)'` and `print(s)` it.",
-        source: """
-        local Stack = {}; Stack.__index = Stack
-        function Stack.new() return setmetatable({ n = 0 }, Stack) end
-        function Stack:push(v) self.n = self.n + 1; self[self.n] = v end
-        function Stack:pop() local v = self[self.n]; self[self.n] = nil; self.n = self.n - 1; return v end
+        -- Dog inherits from Animal; Rex inherits from Dog.
+        local Dog = setmetatable({ species = "dog" }, { __index = Animal })
+        local rex = setmetatable({ name = "Rex" }, { __index = Dog })
+        print(rex.kingdom)              -- found two hops up on Animal
+        print(rex:describe())           -- method found on Animal
 
-        local s = Stack.new()
-        s:push(1); s:push(2); s:push(3)
-        print(s:pop(), s:pop(), s:pop())
-        return s.n
-        """
+        -- __index as a function: compute on demand.
+        local squares = setmetatable({}, { __index = function(_, n) return n * n end })
+        print(squares[7], squares[12])
+        return rex:describe()
+        """,
+        see_also: ["metatables-ops", "bytecode"]
       },
       %{
-        slug: "strings",
-        title: "Pattern matching",
-        objective: "Use Lua patterns — smaller than regex, big enough for 90% of jobs.",
+        slug: "metatables-ops",
+        title: "Operator overloading",
+        chapter: :idioms,
+        objective:
+          "Implement `__add`, `__eq`, `__tostring`, and `__call` so a Vector feels like a native value.",
         body: """
-        Lua's pattern engine is smaller than regex but covers most
-        needs: `%a` letters, `%d` digits, `%s` spaces, `*` zero-or-more,
-        `+` one-or-more, captures with `()`.
+        Metamethods customise operators (`__add`, `__sub`, `__mul`,
+        `__div`, `__unm`, `__pow`, `__concat`), equality (`__eq`),
+        ordering (`__lt`, `__le`), length (`__len`), stringification
+        (`__tostring`), and the call protocol (`__call`). Pair them
+        with `__index = self` to make instance methods discoverable.
         """,
         exercise:
-          "Match an ISO date *with optional time* and capture only year/month/day, ignoring the rest.",
+          "Add a `__sub` metamethod and a `:dot(other)` method. Use them: `print((a - b):dot(a + b))`.",
         source: """
-        local s = "2026-05-23 21:00:00"
-        local y, m, d = string.match(s, "(%d+)-(%d+)-(%d+)")
-        print(y, m, d)
-        return y .. "/" .. m .. "/" .. d
-        """
+        local Vec = {}
+        Vec.__index = Vec
+        Vec.__add = function(a, b) return Vec.new(a.x + b.x, a.y + b.y) end
+        Vec.__eq  = function(a, b) return a.x == b.x and a.y == b.y end
+        Vec.__tostring = function(v) return string.format("(%g, %g)", v.x, v.y) end
+        Vec.__call = function(_, x, y) return Vec.new(x, y) end
+
+        function Vec.new(x, y) return setmetatable({ x = x, y = y }, Vec) end
+        function Vec:length() return math.sqrt(self.x ^ 2 + self.y ^ 2) end
+
+        local a, b = Vec.new(1, 2), Vec.new(3, 4)
+        print(tostring(a + b))
+        print((a + b) == Vec.new(4, 6))
+        print(string.format("|a| = %.3f", a:length()))
+        return tostring(a + b)
+        """,
+        see_also: ["metatables-index"]
       },
       %{
         slug: "errors",
-        title: "Errors & pcall",
-        objective: "Raise and catch errors without leaving the VM. No try/catch needed.",
+        title: "Errors, `pcall`, `xpcall`",
+        chapter: :idioms,
+        objective:
+          "Raise errors as strings *or* tables, catch them with `pcall`, and add a handler with `xpcall`.",
         body: """
-        Errors are raised with `error()` and caught with `pcall` (or
-        `xpcall` for a custom handler). No try/catch — just protected
-        calls returning a status and value.
+        `error(value)` raises — the value is usually a string but a
+        table works and is great for structured failures. `pcall(f, …)`
+        returns `(true, ret…)` or `(false, err)`. `xpcall(f, handler,
+        …)` lets you attach context (e.g. a traceback) *before* the
+        stack unwinds.
         """,
         exercise:
-          "Wrap the failing call with `xpcall` and a handler that prefixes the error with `'oops: '`.",
+          "Replace `handler` with one that returns `{ wrapped = true, original = tostring(e) }` and read `wrapped.wrapped` from the caller side.",
         source: """
-        local ok, err = pcall(function()
-          error("boom!")
-        end)
+        local function risky(x)
+          if x < 0 then error("negative: " .. x) end
+          if x == 0 then error({ code = "ZERO", retry = false }) end
+          return math.sqrt(x)
+        end
+
+        local ok, err = pcall(risky, -1)
         print(ok, err)
 
-        local ok2, val = pcall(function() return 42 end)
-        print(ok2, val)
-        return ok, ok2
+        local ok2, payload = pcall(risky, 0)
+        print(ok2, payload.code, payload.retry)
+
+        local function handler(e) return "oops: " .. tostring(e) end
+        local ok3, wrapped = xpcall(risky, handler, -9)
+        print(ok3, wrapped)
+        return pcall(risky, 16)                  -- true, 4.0
+        """,
+        see_also: ["errors-host"]
+      },
+      %{
+        slug: "coroutines",
+        title: "Coroutines (preview)",
+        chapter: :idioms,
+        runnable: false,
+        objective:
+          "Read the coroutine API and see why it's the engine behind stateful iterators.",
+        body: """
+        Coroutines are cooperative threads inside a single OS thread:
+        `create` builds one, `resume` runs it, `yield` suspends it and
+        passes values back to the caller. They're the canonical engine
+        for stateful iterators and generator pipelines. The snippet
+        below is canonical Lua 5.3 — coroutines are on the Lua.ex
+        roadmap, so this lesson is read-only for now.
+        """,
+        exercise:
+          "Re-read *Iteration*: `range(n)` reached the same generator-shape result by capturing state in a closure instead of yielding from a coroutine.",
+        source: """
+        local function producer(n)
+          for i = 1, n do
+            coroutine.yield(i * i)
+          end
+        end
+
+        -- coroutine.wrap returns an iterator-shaped function.
+        local squares = coroutine.wrap(function() producer(5) end)
+        for v in squares do print(v) end
+
+        -- coroutine.create returns a handle you drive with resume.
+        local co = coroutine.create(function()
+          print("step 1"); coroutine.yield()
+          print("step 2"); coroutine.yield()
+          print("step 3")
+        end)
+        coroutine.resume(co); coroutine.resume(co); coroutine.resume(co)
+        """,
+        see_also: ["iteration"]
+      },
+
+      # ----- Chapter III: The standard library -----
+      %{
+        slug: "strings",
+        title: "Strings & patterns",
+        chapter: :stdlib,
+        objective:
+          "Format, slice, and concatenate strings, then capture matches with `gmatch` and `gsub`.",
+        body: """
+        `..` concatenates, `#s` is byte length (not codepoints),
+        `string.format` is `printf`. Patterns are *not* regex — `%a`
+        letters, `%d` digits, `%s` spaces, `.` any, `%p` punctuation.
+        Quantifiers: `*` 0+, `+` 1+, `?` optional, `-` shortest match.
+        `gmatch` yields each match; `gsub` rewrites with a string or
+        function.
+        """,
+        exercise:
+          "Use `gsub` with a function replacement to capitalise every word: `\"hello there\"` → `\"Hello There\"`. Hint: pattern `(%a)(%a*)`.",
+        source: """
+        local s = "Hello, World!"
+        print(#s, s:upper(), s:sub(1, 5))
+        print(string.format("len=%d, first=%q", #s, s:sub(1, 5)))
+
+        -- Captures: pattern groups in parens become return values.
+        print(string.match("admin42", "(%a+)(%d+)"))
+        print(string.match("2026-05-25", "(%d+)%-(%d+)%-(%d+)"))
+
+        -- gmatch iterates every match.
+        for word in string.gmatch("the quick brown fox", "%a+") do
+          print(word)
+        end
+
+        -- gsub with a function replacement.
+        print((string.gsub("snake_case", "_(%a)", function(c) return c:upper() end)))
+        return string.format("%d words", 4)
         """
       },
       %{
-        slug: "stdlib",
-        title: "The standard library",
+        slug: "tables-stdlib",
+        title: "Working with tables",
+        chapter: :stdlib,
         objective:
-          "Get comfortable with `string`, `table`, and `math` — the three you'll reach for daily.",
+          "Use `table.insert`, `remove`, `sort`, `concat`, and `unpack` to manipulate sequences.",
         body: """
-        Lua ships a small but well-shaped stdlib. `string` has format,
-        upper/lower, find/match/gmatch/gsub, byte/char. `table` has
-        insert/remove/concat/sort/unpack. `math` has floor/ceil/abs/min/
-        max/random/sqrt/log/sin/cos. There's no `os` or `io` in this
-        sandbox — see the *Sandbox* lesson for why.
+        `table.insert(t, v)` pushes; `table.insert(t, pos, v)` inserts
+        at `pos`. `table.remove(t)` pops the tail. `table.concat(t,
+        sep)` is the fast string-buffer pattern. `table.sort(t[, cmp])`
+        sorts in place. `table.unpack(t)` spreads a table back into a
+        value list.
         """,
         exercise:
-          "Sort `nums` in place using `table.sort(nums, function(a,b) return a > b end)` and print it.",
+          "Sort `{3, 1, 4, 1, 5, 9, 2, 6}` so even numbers come before odd, and within each group ascending. Use a single comparator function.",
         source: """
-        local nums = { 5, 1, 4, 2, 3 }
-        print(table.concat(nums, ","))
-        table.sort(nums)
-        print(table.concat(nums, ","))
+        local t = { "b", "d", "a" }
+        table.insert(t, "c")                  -- push to tail
+        table.insert(t, 1, "_")               -- insert at head
+        print(table.concat(t, ","))
 
-        print(string.format("pi ≈ %.5f", math.pi))
-        return math.floor(math.pi), math.ceil(math.pi)
+        table.sort(t)                         -- ascending strings
+        print(table.concat(t, ","))
+
+        table.sort(t, function(a, b) return a > b end)
+        print(table.concat(t, ","))
+
+        local popped = table.remove(t)        -- pop tail
+        print("popped:", popped)
+
+        local x, y, z = table.unpack({ 10, 20, 30 })
+        return x + y + z                       -- 60
         """
+      },
+      %{
+        slug: "math-and-numbers",
+        title: "Numbers: int & float",
+        chapter: :stdlib,
+        objective:
+          "Tell integers from floats, convert between them, and know which operator returns which.",
+        body: """
+        Lua 5.3 has two number subtypes: 64-bit *integer* and *float*
+        (double). `/` always returns a float; `//` floor-divides and
+        stays integer when both operands are integers. `math.type(x)`
+        reports the subtype; `math.tointeger(x)` narrows or returns
+        `nil` when the value isn't representable as an integer.
+        """,
+        exercise:
+          "Predict `math.type(1/1)` and `math.type(2^10)`. Then run and confirm. Why does `2^10` *not* return an integer?",
+        source: """
+        print(math.type(1), math.type(1.0))            -- integer  float
+        print(math.type(1 + 1), math.type(1 + 1.0))    -- integer  float
+
+        print(7 / 2)      -- 3.5      (/ always returns float)
+        print(7 // 2)     -- 3        (int // int = int)
+        print(7.0 // 2)   -- 3.0      (any float = float)
+        print(-7 // 2)    -- -4       (floor, not truncate)
+
+        print(math.tointeger(3.0))    -- 3
+        print(math.tointeger(3.5))    -- nil  (not representable)
+        print(tonumber("42"))         -- 42   (string -> number)
+
+        return math.maxinteger, math.mininteger
+        """,
+        see_also: ["values"]
       },
       %{
         slug: "sandbox",
         title: "The sandbox",
+        chapter: :stdlib,
         objective: "See what's blocked by default — the reason this VM is agent-ready.",
         body: """
-        This playground runs your code in a sandboxed VM: dangerous
-        functions like `os.execute`, `io.open`, `require`, and `load`
-        are stubbed to raise. Those are the libraries a host
-        application typically locks down before exposing a scripting
-        surface to users or LLMs. The block below tries to escape; it
-        produces a friendly error instead of a catastrophe.
+        This playground runs in a sandboxed VM: dangerous functions
+        like `os.execute`, `io.open`, `require`, and `load` are stubbed
+        to raise. Those are the libraries a host application typically
+        locks down before exposing a scripting surface to users or
+        LLMs. *Chapter IV* shows how to expose your *own* safe
+        functions back into Lua.
         """,
         exercise:
-          "Try your own escape — `io.open('/etc/passwd', 'r')` or `require('os')`. Same outcome.",
+          "Try your own escape — `io.open('/etc/passwd', 'r')` or `require('os')`. Same outcome. Now check the *Embedding* lesson to see how to allow specific paths through.",
         source: """
-        -- This is what the agent-tool pitch protects you from:
         local ok, err = pcall(function()
           return os.execute("rm -rf /")
         end)
-        print("ok?", ok)
+        print("os.execute ok?", ok)
         print("err:", err)
 
         -- The names exist, but they refuse to do real work:
         local ok2 = pcall(io.open, "/etc/passwd", "r")
-        print("io.open?", ok2)
+        print("io.open ok?", ok2)
 
         return ok, ok2
-        """
+        """,
+        see_also: ["host-intro", "deflua"]
       },
-      %{
-        slug: "interop",
-        title: "Talking to Elixir",
-        objective:
-          "Read how `deflua` exposes Elixir functions to Lua — the secret behind the agent-tool pitch.",
-        body: """
-        This snippet runs on the playground sandbox, where only safe
-        Lua-level functions are exposed. In your *own* Elixir app you
-        can register any function with `deflua` and call it from Lua.
 
-        The snippet on the right is what your host module looks like —
-        we render it as a Lua call so you can see the bytecode that an
-        agent's script would compile to. The actual Elixir definition
-        of `pricing.discount` lives in your codebase.
+      # ----- Chapter IV: Lua.ex integration (dual-pane) -----
+      %{
+        slug: "host-intro",
+        title: "Embedding Lua in Elixir",
+        chapter: :integration,
+        objective: "Initialize a sandboxed VM and evaluate a Lua snippet from your Elixir app.",
+        body: """
+        `Lua.new()` returns a sandboxed VM. `Lua.eval!/2` runs a
+        snippet and returns `{results, lua}` — the updated VM threads
+        through, so every call yields a state you keep using. Multiple
+        return values from Lua come back as an Elixir list.
         """,
         exercise:
-          "Add another call after the existing one with a different discount percentage. Watch the `call` opcode in the bytecode.",
-        source: """
-        -- The Elixir side (in your project):
-        -- defmodule Pricing do
-        --   use Lua.API, scope: "pricing"
-        --   deflua discount(amount, pct), do: amount * (1 - pct/100)
-        -- end
-        --
-        -- In the playground we stub `pricing` so you can see the shape:
-        pricing = { discount = function(amount, pct)
-          return amount * (1 - pct / 100)
-        end }
+          "Change the snippet to return three values, including a table `{ ok = true }`. The Elixir caller gets a 3-element list with the table at the end.",
+        elixir_source: """
+        lua = Lua.new()
 
-        local total = pricing.discount(100, 15)
-        print("after 15% off:", total)
+        {results, lua} = Lua.eval!(lua, \"\"\"
+          return 1 + 2, "hello"
+        \"\"\")
+
+        results
+        # => [3, "hello"]
+        """,
+        source: """
+        return 1 + 2, "hello"
+        """,
+        see_also: ["set-and-get", "call-function"]
+      },
+      %{
+        slug: "set-and-get",
+        title: "Reading & writing state",
+        chapter: :integration,
+        objective:
+          "Define globals from Elixir with `Lua.set!` and read them back with `Lua.get!`.",
+        body: """
+        `Lua.set!(lua, [:greeting], "hi")` writes a global. `Lua.get!(
+        lua, [:total])` reads one. Paths nest into tables:
+        `Lua.set!(lua, [:cfg, :api_key], …)` writes to `cfg.api_key`.
+        After `eval!`, anything the script wrote to a global is
+        readable from Elixir.
+        """,
+        exercise:
+          "Add a nested-path read on the Elixir side: `Lua.set!(lua, [:cfg, :rate], 0.08)`, then use `cfg.rate` in the Lua snippet to compute tax.",
+        elixir_source: """
+        lua =
+          Lua.new()
+          |> Lua.set!([:discount_pct], 15)
+          |> Lua.set!([:prices], [10, 20, 30])
+
+        {_, lua} = Lua.eval!(lua, source)
+        Lua.get!(lua, [:final_total])
+        # => 51.0
+        """,
+        source: """
+        -- discount_pct and prices come from the Elixir host (Lua.set!).
+        -- The stubs let this snippet run standalone in the playground.
+        discount_pct = discount_pct or 15
+        prices       = prices       or { 10, 20, 30 }
+
+        local total = 0
+        for _, p in ipairs(prices) do
+          total = total + p * (1 - discount_pct / 100)
+        end
+
+        final_total = total      -- host reads this back with Lua.get!
         return total
-        """
+        """,
+        see_also: ["host-intro", "deflua"]
+      },
+      %{
+        slug: "deflua",
+        title: "Exposing Elixir with `deflua`",
+        chapter: :integration,
+        objective:
+          "Define a module with `use Lua.API` + `deflua`, then load it with `Lua.load_api/2`.",
+        body: """
+        `deflua` turns an Elixir function into a Lua-callable. The
+        optional `scope:` puts it under a namespace — `scope:
+        \"pricing\"` exposes `pricing.discount(…)`.
+        `Lua.load_api(lua, MyModule)` registers the module on the VM.
+        The Lua side just calls a function; the Elixir side runs the
+        body.
+        """,
+        exercise:
+          "Add `deflua tax(amount, rate)` to `Pricing`, returning `amount * rate`. Call `pricing.tax(85, 0.08)` from Lua — remember to extend the playground stub too.",
+        elixir_source: """
+        defmodule Pricing do
+          use Lua.API, scope: "pricing"
+
+          deflua discount(amount, pct) do
+            amount * (1 - pct / 100)
+          end
+        end
+
+        lua = Lua.new() |> Lua.load_api(Pricing)
+        {[total], _} = Lua.eval!(lua, ~S|return pricing.discount(100, 15)|)
+        # total = 85.0
+        """,
+        source: """
+        -- In your host, Lua.load_api(Pricing) registers `pricing.discount`.
+        -- Stub it here so the snippet runs in the standalone playground.
+        pricing = pricing or {
+          discount = function(amount, pct) return amount * (1 - pct / 100) end,
+        }
+
+        print(string.format("$%d after 15%%: $%.2f", 100, pricing.discount(100, 15)))
+        print(string.format("$%d after 30%%: $%.2f", 80,  pricing.discount(80, 30)))
+        return pricing.discount(250, 10)
+        """,
+        see_also: ["put-private", "call-function"]
+      },
+      %{
+        slug: "call-function",
+        title: "Calling Lua from Elixir",
+        chapter: :integration,
+        objective:
+          "Define a Lua function in a snippet, then invoke it from Elixir with `call_function!`.",
+        body: """
+        `Lua.call_function!(lua, [:name], [arg1, arg2])` calls a Lua
+        function from Elixir. Path tuples work too — `[:string,
+        :upper]` reaches stdlib. This is the pattern when your script
+        is *configuration*: it defines hooks (`on_request`, `pricing`,
+        …) and your Elixir code drives the loop.
+        """,
+        exercise:
+          "Define a second function `farewell(name)` that returns `\"bye, \" .. name`. The host could now drive a request/response cycle through two hooks defined in one script.",
+        elixir_source: """
+        {_, lua} = Lua.eval!(Lua.new(), \"\"\"
+          function greet(name) return "hi, " .. name end
+        \"\"\")
+
+        Lua.call_function!(lua, [:greet], ["Ada"])
+        # => ["hi, Ada"]
+
+        # Stdlib paths work too:
+        Lua.call_function!(lua, [:string, :upper], ["heya"])
+        # => ["HEYA"]
+        """,
+        source: """
+        -- The host will call greet/1 by name after this snippet runs.
+        function greet(name)
+          return "hi, " .. name
+        end
+
+        -- For the playground, drive it ourselves so you see the output.
+        print(greet("Ada"))
+        print(greet("Joe"))
+        return greet("Linus")
+        """,
+        see_also: ["host-intro", "deflua"]
+      },
+      %{
+        slug: "put-private",
+        title: "Private host context",
+        chapter: :integration,
+        objective:
+          "Pass authenticated context to `deflua` handlers without exposing it to Lua scripts.",
+        body: """
+        `Lua.put_private(lua, :user_id, 42)` stores host state inside
+        the VM that *Lua scripts cannot see*. In a `deflua` body taking
+        `state`, `Lua.get_private!(state, :user_id)` reads it back.
+        This is the pattern for multi-tenant sandboxes: auth, tenant
+        id, and API keys stay on the host side; the script sees only
+        return values.
+        """,
+        exercise:
+          "Print `type(user_id)` from Lua — it stays `nil`. Now write a malicious-looking snippet that *tries* to read the user id (`return _G.user_id`) and confirm it can't.",
+        elixir_source: """
+        defmodule Account do
+          use Lua.API, scope: "account"
+
+          deflua balance(), state do
+            user_id = Lua.get_private!(state, :user_id)
+            {[fetch_balance(user_id)], state}
+          end
+        end
+
+        lua =
+          Lua.new()
+          |> Lua.load_api(Account)
+          |> Lua.put_private(:user_id, 42)
+
+        {[bal], _} = Lua.eval!(lua, "return account.balance()")
+        """,
+        source: """
+        -- account.balance is a deflua handler that reads user_id via
+        -- Lua.get_private!. Lua sees only the return value.
+        account = account or { balance = function() return 12847 end }
+
+        local b = account.balance()
+        print("balance:", b)
+        print("can Lua see user_id?", type(user_id))   -- nil; private!
+        return b
+        """,
+        see_also: ["deflua", "sandbox"]
       },
       %{
         slug: "sigil",
         title: "The `~LUA` sigil",
-        objective:
-          "Embed compile-time-validated Lua inside Elixir — and pre-compile it for zero per-call parsing.",
+        chapter: :integration,
+        objective: "Validate Lua at Elixir compile time and pre-compile chunks for hot paths.",
         body: """
-        `~LUA"..."` parses your Lua at *Elixir compile time*. A typo in
-        the script becomes a compile error in your release, not a
-        runtime surprise on a Tuesday. Add the `c` modifier and the
-        sigil emits a pre-compiled `Lua.Chunk` — repeated runs skip
-        the parser entirely.
-
-        The snippet below is Elixir, not Lua — but you can run the Lua
-        portion in the playground to see the bytecode the sigil
-        compiles to.
+        `~LUA"..."` parses your Lua at *Elixir compile time*. A typo
+        crashes `mix compile`, not your release on a Tuesday. The `c`
+        modifier emits a pre-compiled `%Lua.Chunk{}` — `Lua.eval!(lua,
+        chunk)` skips the parser at runtime. Use this for repeatedly
+        executed snippets and config-as-code.
         """,
         exercise:
-          "Change `n + 1` to `n + ` (drop the operand) and run — see the compile error path light up the editor.",
+          "Drop the closing `end` of an inner function and run. Lua.ex compiles fine here (the playground re-parses every Run), but as a `~LUA` body the same typo crashes `mix compile`.",
+        elixir_source: """
+        defmodule Money do
+          import Lua
+
+          # Parsed at Elixir compile time; runtime still parses.
+          def discount_lua,
+            do: ~LUA"return amount * (1 - pct/100)"
+
+          # Parsed AND compiled at Elixir compile time. Re-runs skip
+          # the parser entirely.
+          def discount_chunk,
+            do: ~LUA"return amount * (1 - pct/100)"c
+        end
+
+        lua = Lua.new() |> Lua.set!([:amount], 100) |> Lua.set!([:pct], 15)
+        {[total], _} = Lua.eval!(lua, Money.discount_chunk())
+        """,
         source: """
-        -- The Lua body of `~LUA"..."c` — try editing this and toggling
-        -- 'Bytecode' to see what your release would ship.
-        local total = 0
-        for i = 1, 100 do total = total + i end
-        return total
-        """
+        -- The body of the ~LUA chunk above — edit and re-run.
+        -- In a real app, `amount` and `pct` come from Lua.set! first.
+        amount = amount or 100
+        pct    = pct    or 15
+        return amount * (1 - pct / 100)
+        """,
+        see_also: ["host-intro", "bytecode"]
       },
+      %{
+        slug: "errors-host",
+        title: "Errors across the boundary",
+        chapter: :integration,
+        expect: :runtime_error,
+        objective:
+          "Catch `Lua.RuntimeException` on the Elixir side — line, source, and call stack come along.",
+        body: """
+        Runtime errors in Lua raise `Lua.RuntimeException` on the
+        Elixir side. The exception carries the offending line, the
+        source snippet, and the call stack. `try/rescue` catches it;
+        `Exception.message/1` formats the pretty version you see in
+        this playground.
+        """,
+        exercise:
+          "Change `nil` to `{ missing = { field = 42 } }` and the error disappears — you get `42` back. Now toggle Bytecode and find the `get_table` op that the runtime stack points at.",
+        elixir_source: """
+        try do
+          Lua.eval!(Lua.new(), \"\"\"
+            local function deep(x) return x.missing.field end
+            deep(nil)
+          \"\"\")
+        rescue
+          e in Lua.RuntimeException ->
+            IO.puts(Exception.message(e))
+            {:error, e.line, e.source}
+        end
+        """,
+        source: """
+        -- Run this to see the same error the Elixir caller rescues.
+        local function inner(x)
+          return x.missing.field
+        end
+
+        local function middle(x)
+          return inner(x)       -- error propagates up the stack
+        end
+
+        return middle(nil)
+        """,
+        see_also: ["errors"]
+      },
+
+      # ----- Chapter V: Under the hood -----
       %{
         slug: "bytecode",
         title: "The bytecode model",
+        chapter: :internals,
         objective:
           "Read a disassembled prototype: instructions, registers, upvalues, and nested protos.",
         body: """
-        The compiler in this library lowers Lua to a stream of
-        *register-based* opcodes — no labels, no PC-relative jumps.
-        Each `function` becomes a `%Lua.Compiler.Prototype{}` with its
-        own register window and upvalue descriptors. Toggle 'Bytecode'
-        to see the layout. Full reference at
-        `/reference/opcodes`.
+        The compiler lowers Lua to a stream of *register-based*
+        opcodes — no labels, no PC-relative jumps. Each function
+        becomes a `%Lua.Compiler.Prototype{}` with its own register
+        window and upvalue descriptors. Toggle Bytecode to see the
+        layout. Full reference at [`/reference/opcodes`](/reference/opcodes).
         """,
         exercise:
-          "Toggle 'Bytecode' on. Find the `closure` opcode that builds the inner function and the `call` that invokes it.",
+          "Toggle Bytecode. Count the prototypes (`function #N` headers). Find the `closure` op that builds the inner function and the `get_upvalue` op that reads `seed`.",
         source: """
-        local function double(n)
-          return n * 2
+        -- Two prototypes nest below. `outer` captures `seed` as an
+        -- upvalue, and the inner closure captures it again. Open
+        -- Bytecode and look for: load_constant, closure, get_upvalue,
+        -- call, return.
+        local function outer(seed)
+          return function(x) return x + seed end
         end
 
-        return double(21)
+        local add10 = outer(10)
+        print(add10(5), add10(100))
+        return add10(0)
+        """,
+        see_also: ["closures", "metatables-index"]
+      },
+      %{
+        slug: "next-steps",
+        title: "Where to go from here",
+        chapter: :internals,
+        objective:
+          "Pick the next stop — playground, opcode reference, or the canonical Lua book.",
+        body: """
+        You've seen the language, the standard library, the host
+        integration, and the bytecode pipeline. Three places to go
+        next: the [Playground](/playground) for an empty editor, the
+        [opcode reference](/reference/opcodes) for the VM internals,
+        and [Programming in Lua](https://www.lua.org/pil/) — the
+        canonical reference written by the language's authors.
         """
       }
     ]

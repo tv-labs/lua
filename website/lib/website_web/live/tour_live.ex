@@ -12,7 +12,7 @@ defmodule DemoWeb.TourLive do
       |> assign(:page_title, "Tour of Lua")
       |> assign(:lessons, lessons)
       |> assign(:lesson, hd(lessons))
-      |> assign(:source, hd(lessons).source)
+      |> assign(:source, Map.get(hd(lessons), :source, ""))
       |> assign(:result, nil)
       |> assign(:running, false)
       |> assign(:show_bytecode, false)
@@ -32,7 +32,7 @@ defmodule DemoWeb.TourLive do
             {:noreply,
              socket
              |> assign(:lesson, lesson)
-             |> assign(:source, lesson.source)
+             |> assign(:source, Map.get(lesson, :source, ""))
              |> assign(:result, nil)}
         end
 
@@ -52,7 +52,7 @@ defmodule DemoWeb.TourLive do
   end
 
   def handle_event("reset", _params, socket) do
-    source = socket.assigns.lesson.source
+    source = Map.get(socket.assigns.lesson, :source, "")
 
     {:noreply,
      socket
@@ -89,59 +89,94 @@ defmodule DemoWeb.TourLive do
     Enum.at(lessons, idx + 1)
   end
 
+  defp lesson_by_slug(lessons, slug), do: Enum.find(lessons, &(&1.slug == slug))
+
+  defp runnable?(lesson), do: Map.get(lesson, :runnable, true)
+
+  defp has_editor?(lesson), do: is_binary(Map.get(lesson, :source))
+
+  defp integration?(lesson), do: lesson.chapter == :integration
+
   @impl true
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} active={:tour}>
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-        <div class="grid lg:grid-cols-[260px_1fr] gap-8">
+        <div class="grid lg:grid-cols-[280px_1fr] gap-8">
           <aside class="lg:sticky lg:top-20 lg:self-start">
             <div class="mb-4">
               <h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/50 mb-2">
-                A tour of Lua
+                A tour of Lua &amp; Lua.ex
               </h2>
               <p class="text-sm text-base-content/70">
-                {length(@lessons)} bite-sized lessons. Each one runs live on the BEAM.
+                {length(@lessons)} lessons across {length(LuaSandbox.chapters())} chapters.
+                Every snippet runs live on the BEAM.
               </p>
             </div>
-            <ol class="space-y-1">
-              <%= for {lesson, i} <- Enum.with_index(@lessons) do %>
-                <li>
-                  <.link
-                    patch={~p"/tour/#{lesson.slug}"}
-                    class={[
-                      "flex items-center gap-3 px-3 py-2 rounded-box transition-colors",
-                      @lesson.slug == lesson.slug && "bg-primary/10 text-primary",
-                      @lesson.slug != lesson.slug && "hover:bg-base-200 text-base-content/80"
-                    ]}
-                  >
-                    <span class={[
-                      "size-6 rounded-full text-xs font-mono flex items-center justify-center shrink-0",
-                      @lesson.slug == lesson.slug && "bg-primary text-primary-content",
-                      @lesson.slug != lesson.slug && "bg-base-300 text-base-content/60"
-                    ]}>
-                      {i + 1}
-                    </span>
-                    <span class="text-sm font-medium">{lesson.title}</span>
-                  </.link>
-                </li>
-              <% end %>
-            </ol>
+
+            <%= for {{chapter_slug, chapter_title}, chapter_idx} <- Enum.with_index(LuaSandbox.chapters()) do %>
+              <div class="mb-5">
+                <div class="px-3 pb-1.5 text-[11px] uppercase tracking-[0.14em] text-base-content/40 font-semibold">
+                  <span class="text-base-content/30">{roman(chapter_idx + 1)}.</span>
+                  &nbsp;{chapter_title}
+                </div>
+                <ol class="space-y-1">
+                  <%= for lesson <- @lessons, lesson.chapter == chapter_slug do %>
+                    <li>
+                      <.link
+                        patch={~p"/tour/#{lesson.slug}"}
+                        class={[
+                          "flex items-center gap-3 px-3 py-1.5 rounded-box transition-colors",
+                          @lesson.slug == lesson.slug && "bg-primary/10 text-primary",
+                          @lesson.slug != lesson.slug && "hover:bg-base-200 text-base-content/80"
+                        ]}
+                      >
+                        <span class={[
+                          "size-6 rounded-full text-xs font-mono flex items-center justify-center shrink-0",
+                          @lesson.slug == lesson.slug && "bg-primary text-primary-content",
+                          @lesson.slug != lesson.slug && "bg-base-300 text-base-content/60"
+                        ]}>
+                          {lesson_index(@lessons, lesson) + 1}
+                        </span>
+                        <span class="text-sm font-medium">{raw(render_inline(lesson.title))}</span>
+                      </.link>
+                    </li>
+                  <% end %>
+                </ol>
+              </div>
+            <% end %>
           </aside>
 
           <article class="min-w-0">
-            <div class="mb-2 text-sm text-base-content/50 font-mono">
-              Lesson {lesson_index(@lessons, @lesson) + 1} of {length(@lessons)}
+            <div class="mb-2 flex items-center gap-2 text-xs font-mono">
+              <span class="text-primary/80 font-semibold">
+                Chapter {chapter_label(@lesson.chapter)} ·
+                <span class="text-base-content/70">
+                  {LuaSandbox.chapter_title(@lesson.chapter)}
+                </span>
+              </span>
+              <span class="text-base-content/30">/</span>
+              <span class="text-base-content/50">
+                Lesson {lesson_index(@lessons, @lesson) + 1} of {length(@lessons)}
+              </span>
+              <%= if integration?(@lesson) do %>
+                <span class="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-semibold bg-accent/15 text-accent border border-accent/30">
+                  <.icon name="hero-arrows-right-left-micro" class="size-3" /> Host integration
+                </span>
+              <% end %>
             </div>
+
             <h1 class="text-3xl sm:text-4xl font-bold tracking-tight mb-3">
-              {@lesson.title}
+              {raw(render_inline(@lesson.title))}
             </h1>
 
             <%= if obj = Map.get(@lesson, :objective) do %>
               <div class="mb-5 flex items-start gap-2.5 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
                 <.icon name="hero-flag-micro" class="size-4 text-primary shrink-0 mt-0.5" />
                 <span class="text-sm text-base-content/85">
-                  <span class="text-primary font-semibold">You'll learn:</span> {obj}
+                  <span class="text-primary font-semibold">You'll learn:</span> {raw(
+                    render_inline(obj)
+                  )}
                 </span>
               </div>
             <% end %>
@@ -152,64 +187,104 @@ defmodule DemoWeb.TourLive do
               <% end %>
             </div>
 
-            <div class="rounded-box border border-base-300/60 bg-base-200/50 overflow-hidden mb-3">
-              <form
-                phx-submit="run"
-                phx-change="source-changed"
-                class="contents"
-              >
-                <div class="flex items-center justify-between px-4 py-2 border-b border-base-300/60 bg-base-300/30">
-                  <div class="text-sm font-mono text-base-content/70 font-semibold">
-                    {@lesson.slug}.lua
+            <%= if elixir = Map.get(@lesson, :elixir_source) do %>
+              <div class="rounded-box border border-accent/30 bg-base-200/40 overflow-hidden mb-3">
+                <div class="flex items-center justify-between px-4 py-2 border-b border-accent/20 bg-accent/5">
+                  <div class="text-sm font-mono text-accent font-semibold flex items-center gap-2">
+                    <.icon name="hero-cube-micro" class="size-3.5" /> Elixir &middot; your app
                   </div>
-                  <div class="flex items-center gap-2">
-                    <button
-                      type="button"
-                      class={[
-                        "btn btn-xs",
-                        @show_bytecode && "btn-primary",
-                        !@show_bytecode && "btn-ghost border border-base-300/60"
-                      ]}
-                      phx-click="toggle-bytecode"
-                    >
-                      <.icon name="hero-code-bracket-square-micro" class="size-3.5" /> Bytecode
-                    </button>
-                    <button
-                      type="button"
-                      class="btn btn-xs btn-ghost border border-base-300/60"
-                      phx-click="reset"
-                    >
-                      <.icon name="hero-arrow-uturn-left-micro" class="size-3.5" /> Reset
-                    </button>
-                    <button
-                      type="submit"
-                      class={["btn btn-xs btn-primary", @running && "btn-disabled"]}
-                    >
-                      <%= if @running do %>
-                        <span class="loading loading-spinner loading-xs" />
-                      <% else %>
-                        <.icon name="hero-play-micro" class="size-3.5" /> Run
-                      <% end %>
-                    </button>
-                  </div>
+                  <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-semibold">
+                    Reference only
+                  </span>
                 </div>
-                <div
-                  id={"tour-editor-#{@lesson.slug}"}
-                  phx-hook="LuaEditor"
-                  phx-update="ignore"
-                  class="relative h-[260px] overflow-hidden"
-                >
-                  <textarea
-                    name="source"
-                    spellcheck="false"
-                    autocomplete="off"
-                    class="w-full h-full font-mono text-sm leading-6 p-4 bg-transparent resize-none focus:outline-none"
-                  ><%= @source %></textarea>
-                </div>
-              </form>
-            </div>
+                <pre class="highlight p-4 font-mono text-[13px] leading-6 overflow-x-auto"><code>{DemoWeb.Highlight.to_html(elixir, :elixir)}</code></pre>
+              </div>
+            <% end %>
 
-            <.tour_output result={@result} running={@running} />
+            <%= if has_editor?(@lesson) do %>
+              <%= unless runnable?(@lesson) do %>
+                <div class="mb-3 flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/5 px-4 py-3">
+                  <.icon
+                    name="hero-information-circle-micro"
+                    class="size-4 text-warning shrink-0 mt-0.5"
+                  />
+                  <span class="text-sm text-base-content/85">
+                    <span class="text-warning font-semibold">Read-only:</span>
+                    this snippet uses canonical Lua features that aren't implemented in Lua.ex yet. It's here as a reference.
+                  </span>
+                </div>
+              <% end %>
+
+              <div class="rounded-box border border-base-300/60 bg-base-200/50 overflow-hidden mb-3">
+                <form
+                  phx-submit="run"
+                  phx-change="source-changed"
+                  class="contents"
+                >
+                  <div class="flex items-center justify-between px-4 py-2 border-b border-base-300/60 bg-base-300/30">
+                    <div class="text-sm font-mono text-base-content/70 font-semibold flex items-center gap-2">
+                      <%= if integration?(@lesson) do %>
+                        <.icon name="hero-bolt-micro" class="size-3.5 text-primary" />
+                      <% end %>
+                      {@lesson.slug}.lua
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <%= if runnable?(@lesson) do %>
+                        <button
+                          type="button"
+                          class={[
+                            "btn btn-xs",
+                            @show_bytecode && "btn-primary",
+                            !@show_bytecode && "btn-ghost border border-base-300/60"
+                          ]}
+                          phx-click="toggle-bytecode"
+                        >
+                          <.icon name="hero-code-bracket-square-micro" class="size-3.5" /> Bytecode
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-xs btn-ghost border border-base-300/60"
+                          phx-click="reset"
+                        >
+                          <.icon name="hero-arrow-uturn-left-micro" class="size-3.5" /> Reset
+                        </button>
+                        <button
+                          type="submit"
+                          class={["btn btn-xs btn-primary", @running && "btn-disabled"]}
+                        >
+                          <%= if @running do %>
+                            <span class="loading loading-spinner loading-xs" />
+                          <% else %>
+                            <.icon name="hero-play-micro" class="size-3.5" /> Run
+                          <% end %>
+                        </button>
+                      <% end %>
+                    </div>
+                  </div>
+                  <div
+                    id={"tour-editor-#{@lesson.slug}"}
+                    phx-hook="LuaEditor"
+                    phx-update="ignore"
+                    class="relative h-[260px] overflow-hidden"
+                  >
+                    <textarea
+                      name="source"
+                      spellcheck="false"
+                      autocomplete="off"
+                      readonly={!runnable?(@lesson)}
+                      class={[
+                        "w-full h-full font-mono text-sm leading-6 p-4 bg-transparent resize-none focus:outline-none",
+                        !runnable?(@lesson) && "cursor-default"
+                      ]}
+                    ><%= @source %></textarea>
+                  </div>
+                </form>
+              </div>
+
+              <%= if runnable?(@lesson) do %>
+                <.tour_output result={@result} running={@running} />
+              <% end %>
+            <% end %>
 
             <%= if ex = Map.get(@lesson, :exercise) do %>
               <div class="mt-4 flex items-start gap-2.5 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3">
@@ -221,11 +296,27 @@ defmodule DemoWeb.TourLive do
               </div>
             <% end %>
 
-            <%= if @show_bytecode do %>
+            <%= if @show_bytecode and has_editor?(@lesson) and runnable?(@lesson) do %>
               <.tour_bytecode source={@source} result={@result} />
             <% end %>
 
-            <div class="mt-8 flex items-center justify-between">
+            <%= if (refs = Map.get(@lesson, :see_also)) && refs != [] do %>
+              <div class="mt-6 flex flex-wrap items-center gap-2">
+                <span class="text-[11px] uppercase tracking-[0.14em] text-base-content/40 font-semibold">
+                  See also
+                </span>
+                <%= for slug <- refs, target = lesson_by_slug(@lessons, slug), target != nil do %>
+                  <.link
+                    patch={~p"/tour/#{target.slug}"}
+                    class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-base-200 hover:bg-base-300/70 border border-base-300/60 text-base-content/80"
+                  >
+                    {target.title}
+                  </.link>
+                <% end %>
+              </div>
+            <% end %>
+
+            <div class="mt-8 flex items-center justify-between gap-3">
               <%= if prev = prev_lesson(@lessons, @lesson) do %>
                 <.link patch={~p"/tour/#{prev.slug}"} class="btn btn-ghost">
                   <.icon name="hero-arrow-left-micro" class="size-4" /> {prev.title}
@@ -364,11 +455,39 @@ defmodule DemoWeb.TourLive do
 
   defp format_us(us) when is_integer(us), do: "#{Float.round(us / 1_000_000, 3)} s"
 
+  defp roman(1), do: "I"
+  defp roman(2), do: "II"
+  defp roman(3), do: "III"
+  defp roman(4), do: "IV"
+  defp roman(5), do: "V"
+  defp roman(n), do: Integer.to_string(n)
+
+  defp chapter_label(chapter) do
+    case Enum.find_index(LuaSandbox.chapters(), fn {slug, _} -> slug == chapter end) do
+      nil -> "?"
+      idx -> roman(idx + 1)
+    end
+  end
+
+  # Markdown-lite for lesson body / objective / exercise text:
+  #   `code` → styled inline code
+  #   [text](url) → anchor (external links open a new tab)
   defp render_inline(text) do
-    text
-    |> String.replace(
-      ~r/`([^`]+)`/,
-      ~s|<code class="text-primary bg-base-300/40 px-1 rounded">\\1</code>|
-    )
+    text =
+      Regex.replace(~r/\[([^\]]+)\]\(([^)]+)\)/, text, fn _full, anchor, url ->
+        link_html(anchor, url)
+      end)
+
+    Regex.replace(~r/`([^`]+)`/, text, fn _full, code ->
+      ~s|<code class="text-primary bg-base-300/40 px-1 rounded">#{code}</code>|
+    end)
+  end
+
+  defp link_html(text, "http" <> _ = url) do
+    ~s|<a href="#{url}" class="text-primary underline decoration-primary/30 hover:decoration-primary" target="_blank" rel="noopener noreferrer">#{text}</a>|
+  end
+
+  defp link_html(text, url) do
+    ~s|<a href="#{url}" class="text-primary underline decoration-primary/30 hover:decoration-primary">#{text}</a>|
   end
 end
