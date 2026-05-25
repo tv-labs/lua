@@ -107,9 +107,7 @@
    non-summary children when the disclosure is closed. Scoped to
    `.disclosure` so ad-hoc <details> usage elsewhere (e.g. dev widgets)
    isn't silently affected — apply the class to any <details> that should
-   collapse natively. Re-override with `lg:[&>...]:!block` /
-   `sm:[&>...]:!block` where the content must remain visible at larger
-   viewports regardless of the `open` attribute. */
+   collapse natively. */
 details.disclosure:not([open]) > *:not(summary) {
   display: none;
 }

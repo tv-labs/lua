@@ -330,20 +330,29 @@ defmodule DemoWeb.Layouts do
 
   defp footer_section(assigns) do
     ~H"""
-    <details class="disclosure group border-b border-base-300/40 sm:border-0 [&[open]>summary>svg]:rotate-180 sm:[&>ul]:!block">
-      <summary class="flex items-center justify-between min-h-11 py-2 sm:min-h-0 sm:py-0 sm:mb-3 cursor-pointer sm:cursor-default sm:pointer-events-none list-none [&::-webkit-details-marker]:hidden">
-        <span class="text-xs font-bold uppercase tracking-wider text-base-content/70 sm:text-base-content/50">
+    <details class="disclosure group sm:hidden border-b border-base-300/40 [&[open]>summary>svg]:rotate-180">
+      <summary class="flex items-center justify-between min-h-11 py-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        <span class="text-xs font-bold uppercase tracking-wider text-base-content/70">
           {@title}
         </span>
         <.icon
           name="hero-chevron-down-micro"
-          class="size-5 text-base-content/60 transition-transform sm:hidden"
+          class="size-5 text-base-content/60 transition-transform"
         />
       </summary>
-      <ul class="space-y-2 text-sm pb-3 sm:pb-0">
+      <ul class="space-y-2 text-sm pb-3">
         {render_slot(@inner_block)}
       </ul>
     </details>
+
+    <div class="hidden sm:block">
+      <h3 class="text-xs font-bold uppercase tracking-wider text-base-content/50 mb-3">
+        {@title}
+      </h3>
+      <ul class="space-y-2 text-sm">
+        {render_slot(@inner_block)}
+      </ul>
+    </div>
     """
   end
 
