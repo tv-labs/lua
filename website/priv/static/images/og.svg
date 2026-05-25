@@ -1,110 +1,156 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="Lua.ex — Lua on the BEAM">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="Lua.ex — Sandboxed Lua 5.3 on the BEAM">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0d0d12" />
-      <stop offset="100%" stop-color="#16121f" />
+      <stop offset="0%" stop-color="#0b0a13" />
+      <stop offset="55%" stop-color="#12101c" />
+      <stop offset="100%" stop-color="#1a1230" />
     </linearGradient>
-    <radialGradient id="halo" cx="0.5" cy="0" r="0.7">
-      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.45" />
-      <stop offset="60%" stop-color="#7c3aed" stop-opacity="0.08" />
+
+    <radialGradient id="halo" cx="0.18" cy="0.05" r="0.75">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.55" />
+      <stop offset="40%" stop-color="#7c3aed" stop-opacity="0.18" />
       <stop offset="100%" stop-color="#7c3aed" stop-opacity="0" />
     </radialGradient>
-    <linearGradient id="title-grad" x1="0" y1="0" x2="1" y2="1">
+
+    <radialGradient id="halo2" cx="0.95" cy="1" r="0.55">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.28" />
+      <stop offset="100%" stop-color="#c084fc" stop-opacity="0" />
+    </radialGradient>
+
+    <linearGradient id="title-grad" x1="0" y1="0" x2="1" y2="0.6">
+      <stop offset="0%" stop-color="#ddd6fe" />
+      <stop offset="40%" stop-color="#c4b5fd" />
+      <stop offset="100%" stop-color="#a78bfa" />
+    </linearGradient>
+
+    <linearGradient id="beam-grad" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#a78bfa" />
       <stop offset="50%" stop-color="#c084fc" />
       <stop offset="100%" stop-color="#f0abfc" />
     </linearGradient>
-    <linearGradient id="lua-grad" x1="0" y1="0" x2="1" y2="1">
+
+    <linearGradient id="moon-grad" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#a78bfa" />
-      <stop offset="100%" stop-color="#7c3aed" />
+      <stop offset="100%" stop-color="#6d28d9" />
     </linearGradient>
-    <mask id="crescent-mask">
-      <rect width="64" height="64" fill="white" />
-      <circle cx="42" cy="28" r="14" fill="black" />
+
+    <radialGradient id="moon-glow" cx="0.5" cy="0.5" r="0.6">
+      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#a78bfa" stop-opacity="0" />
+    </radialGradient>
+
+    <mask id="crescent">
+      <rect width="200" height="200" fill="white" />
+      <circle cx="131" cy="88" r="44" fill="black" />
     </mask>
-    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
-      <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#7c3aed" stroke-opacity="0.07" stroke-width="1" />
+
+    <pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse">
+      <path d="M 56 0 L 0 0 0 56" fill="none" stroke="#a78bfa" stroke-opacity="0.045" stroke-width="1" />
     </pattern>
   </defs>
 
+  <!-- Background layers -->
   <rect width="1200" height="630" fill="url(#bg)" />
   <rect width="1200" height="630" fill="url(#grid)" />
   <rect width="1200" height="630" fill="url(#halo)" />
+  <rect width="1200" height="630" fill="url(#halo2)" />
 
-  <!-- Lua logo top-left -->
-  <g transform="translate(72,72) scale(1.15)">
-    <svg viewBox="0 0 64 64" width="48" height="48">
-      <path d="M 32 4 Q 12 24 12 36 A 20 20 0 0 0 52 36 Q 52 24 32 4 Z"
-            fill="url(#lua-grad)" mask="url(#crescent-mask)" />
-      <circle cx="52" cy="12" r="3.5" fill="#f0abfc" />
-    </svg>
-    <text x="64" y="38" font-family="ui-sans-serif, -apple-system, Inter, system-ui" font-size="28" font-weight="700" fill="#e5e7eb" letter-spacing="-0.5">
+  <!-- Faint orbit arc behind moon (decorative) -->
+  <circle cx="148" cy="148" r="86" fill="none" stroke="#a78bfa" stroke-opacity="0.18" stroke-width="1" />
+  <circle cx="148" cy="148" r="108" fill="none" stroke="#a78bfa" stroke-opacity="0.08" stroke-width="1" />
+
+  <!-- Brand mark: crescent moon + satellite (top-left) -->
+  <g transform="translate(72 72)">
+    <!-- soft glow -->
+    <circle cx="76" cy="76" r="80" fill="url(#moon-glow)" />
+    <!-- moon drop -->
+    <g transform="scale(0.78)">
+      <path d="M 100 12 Q 38 75 38 113 A 62 62 0 0 0 162 113 Q 162 75 100 12 Z"
+            fill="url(#moon-grad)" mask="url(#crescent)" />
+      <!-- satellite glow -->
+      <circle cx="163" cy="37" r="16" fill="#f0abfc" fill-opacity="0.18" />
+      <circle cx="163" cy="37" r="9" fill="#f0abfc" />
+    </g>
+    <!-- wordmark -->
+    <text x="172" y="98" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="38" font-weight="700" fill="#f4f4f5" letter-spacing="-1">
       Lua<tspan fill="#a78bfa">.ex</tspan>
+    </text>
+    <text x="172" y="126" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" fill="#71717a" letter-spacing="2">
+      LUA 5.3 ON THE BEAM
     </text>
   </g>
 
-  <!-- Title -->
-  <text x="72" y="280" font-family="ui-sans-serif, -apple-system, Inter, system-ui" font-size="100" font-weight="800" fill="#f5f5f5" letter-spacing="-3">
+  <!-- Headline -->
+  <text x="72" y="320" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="108" font-weight="800" fill="url(#title-grad)" letter-spacing="-4">
     Lua, on the
   </text>
-  <text x="72" y="400" font-family="ui-sans-serif, -apple-system, Inter, system-ui" font-size="140" font-weight="800" fill="url(#title-grad)" letter-spacing="-4">
+  <text x="72" y="440" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="148" font-weight="800" fill="url(#beam-grad)" letter-spacing="-5">
     BEAM.
   </text>
 
   <!-- Tagline -->
-  <text x="72" y="470" font-family="ui-sans-serif, -apple-system, Inter, system-ui" font-size="32" font-weight="500" fill="#a1a1aa" letter-spacing="-0.5">
+  <text x="76" y="500" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="28" font-weight="500" fill="#a1a1aa" letter-spacing="-0.3">
     Scriptable. Sandboxed. Stupid easy.
   </text>
 
-  <!-- Badges -->
-  <g transform="translate(72, 525)" font-family="ui-sans-serif, -apple-system, Inter, system-ui" font-size="20" font-weight="600">
+  <!-- Feature pills -->
+  <g transform="translate(72 540)" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="18" font-weight="600">
     <g>
-      <rect x="0" y="0" width="220" height="42" rx="21" fill="#7c3aed" fill-opacity="0.15" stroke="#7c3aed" stroke-opacity="0.4" />
-      <circle cx="22" cy="21" r="5" fill="#a78bfa" />
-      <text x="38" y="28" fill="#c4b5fd">Pure Elixir VM</text>
+      <rect x="0" y="0" width="206" height="40" rx="20" fill="#7c3aed" fill-opacity="0.16" stroke="#a78bfa" stroke-opacity="0.4" />
+      <circle cx="22" cy="20" r="5" fill="#a78bfa" />
+      <text x="38" y="26" fill="#ddd6fe">Pure Elixir VM</text>
     </g>
-    <g transform="translate(240, 0)">
-      <rect x="0" y="0" width="200" height="42" rx="21" fill="#10b981" fill-opacity="0.13" stroke="#10b981" stroke-opacity="0.4" />
-      <circle cx="22" cy="21" r="5" fill="#10b981" />
-      <text x="38" y="28" fill="#6ee7b7">Sandboxed</text>
+    <g transform="translate(222 0)">
+      <rect x="0" y="0" width="170" height="40" rx="20" fill="#10b981" fill-opacity="0.14" stroke="#34d399" stroke-opacity="0.4" />
+      <circle cx="22" cy="20" r="5" fill="#34d399" />
+      <text x="38" y="26" fill="#a7f3d0">Sandboxed</text>
     </g>
-    <g transform="translate(460, 0)">
-      <rect x="0" y="0" width="200" height="42" rx="21" fill="#f59e0b" fill-opacity="0.13" stroke="#f59e0b" stroke-opacity="0.4" />
-      <circle cx="22" cy="21" r="5" fill="#f59e0b" />
-      <text x="38" y="28" fill="#fcd34d">Agent-ready</text>
+    <g transform="translate(408 0)">
+      <rect x="0" y="0" width="186" height="40" rx="20" fill="#f59e0b" fill-opacity="0.13" stroke="#fbbf24" stroke-opacity="0.4" />
+      <circle cx="22" cy="20" r="5" fill="#fbbf24" />
+      <text x="38" y="26" fill="#fde68a">Agent-ready</text>
     </g>
   </g>
 
   <!-- Code preview card on right -->
-  <g transform="translate(720, 130)">
-    <rect x="0" y="0" width="420" height="380" rx="16" fill="#1c1825" stroke="#2d2640" stroke-width="1" />
-    <!-- chrome -->
-    <rect x="0" y="0" width="420" height="36" rx="16" fill="#231d2e" />
-    <rect x="0" y="20" width="420" height="16" fill="#231d2e" />
-    <circle cx="20" cy="18" r="5" fill="#f87171" />
-    <circle cx="38" cy="18" r="5" fill="#fbbf24" />
-    <circle cx="56" cy="18" r="5" fill="#34d399" />
-    <text x="210" y="23" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="13" fill="#71717a">agent_tool.exs</text>
+  <g transform="translate(700 132)">
+    <!-- glow behind card -->
+    <rect x="-8" y="-8" width="456" height="406" rx="22" fill="#7c3aed" fill-opacity="0.12" />
+    <!-- card -->
+    <rect x="0" y="0" width="440" height="390" rx="18" fill="#15121f" stroke="#2a2240" stroke-width="1" />
+    <!-- title bar -->
+    <rect x="0" y="0" width="440" height="38" rx="18" fill="#1b1628" />
+    <rect x="0" y="20" width="440" height="18" fill="#1b1628" />
+    <circle cx="22" cy="19" r="5.5" fill="#f87171" />
+    <circle cx="42" cy="19" r="5.5" fill="#fbbf24" />
+    <circle cx="62" cy="19" r="5.5" fill="#34d399" />
+    <text x="220" y="24" text-anchor="middle" font-family="Menlo, Monaco, Consolas, monospace" font-size="13" fill="#71717a" letter-spacing="0.2">agent_tools.exs</text>
 
     <!-- code -->
-    <g font-family="ui-monospace, Menlo, monospace" font-size="16" letter-spacing="-0.2">
-      <text x="22" y="72"><tspan fill="#c4b5fd">defmodule</tspan> <tspan fill="#fcd34d">MyAgent.Tools</tspan> <tspan fill="#c4b5fd">do</tspan></text>
-      <text x="22" y="98"><tspan fill="#a1a1aa">  use</tspan> <tspan fill="#fcd34d">Lua.API</tspan><tspan fill="#a1a1aa">,</tspan> scope: <tspan fill="#6ee7b7">"tools"</tspan></text>
-      <text x="22" y="138"><tspan fill="#c4b5fd">  deflua</tspan> <tspan fill="#a78bfa">search</tspan>(query) <tspan fill="#c4b5fd">do</tspan></text>
-      <text x="22" y="164" fill="#a1a1aa">    MyApp.Search.run(query)</text>
-      <text x="22" y="190"><tspan fill="#c4b5fd">  end</tspan></text>
-      <text x="22" y="216"><tspan fill="#c4b5fd">end</tspan></text>
+    <g font-family="Menlo, Monaco, Consolas, monospace" font-size="16" xml:space="preserve">
+      <text x="24" y="76"><tspan fill="#c4b5fd">defmodule </tspan><tspan fill="#fcd34d">MyAgent.Tools </tspan><tspan fill="#c4b5fd">do</tspan></text>
+      <text x="24" y="102"><tspan fill="#a1a1aa">  use </tspan><tspan fill="#fcd34d">Lua.API</tspan><tspan fill="#a1a1aa">, scope: </tspan><tspan fill="#86efac">"tools"</tspan></text>
 
-      <text x="22" y="262" fill="#52525b" font-style="italic"># One VM per conversation.</text>
-      <text x="22" y="288" fill="#a1a1aa">lua = <tspan fill="#fcd34d">Lua</tspan>.new()</text>
-      <text x="22" y="314" fill="#a1a1aa">  |&gt; <tspan fill="#fcd34d">Lua</tspan>.load_api(<tspan fill="#fcd34d">MyAgent.Tools</tspan>)</text>
+      <text x="24" y="148"><tspan fill="#c4b5fd">  deflua </tspan><tspan fill="#a78bfa">search</tspan><tspan fill="#e4e4e7">(query) </tspan><tspan fill="#c4b5fd">do</tspan></text>
+      <text x="24" y="172" fill="#a1a1aa">    MyApp.Search.run(query)</text>
+      <text x="24" y="196"><tspan fill="#c4b5fd">  end</tspan></text>
 
-      <text x="22" y="354"><tspan fill="#fcd34d">Lua</tspan>.<tspan fill="#a78bfa">eval!</tspan>(lua, llm_script)</text>
+      <text x="24" y="222"><tspan fill="#c4b5fd">end</tspan></text>
+
+      <text x="24" y="272" fill="#52525b" font-style="italic"># One sandboxed VM per chat.</text>
+      <text x="24" y="298"><tspan fill="#a1a1aa">lua = </tspan><tspan fill="#fcd34d">Lua</tspan><tspan fill="#a1a1aa">.new()</tspan></text>
+      <text x="24" y="322"><tspan fill="#a1a1aa">  |&gt; </tspan><tspan fill="#fcd34d">Lua</tspan><tspan fill="#a1a1aa">.load_api(</tspan><tspan fill="#fcd34d">MyAgent.Tools</tspan><tspan fill="#a1a1aa">)</tspan></text>
+
+      <text x="24" y="362"><tspan fill="#fcd34d">Lua</tspan><tspan fill="#a1a1aa">.</tspan><tspan fill="#a78bfa">eval!</tspan><tspan fill="#a1a1aa">(lua, llm_script)</tspan></text>
     </g>
   </g>
 
-  <!-- footer URL -->
-  <text x="600" y="595" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="20" font-weight="500" fill="#71717a">
-    hexdocs.pm/lua &middot; github.com/tv-labs/lua
-  </text>
+  <!-- Footer -->
+  <g font-family="Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="500">
+    <text x="72" y="600" fill="#52525b">deflua.com</text>
+    <text x="240" y="600" fill="#3f3f46">·</text>
+    <text x="260" y="600" fill="#52525b">hexdocs.pm/lua</text>
+    <text x="450" y="600" fill="#3f3f46">·</text>
+    <text x="470" y="600" fill="#52525b">github.com/tv-labs/lua</text>
+  </g>
 </svg>
