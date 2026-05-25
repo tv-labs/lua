@@ -89,12 +89,12 @@
   </text>
 
   <!-- Tagline -->
-  <text x="76" y="500" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="28" font-weight="500" fill="#a1a1aa" letter-spacing="-0.3">
+  <text x="76" y="494" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="28" font-weight="500" fill="#a1a1aa" letter-spacing="-0.3">
     Scriptable. Sandboxed. Stupid easy.
   </text>
 
   <!-- Feature pills -->
-  <g transform="translate(72 540)" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="18" font-weight="600">
+  <g transform="translate(72 522)" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="18" font-weight="600">
     <g>
       <rect x="0" y="0" width="206" height="40" rx="20" fill="#7c3aed" fill-opacity="0.16" stroke="#a78bfa" stroke-opacity="0.4" />
       <circle cx="22" cy="20" r="5" fill="#a78bfa" />
