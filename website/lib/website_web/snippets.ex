@@ -182,7 +182,31 @@ defmodule DemoWeb.Snippets do
   {:ok, {result, _lua}} = Lua.eval(lua, agent_script)
   """
 
+  @tvlabs_remote_api """
+  defmodule RemoteAPI do
+    use Lua.API
+
+    deflua tap(direction), state do
+      Device.tap(state.device, direction)
+      {[], state}
+    end
+
+    deflua screenshot(), state do
+      {[Vision.capture!(state.device)], state}
+    end
+  end
+
+  Lua.new()
+  |> Lua.load_api(RemoteAPI)
+  |> Lua.eval!(\"\"\"
+    tap("right")
+    local img = screenshot()
+    assert(vision.contains(img, "Home"))
+  \"\"\")
+  """
+
   def hero, do: @hero
   def embed, do: @embed
   def agent_tool, do: @agent_tool
+  def tvlabs_remote_api, do: @tvlabs_remote_api
 end

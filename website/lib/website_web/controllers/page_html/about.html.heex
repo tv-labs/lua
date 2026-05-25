@@ -1,0 +1,528 @@
+<Layouts.app flash={@flash} active={:about}>
+  <%!-- ============== HERO ============== --%>
+  <section class="relative overflow-hidden">
+    <div
+      aria-hidden="true"
+      class="absolute inset-0 -z-10 [background:radial-gradient(60%_50%_at_50%_0%,oklch(58%_0.233_277.117/0.18),transparent_70%)]"
+    >
+    </div>
+    <div
+      aria-hidden="true"
+      class="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[420px] bg-[length:24px_24px] [background-image:linear-gradient(to_right,oklch(60%_0.25_292.717/0.05)_1px,transparent_1px),linear-gradient(to_bottom,oklch(60%_0.25_292.717/0.05)_1px,transparent_1px)] [mask-image:linear-gradient(to_bottom,black,transparent)]"
+    >
+    </div>
+
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-16 pb-16 sm:pt-20 sm:pb-20">
+      <div class="grid lg:grid-cols-[1.1fr_1fr] gap-10 lg:gap-14 items-center">
+        <div>
+          <div class="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary mb-6">
+            <span class="size-2 rounded-full bg-primary"></span>
+            Our story &middot; since 2012
+          </div>
+          <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.05]">
+            A library, three decades
+            <br />in the
+            <span class="bg-gradient-to-br from-primary via-accent to-secondary bg-clip-text text-transparent">
+              making.
+            </span>
+          </h1>
+          <p class="mt-6 text-lg text-base-content/70 leading-relaxed max-w-xl">
+            Lua.ex didn't start in 2025. It started in 1986 with Erlang, kept
+            going in 2012 when Robert Virding gave the BEAM an imperative
+            language, and arrived here after thirteen years of
+            <a
+              href="https://github.com/rvirding/luerl"
+              target="_blank"
+              rel="noopener"
+              class="link link-primary"
+            >Luerl</a>
+            quietly powering everything from game servers to spaceships.
+          </p>
+
+          <div class="mt-7 flex items-center gap-3">
+            <div class="size-10 rounded-full bg-gradient-to-br from-primary/40 to-accent/30 grid place-items-center font-bold text-sm text-base-content shrink-0">
+              DL
+            </div>
+            <div class="text-sm leading-snug">
+              <div class="text-base-content/50 text-xs uppercase tracking-[0.15em] font-bold">
+                Written by
+              </div>
+              <div>
+                <a
+                  href="https://davelucia.com"
+                  target="_blank"
+                  rel="noopener"
+                  class="font-semibold text-base-content link link-hover"
+                >
+                  Dave Lucia
+                </a>
+                <span class="text-base-content/50">·</span>
+                <a
+                  href="https://github.com/davydog187"
+                  target="_blank"
+                  rel="noopener"
+                  class="text-base-content/70 link link-hover"
+                >@davydog187</a>
+                <span class="text-base-content/50">·</span>
+                <a
+                  href="https://tvlabs.ai"
+                  target="_blank"
+                  rel="noopener"
+                  class="text-base-content/70 link link-hover"
+                >TV Labs</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <figure class="relative">
+          <div
+            aria-hidden="true"
+            class="absolute -inset-4 rounded-3xl bg-gradient-to-br from-primary/25 via-accent/15 to-transparent blur-2xl"
+          >
+          </div>
+          <a
+            href="#code-beam-eu"
+            class="group relative block rounded-2xl overflow-hidden border border-base-300/60 shadow-xl"
+          >
+            <img
+              src={~p"/images/dave-robert.webp"}
+              alt="Dave Lucia and Robert Virding at Code BEAM Europe 2024"
+              class="block w-full transition-transform duration-300 group-hover:scale-[1.02]"
+            />
+            <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-base-100/90 backdrop-blur border border-base-300/60 px-3 py-1.5 text-xs font-semibold shadow-md group-hover:bg-primary group-hover:text-primary-content group-hover:border-primary transition-colors">
+              <.icon name="hero-play-circle-micro" class="size-4 text-primary group-hover:text-primary-content" />
+              Watch the talk
+            </div>
+          </a>
+          <figcaption class="mt-3 text-xs text-base-content/50 text-center">
+            Dave Lucia &amp; Robert Virding &middot; Code BEAM Europe 2024
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <%!-- ============== TOUR OF PARADIGMS ============== --%>
+  <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
+    <div class="grid lg:grid-cols-[1fr_1.1fr] gap-10 lg:gap-14 items-start">
+      <div>
+        <div class="inline-block text-xs uppercase tracking-[0.18em] text-secondary font-bold mb-3">
+          1986 → 2012
+        </div>
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">
+          The tour of paradigms.
+        </h2>
+        <div class="mt-5 space-y-4 text-base-content/70 leading-relaxed">
+          <p>
+            Erlang itself began as a Prolog interpreter for a telephony algebra
+            in 1985–86 at Ericsson, before being rewritten as the JAM bytecode
+            machine once Prolog proved too slow. So logic programming was
+            literally in Erlang's DNA from day one.
+          </p>
+          <p>
+            After Erlang, Robert kept building languages on the BEAM as side
+            projects. He wrote
+            <a
+              href="https://github.com/rvirding/erlog"
+              target="_blank"
+              rel="noopener"
+              class="link link-hover text-base-content"
+            >Erlog</a>, a Prolog interpreter in Erlang, and then
+            <a
+              href="https://lfe.io"
+              target="_blank"
+              rel="noopener"
+              class="link link-hover text-base-content"
+            >LFE</a>
+            (Lisp Flavored Erlang), prototyped in 2007 and first released to
+            erlang-questions in March 2008.
+          </p>
+          <p>
+            With logic programming covered and a functional Lisp covered, the
+            obvious missing paradigm was <em>imperative</em>. He picked Lua —
+            small, clean, embeddable — and had at it.
+            <strong class="text-base-content">Luerl</strong>
+            shipped on February 18, 2012.
+          </p>
+        </div>
+      </div>
+
+      <figure class="rounded-3xl border border-base-300/60 bg-base-200/40 p-7 lg:p-9 relative">
+        <.icon
+          name="hero-chat-bubble-left-right-micro"
+          class="absolute -top-4 -left-4 size-9 p-2 rounded-xl bg-primary/15 text-primary border border-base-300/60 bg-base-100"
+        />
+        <blockquote class="text-lg sm:text-xl leading-relaxed text-base-content/90 italic">
+          "I wrote a Prolog on Erlang, that was fun. Then I wrote a functional
+          Lisp in Erlang, that was fun too. But then I realized that it would
+          be neat to implement an imperative or object-oriented language on the
+          BEAM, so I picked Lua and had at it. That's how Luerl was born."
+        </blockquote>
+        <figcaption class="mt-5 flex items-center gap-3 text-sm text-base-content/60">
+          <div class="size-9 rounded-full bg-gradient-to-br from-primary/40 to-accent/30 grid place-items-center font-bold text-base-content">
+            RV
+          </div>
+          <div>
+            <div class="font-semibold text-base-content">Robert Virding</div>
+            <div class="text-xs">co-creator of Erlang &middot; author of Luerl</div>
+          </div>
+        </figcaption>
+
+        <div class="mt-6 pt-5 border-t border-base-300/60 text-xs text-base-content/50 leading-relaxed">
+          The name is "Lua" + "Erl" — Robert confirmed it himself on Hacker
+          News. See the original
+          <a
+            href="https://groups.google.com/g/erlang-questions/c/0SyhdmIf1uQ"
+            target="_blank"
+            rel="noopener"
+            class="link link-hover text-base-content/80"
+          >Feb 18, 2012 erlang-questions announcement</a>.
+        </div>
+      </figure>
+    </div>
+  </section>
+
+  <%!-- ============== TECHNICAL PUZZLE ============== --%>
+  <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
+    <div class="rounded-3xl border border-base-300/60 bg-base-200/30 p-8 lg:p-10">
+      <div class="grid lg:grid-cols-[1fr_1.4fr] gap-8 items-start">
+        <div>
+          <div class="inline-block text-xs uppercase tracking-[0.18em] text-info font-bold mb-3">
+            The puzzle
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-bold tracking-tight leading-tight">
+            Mutable global state, on an immutable runtime.
+          </h2>
+          <p class="mt-4 text-base-content/70 leading-relaxed">
+            The core challenge was philosophical as much as engineering: how do
+            you build a language whose entire semantic model is mutable global
+            state on top of a language whose entire semantic model is immutable
+            local state?
+          </p>
+          <p class="mt-3 text-base-content/70 leading-relaxed">
+            The answer, it turns out, is what you'd do in Erlang anyway —
+            thread the Lua state through every call as a value. No process
+            dictionary, no ETS escape hatch. Straight Erlang.
+          </p>
+        </div>
+
+        <div class="grid sm:grid-cols-3 gap-3">
+          <div class="rounded-box border border-base-300/40 bg-base-100/50 p-4">
+            <div class="size-9 rounded-lg bg-info/15 grid place-items-center mb-3">
+              <.icon name="hero-arrow-path-rounded-square-micro" class="size-5 text-info" />
+            </div>
+            <div class="text-sm font-semibold tracking-tight mb-1">
+              Thread the state
+            </div>
+            <div class="text-xs text-base-content/70 leading-relaxed">
+              A single <code class="text-primary">#luerl&#123;&#125;</code>
+              record passed through every call, idiomatic Erlang style.
+            </div>
+          </div>
+          <div class="rounded-box border border-base-300/40 bg-base-100/50 p-4">
+            <div class="size-9 rounded-lg bg-accent/15 grid place-items-center mb-3">
+              <.icon name="hero-trash-micro" class="size-5 text-accent" />
+            </div>
+            <div class="text-sm font-semibold tracking-tight mb-1">
+              Layered GC
+            </div>
+            <div class="text-xs text-base-content/70 leading-relaxed">
+              Luerl's own collector reclaims dead table indices, sitting on top
+              of BEAM's GC.
+            </div>
+          </div>
+          <div class="rounded-box border border-base-300/40 bg-base-100/50 p-4">
+            <div class="size-9 rounded-lg bg-success/15 grid place-items-center mb-3">
+              <.icon name="hero-shield-check-micro" class="size-5 text-success" />
+            </div>
+            <div class="text-sm font-semibold tracking-tight mb-1">
+              Erlang-shaped API
+            </div>
+            <div class="text-xs text-base-content/70 leading-relaxed">
+              <code class="text-primary">&#123;ok, _&#125;</code>/<code class="text-primary">&#123;error, _&#125;</code>
+              for safe calls, raw exceptions for <code>do</code>/<code>call</code>.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%!-- ============== TV LABS PICKS UP LUERL ============== --%>
+  <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
+    <div class="grid lg:grid-cols-[1.1fr_1fr] gap-10 items-start">
+      <div>
+        <div class="inline-block text-xs uppercase tracking-[0.18em] text-warning font-bold mb-3">
+          2024 &middot; TV Labs
+        </div>
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">
+          A scripting language for streaming devices.
+        </h2>
+        <div class="mt-5 space-y-4 text-base-content/70 leading-relaxed">
+          <p>
+            At
+            <a
+              href="https://tvlabs.ai"
+              target="_blank"
+              rel="noopener"
+              class="link link-hover text-base-content"
+            >TV Labs</a>, we run vision-based integration tests against
+            real Roku, Fire TV, Apple TV, and game-console hardware. To
+            describe a test — "tap right, wait for the home screen, take a
+            screenshot, assert the carousel" — I needed a scripting language
+            I could embed, sandbox, and run thousands of times a day inside
+            an Elixir release.
+          </p>
+          <p>
+            Luerl was already the answer. It was the mature, battle-tested
+            Lua VM on the BEAM, and Robert had been quietly shipping it for
+            twelve years. The only thing missing was an Elixir-shaped API.
+          </p>
+          <p>
+            So in 2024 I built one — the
+            <a
+              href="https://hex.pm/packages/lua"
+              target="_blank"
+              rel="noopener"
+              class="link link-hover text-base-content"
+            >tv-labs/lua</a>
+            package on Hex — wrapping Luerl with the
+            <code class="text-primary bg-base-300/40 px-1 rounded">deflua</code>
+            macro, the
+            <code class="text-primary bg-base-300/40 px-1 rounded">~LUA</code>
+            sigil for compile-time syntax checking, and a
+            <code class="text-primary bg-base-300/40 px-1 rounded">Lua.API</code>
+            behaviour for registering Elixir modules with a Lua VM.
+          </p>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-base-300/60 bg-base-200 overflow-hidden shadow-xl">
+        <div class="flex items-center gap-2 px-4 py-2 border-b border-base-300/60 bg-base-300/30">
+          <span class="size-2.5 rounded-full bg-red-400/70"></span>
+          <span class="size-2.5 rounded-full bg-yellow-400/70"></span>
+          <span class="size-2.5 rounded-full bg-green-400/70"></span>
+          <span class="ml-2 text-xs font-mono text-base-content/50">
+            tv_test.exs
+          </span>
+        </div>
+        <.code_block
+          id="tvlabs-snippet"
+          language={:elixir}
+          class="px-5 py-4 font-mono text-[13px] leading-6 overflow-x-auto"
+          source={DemoWeb.Snippets.tvlabs_remote_api()}
+        />
+      </div>
+    </div>
+  </section>
+
+  <%!-- ============== CODE BEAM TALK ============== --%>
+  <section id="code-beam-eu" class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 pb-20 scroll-mt-20">
+    <div class="text-center">
+      <div class="inline-block text-xs uppercase tracking-[0.18em] text-primary font-bold mb-3">
+        Code BEAM EU &middot; 2024
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">
+        Lua on the BEAM, together.
+      </h2>
+    </div>
+
+    <div class="mt-6 space-y-4 text-base-content/70 leading-relaxed">
+      <p>
+        At Code BEAM Europe 2024 we ended up giving a talk together —
+        <em>Lua on the BEAM</em> — covering Luerl's history, the Elixir
+        wrapper, and what a next-generation Lua VM on the BEAM could look
+        like.
+      </p>
+      <p>
+        Backstage, I asked Robert the obvious question: <em>why</em>
+        bother writing a Lua interpreter in Erlang in the first place?
+        That's when he told me the tour-of-paradigms story above. We
+        spent the rest of the conference talking about what a Luerl 2.0
+        could look like — better error messages, real stack traces,
+        memory sandboxing, all the things that Luerl's age made hard to
+        retrofit.
+      </p>
+    </div>
+
+    <a
+      href="https://youtu.be/4YBBoXXH_98"
+      target="_blank"
+      rel="noopener"
+      class="mt-8 group flex items-center gap-4 rounded-2xl border border-base-300/60 bg-base-200/50 hover:bg-base-200 hover:border-primary/40 p-4 transition-colors"
+    >
+          <div class="size-12 rounded-xl bg-primary/15 grid place-items-center shrink-0 group-hover:bg-primary/25 transition-colors">
+            <.icon name="hero-play-circle-micro" class="size-7 text-primary" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-[10px] uppercase tracking-[0.18em] text-base-content/50 font-bold">
+              Watch the talk &middot; YouTube
+            </div>
+            <div class="font-semibold tracking-tight truncate">
+              Lua on the BEAM — Code BEAM Europe 2024
+            </div>
+            <div class="text-xs text-base-content/60 mt-0.5">
+              Robert Virding &amp; Dave Lucia &middot; 40 min
+            </div>
+          </div>
+      <.icon
+        name="hero-arrow-up-right-micro"
+        class="size-5 text-base-content/40 group-hover:text-primary shrink-0"
+      />
+    </a>
+  </section>
+
+  <%!-- ============== THE REWRITE ============== --%>
+  <section class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
+    <div class="max-w-3xl mb-10">
+      <div class="inline-block text-xs uppercase tracking-[0.18em] text-accent font-bold mb-3">
+        2025 &middot; the rewrite
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">
+        From wrapper to native VM.
+      </h2>
+      <div class="mt-5 space-y-4 text-base-content/70 leading-relaxed">
+        <p>
+          The wrapper got us most of the way there. But as the embedded surface
+          area grew — more tools, more user scripts, more agents — the cracks
+          showed. Error messages were terse. Stack traces stopped at the Luerl
+          boundary. There was no way to see the bytecode the VM was actually
+          running.
+        </p>
+        <p>
+          What started as a planned Luerl 2.0 became something else: a full
+          rewrite, in Elixir, top to bottom. A new lexer, a new parser, a new
+          register-based VM, a new compiler. Lua.ex 1.0 ships as a pure-Elixir
+          implementation of Lua 5.3 — no Luerl in the dependency graph, no
+          NIFs, no shelling out. Just Elixir.
+        </p>
+        <p>
+          The goal wasn't to outperform Luerl. It was to give Elixir
+          developers the same developer experience they get with Phoenix or
+          Ecto — beautiful errors, compile-time validation, code you can read
+          when something goes wrong.
+        </p>
+      </div>
+    </div>
+
+    <div class="grid sm:grid-cols-3 gap-4">
+      <.feature
+        icon="hero-document-text-micro"
+        title="Real stack traces"
+        accent="warning"
+      >
+        Lua frames <em>and</em>
+        Elixir frames in one trace, blamed by the callee's name — none of that
+        "attempt to call a nil value" nonsense.
+      </.feature>
+
+      <.feature
+        icon="hero-sparkles-micro"
+        title="Compile-time validation"
+        accent="accent"
+      >
+        The <code>~LUA</code>
+        sigil catches syntax errors at compile time.
+        Add <code>c</code> and ship a pre-compiled chunk in your release.
+      </.feature>
+
+      <.feature
+        icon="hero-magnifying-glass-circle-micro"
+        title="Bytecode you can read"
+        accent="info"
+      >
+        Every chunk compiles to a register-based opcode stream you can step
+        through in the <a href="/playground" class="link link-primary">playground</a>.
+      </.feature>
+    </div>
+
+    <p class="mt-10 text-base-content/70 leading-relaxed max-w-3xl">
+      Luerl is still the right choice for Erlang projects, and Robert is still
+      actively shipping it. Lua.ex is the Elixir-native sibling — born from
+      the same conversations, aimed at the same problem from the other side
+      of the BEAM.
+    </p>
+  </section>
+
+  <%!-- ============== THANKS ============== --%>
+  <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pb-20">
+    <div class="rounded-3xl border border-base-300/60 bg-base-200/30 p-8 lg:p-12">
+      <div class="inline-block text-xs uppercase tracking-[0.18em] text-secondary font-bold mb-3">
+        Standing on the shoulders
+      </div>
+      <h2 class="text-2xl sm:text-3xl font-bold tracking-tight">
+        Thanks, Robert.
+      </h2>
+      <div class="mt-4 space-y-4 text-base-content/70 leading-relaxed max-w-3xl">
+        <p>
+          This library exists because Robert Virding wrote Luerl first.
+          Thirteen years of design decisions, edge cases, and stdlib
+          implementations live inside Lua.ex's lineage. We learned from
+          all of them.
+        </p>
+        <p>
+          Credit also to the long-time Luerl contributors who shaped the API
+          we ported from — Henning Diedrich, Cees de Groot, Heinz Gies, and
+          dozens of others on the
+          <a
+            href="https://github.com/rvirding/luerl/graphs/contributors"
+            target="_blank"
+            rel="noopener"
+            class="link link-hover text-base-content"
+          >commit log</a>. And to the Lua team in Rio for designing a
+          language small enough to fit in your head and powerful enough to
+          run Roblox.
+        </p>
+        <p>
+          Lua.ex is built at
+          <a
+            href="https://tvlabs.ai"
+            target="_blank"
+            rel="noopener"
+            class="link link-hover text-base-content"
+          >TV Labs</a>, where we use it every day to script vision-based
+          integration tests against real streaming devices.
+        </p>
+      </div>
+
+      <div class="mt-8 flex flex-col sm:flex-row gap-3">
+        <a
+          href="https://github.com/rvirding/luerl"
+          target="_blank"
+          rel="noopener"
+          class="btn btn-primary shadow-sm"
+        >
+          <.icon name="hero-star-micro" class="size-4" /> Star Luerl on GitHub
+        </a>
+        <a
+          href="https://groups.google.com/g/erlang-questions/c/0SyhdmIf1uQ"
+          target="_blank"
+          rel="noopener"
+          class="btn btn-ghost border border-base-300"
+        >
+          <.icon name="hero-document-text-micro" class="size-4" />
+          Read the 2012 announcement
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <%!-- ============== CTA ============== --%>
+  <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pb-24">
+    <div class="rounded-3xl border border-primary/40 bg-gradient-to-br from-primary/15 via-accent/10 to-secondary/10 p-10 lg:p-14 text-center shadow-xl">
+      <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">
+        Now go write some Lua.
+      </h2>
+      <p class="mt-3 text-base-content/70 max-w-xl mx-auto">
+        The story is nice, but the VM is more fun. Open the playground and
+        watch the opcodes flow.
+      </p>
+      <div class="mt-7 flex justify-center">
+        <.link navigate={~p"/playground"} class="btn btn-primary btn-lg shadow-lg">
+          Open the Playground <.icon name="hero-arrow-right-micro" class="size-4" />
+        </.link>
+      </div>
+    </div>
+  </section>
+</Layouts.app>
