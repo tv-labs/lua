@@ -2,17 +2,17 @@ defmodule Website.LuaSandbox do
   @moduledoc """
   Safe(-ish) execution wrapper around `Lua.eval!/2`.
 
-  Runs user-submitted Lua snippets in a supervised, time-bounded task and
-  captures any output produced via the `print` builtin. The host VM is
-  sandboxed via the library's default deny-list (no `io.*`, `os.*`,
-  `require`, `package`, `load`, etc.), and execution is killed if it
-  exceeds the configured timeout.
+  Synchronously evaluates user-submitted Lua snippets and captures any
+  output produced via the `print` builtin. The host VM is sandboxed via
+  the library's default deny-list (no `io.*`, `os.*`, `require`,
+  `package`, `load`, etc.).
+
+  This module is intentionally process-free: timeout enforcement and
+  task lifecycle are the caller's responsibility (the LiveView wraps
+  `run/1` in `start_async/3` and cancels it on a timer).
   """
 
   alias Lua.Compiler.Prototype
-  alias Lua.Compiler.Instruction
-
-  @default_timeout_ms 1_000
 
   @doc """
   Compiles a Lua snippet into a `Lua.Chunk` (without running it) and
@@ -44,40 +44,8 @@ defmodule Website.LuaSandbox do
           bytecode: [map()]
         }
 
-  @spec run(String.t(), keyword()) :: result()
-  def run(source, opts \\ []) when is_binary(source) do
-    timeout = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
-
-    parent = self()
-    ref = make_ref()
-
-    task =
-      Task.async(fn ->
-        send(parent, {ref, :starting})
-        do_run(source)
-      end)
-
-    receive do
-      {^ref, :starting} -> :ok
-    after
-      100 -> :ok
-    end
-
-    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, result} ->
-        result
-
-      nil ->
-        %{
-          status: :timeout,
-          output: "",
-          returns: [],
-          error: "Execution timed out after #{timeout}ms",
-          duration_us: timeout * 1000,
-          bytecode: []
-        }
-    end
-  end
+  @spec run(String.t()) :: result()
+  def run(source) when is_binary(source), do: do_run(source)
 
   defp do_run(source) do
     started = System.monotonic_time(:microsecond)
@@ -136,7 +104,7 @@ defmodule Website.LuaSandbox do
   end
 
   defp strip_ansi(s) when is_binary(s) do
-    String.replace(s, ~r/\e\[[0-9;]*[a-zA-Z]/, "")
+    String.replace(s, ~r/\e\[[\d;]*[\x40-\x7E]/, "")
   end
 
   defp start_output_collector do
@@ -1448,7 +1416,4 @@ defmodule Website.LuaSandbox do
     ]
   end
 
-  # Quiet unused-warning on Instruction (kept for future opcode docs)
-  @doc false
-  def _instructions, do: Instruction
 end

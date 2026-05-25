@@ -20,7 +20,7 @@ defmodule Website.LuaExamplesTest do
     @label "#{source}/#{example[:id] || example[:slug]}"
 
     test "#{@label} (#{@expect})" do
-      result = LuaSandbox.run(@example.source, timeout_ms: 2_000)
+      result = LuaSandbox.run(@example.source)
 
       case @expect do
         :ok ->

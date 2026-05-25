@@ -5,6 +5,7 @@ defmodule DemoWeb.PlaygroundLive do
   alias Website.LuaSandbox
 
   @max_shared_bytes 20_000
+  @lua_timeout_ms 1_500
 
   @impl true
   def mount(_params, _session, socket) do
@@ -20,6 +21,7 @@ defmodule DemoWeb.PlaygroundLive do
       |> assign(:selected_block, 0)
       |> assign(:hover_line, nil)
       |> assign(:shared_source?, false)
+      |> assign(:lua_timer_ref, nil)
 
     {:ok, socket}
   end
@@ -116,16 +118,14 @@ defmodule DemoWeb.PlaygroundLive do
   end
 
   def handle_event("run", %{"source" => source}, socket) do
-    socket = assign(socket, source: source, running: true)
-    send(self(), {:run, source})
-    {:noreply, socket}
+    {:noreply, start_lua_run(socket, source)}
   end
 
   def handle_event("toggle-bytecode", _, socket) do
     {:noreply, update(socket, :show_bytecode, &(!&1))}
   end
 
-  def handle_event("select-block", %{"index" => idx}, socket) do
+  def handle_event("select-block", %{"index" => idx}, socket) when is_binary(idx) do
     {:noreply, assign(socket, :selected_block, String.to_integer(idx))}
   end
 
@@ -159,14 +159,62 @@ defmodule DemoWeb.PlaygroundLive do
   defp parse_line(line) when is_integer(line), do: line
 
   @impl true
-  def handle_info({:run, source}, socket) do
-    result = LuaSandbox.run(source, timeout_ms: 1500)
-
+  def handle_async(:lua_run, {:ok, result}, socket) do
     {:noreply,
      socket
-     |> assign(:running, false)
+     |> finish_lua_run()
      |> assign(:result, result)
      |> assign(:selected_block, 0)}
+  end
+
+  def handle_async(:lua_run, {:exit, _reason}, socket) do
+    {:noreply,
+     socket
+     |> finish_lua_run()
+     |> assign(:result, timeout_result())}
+  end
+
+  @impl true
+  def handle_info(:lua_timeout, %{assigns: %{running: true}} = socket) do
+    {:noreply, cancel_async(socket, :lua_run)}
+  end
+
+  def handle_info(:lua_timeout, socket), do: {:noreply, socket}
+
+  defp start_lua_run(socket, source) do
+    socket
+    |> cancel_lua_run()
+    |> assign(:source, source)
+    |> assign(:running, true)
+    |> assign(:lua_timer_ref, Process.send_after(self(), :lua_timeout, @lua_timeout_ms))
+    |> start_async(:lua_run, fn -> LuaSandbox.run(source) end)
+  end
+
+  defp cancel_lua_run(socket) do
+    if ref = socket.assigns[:lua_timer_ref], do: Process.cancel_timer(ref)
+
+    socket
+    |> cancel_async(:lua_run)
+    |> assign(:lua_timer_ref, nil)
+  end
+
+  defp finish_lua_run(socket) do
+    if ref = socket.assigns[:lua_timer_ref], do: Process.cancel_timer(ref)
+
+    socket
+    |> assign(:running, false)
+    |> assign(:lua_timer_ref, nil)
+  end
+
+  defp timeout_result do
+    %{
+      status: :timeout,
+      output: "",
+      returns: [],
+      error: "Execution timed out after #{@lua_timeout_ms}ms",
+      duration_us: @lua_timeout_ms * 1_000,
+      bytecode: []
+    }
   end
 
   defp default_source(id) do

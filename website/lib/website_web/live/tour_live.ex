@@ -3,6 +3,8 @@ defmodule DemoWeb.TourLive do
 
   alias Website.LuaSandbox
 
+  @lua_timeout_ms 1_500
+
   @impl true
   def mount(_params, _session, socket) do
     lessons = LuaSandbox.tour_lessons()
@@ -16,6 +18,7 @@ defmodule DemoWeb.TourLive do
       |> assign(:result, nil)
       |> assign(:running, false)
       |> assign(:show_bytecode, false)
+      |> assign(:lua_timer_ref, nil)
 
     {:ok, socket}
   end
@@ -31,6 +34,7 @@ defmodule DemoWeb.TourLive do
           lesson ->
             {:noreply,
              socket
+             |> cancel_lua_run()
              |> assign(:lesson, lesson)
              |> assign(:source, Map.get(lesson, :source, ""))
              |> assign(:result, nil)}
@@ -47,8 +51,7 @@ defmodule DemoWeb.TourLive do
   end
 
   def handle_event("run", %{"source" => source}, socket) do
-    send(self(), {:run, source})
-    {:noreply, assign(socket, source: source, running: true)}
+    {:noreply, start_lua_run(socket, source)}
   end
 
   def handle_event("reset", _params, socket) do
@@ -56,6 +59,7 @@ defmodule DemoWeb.TourLive do
 
     {:noreply,
      socket
+     |> cancel_lua_run()
      |> assign(:source, source)
      |> assign(:result, nil)
      |> push_event("lua-editor:set-source", %{source: source})}
@@ -70,9 +74,62 @@ defmodule DemoWeb.TourLive do
   def handle_event("hover-line", _params, socket), do: {:noreply, socket}
 
   @impl true
-  def handle_info({:run, source}, socket) do
-    result = LuaSandbox.run(source, timeout_ms: 1500)
-    {:noreply, socket |> assign(:result, result) |> assign(:running, false)}
+  def handle_async(:lua_run, {:ok, result}, socket) do
+    {:noreply,
+     socket
+     |> finish_lua_run()
+     |> assign(:result, result)}
+  end
+
+  def handle_async(:lua_run, {:exit, _reason}, socket) do
+    {:noreply,
+     socket
+     |> finish_lua_run()
+     |> assign(:result, timeout_result())}
+  end
+
+  @impl true
+  def handle_info(:lua_timeout, %{assigns: %{running: true}} = socket) do
+    {:noreply, cancel_async(socket, :lua_run)}
+  end
+
+  def handle_info(:lua_timeout, socket), do: {:noreply, socket}
+
+  defp start_lua_run(socket, source) do
+    socket
+    |> cancel_lua_run()
+    |> assign(:source, source)
+    |> assign(:running, true)
+    |> assign(:lua_timer_ref, Process.send_after(self(), :lua_timeout, @lua_timeout_ms))
+    |> start_async(:lua_run, fn -> LuaSandbox.run(source) end)
+  end
+
+  defp cancel_lua_run(socket) do
+    if ref = socket.assigns[:lua_timer_ref], do: Process.cancel_timer(ref)
+
+    socket
+    |> cancel_async(:lua_run)
+    |> assign(:running, false)
+    |> assign(:lua_timer_ref, nil)
+  end
+
+  defp finish_lua_run(socket) do
+    if ref = socket.assigns[:lua_timer_ref], do: Process.cancel_timer(ref)
+
+    socket
+    |> assign(:running, false)
+    |> assign(:lua_timer_ref, nil)
+  end
+
+  defp timeout_result do
+    %{
+      status: :timeout,
+      output: "",
+      returns: [],
+      error: "Execution timed out after #{@lua_timeout_ms}ms",
+      duration_us: @lua_timeout_ms * 1_000,
+      bytecode: []
+    }
   end
 
   defp lesson_index(lessons, lesson) do
