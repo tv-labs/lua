@@ -104,47 +104,74 @@ defmodule DemoWeb.TourLive do
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
         <div class="grid lg:grid-cols-[280px_1fr] gap-8">
           <aside class="lg:sticky lg:top-20 lg:self-start">
-            <div class="mb-4">
-              <h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/50 mb-2">
-                A tour of Lua &amp; Lua.ex
-              </h2>
-              <p class="text-sm text-base-content/70">
-                {length(@lessons)} lessons across {length(LuaSandbox.chapters())} chapters.
-                Every snippet runs live on the BEAM.
-              </p>
-            </div>
+            <details
+              id="tour-sidebar"
+              class="group lg:[&>summary]:hidden lg:[&>.tour-nav-body]:!block [&[open]>summary>.tour-chevron]:rotate-180"
+            >
+              <summary class="flex items-center justify-between gap-3 px-3 py-2.5 mb-3 rounded-box border border-base-300/60 bg-base-200/50 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <span class="min-w-0 flex-1">
+                  <span class="block text-[10px] uppercase tracking-[0.14em] font-semibold text-base-content/40">
+                    Chapter {chapter_label(@lesson.chapter)} · Lesson {lesson_index(
+                      @lessons,
+                      @lesson
+                    ) + 1} of {length(@lessons)}
+                  </span>
+                  <span class="block text-sm font-medium text-base-content/90 truncate">
+                    {raw(render_inline(@lesson.title))}
+                  </span>
+                </span>
+                <.icon
+                  name="hero-chevron-down-micro"
+                  class="tour-chevron size-4 text-base-content/50 transition-transform shrink-0"
+                />
+              </summary>
 
-            <%= for {{chapter_slug, chapter_title}, chapter_idx} <- Enum.with_index(LuaSandbox.chapters()) do %>
-              <div class="mb-5">
-                <div class="px-3 pb-1.5 text-[11px] uppercase tracking-[0.14em] text-base-content/40 font-semibold">
-                  <span class="text-base-content/30">{roman(chapter_idx + 1)}.</span>
-                  &nbsp;{chapter_title}
+              <div class="tour-nav-body">
+                <div class="mb-4">
+                  <h2 class="text-xs font-semibold uppercase tracking-wider text-base-content/50 mb-2">
+                    A tour of Lua &amp; Lua.ex
+                  </h2>
+                  <p class="text-sm text-base-content/70">
+                    {length(@lessons)} lessons across {length(LuaSandbox.chapters())} chapters.
+                    Every snippet runs live on the BEAM.
+                  </p>
                 </div>
-                <ol class="space-y-1">
-                  <%= for lesson <- @lessons, lesson.chapter == chapter_slug do %>
-                    <li>
-                      <.link
-                        patch={~p"/tour/#{lesson.slug}"}
-                        class={[
-                          "flex items-center gap-3 px-3 py-1.5 rounded-box transition-colors",
-                          @lesson.slug == lesson.slug && "bg-primary/10 text-primary",
-                          @lesson.slug != lesson.slug && "hover:bg-base-200 text-base-content/80"
-                        ]}
-                      >
-                        <span class={[
-                          "size-6 rounded-full text-xs font-mono flex items-center justify-center shrink-0",
-                          @lesson.slug == lesson.slug && "bg-primary text-primary-content",
-                          @lesson.slug != lesson.slug && "bg-base-300 text-base-content/60"
-                        ]}>
-                          {lesson_index(@lessons, lesson) + 1}
-                        </span>
-                        <span class="text-sm font-medium">{raw(render_inline(lesson.title))}</span>
-                      </.link>
-                    </li>
-                  <% end %>
-                </ol>
+
+                <%= for {{chapter_slug, chapter_title}, chapter_idx} <- Enum.with_index(LuaSandbox.chapters()) do %>
+                  <div class="mb-5">
+                    <div class="px-3 pb-1.5 text-[11px] uppercase tracking-[0.14em] text-base-content/40 font-semibold">
+                      <span class="text-base-content/30">{roman(chapter_idx + 1)}.</span>
+                      &nbsp;{chapter_title}
+                    </div>
+                    <ol class="space-y-1">
+                      <%= for lesson <- @lessons, lesson.chapter == chapter_slug do %>
+                        <li>
+                          <.link
+                            patch={~p"/tour/#{lesson.slug}"}
+                            class={[
+                              "flex items-center gap-3 px-3 py-1.5 rounded-box transition-colors",
+                              @lesson.slug == lesson.slug && "bg-primary/10 text-primary",
+                              @lesson.slug != lesson.slug && "hover:bg-base-200 text-base-content/80"
+                            ]}
+                          >
+                            <span class={[
+                              "size-6 rounded-full text-xs font-mono flex items-center justify-center shrink-0",
+                              @lesson.slug == lesson.slug && "bg-primary text-primary-content",
+                              @lesson.slug != lesson.slug && "bg-base-300 text-base-content/60"
+                            ]}>
+                              {lesson_index(@lessons, lesson) + 1}
+                            </span>
+                            <span class="text-sm font-medium">
+                              {raw(render_inline(lesson.title))}
+                            </span>
+                          </.link>
+                        </li>
+                      <% end %>
+                    </ol>
+                  </div>
+                <% end %>
               </div>
-            <% end %>
+            </details>
           </aside>
 
           <article class="min-w-0">

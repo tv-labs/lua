@@ -51,7 +51,7 @@ defmodule DemoWeb.Layouts do
   def site_nav(assigns) do
     ~H"""
     <header class="sticky top-0 z-30 backdrop-blur-md bg-base-100/70 border-b border-base-300/60">
-      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center gap-6">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center gap-3 sm:gap-6">
         <a href="/" class="flex items-center gap-2.5 group">
           <.lua_mark class="h-8 w-8 transition-transform group-hover:rotate-12" />
           <span class="font-semibold tracking-tight text-lg">
@@ -93,6 +93,64 @@ defmodule DemoWeb.Layouts do
         <a href="/playground" class="btn btn-primary btn-sm shadow-sm">
           Try it <.icon name="hero-arrow-right-micro" class="size-4" />
         </a>
+
+        <details class="md:hidden dropdown dropdown-end" id="mobile-nav">
+          <summary
+            class="btn btn-ghost btn-sm btn-square"
+            aria-label="Open navigation menu"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="size-5"
+              aria-hidden="true"
+            >
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </summary>
+          <ul class="menu dropdown-content mt-2 z-40 w-56 p-2 shadow-lg bg-base-100 rounded-box border border-base-300/60">
+            <li>
+              <.link
+                navigate="/playground"
+                class={@active == :playground && "active text-primary bg-primary/10"}
+              >
+                Playground
+              </.link>
+            </li>
+            <li>
+              <.link
+                navigate="/tour"
+                class={@active == :tour && "active text-primary bg-primary/10"}
+              >
+                Tour
+              </.link>
+            </li>
+            <li>
+              <.link
+                navigate="/reference/opcodes"
+                class={@active == :opcodes && "active text-primary bg-primary/10"}
+              >
+                Opcodes
+              </.link>
+            </li>
+            <li>
+              <.link
+                navigate="/about"
+                class={@active == :about && "active text-primary bg-primary/10"}
+              >
+                About
+              </.link>
+            </li>
+            <li><a href="https://hexdocs.pm/lua" target="_blank">Docs</a></li>
+            <li><a href="https://github.com/tv-labs/lua" target="_blank">GitHub</a></li>
+          </ul>
+        </details>
       </div>
     </header>
     """
@@ -118,10 +176,10 @@ defmodule DemoWeb.Layouts do
 
   def site_footer(assigns) do
     ~H"""
-    <footer class="border-t border-base-300/60 mt-24 pt-12 pb-8 px-4 sm:px-6 lg:px-8">
+    <footer class="border-t border-base-300/60 mt-16 sm:mt-24 pt-8 sm:pt-12 pb-8 px-4 sm:px-6 lg:px-8">
       <div class="mx-auto max-w-7xl">
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-8 mb-10">
-          <div class="col-span-2 sm:col-span-1">
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-y-3 sm:gap-y-6 gap-x-8 mb-8 sm:mb-10">
+          <div class="mb-2 sm:mb-0">
             <div class="flex items-center gap-2 mb-3">
               <.lua_mark class="h-6 w-6" />
               <span class="font-semibold tracking-tight">
@@ -133,115 +191,100 @@ defmodule DemoWeb.Layouts do
             </p>
           </div>
 
-          <div>
-            <h4 class="text-xs font-bold uppercase tracking-wider text-base-content/50 mb-3">
-              Product
-            </h4>
-            <ul class="space-y-2 text-sm">
-              <li>
-                <.link navigate={~p"/playground"} class="text-base-content/70 hover:text-primary">
-                  Playground
-                </.link>
-              </li>
-              <li>
-                <.link navigate={~p"/tour"} class="text-base-content/70 hover:text-primary">
-                  Tour
-                </.link>
-              </li>
-              <li>
-                <.link
-                  navigate={~p"/reference/opcodes"}
-                  class="text-base-content/70 hover:text-primary"
-                >
-                  Opcode reference
-                </.link>
-              </li>
-              <li>
-                <.link navigate={~p"/about"} class="text-base-content/70 hover:text-primary">
-                  About
-                </.link>
-              </li>
-            </ul>
-          </div>
+          <.footer_section title="Product">
+            <li>
+              <.link navigate={~p"/playground"} class="text-base-content/70 hover:text-primary">
+                Playground
+              </.link>
+            </li>
+            <li>
+              <.link navigate={~p"/tour"} class="text-base-content/70 hover:text-primary">
+                Tour
+              </.link>
+            </li>
+            <li>
+              <.link
+                navigate={~p"/reference/opcodes"}
+                class="text-base-content/70 hover:text-primary"
+              >
+                Opcode reference
+              </.link>
+            </li>
+            <li>
+              <.link navigate={~p"/about"} class="text-base-content/70 hover:text-primary">
+                About
+              </.link>
+            </li>
+          </.footer_section>
 
-          <div>
-            <h4 class="text-xs font-bold uppercase tracking-wider text-base-content/50 mb-3">
-              Resources
-            </h4>
-            <ul class="space-y-2 text-sm">
-              <li>
-                <a
-                  href="https://hexdocs.pm/lua"
-                  target="_blank"
-                  class="text-base-content/70 hover:text-primary"
-                >
-                  HexDocs
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://hex.pm/packages/lua"
-                  target="_blank"
-                  class="text-base-content/70 hover:text-primary"
-                >
-                  Hex.pm
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://github.com/tv-labs/lua/blob/main/CHANGELOG.md"
-                  target="_blank"
-                  class="text-base-content/70 hover:text-primary"
-                >
-                  Changelog
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://github.com/tv-labs/lua/blob/main/ROADMAP.md"
-                  target="_blank"
-                  class="text-base-content/70 hover:text-primary"
-                >
-                  Roadmap
-                </a>
-              </li>
-            </ul>
-          </div>
+          <.footer_section title="Resources">
+            <li>
+              <a
+                href="https://hexdocs.pm/lua"
+                target="_blank"
+                class="text-base-content/70 hover:text-primary"
+              >
+                HexDocs
+              </a>
+            </li>
+            <li>
+              <a
+                href="https://hex.pm/packages/lua"
+                target="_blank"
+                class="text-base-content/70 hover:text-primary"
+              >
+                Hex.pm
+              </a>
+            </li>
+            <li>
+              <a
+                href="https://github.com/tv-labs/lua/blob/main/CHANGELOG.md"
+                target="_blank"
+                class="text-base-content/70 hover:text-primary"
+              >
+                Changelog
+              </a>
+            </li>
+            <li>
+              <a
+                href="https://github.com/tv-labs/lua/blob/main/ROADMAP.md"
+                target="_blank"
+                class="text-base-content/70 hover:text-primary"
+              >
+                Roadmap
+              </a>
+            </li>
+          </.footer_section>
 
-          <div>
-            <h4 class="text-xs font-bold uppercase tracking-wider text-base-content/50 mb-3">
-              Community
-            </h4>
-            <ul class="space-y-2 text-sm">
-              <li>
-                <a
-                  href="https://github.com/tv-labs/lua"
-                  target="_blank"
-                  class="text-base-content/70 hover:text-primary"
-                >
-                  GitHub
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://github.com/tv-labs/lua/issues"
-                  target="_blank"
-                  class="text-base-content/70 hover:text-primary"
-                >
-                  Report an issue
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://elixirforum.com/"
-                  target="_blank"
-                  class="text-base-content/70 hover:text-primary"
-                >
-                  Elixir Forum
-                </a>
-              </li>
-            </ul>
-          </div>
+          <.footer_section title="Community">
+            <li>
+              <a
+                href="https://github.com/tv-labs/lua"
+                target="_blank"
+                class="text-base-content/70 hover:text-primary"
+              >
+                GitHub
+              </a>
+            </li>
+            <li>
+              <a
+                href="https://github.com/tv-labs/lua/issues"
+                target="_blank"
+                class="text-base-content/70 hover:text-primary"
+              >
+                Report an issue
+              </a>
+            </li>
+            <li>
+              <a
+                href="https://elixirforum.com/"
+                target="_blank"
+                class="text-base-content/70 hover:text-primary"
+              >
+                Elixir Forum
+              </a>
+            </li>
+          </.footer_section>
         </div>
 
         <div class="pt-6 border-t border-base-300/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-base-content/50">
@@ -268,6 +311,28 @@ defmodule DemoWeb.Layouts do
         </div>
       </div>
     </footer>
+    """
+  end
+
+  attr :title, :string, required: true
+  slot :inner_block, required: true
+
+  defp footer_section(assigns) do
+    ~H"""
+    <details class="group border-b border-base-300/40 sm:border-0 [&[open]>summary>svg]:rotate-180 sm:[&>ul]:!block">
+      <summary class="flex items-center justify-between py-2 sm:py-0 sm:mb-3 cursor-pointer sm:cursor-default sm:pointer-events-none list-none [&::-webkit-details-marker]:hidden">
+        <span class="text-xs font-bold uppercase tracking-wider text-base-content/50">
+          {@title}
+        </span>
+        <.icon
+          name="hero-chevron-down-micro"
+          class="size-4 text-base-content/40 transition-transform sm:hidden"
+        />
+      </summary>
+      <ul class="space-y-2 text-sm pb-3 sm:pb-0">
+        {render_slot(@inner_block)}
+      </ul>
+    </details>
     """
   end
 

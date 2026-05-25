@@ -102,6 +102,16 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+/* Restore the standard <details> collapse behavior. Tailwind v4 + daisyUI
+   preflight removes the user-agent rule that hides non-summary children when
+   the disclosure is closed, which breaks the mobile nav/footer/tour
+   collapsibles. Site code re-overrides this with `lg:[&>...]:!block` /
+   `sm:[&>...]:!block` where the content must remain visible at larger
+   viewports regardless of the `open` attribute. */
+details:not([open]) > *:not(summary) {
+  display: none;
+}
+
 /* Crescent Drop mark — theme-aware CSS variables consumed by the
    inline SVG defined in DemoWeb.Layouts.lua_mark/1 and lua_orbit/1.
    Light theme: near-black ink drop with a Phoenix-orange satellite.
