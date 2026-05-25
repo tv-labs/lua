@@ -27,7 +27,7 @@
           <p class="mt-6 text-lg text-base-content/70 leading-relaxed max-w-xl">
             Lua.ex didn't start in 2026. It started in 1986 with Erlang, kept
             going in 2012 when Robert Virding gave the BEAM an imperative
-            language, and landed here after thirteen years of
+            language, and landed here after fourteen years of
             <a
               href="https://github.com/rvirding/luerl"
               target="_blank"
@@ -36,7 +36,12 @@
             >
               Luerl
             </a>
-            quietly powering everything from game servers to spaceships.
+            quietly powering everything from game servers to <a
+              href="https://youtu.be/NC8Xl6tvjfk"
+              target="_blank"
+              rel="noopener"
+              class="link link-primary"
+            >spaceships</a>.
           </p>
 
           <div class="mt-7 flex items-center gap-3">
@@ -121,10 +126,14 @@
         </h2>
         <div class="mt-5 space-y-4 text-base-content/70 leading-relaxed">
           <p>
-            Erlang itself began as a Prolog interpreter for a telephony algebra
-            in 1985-86 at Ericsson, before being rewritten as the JAM bytecode
-            machine once Prolog proved too slow. So logic programming was
-            literally in Erlang's DNA from day one.
+            Erlang itself began as a Prolog experiment in 1986 at Ericsson's
+            Computer Science Lab. The first Erlang interpreter was literally
+            a Prolog program. Joe Armstrong, Robert Virding, and Mike
+            Williams were looking for a better way to program telephone
+            exchanges, and Prolog was the prototype. It was rewritten as the
+            JAM bytecode machine around 1989, once the interpreter proved
+            roughly 40× too slow for production switches. Building one
+            language inside another was there from day one.
           </p>
           <p>
             After Erlang, Robert kept building languages on the BEAM as side
@@ -146,11 +155,12 @@
             erlang-questions in March 2008.
           </p>
           <p>
-            With logic programming covered and a functional Lisp covered, the
-            obvious missing paradigm was <em>imperative</em>. He picked Lua
-            (small, clean, embeddable) and had at it.
+            Lua was a natural target for the next experiment: a small,
+            tightly-specified language built around embeddability, with a
+            reference implementation compact enough for one person to port.
             <strong class="text-base-content">Luerl</strong>
-            shipped on February 18, 2012.
+            shipped on February 19, 2012, and Robert has shepherded it ever
+            since.
           </p>
         </div>
       </div>
@@ -161,10 +171,10 @@
           class="absolute -top-4 -left-4 size-9 p-2 rounded-xl bg-primary/15 text-primary border border-base-300/60 bg-base-100"
         />
         <blockquote class="text-lg sm:text-xl leading-relaxed text-base-content/90 italic">
-          "I wrote a Prolog on Erlang, that was fun. Then I wrote a functional
-          Lisp in Erlang, that was fun too. But then I realized that it would
-          be neat to implement an imperative or object-oriented language on the
-          BEAM, so I picked Lua and had at it. That's how Luerl was born."
+          I wrote a Prolog in Erlang, that was fun. Then I wrote a functional
+          Lisp in Erlang, that was fun too. But then I realized it would be
+          neat to implement an imperative or object-oriented language on the
+          BEAM, so I picked Lua and had at it. That's how Luerl was born.
         </blockquote>
         <figcaption class="mt-5 flex items-center gap-3 text-sm text-base-content/60">
           <div class="size-9 rounded-full bg-gradient-to-br from-primary/40 to-accent/30 grid place-items-center font-bold text-base-content">
@@ -172,18 +182,23 @@
           </div>
           <div>
             <div class="font-semibold text-base-content">Robert Virding</div>
-            <div class="text-xs">co-creator of Erlang &middot; author of Luerl</div>
+            <div class="text-xs">
+              co-creator of Erlang &middot; author of Luerl
+            </div>
+            <div class="text-xs text-base-content/50 mt-0.5">
+              paraphrased from a conversation at Code BEAM EU 2024
+            </div>
           </div>
         </figcaption>
 
         <div class="mt-6 pt-5 border-t border-base-300/60 text-xs text-base-content/50 leading-relaxed">
           The name is "Lua" + "Erl". Robert confirmed it himself on Hacker
           News. See the original <a
-            href="https://groups.google.com/g/erlang-questions/c/0SyhdmIf1uQ"
+            href="https://groups.google.com/g/erlang-programming/c/0SyhdmIf1uQ"
             target="_blank"
             rel="noopener"
             class="link link-hover text-base-content/80"
-          >Feb 18, 2012 erlang-questions announcement</a>.
+          >Feb 19, 2012 erlang-questions announcement</a>.
         </div>
       </figure>
     </div>
@@ -246,7 +261,9 @@
               Erlang-shaped API
             </div>
             <div class="text-xs text-base-content/70 leading-relaxed">
-              <code class="text-primary">&#123;ok, _&#125;</code>/<code class="text-primary">&#123;error, _&#125;</code> for safe calls, raw exceptions for <code>do</code>/<code>call</code>.
+              <code class="text-primary">&#123;ok, _&#125;</code>
+              / <code class="text-primary">&#123;error, _&#125;</code>
+              for safe calls, raw exceptions for <code>do</code>/<code>call</code>.
             </div>
           </div>
         </div>
@@ -452,16 +469,34 @@
   <%!-- ============== THANKS ============== --%>
   <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pb-20">
     <div class="rounded-3xl border border-base-300/60 bg-base-200/30 p-8 lg:p-12">
-      <div class="inline-block text-xs uppercase tracking-[0.18em] text-secondary font-bold mb-3">
-        Standing on the shoulders
+      <div class="flex items-start gap-5">
+        <a
+          href="https://github.com/rvirding/luerl"
+          target="_blank"
+          rel="noopener"
+          class="shrink-0 hidden sm:block"
+        >
+          <img
+            src={~p"/images/luerl-logo.png"}
+            alt="Luerl logo"
+            width="80"
+            height="80"
+            class="size-20 rounded-2xl border border-base-300/60 bg-base-100 shadow-sm"
+          />
+        </a>
+        <div>
+          <div class="inline-block text-xs uppercase tracking-[0.18em] text-secondary font-bold mb-3">
+            Standing on the shoulders
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-bold tracking-tight">
+            Thanks, Robert.
+          </h2>
+        </div>
       </div>
-      <h2 class="text-2xl sm:text-3xl font-bold tracking-tight">
-        Thanks, Robert.
-      </h2>
       <div class="mt-4 space-y-4 text-base-content/70 leading-relaxed max-w-3xl">
         <p>
           This library exists because Robert Virding wrote Luerl first.
-          Thirteen years of design decisions, edge cases, and stdlib
+          Fourteen years of design decisions, edge cases, and stdlib
           implementations live inside Lua.ex's lineage. We learned from
           all of them.
         </p>
@@ -498,7 +533,7 @@
           <.icon name="hero-star-micro" class="size-4" /> Star Luerl on GitHub
         </a>
         <a
-          href="https://groups.google.com/g/erlang-questions/c/0SyhdmIf1uQ"
+          href="https://groups.google.com/g/erlang-programming/c/0SyhdmIf1uQ"
           target="_blank"
           rel="noopener"
           class="btn btn-ghost border border-base-300"
