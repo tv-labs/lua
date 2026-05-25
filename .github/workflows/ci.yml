@@ -80,6 +80,37 @@ jobs:
       - name: Format
         run: mix format --check-formatted
 
+  website:
+    name: Website tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - elixir: "1.19.0"
+            otp: "28.0"
+            bootstrap_beam: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - *setup-beam
+      - *bootstrap-beam
+      - name: Restore website dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: website/deps
+          key: ${{ runner.os }}-elixir${{ matrix.elixir }}-otp${{ matrix.otp }}-website-mix-${{ hashFiles('website/mix.lock') }}
+          restore-keys: ${{ runner.os }}-elixir${{ matrix.elixir }}-otp${{ matrix.otp }}-website-mix-
+      - name: Install website dependencies
+        working-directory: website
+        run: mix deps.get
+      - name: Run website tests
+        working-directory: website
+        run: mix test
+      - name: Format
+        working-directory: website
+        run: mix format --check-formatted
+
   lua53-suite:
     name: Lua 5.3 suite
     runs-on: ubuntu-latest
