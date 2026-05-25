@@ -325,6 +325,29 @@ defmodule Website.LuaSandbox do
   defp count(other), do: inspect(other)
 
   @doc """
+  Returns the Lua snippets that are rendered on the marketing home page
+  (currently the compiler-explorer card). Same shape as `examples/0` so
+  the example test loop can iterate over every snippet uniformly.
+  """
+  def home_snippets do
+    [
+      %{
+        id: "home-fib",
+        title: "Hero compiler-explorer",
+        source: """
+        local function fib(n)
+          if n < 2 then return n end
+          return fib(n - 1)
+               + fib(n - 2)
+        end
+
+        return fib(15)
+        """
+      }
+    ]
+  end
+
+  @doc """
   Returns a list of canonical example snippets for the playground/tour.
   Each snippet has an id, title, blurb, and Lua source.
   """
@@ -453,6 +476,7 @@ defmodule Website.LuaSandbox do
         id: "error",
         title: "Compile error",
         blurb: "See the friendly compiler error path.",
+        expect: :compile_error,
         source: """
         local x = 10
         local y = 20
@@ -463,6 +487,7 @@ defmodule Website.LuaSandbox do
         id: "runtime-error",
         title: "Runtime error",
         blurb: "Watch the VM blame the offending local by name, with a real stack trace.",
+        expect: :runtime_error,
         source: """
         local function greet(person)
           return "hi, " .. person.name
