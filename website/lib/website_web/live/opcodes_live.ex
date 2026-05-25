@@ -8,7 +8,7 @@ defmodule DemoWeb.OpcodesLive do
       id: "loads",
       title: "Loads & moves",
       blurb:
-        "Get values into registers — constants, nil, booleans, and register-to-register copies.",
+        "Get values into registers: constants, nil, booleans, and register-to-register copies.",
       ops: [:load_constant, :load_nil, :load_boolean, :load_env, :move]
     },
     %{
@@ -70,7 +70,7 @@ defmodule DemoWeb.OpcodesLive do
       id: "calls",
       title: "Calls & returns",
       blurb:
-        "Invoke and return — including tail calls, varargs, and the method-shim for `obj:method(...)`.",
+        "Invoke and return, including tail calls, varargs, and the method-shim for `obj:method(...)`.",
       ops: [:call, :tail_call, :return, :return_vararg, :vararg]
     },
     %{
@@ -158,7 +158,7 @@ defmodule DemoWeb.OpcodesLive do
                 The Lua compiler in this library lowers source to a flat
                 stream of <strong>register-based</strong>
                 opcodes. There
-                are no labels and no PC-relative jumps — control flow is
+                are no labels and no PC-relative jumps; control flow is
                 threaded through an explicit <code class="text-primary">continuation list</code>
                 inside the executor. The full set of opcodes the
                 disassembler emits is documented below.
@@ -189,7 +189,7 @@ defmodule DemoWeb.OpcodesLive do
                         </div>
                         <p class="text-sm text-base-content/75 leading-relaxed">
                           {Bytecode.opcode_doc(op) ||
-                            raw("<em class='text-base-content/40'>(undocumented — see source)</em>")}
+                            raw("<em class='text-base-content/40'>(undocumented; see source)</em>")}
                         </p>
                       </div>
                     <% end %>

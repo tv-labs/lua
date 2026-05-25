@@ -102,13 +102,15 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
-/* Restore the standard <details> collapse behavior. Tailwind v4 + daisyUI
-   preflight removes the user-agent rule that hides non-summary children when
-   the disclosure is closed, which breaks the mobile nav/footer/tour
-   collapsibles. Site code re-overrides this with `lg:[&>...]:!block` /
+/* Restore the standard <details> collapse behavior for site disclosures.
+   Tailwind v4 + daisyUI preflight removes the user-agent rule that hides
+   non-summary children when the disclosure is closed. Scoped to
+   `.disclosure` so ad-hoc <details> usage elsewhere (e.g. dev widgets)
+   isn't silently affected — apply the class to any <details> that should
+   collapse natively. Re-override with `lg:[&>...]:!block` /
    `sm:[&>...]:!block` where the content must remain visible at larger
    viewports regardless of the `open` attribute. */
-details:not([open]) > *:not(summary) {
+details.disclosure:not([open]) > *:not(summary) {
   display: none;
 }
 

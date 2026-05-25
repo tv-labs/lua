@@ -11,7 +11,7 @@ defmodule DemoWeb.PageController do
   end
 
   def about(conn, _params) do
-    render(conn, :about, page_title: "About — Lua.ex")
+    render(conn, :about, page_title: "About")
   end
 
   def health(conn, _params) do

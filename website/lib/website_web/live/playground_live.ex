@@ -208,7 +208,7 @@ defmodule DemoWeb.PlaygroundLive do
             <p class="text-base-content/70 mt-2 max-w-2xl">
               Write Lua, run it on the BEAM, and watch the
               <span class="text-primary font-semibold">register-based bytecode</span>
-              this VM actually executes. No JavaScript Lua — every byte is Elixir.
+              this VM actually executes. No JavaScript Lua. Every byte is Elixir.
             </p>
           </div>
           <div class="flex items-center gap-2">

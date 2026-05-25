@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
     <.live_title
-      default="Lua.ex — Sandboxed Lua 5.3 on the BEAM, built for AI agents"
+      default="Lua.ex: Sandboxed Lua 5.3 on the BEAM, built for AI agents"
       suffix=" · Lua.ex"
       phx-no-format
     >{assigns[:page_title]}</.live_title>
@@ -13,7 +13,7 @@
     <%!-- Primary SEO --%>
     <meta
       name="description"
-      content="An Elixir-native Lua 5.3 VM, built for embedding untrusted code — AI agent tools, user-supplied formulas, per-tenant plugins. Zero NIFs, zero shelling out, every opcode auditable."
+      content="An Elixir-native Lua 5.3 VM for embedding untrusted code: AI agent tools, user-supplied formulas, per-tenant plugins. Zero NIFs, zero shelling out, every opcode auditable."
     />
     <meta name="theme-color" content="#0d0d12" />
 
@@ -24,12 +24,12 @@
       property="og:title"
       content={
         assigns[:og_title] || assigns[:page_title] ||
-          "Lua.ex — Sandboxed Lua 5.3 on the BEAM, built for AI agents"
+          "Lua.ex: Sandboxed Lua 5.3 on the BEAM, built for AI agents"
       }
     />
     <meta
       property="og:description"
-      content="Embed untrusted Lua in your Elixir app — AI agent tools, user formulas, per-tenant plugins. Pure BEAM, sandboxed by default, zero NIFs."
+      content="Embed untrusted Lua in your Elixir app: AI agent tools, user formulas, per-tenant plugins. Pure BEAM, sandboxed by default, zero NIFs."
     />
     <meta property="og:image" content={url(~p"/images/og.png")} />
     <meta property="og:image:type" content="image/png" />
@@ -37,7 +37,7 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="Lua.ex — Lua 5.3 on the BEAM. Scriptable. Sandboxed. Stupid easy."
+      content="Lua.ex: Lua 5.3 on the BEAM. Scriptable. Sandboxed. Stupid easy."
     />
     <meta property="og:url" content={url(~p"/")} />
 
@@ -47,17 +47,17 @@
       name="twitter:title"
       content={
         assigns[:og_title] || assigns[:page_title] ||
-          "Lua.ex — Sandboxed Lua 5.3 on the BEAM, built for AI agents"
+          "Lua.ex: Sandboxed Lua 5.3 on the BEAM, built for AI agents"
       }
     />
     <meta
       name="twitter:description"
-      content="Embed untrusted Lua in your Elixir app — AI agent tools, user formulas, per-tenant plugins. Pure BEAM, sandboxed by default, zero NIFs."
+      content="Embed untrusted Lua in your Elixir app: AI agent tools, user formulas, per-tenant plugins. Pure BEAM, sandboxed by default, zero NIFs."
     />
     <meta name="twitter:image" content={url(~p"/images/og.png")} />
     <meta
       name="twitter:image:alt"
-      content="Lua.ex — Lua 5.3 on the BEAM. Scriptable. Sandboxed. Stupid easy."
+      content="Lua.ex: Lua 5.3 on the BEAM. Scriptable. Sandboxed. Stupid easy."
     />
 
     <link rel="icon" type="image/svg+xml" href={~p"/images/favicon.svg"} />

@@ -33,8 +33,8 @@
             <br />Scriptable, sandboxed, <span class="italic">stupid easy.</span>
           </h1>
           <p class="mt-6 text-lg text-base-content/70 leading-relaxed max-w-xl">
-            An Elixir-native Lua 5.3 VM, built for embedding untrusted code &mdash;
-            AI agent tools, user-supplied formulas, per-tenant plugins. Zero NIFs,
+            An Elixir-native Lua 5.3 VM for embedding untrusted code: AI agent tools,
+            user-supplied formulas, per-tenant plugins. Zero NIFs,
             zero shelling out, every opcode auditable.
           </p>
 
@@ -137,7 +137,7 @@
             The scripting language the world already trusts.
           </h2>
           <p class="mt-4 text-base-content/70 leading-relaxed">
-            Lua is small, fast to learn, and built to be embedded — that's
+            Lua is small, fast to learn, and built to be embedded. That's
             why Neovim, Roblox, World of Warcraft, Redis, Nginx, and
             Adobe Lightroom all chose it. Now you get the same language,
             but the host runtime is the BEAM, not a C extension.
@@ -157,7 +157,7 @@
               Built to embed
             </div>
             <div class="text-sm text-base-content/80">
-              Designed from day one to live inside a host application — not the other way around.
+              Designed from day one to live inside a host application, not the other way around.
             </div>
           </div>
           <div class="rounded-box border border-base-300/40 bg-base-100/50 p-4">
@@ -209,7 +209,7 @@
         title="Pure Elixir VM"
         accent="primary"
       >
-        Lexer, parser, register-based VM, and stdlib — all written in idiomatic
+        Lexer, parser, register-based VM, and stdlib, all written in idiomatic
         Elixir. Drops into any Phoenix or OTP release.
       </.feature>
 
@@ -219,7 +219,7 @@
         accent="success"
       >
         <code>io</code>, <code>os</code>, <code>require</code>, and friends are
-        disabled. Expose exactly the surface area you want — nothing more.
+        disabled. Expose exactly the surface area you want, nothing more.
       </.feature>
 
       <.feature
@@ -255,7 +255,7 @@
         accent="error"
       >
         Real stack traces, real source lines, useful messages. Errors blame the
-        callee by name — none of that "attempt to call a nil value" nonsense.
+        callee by name. None of that "attempt to call a nil value" nonsense.
       </.feature>
     </div>
   </section>
@@ -271,7 +271,7 @@
       </h2>
       <p class="mt-3 text-base-content/70 leading-relaxed">
         Each Lua VM is an immutable Elixir value. Spawn one per conversation,
-        per tool call, per user — throw it away when you're done.
+        per tool call, per user. Throw it away when you're done.
       </p>
     </div>
 
@@ -282,13 +282,13 @@
         </h3>
         <p class="text-base-content/70 leading-relaxed">
           Define the tools the agent can call. Hand it a VM with those tools
-          loaded. Run whatever Lua the model emits — it can only do what you
+          loaded. Run whatever Lua the model emits. It can only do what you
           exposed, nothing else. No subprocess. No NIF. No surprises.
         </p>
         <ul class="mt-5 space-y-2 text-sm text-base-content/80">
           <li class="flex gap-2.5">
             <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
-            One VM per agent conversation — cheap to spawn, garbage collected
+            One VM per agent conversation, cheap to spawn, garbage collected
           </li>
           <li class="flex gap-2.5">
             <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
@@ -302,7 +302,7 @@
           </li>
           <li class="flex gap-2.5">
             <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
-            Replay any opcode the agent ran — full audit trail in the
+            Replay any opcode the agent ran. Full audit trail in the
             <a href="/playground" class="link link-primary">playground</a>
           </li>
         </ul>
@@ -339,7 +339,7 @@
           </h2>
           <p class="mt-4 text-base-content/70 leading-relaxed">
             Like Godbolt, but for Lua bytecode. Type a snippet on the left, watch
-            the opcodes appear on the right — instruction by instruction,
+            the opcodes appear on the right, instruction by instruction,
             register by register. Toggle prototypes for nested closures and follow
             every <code class="text-primary">closure</code>, <code class="text-primary">call</code>,
             and <code class="text-primary">return</code>.
@@ -402,7 +402,7 @@
         </h2>
         <p class="mt-4 text-base-content/70 leading-relaxed">
           Define an API module with <code>use Lua.API</code>. Annotate functions
-          with <code>deflua</code>. Load it into a Lua VM. That's it — your
+          with <code>deflua</code>. Load it into a Lua VM. That's it. Your
           users can now write Lua scripts that call back into your Elixir code,
           safely.
         </p>
@@ -414,7 +414,7 @@
           <li class="flex gap-3">
             <.icon name="hero-check-circle-micro" class="size-5 text-success shrink-0 mt-0.5" />
             <span>
-              <strong>AI agent sandboxes</strong> — one Lua VM per conversation,
+              <strong>AI agent sandboxes</strong>: one Lua VM per conversation,
               tools exposed via <code>deflua</code>
             </span>
           </li>
@@ -460,7 +460,7 @@
         Why this VM, not the others?
       </h2>
       <p class="mt-3 text-base-content/70 max-w-2xl mx-auto">
-        Lua on the BEAM isn't new — but the developer experience is.
+        Lua on the BEAM isn't new. The developer experience is.
         Here's the honest breakdown.
       </p>
     </div>
@@ -547,8 +547,8 @@
     <p class="mt-3 text-xs text-base-content/50 text-center">
       *Benchee on Apple M1 Pro, Elixir 1.20.0-rc.4 / Erlang 29. Lua.ex
       is in the same ballpark as Luerl on tight CPU loops, both ~200×
-      slower than raw C Lua. For the embedded scripting use case —
-      AI tools, formulas, plugins — that gap rarely matters.
+      slower than raw C Lua. For the embedded scripting use case
+      (AI tools, formulas, plugins), that gap rarely matters.
     </p>
 
     <div class="mt-12 grid sm:grid-cols-3 gap-x-10 gap-y-8 max-w-5xl mx-auto">
@@ -556,7 +556,7 @@
         <div class="text-sm font-bold text-primary mb-2">Pick Lua.ex when…</div>
         <p class="text-sm text-base-content/70 leading-relaxed">
           you want ergonomic Elixir interop, compile-time Lua, and
-          beautiful errors — and you control the host application.
+          beautiful errors, and you control the host application.
         </p>
       </div>
       <div>

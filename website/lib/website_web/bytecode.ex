@@ -155,7 +155,7 @@ defmodule DemoWeb.Bytecode do
   Returns a curated map of opcode → short human-readable description.
 
   Used by the opcode reference page and as tooltip text in the
-  playground. Not exhaustive — covers the ops users will actually see
+  playground. Not exhaustive; covers the ops users will actually see
   in the playground examples.
   """
   def opcode_doc(op) do
@@ -179,13 +179,13 @@ defmodule DemoWeb.Bytecode do
       new_table: "Allocate a new table with the given array/hash pre-sizing.",
       get_table: "Read t[k] into a register.",
       set_table: "Write t[k] from a register.",
-      get_field: "Read t.name (string-keyed field) — faster path than get_table.",
+      get_field: "Read t.name (string-keyed field). Faster path than get_table.",
       set_field: "Write t.name from a register.",
       set_list: "Bulk-write a slice of registers into the array part of a table.",
       self: "Method-call shim: load t and t.name into adjacent registers for `obj:method(...)`.",
       closure: "Build a closure from a nested prototype, capturing its upvalues.",
       call: "Call a function. Args/results encoded as fixed counts, multi, or varargs.",
-      tail_call: "Tail-position call — replaces the current frame instead of pushing.",
+      tail_call: "Tail-position call. Replaces the current frame instead of pushing.",
       return: "Return zero or more values from the current function.",
       return_vararg: "Return whatever varargs the current function received.",
       vararg: "Materialise `...` into consecutive registers.",
@@ -198,7 +198,7 @@ defmodule DemoWeb.Bytecode do
       power: "Exponentiation (`^`).",
       negate: "Numeric negation.",
       concatenate: "String concatenation (`..`).",
-      length: "`#x` — string length, array length, or `__len` metamethod.",
+      length: "`#x`: string length, array length, or `__len` metamethod.",
       not: "Logical not.",
       equal: "Equality comparison (`==`).",
       less_than: "Less-than comparison (`<`).",

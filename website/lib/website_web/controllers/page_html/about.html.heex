@@ -27,7 +27,7 @@
           <p class="mt-6 text-lg text-base-content/70 leading-relaxed max-w-xl">
             Lua.ex didn't start in 2026. It started in 1986 with Erlang, kept
             going in 2012 when Robert Virding gave the BEAM an imperative
-            language, and arrived here after thirteen years of
+            language, and landed here after thirteen years of
             <a
               href="https://github.com/rvirding/luerl"
               target="_blank"
@@ -122,7 +122,7 @@
         <div class="mt-5 space-y-4 text-base-content/70 leading-relaxed">
           <p>
             Erlang itself began as a Prolog interpreter for a telephony algebra
-            in 1985–86 at Ericsson, before being rewritten as the JAM bytecode
+            in 1985-86 at Ericsson, before being rewritten as the JAM bytecode
             machine once Prolog proved too slow. So logic programming was
             literally in Erlang's DNA from day one.
           </p>
@@ -147,8 +147,8 @@
           </p>
           <p>
             With logic programming covered and a functional Lisp covered, the
-            obvious missing paradigm was <em>imperative</em>. He picked Lua —
-            small, clean, embeddable — and had at it.
+            obvious missing paradigm was <em>imperative</em>. He picked Lua
+            (small, clean, embeddable) and had at it.
             <strong class="text-base-content">Luerl</strong>
             shipped on February 18, 2012.
           </p>
@@ -177,7 +177,7 @@
         </figcaption>
 
         <div class="mt-6 pt-5 border-t border-base-300/60 text-xs text-base-content/50 leading-relaxed">
-          The name is "Lua" + "Erl" — Robert confirmed it himself on Hacker
+          The name is "Lua" + "Erl". Robert confirmed it himself on Hacker
           News. See the original <a
             href="https://groups.google.com/g/erlang-questions/c/0SyhdmIf1uQ"
             target="_blank"
@@ -207,8 +207,8 @@
             local state?
           </p>
           <p class="mt-3 text-base-content/70 leading-relaxed">
-            The answer, it turns out, is what you'd do in Erlang anyway —
-            thread the Lua state through every call as a value. No process
+            The answer turns out to be what you'd do in Erlang anyway: thread
+            the Lua state through every call as a value. No process
             dictionary, no ETS escape hatch. Straight Erlang.
           </p>
         </div>
@@ -273,8 +273,8 @@
               class="link link-hover text-base-content"
             >TV Labs</a>, we run vision-based integration tests against
             real Roku, Fire TV, Apple TV, and game-console hardware. To
-            describe a test — "tap right, wait for the home screen, take a
-            screenshot, assert the carousel" — I needed a scripting language
+            describe a test ("tap right, wait for the home screen, take a
+            screenshot, assert the carousel") I needed a scripting language
             I could embed, sandbox, and run thousands of times a day inside
             an Elixir release.
           </p>
@@ -284,7 +284,7 @@
             twelve years. The only thing missing was an Elixir-shaped API.
           </p>
           <p>
-            So in 2024 I built one — the
+            So in 2024 I built one: the
             <a
               href="https://hex.pm/packages/lua"
               target="_blank"
@@ -293,7 +293,7 @@
             >
               tv-labs/lua
             </a>
-            package on Hex — wrapping Luerl with the
+            package on Hex, wrapping Luerl with the
             <code class="text-primary bg-base-300/40 px-1 rounded">deflua</code>
             macro, the <code class="text-primary bg-base-300/40 px-1 rounded">~LUA</code>
             sigil for compile-time syntax checking, and a
@@ -335,8 +335,8 @@
 
     <div class="mt-6 space-y-4 text-base-content/70 leading-relaxed">
       <p>
-        At Code BEAM Europe 2024 we ended up giving a talk together — <em>Lua on the BEAM</em>
-        — covering Luerl's history, the Elixir
+        At Code BEAM Europe 2024 we ended up giving a talk together,
+        <em>Lua on the BEAM</em>, covering Luerl's history, the Elixir
         wrapper, and what a next-generation Lua VM on the BEAM could look
         like.
       </p>
@@ -345,7 +345,7 @@
         bother writing a Lua interpreter in Erlang in the first place?
         That's when he told me the tour-of-paradigms story above. We
         spent the rest of the conference talking about what a Luerl 2.0
-        could look like — better error messages, real stack traces,
+        could look like: better error messages, real stack traces,
         memory sandboxing, all the things that Luerl's age made hard to
         retrofit.
       </p>
@@ -365,7 +365,7 @@
           Watch the talk &middot; YouTube
         </div>
         <div class="font-semibold tracking-tight truncate">
-          Lua on the BEAM — Code BEAM Europe 2024
+          Lua on the BEAM &middot; Code BEAM Europe 2024
         </div>
         <div class="text-xs text-base-content/60 mt-0.5">
           Robert Virding &amp; Dave Lucia &middot; 40 min
@@ -390,7 +390,7 @@
       <div class="mt-5 space-y-4 text-base-content/70 leading-relaxed">
         <p>
           The wrapper got us most of the way there. But as the embedded surface
-          area grew — more tools, more user scripts, more agents — the cracks
+          area grew (more tools, more user scripts, more agents) the cracks
           showed. Error messages were terse. Stack traces stopped at the Luerl
           boundary. There was no way to see the bytecode the VM was actually
           running.
@@ -399,13 +399,13 @@
           What started as a planned Luerl 2.0 became something else: a full
           rewrite, in Elixir, top to bottom. A new lexer, a new parser, a new
           register-based VM, a new compiler. Lua.ex 1.0 ships as a pure-Elixir
-          implementation of Lua 5.3 — no Luerl in the dependency graph, no
+          implementation of Lua 5.3. No Luerl in the dependency graph, no
           NIFs, no shelling out. Just Elixir.
         </p>
         <p>
           The goal wasn't to outperform Luerl. It was to give Elixir
           developers the same developer experience they get with Phoenix or
-          Ecto — beautiful errors, compile-time validation, code you can read
+          Ecto: beautiful errors, compile-time validation, code you can read
           when something goes wrong.
         </p>
       </div>
@@ -418,7 +418,7 @@
         accent="warning"
       >
         Lua frames <em>and</em>
-        Elixir frames in one trace, blamed by the callee's name — none of that
+        Elixir frames in one trace, blamed by the callee's name. None of that
         "attempt to call a nil value" nonsense.
       </.feature>
 
@@ -443,7 +443,7 @@
 
     <p class="mt-10 text-base-content/70 leading-relaxed max-w-3xl">
       Luerl is still the right choice for Erlang projects, and Robert is still
-      actively shipping it. Lua.ex is the Elixir-native sibling — born from
+      actively shipping it. Lua.ex is the Elixir-native sibling, born from
       the same conversations, aimed at the same problem from the other side
       of the BEAM.
     </p>
@@ -467,7 +467,7 @@
         </p>
         <p>
           Credit also to the long-time Luerl contributors who shaped the API
-          we ported from — Henning Diedrich, Cees de Groot, Heinz Gies, and
+          we ported from: Henning Diedrich, Cees de Groot, Heinz Gies, and
           dozens of others on the <a
             href="https://github.com/rvirding/luerl/graphs/contributors"
             target="_blank"

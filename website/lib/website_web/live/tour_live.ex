@@ -106,17 +106,17 @@ defmodule DemoWeb.TourLive do
           <aside class="lg:sticky lg:top-20 lg:self-start">
             <details
               id="tour-sidebar"
-              class="group lg:[&>summary]:hidden lg:[&>.tour-nav-body]:!block [&[open]>summary>.tour-chevron]:rotate-180"
+              class="disclosure group lg:[&>summary]:hidden lg:[&>.tour-nav-body]:!block [&[open]>summary>.tour-chevron]:rotate-180"
             >
               <summary class="flex items-center justify-between gap-3 px-3 py-2.5 mb-3 rounded-box border border-base-300/60 bg-base-200/50 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                 <span class="min-w-0 flex-1">
-                  <span class="block text-[10px] uppercase tracking-[0.14em] font-semibold text-base-content/40">
+                  <span class="block text-[11px] uppercase tracking-[0.12em] font-semibold text-base-content/60">
                     Chapter {chapter_label(@lesson.chapter)} · Lesson {lesson_index(
                       @lessons,
                       @lesson
                     ) + 1} of {length(@lessons)}
                   </span>
-                  <span class="block text-sm font-medium text-base-content/90 truncate">
+                  <span class="block text-sm font-medium text-base-content/90 line-clamp-2">
                     {raw(render_inline(@lesson.title))}
                   </span>
                 </span>

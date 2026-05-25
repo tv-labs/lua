@@ -89,14 +89,17 @@ defmodule DemoWeb.Layouts do
           </svg>
           GitHub
         </a>
-        <.theme_toggle />
-        <a href="/playground" class="btn btn-primary btn-sm shadow-sm">
+        <.theme_toggle class="hidden md:flex" />
+        <a
+          href="/playground"
+          class="btn btn-primary shadow-sm min-h-11 md:min-h-0 md:h-8 md:btn-sm"
+        >
           Try it <.icon name="hero-arrow-right-micro" class="size-4" />
         </a>
 
-        <details class="md:hidden dropdown dropdown-end" id="mobile-nav">
+        <details class="disclosure md:hidden dropdown dropdown-end" id="mobile-nav">
           <summary
-            class="btn btn-ghost btn-sm btn-square"
+            class="btn btn-ghost btn-square min-h-11 min-w-11 h-11 w-11"
             aria-label="Open navigation menu"
           >
             <svg
@@ -114,7 +117,7 @@ defmodule DemoWeb.Layouts do
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </summary>
-          <ul class="menu dropdown-content mt-2 z-40 w-56 p-2 shadow-lg bg-base-100 rounded-box border border-base-300/60">
+          <ul class="menu menu-lg dropdown-content mt-2 z-40 w-60 p-2 shadow-lg bg-base-100 rounded-box border border-base-300/60 [&_li>*]:min-h-11">
             <li>
               <.link
                 navigate="/playground"
@@ -149,6 +152,14 @@ defmodule DemoWeb.Layouts do
             </li>
             <li><a href="https://hexdocs.pm/lua" target="_blank">Docs</a></li>
             <li><a href="https://github.com/tv-labs/lua" target="_blank">GitHub</a></li>
+            <li class="menu-title pt-3 pb-1 text-[10px] uppercase tracking-[0.12em]">
+              Theme
+            </li>
+            <li class="!min-h-0">
+              <div class="flex justify-center !p-1">
+                <.theme_toggle />
+              </div>
+            </li>
           </ul>
         </details>
       </div>
@@ -319,14 +330,14 @@ defmodule DemoWeb.Layouts do
 
   defp footer_section(assigns) do
     ~H"""
-    <details class="group border-b border-base-300/40 sm:border-0 [&[open]>summary>svg]:rotate-180 sm:[&>ul]:!block">
-      <summary class="flex items-center justify-between py-2 sm:py-0 sm:mb-3 cursor-pointer sm:cursor-default sm:pointer-events-none list-none [&::-webkit-details-marker]:hidden">
-        <span class="text-xs font-bold uppercase tracking-wider text-base-content/50">
+    <details class="disclosure group border-b border-base-300/40 sm:border-0 [&[open]>summary>svg]:rotate-180 sm:[&>ul]:!block">
+      <summary class="flex items-center justify-between min-h-11 py-2 sm:min-h-0 sm:py-0 sm:mb-3 cursor-pointer sm:cursor-default sm:pointer-events-none list-none [&::-webkit-details-marker]:hidden">
+        <span class="text-xs font-bold uppercase tracking-wider text-base-content/70 sm:text-base-content/50">
           {@title}
         </span>
         <.icon
           name="hero-chevron-down-micro"
-          class="size-4 text-base-content/40 transition-transform sm:hidden"
+          class="size-5 text-base-content/60 transition-transform sm:hidden"
         />
       </summary>
       <ul class="space-y-2 text-sm pb-3 sm:pb-0">
@@ -475,20 +486,29 @@ defmodule DemoWeb.Layouts do
     """
   end
 
+  attr :class, :string, default: ""
+
   @doc """
   Provides dark vs light theme toggle based on themes defined in app.css.
 
   See <head> in root.html.heex which applies the theme before page load.
+  Dark is the canonical default; the moon button is marked with a small
+  primary dot to signal that.
   """
   def theme_toggle(assigns) do
     ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
+    <div class={[
+      "card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full",
+      @class
+    ]}>
       <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 transition-[left]" />
 
       <button
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="system"
+        title="Follow system"
+        aria-label="Follow system theme"
       >
         <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
@@ -497,16 +517,24 @@ defmodule DemoWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="light"
+        title="Light"
+        aria-label="Light theme"
       >
         <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="relative flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="dark"
+        title="Dark (default)"
+        aria-label="Dark theme (default)"
       >
         <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
+        <span
+          aria-hidden="true"
+          class="absolute top-1 right-1.5 size-1.5 rounded-full bg-primary shadow-[0_0_4px_var(--color-primary)]"
+        />
       </button>
     </div>
     """
