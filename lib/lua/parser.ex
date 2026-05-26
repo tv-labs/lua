@@ -576,10 +576,10 @@ defmodule Lua.Parser do
             # It's a call statement (or error if not a call)
             case expr do
               %Expr.Call{} = call ->
-                {:ok, %Statement.CallStmt{call: call, meta: nil}, rest}
+                {:ok, %Statement.CallStmt{call: call, meta: Meta.new(starting_pos)}, rest}
 
               %Expr.MethodCall{} = call ->
-                {:ok, %Statement.CallStmt{call: call, meta: nil}, rest}
+                {:ok, %Statement.CallStmt{call: call, meta: Meta.new(starting_pos)}, rest}
 
               other ->
                 # Prefer the AST node's meta when populated; some postfix
