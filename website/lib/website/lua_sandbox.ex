@@ -1521,8 +1521,7 @@ defmodule Website.LuaSandbox do
         slug: "next-steps",
         title: "Where to go from here",
         chapter: :internals,
-        objective:
-          "Pick the next stop: playground, opcode reference, or the canonical Lua book.",
+        objective: "Pick the next stop: playground, opcode reference, or the canonical Lua book.",
         body: """
         You've seen the language, the standard library, the host
         integration, and the bytecode pipeline. Three places to go
@@ -1534,5 +1533,4 @@ defmodule Website.LuaSandbox do
       }
     ]
   end
-
 end

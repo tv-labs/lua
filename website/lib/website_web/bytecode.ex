@@ -168,7 +168,8 @@ defmodule DemoWeb.Bytecode do
         "Put the globals table (`_ENV`, where `print`, `math`, etc. live) into a register so later instructions can look things up in it.",
       load_constant:
         "Put a literal value — a number, string, `nil`, or boolean — into a register. Constants are baked into the bytecode at compile time.",
-      load_nil: "Set a run of registers to `nil` in one shot (used when declaring locals without values).",
+      load_nil:
+        "Set a run of registers to `nil` in one shot (used when declaring locals without values).",
       load_boolean: "Put `true` or `false` into a register.",
       move: "Copy the value in one register into another. Like `local x = y`.",
       get_global: "Read a global variable (e.g. `print`) by name into a register.",
@@ -197,9 +198,11 @@ defmodule DemoWeb.Bytecode do
         "Call a function. The function and its arguments must already be in consecutive registers. Returns are written back to those same registers.",
       tail_call:
         "Call a function in tail position — reuses the current function's stack frame instead of growing it. Lets recursive functions run without exhausting the stack.",
-      return: "Return zero or more values from this function. Values come from a run of consecutive registers.",
+      return:
+        "Return zero or more values from this function. Values come from a run of consecutive registers.",
       return_vararg: "Return whatever `...` arguments this function received, unchanged.",
-      vararg: "Expand `...` into a run of consecutive registers so following instructions can use them.",
+      vararg:
+        "Expand `...` into a run of consecutive registers so following instructions can use them.",
       add: "Compute `a + b` and write the result to a register.",
       subtract: "Compute `a - b` and write the result to a register.",
       multiply: "Compute `a * b` and write the result to a register.",
@@ -248,44 +251,119 @@ defmodule DemoWeb.Bytecode do
   """
   def op_signature(op) do
     case op do
-      :load_constant -> "rD, K"
-      :load_nil -> "rD, N"
-      :load_boolean -> "rD, bool"
-      :load_env -> "rD"
-      :move -> "rD, rS"
-      :get_global -> "rD, name"
-      :set_global -> "name, rS"
-      :get_upvalue -> "rD, up[i]"
-      :set_upvalue -> "up[i], rS"
-      :get_open_upvalue -> "rD, rS"
-      :set_open_upvalue -> "rD, rS"
-      :new_table -> "rD, array, hash"
-      :get_table -> "rD, rT, k"
-      :set_table -> "rT, k, rV"
-      :get_field -> "rD, rT, name"
-      :set_field -> "rT, name, rV"
-      :set_list -> "rT, start, count, off"
-      :self -> "rD, rO, name"
-      :closure -> "rD, proto[i]"
-      :call -> "rB, argc, resc"
-      :tail_call -> "rB, argc"
-      :return -> "rB, count"
-      :return_vararg -> "(varargs)"
-      :vararg -> "rB, count"
-      :test -> "rR"
-      :test_true -> "rR"
-      :test_and -> "rD, rS"
-      :test_or -> "rD, rS"
-      :numeric_for -> "rB"
-      :generic_for -> "rB, vars"
-      :scope -> "registers"
-      :source_line -> "line"
-      op when op in [:add, :subtract, :multiply, :divide, :floor_divide, :modulo, :power] -> "rD, rA, rB"
-      op when op in [:concatenate, :bitwise_and, :bitwise_or, :bitwise_xor] -> "rD, rA, rB"
-      op when op in [:shift_left, :shift_right] -> "rD, rA, rB"
-      op when op in [:equal, :less_than, :less_equal] -> "rD, rA, rB"
-      op when op in [:negate, :not, :length, :bitwise_not] -> "rD, rS"
-      _ -> ""
+      :load_constant ->
+        "rD, K"
+
+      :load_nil ->
+        "rD, N"
+
+      :load_boolean ->
+        "rD, bool"
+
+      :load_env ->
+        "rD"
+
+      :move ->
+        "rD, rS"
+
+      :get_global ->
+        "rD, name"
+
+      :set_global ->
+        "name, rS"
+
+      :get_upvalue ->
+        "rD, up[i]"
+
+      :set_upvalue ->
+        "up[i], rS"
+
+      :get_open_upvalue ->
+        "rD, rS"
+
+      :set_open_upvalue ->
+        "rD, rS"
+
+      :new_table ->
+        "rD, array, hash"
+
+      :get_table ->
+        "rD, rT, k"
+
+      :set_table ->
+        "rT, k, rV"
+
+      :get_field ->
+        "rD, rT, name"
+
+      :set_field ->
+        "rT, name, rV"
+
+      :set_list ->
+        "rT, start, count, off"
+
+      :self ->
+        "rD, rO, name"
+
+      :closure ->
+        "rD, proto[i]"
+
+      :call ->
+        "rB, argc, resc"
+
+      :tail_call ->
+        "rB, argc"
+
+      :return ->
+        "rB, count"
+
+      :return_vararg ->
+        "(varargs)"
+
+      :vararg ->
+        "rB, count"
+
+      :test ->
+        "rR"
+
+      :test_true ->
+        "rR"
+
+      :test_and ->
+        "rD, rS"
+
+      :test_or ->
+        "rD, rS"
+
+      :numeric_for ->
+        "rB"
+
+      :generic_for ->
+        "rB, vars"
+
+      :scope ->
+        "registers"
+
+      :source_line ->
+        "line"
+
+      op when op in [:add, :subtract, :multiply, :divide, :floor_divide, :modulo, :power] ->
+        "rD, rA, rB"
+
+      op when op in [:concatenate, :bitwise_and, :bitwise_or, :bitwise_xor] ->
+        "rD, rA, rB"
+
+      op when op in [:shift_left, :shift_right] ->
+        "rD, rA, rB"
+
+      op when op in [:equal, :less_than, :less_equal] ->
+        "rD, rA, rB"
+
+      op when op in [:negate, :not, :length, :bitwise_not] ->
+        "rD, rS"
+
+      _ ->
+        ""
     end
   end
 
