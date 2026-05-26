@@ -68,13 +68,8 @@ defmodule Lua.VM.DisplayTest do
     test "wraps Lua closures returned in default decode mode" do
       {[c], _} = Lua.eval!(Lua.new(), "return function(a, b) return a + b end")
 
-      assert %Closure{
-               source: "<eval>",
-               line: 1,
-               arity: 2,
-               vararg?: false,
-               ref: {:lua_closure, _, _}
-             } = c
+      assert %Closure{source: "<eval>", line: 1, arity: 2, vararg?: false, ref: ref} = c
+      assert match?({:lua_closure, _, _}, ref) or match?({:compiled_closure, _, _}, ref)
 
       assert inspect(c) == "#Lua.Closure<source: \"<eval>\", line: 1, arity: 2>"
     end
@@ -82,7 +77,8 @@ defmodule Lua.VM.DisplayTest do
     test "wraps Lua closures returned in decode: false mode" do
       {[c], _} = Lua.eval!(Lua.new(), "return function() end", decode: false)
 
-      assert %Closure{ref: {:lua_closure, _, _}} = c
+      assert %Closure{ref: ref} = c
+      assert match?({:lua_closure, _, _}, ref) or match?({:compiled_closure, _, _}, ref)
       assert inspect(c) =~ "#Lua.Closure<"
     end
 
@@ -158,7 +154,8 @@ defmodule Lua.VM.DisplayTest do
     test "returns the underlying lua_closure for closures" do
       {[c], _} = Lua.eval!(Lua.new(), "return function() end")
 
-      assert match?({:lua_closure, _, _}, Lua.unwrap(c))
+      assert match?({:lua_closure, _, _}, Lua.unwrap(c)) or
+               match?({:compiled_closure, _, _}, Lua.unwrap(c))
     end
 
     test "returns the underlying native_func for native funcs" do

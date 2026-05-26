@@ -2,10 +2,10 @@
 id: B5a-v2
 title: Dispatcher foundation — single hand-written executor over dense bytecode
 issue: null
-pr: null
+pr: 237
 branch: perf/dispatcher-foundation
 base: main
-status: ready
+status: review
 direction: B
 unlocks:
   - B5b-v2 (table opcodes), B5c-v2 (closures), B5d-v2 (error fidelity)
@@ -399,4 +399,144 @@ MIX_ENV=benchmark mix run benchmarks/string_ops.exs
 
 ## Discoveries
 
-(Will be filled in during implementation.)
+### IR shape diverges from plan
+
+The plan was drafted against a mental model of a flat instruction stream
+with absolute PC labels and a separate constants pool. The actual IR is
+**structured**: `:test` carries nested instruction lists for then/else
+branches, loops use CPS continuation markers (not PC jumps), and
+constants are inlined directly into opcodes (no pool, no `k_idx`).
+
+Adapted the design accordingly: the bytecode is a tuple of opcode tuples
+where `:test` recursively carries nested bytecode sub-tuples. The
+dispatcher pushes `{code, pc}` resume points onto a local continuation
+stack when entering a branch body, mirroring the interpreter's pattern.
+No PC label resolution machinery needed.
+
+### Several plan opcode signatures were stale
+
+- `:return` is `{:return, base, count}`, not `{:return_one, base}`.
+- `:call` is 5-tuple with `name_hint`, not 3-tuple.
+- `:load_env` carries `dest`, not zero operands.
+- `:source_line` is `{:source_line, line, file}`, not just `{line}`.
+- `:scope` is listed in coverage but never emitted by the current
+  codegen — it's vestigial in `Lua.Compiler.Instruction`.
+
+The bytecode encoder matches the actual shapes. `:scope` was dropped
+from coverage as a no-op.
+
+### `proto.subprotos` field is named `prototypes`
+
+The plan called it `subprotos` throughout. The actual struct field is
+`prototypes`. Bytecode compilation walks `proto.prototypes` and stores
+encoded children back in the same field.
+
+### `:source_line` opcodes stripped from bytecode
+
+Keeping them in the dense encoding cost one no-op dispatch per source
+line, ~5% on fib(25). Stripped at encode time. Error attribution for
+compiled prototypes is deferred to B5d-v2 anyway, so the
+instruction-stream `:source_line` entries (used by the interpreter for
+error positions) survive untouched on the prototype.
+
+### Perf gate is brushed, not robustly cleared
+
+Final measurements on fib(25) (full Benchee mode, median of 10s runs):
+
+- Dispatcher: ~65 ms/iter
+- Interpreter (same VM, bytecode stripped): ~76 ms/iter
+- **Speedup: 1.17x median** (range 1.14x – 1.21x across runs, ~1.5% deviation)
+
+The plan's gate was ≥1.2x. We sit between 1.14 and 1.21, with the
+median around 1.17. fib(30) full benchmark beats Luerl by ~5% on a good
+run (stretch goal: parity ±10%). No workload regresses.
+
+Why we didn't hit a clean 1.2x: the interpreter is already heavily
+tuned (per-clause guards, inlined integer fast paths, dedicated
+`{:return, _, 1}` fast clause). The dispatcher's wins — integer-tagged
+case dispatch, tuple-encoded operands, stripped `:source_line` — are
+real but bounded by the interpreter's existing optimisations.
+
+Profile attribution after all optimization passes:
+
+- `Dispatcher.dispatch/8`: 50% (the case-jump-table itself)
+- `:erlang.setelement/3`: 30% (register writes — unavoidable)
+- `copy_regs/5` + `init_callee_regs/4`: 9% (call setup tuple allocation)
+- `return_one/3`: 4% (frame unwinding)
+
+Further gains require structural changes explicitly out of scope:
+
+- Mutable register storage (`:array`/process dict) would eliminate
+  `setelement/3` allocations entirely.
+- Flat PC bytecode with label resolution would let `:test` skip the
+  continuation-stack push.
+- Direct-threaded dispatch (computed-goto-equivalent) would replace
+  the case statement with token-driven jumps.
+
+Each is its own follow-up plan.
+
+### Optimization iterations log
+
+For reproducibility — the perf loop that got us from 1.05x to 1.17x:
+
+1. **Initial baseline:** 1.05x (dispatch/8 + step/9 two-level chain).
+2. **Inlined `step/9` into `dispatch/8`:** 1.09x (eliminated one call frame per opcode).
+3. **Tuple frames + unboxed `return_one/3`:** 1.09x (skips `[v]` allocation on return).
+4. **Stripped `:source_line` from bytecode:** 1.15x (~5% win — 228k dispatches saved on fib(25)).
+5. **Inlined int64-bounds guard + truthy check:** 1.17x median (eliminated `Numeric.to_signed_int64` and `Value.truthy?` function calls in hot paths).
+6. **Tried open_upvalues empty-map elision:** -3% regression, reverted.
+
+### `:compiled_closure` plumbing has more touch points than expected
+
+Every site in the codebase that pattern-matches on `{:lua_closure, _, _}`
+needed a parallel clause for `{:compiled_closure, _, _}`:
+
+- `Lua.VM.Executor.call_function/3`, `:call` opcode, `:closure` opcode, `invoke_metamethod`, `call_value`, `value_type`
+- `Lua.VM.Value.type_name`, `to_string`
+- `Lua.VM.Stdlib.lua_load`, `compile_loaded_chunk`
+- `Lua.VM.Stdlib.Util.typeof`
+- `Lua.VM.Stdlib.String` (gsub repl)
+- `Lua.VM.Stdlib.Debug.getinfo`
+- `Lua.VM.Display.wrap_value`, `wrap_closure`
+- `Lua.Util.encoded?`
+- `Lua.Api.is_lua_func` guard
+- `Lua.do_call_function`
+
+Tests that asserted on the specific `:lua_closure` tag (display tests,
+unwrap doctest) had to learn that closures may now be either tag.
+
+This was a real cost. A future refactor could collapse the two tags
+into one (`{:lua_closure, proto, upvalues}` where `proto.bytecode != nil`
+implies dispatcher routing) — but the explicit tag makes the routing
+decision local to `call_function/3` and that's worth something.
+
+### Tests added
+
+- `test/lua/vm/dispatcher_test.exs` — 27 per-opcode goldens.
+- `test/lua/compiler/bytecode_test.exs` — 14 fallback cascade tests.
+- `test/lua/vm/leak_regression_test.exs` — 3 leak guards (atom count
+  growth, module load growth, bytecode-is-tuple shape).
+
+Total: +44 tests, 1705 → 1749, 0 failures.
+
+## What changed
+
+- New: `lib/lua/compiler/bytecode.ex` (encoder),
+  `lib/lua/vm/dispatcher.ex` (hand-written executor),
+  `benchmarks/dispatcher_vs_interpreter.exs` (perf comparison harness),
+  `test/lua/compiler/bytecode_test.exs`,
+  `test/lua/vm/dispatcher_test.exs`,
+  `test/lua/vm/leak_regression_test.exs`.
+- Modified: `lib/lua/compiler.ex` (wires bytecode encoder into compile
+  pipeline), `lib/lua/compiler/prototype.ex` (adds `bytecode` field),
+  `lib/lua/vm/executor.ex` (adds `:compiled_closure` clauses to
+  `call_function/3`, `:call` opcode, `:closure` opcode; adds
+  `dispatcher_*` bridge helpers for arithmetic/comparison/field access),
+  `lib/lua.ex`, `lib/lua/api.ex`, `lib/lua/util.ex`,
+  `lib/lua/vm/{display,value}.ex`,
+  `lib/lua/vm/stdlib/{debug,string,util}.ex`,
+  `lib/lua/vm/stdlib.ex` (all gain parallel `:compiled_closure` clauses).
+- Tests: `test/lua/vm/display_test.exs` updated to accept either
+  closure tag.
+
+PR: https://github.com/tv-labs/lua/pull/237

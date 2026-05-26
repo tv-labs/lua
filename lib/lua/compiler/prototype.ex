@@ -20,9 +20,16 @@ defmodule Lua.Compiler.Prototype do
           is_vararg: boolean(),
           max_registers: non_neg_integer(),
           source: binary(),
-          lines: {non_neg_integer(), non_neg_integer()}
+          lines: {non_neg_integer(), non_neg_integer()},
+          bytecode: tuple() | nil
         }
 
+  # `bytecode` is an optional dense encoding produced by `Lua.Compiler.Bytecode`.
+  # When set, the executor routes calls into `Lua.VM.Dispatcher` for a tighter
+  # dispatch loop. When nil, the prototype is interpreted in the usual way.
+  # The two representations are kept independent so the human-readable
+  # `instructions` list (used by error reporting, debugging, and any future
+  # tooling) survives untouched.
   defstruct instructions: [],
             prototypes: [],
             upvalue_descriptors: [],
@@ -31,7 +38,8 @@ defmodule Lua.Compiler.Prototype do
             max_registers: 0,
             source: <<"-no-source-">>,
             lines: {0, 0},
-            varargs: []
+            varargs: [],
+            bytecode: nil
 
   @doc """
   Creates a new prototype with the given options.

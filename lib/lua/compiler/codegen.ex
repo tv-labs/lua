@@ -64,12 +64,25 @@ defmodule Lua.Compiler.Codegen do
       # Emit source_line before each statement
       line_instr = emit_source_line(stmt, ctx)
       {new_instructions, ctx} = gen_statement(stmt, ctx)
-      # Track peak for max_registers, then reset for next statement
+      # Track peak for max_registers, then reset for next statement.
+      # `record_peak/1` (called at every internal reset of next_reg —
+      # e.g. inside `gen_expr` for `Expr.Call` after the callee is
+      # evaluated) keeps `peak_reg` honest across the statement; the
+      # `max` here picks up any tail allocation that wasn't reset.
       peak = max(Map.get(ctx, :peak_reg, 0), ctx.next_reg)
       ctx = %{ctx | next_reg: saved_next_reg}
       ctx = Map.put(ctx, :peak_reg, peak)
       {instructions ++ line_instr ++ new_instructions, ctx}
     end)
+  end
+
+  # Capture the current `ctx.next_reg` as a peak before a downward reset.
+  # Each `gen_expr` site that lowers `next_reg` (typically after a callee
+  # has been evaluated into a base register and the temp registers used
+  # to load it are about to be recycled) calls this first so the peak
+  # information survives the reset.
+  defp record_peak(ctx) do
+    Map.put(ctx, :peak_reg, max(Map.get(ctx, :peak_reg, 0), ctx.next_reg))
   end
 
   defp emit_source_line(%{meta: %{start: %{line: line}}}, ctx) when is_integer(line) do
@@ -1009,6 +1022,13 @@ defmodule Lua.Compiler.Codegen do
         [Instruction.move(base_reg, func_reg)]
       end
 
+    # Record the peak before resetting next_reg — `func_expr` may have
+    # used temp registers above `base_reg + 1` to load the callee
+    # (e.g. `_ENV.string.upper` chains through two `:get_field`
+    # opcodes). Without this, those high-water register indices are
+    # invisible to `max_registers` and downstream executors have to
+    # over-size their register tuples to compensate.
+    ctx = record_peak(ctx)
     ctx = %{ctx | next_reg: base_reg + 1}
 
     # Check what the last argument is — determines calling convention
@@ -1290,6 +1310,10 @@ defmodule Lua.Compiler.Codegen do
     # self instruction: R[base+1] = obj, R[base] = obj["method"]
     self_instruction = Instruction.self_instr(base_reg, obj_reg, method, obj_hint)
 
+    # Same peak-capture as `Expr.Call`: the object expression may have
+    # used temp registers above the call's base that we're about to
+    # discard, so promote them to `peak_reg` first.
+    ctx = record_peak(ctx)
     ctx = %{ctx | next_reg: base_reg + 2}
 
     # Compile arguments into temp registers above the arg window

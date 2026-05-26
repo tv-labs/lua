@@ -66,7 +66,6 @@ defmodule Lua.Compiler.Instruction do
 
   # Control flow
   def test(register, then_body, else_body), do: {:test, register, then_body, else_body}
-  def test_true(register, then_body), do: {:test_true, register, then_body}
   def test_and(dest, source, rest_body), do: {:test_and, dest, source, rest_body}
   def test_or(dest, source, rest_body), do: {:test_or, dest, source, rest_body}
 

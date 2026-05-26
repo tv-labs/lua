@@ -12,6 +12,7 @@ defmodule Lua.VM.Executor do
     line   — current source line (threaded to avoid State struct allocation)
   """
 
+  alias Lua.VM.Dispatcher
   alias Lua.VM.InternalError
   alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
@@ -124,6 +125,14 @@ defmodule Lua.VM.Executor do
     {results, state}
   end
 
+  def call_function({:compiled_closure, callee_proto, callee_upvalues}, args, state) do
+    # Compiled callees route through the dispatcher. The dispatcher manages
+    # its own register file setup, vararg routing, and open-upvalue save/
+    # restore — `Dispatcher.execute/4` mirrors the semantics of this
+    # function for the bytecode-encoded path.
+    Dispatcher.execute(callee_proto, args, callee_upvalues, state)
+  end
+
   def call_function({:native_func, fun}, args, state) do
     case fun.(args, state) do
       {results, %State{} = new_state} when is_list(results) ->
@@ -164,6 +173,108 @@ defmodule Lua.VM.Executor do
             call_function(call_mm, [other | args], state)
         end
     end
+  end
+
+  # ── Bridges for Lua.VM.Dispatcher ──────────────────────────────────────────
+  #
+  # The dispatcher reuses these helpers to keep metamethod fidelity in
+  # lockstep with the interpreter. Each helper takes operands plus the
+  # current `proto` (for source attribution) and returns the same
+  # `{value, state}` shape the interpreter clauses produce.
+  #
+  # Line position for raise sites is passed as `0` because the dispatcher
+  # does not yet track per-instruction line numbers — error attribution
+  # for compiled prototypes is the subject of B5d-v2. Native callbacks
+  # invoked via metamethods still get accurate positions via the
+  # process-dictionary bridge installed at the call boundary.
+
+  @doc false
+  @spec dispatcher_binop(atom(), term(), term(), State.t(), term()) :: {term(), State.t()}
+  def dispatcher_binop(:add, a, b, state, proto) do
+    try_binary_metamethod("__add", a, b, state, fn -> safe_add(a, b, 0, proto.source) end)
+  end
+
+  def dispatcher_binop(:subtract, a, b, state, proto) do
+    try_binary_metamethod("__sub", a, b, state, fn -> safe_subtract(a, b, 0, proto.source) end)
+  end
+
+  def dispatcher_binop(:multiply, a, b, state, proto) do
+    try_binary_metamethod("__mul", a, b, state, fn -> safe_multiply(a, b, 0, proto.source) end)
+  end
+
+  def dispatcher_binop(:divide, a, b, state, proto) do
+    try_binary_metamethod("__div", a, b, state, fn -> safe_divide(a, b, 0, proto.source) end)
+  end
+
+  def dispatcher_binop(:floor_divide, a, b, state, proto) do
+    try_binary_metamethod("__idiv", a, b, state, fn -> safe_floor_divide(a, b, 0, proto.source) end)
+  end
+
+  def dispatcher_binop(:modulo, a, b, state, proto) do
+    try_binary_metamethod("__mod", a, b, state, fn -> safe_modulo(a, b, 0, proto.source) end)
+  end
+
+  def dispatcher_binop(:power, a, b, state, proto) do
+    try_binary_metamethod("__pow", a, b, state, fn -> safe_power(a, b, 0, proto.source) end)
+  end
+
+  @doc false
+  @spec dispatcher_unop(atom(), term(), State.t(), term()) :: {term(), State.t()}
+  def dispatcher_unop(:negate, val, state, proto) do
+    try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, 0, proto.source) end)
+  end
+
+  @doc false
+  @spec dispatcher_cmp(atom(), term(), term(), State.t(), term()) :: {term(), State.t()}
+  def dispatcher_cmp(:less_than, a, b, state, proto) do
+    try_binary_metamethod("__lt", a, b, state, fn -> safe_compare_lt(a, b, 0, proto.source) end)
+  end
+
+  def dispatcher_cmp(:less_equal, a, b, state, proto) do
+    compare_le(a, b, state, 0, proto.source)
+  end
+
+  def dispatcher_cmp(:greater_than, a, b, state, proto) do
+    # Lua 5.3 §3.4.4: a > b dispatches __lt with swapped operands.
+    try_binary_metamethod("__lt", b, a, state, fn -> safe_compare_lt(b, a, 0, proto.source) end)
+  end
+
+  def dispatcher_cmp(:greater_equal, a, b, state, proto) do
+    # Lua 5.3 §3.4.4: a >= b is rewritten to b <= a.
+    compare_le(b, a, state, 0, proto.source)
+  end
+
+  def dispatcher_cmp(:equal, a, b, state, _proto) do
+    try_equality_metamethod(a, b, state, fn -> lua_equal(a, b) end)
+  end
+
+  def dispatcher_cmp(:not_equal, a, b, state, _proto) do
+    {eq, new_state} = try_equality_metamethod(a, b, state, fn -> lua_equal(a, b) end)
+    {not eq, new_state}
+  end
+
+  @doc false
+  @spec dispatcher_get_field(term(), term(), State.t(), term(), term()) :: {term(), State.t()}
+  def dispatcher_get_field({:tref, id} = tref, name, state, proto, name_hint) do
+    # Fast path mirrors the interpreter's `:get_field` clause: skip the
+    # full `index_value` pipeline when the table has the key and either
+    # has no metatable, or the key is present at the data layer.
+    table = :erlang.map_get(id, state.tables)
+
+    case :erlang.map_get(:data, table) do
+      %{^name => value} ->
+        {value, state}
+
+      _ ->
+        case :erlang.map_get(:metatable, table) do
+          nil -> {nil, state}
+          _ -> index_value(tref, name, state, 0, proto.source, name_hint)
+        end
+    end
+  end
+
+  def dispatcher_get_field(value, name, state, proto, name_hint) do
+    index_value(value, name, state, 0, proto.source, name_hint)
   end
 
   # ── Break ──────────────────────────────────────────────────────────────────
@@ -574,7 +685,19 @@ defmodule Lua.VM.Executor do
       end)
 
     captured_upvalues = Enum.reverse(captured_upvalues_reversed)
-    closure = {:lua_closure, nested_proto, List.to_tuple(captured_upvalues)}
+    upvalues_tuple = List.to_tuple(captured_upvalues)
+
+    # Sub-prototypes are compiled to bytecode independently. The closure
+    # value tag reflects which executor path will run the function — the
+    # decision flows through the closure tag rather than back through the
+    # parent prototype, so a compiled child can be called from an
+    # interpreted parent and vice versa.
+    closure =
+      case nested_proto.bytecode do
+        nil -> {:lua_closure, nested_proto, upvalues_tuple}
+        _ -> {:compiled_closure, nested_proto, upvalues_tuple}
+      end
+
     regs = put_elem(regs, dest, closure)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
@@ -608,6 +731,17 @@ defmodule Lua.VM.Executor do
       end
 
     case func_value do
+      {:compiled_closure, callee_proto, callee_upvalues} ->
+        # Shortcut for interpreter → dispatcher hand-off: materialize the
+        # args list and route through `Dispatcher.execute/4`, which mirrors
+        # the semantics of the `:lua_closure` clause below (param/vararg
+        # setup, open-upvalue save/restore). The dispatcher's own
+        # `:call_one` clause handles dispatcher → dispatcher chains
+        # without going through this branch.
+        args = collect_args(regs, base + 1, total_args)
+        {results, state} = Dispatcher.execute(callee_proto, args, callee_upvalues, state)
+        continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, base, result_count)
+
       {:lua_closure, callee_proto, callee_upvalues} ->
         param_count = callee_proto.param_count
 
@@ -1690,6 +1824,12 @@ defmodule Lua.VM.Executor do
     {results, state}
   end
 
+  defp call_value({:compiled_closure, _, _} = closure, args, _proto, state, _line) do
+    # Compiled-closure callees for generic_for iterators reuse the same
+    # dispatcher bridge as `call_function/3`.
+    call_function(closure, args, state)
+  end
+
   defp call_value({:native_func, fun}, args, proto, state, line) do
     # Same source-position bridge as the `:call` opcode's native dispatch.
     # Used by `for` loop iteration when the iterator is native.
@@ -2057,6 +2197,10 @@ defmodule Lua.VM.Executor do
         {results, new_state} = call_function(func, args, state)
         {List.first(results), new_state}
 
+      {:compiled_closure, _, _} = func ->
+        {results, new_state} = call_function(func, args, state)
+        {List.first(results), new_state}
+
       _ ->
         {default_fn.(), state}
     end
@@ -2400,6 +2544,7 @@ defmodule Lua.VM.Executor do
   defp value_type(v) when is_binary(v), do: :string
   defp value_type({:tref, _}), do: :table
   defp value_type({:lua_closure, _, _}), do: :function
+  defp value_type({:compiled_closure, _, _}), do: :function
   defp value_type({:native_func, _}), do: :function
   defp value_type(_), do: :unknown
 
