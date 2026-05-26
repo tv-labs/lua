@@ -2,10 +2,10 @@
 id: A37
 title: Parser `:unexpected_token` errors carry position in all sites (A36 follow-up)
 issue: null
-pr: null
+pr: 241
 branch: fix/parser-error-tuple-shapes
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - Table-field syntax errors render with position and source context
