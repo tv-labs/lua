@@ -132,6 +132,26 @@ defmodule Lua.Parser.StatementTest do
                block: %{stmts: [%Statement.CallStmt{call: %Expr.MethodCall{method: "method"}}]}
              } = chunk
     end
+
+    test "call-statement meta carries the source line of the leading token" do
+      assert {:ok, chunk} = Parser.parse("\nprint(1)\n")
+
+      assert %{
+               block: %{
+                 stmts: [%Statement.CallStmt{meta: %{start: %{line: 2}}}]
+               }
+             } = chunk
+    end
+
+    test "method-call-statement meta carries the source line of the leading token" do
+      assert {:ok, chunk} = Parser.parse("\n\nobj:method()\n")
+
+      assert %{
+               block: %{
+                 stmts: [%Statement.CallStmt{meta: %{start: %{line: 3}}}]
+               }
+             } = chunk
+    end
   end
 
   describe "if statements" do

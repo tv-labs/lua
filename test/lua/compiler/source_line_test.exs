@@ -84,6 +84,25 @@ defmodule Lua.Compiler.SourceLineTest do
       assert last >= 4
     end
 
+    test "emits source_line for a leading bare-call statement" do
+      # Regression: CallStmt used to be constructed with `meta: nil`, which
+      # caused codegen to skip the leading `:source_line` marker. Without
+      # it, every instruction up to the first non-call statement was
+      # rendered with no associated source line in the playground.
+      code = "print(1)\nreturn 2\n"
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+      line_numbers =
+        proto.instructions
+        |> Enum.filter(&match?({:source_line, _, _}, &1))
+        |> Enum.map(fn {:source_line, line, _} -> line end)
+
+      assert 1 in line_numbers
+      assert 2 in line_numbers
+    end
+
     test "computes line range for nested functions" do
       code = """
       local x = function()
