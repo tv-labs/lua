@@ -286,19 +286,7 @@ defmodule Lua.Parser do
         end
 
       _ ->
-        # Build the standard 4-tuple shape so the renderer can show
-        # position. `peek(rest)` may return a real token, an EOF token,
-        # or `nil` (after EOF is consumed). Handle all three.
-        case peek(rest) do
-          {type, _value, pos} ->
-            {:error, {:unexpected_token, type, pos, "Expected identifier or 'function' after 'local'"}}
-
-          {:eof, pos} ->
-            {:error, {:unexpected_token, :eof, pos, "Expected identifier or 'function' after 'local'"}}
-
-          nil ->
-            {:error, {:unexpected_end, "Expected identifier or 'function' after 'local'", nil}}
-        end
+        unexpected_token_error(rest, "Expected identifier or 'function' after 'local'")
     end
   end
 
@@ -404,7 +392,7 @@ defmodule Lua.Parser do
             parse_generic_for([var], rest2, pos)
 
           _ ->
-            {:error, {:unexpected_token, peek(rest2), "Expected '=' or 'in' after for variable"}}
+            unexpected_token_error(rest2, "Expected '=' or 'in' after for variable")
         end
 
       {:error, reason} ->
@@ -453,7 +441,7 @@ defmodule Lua.Parser do
         end
 
       _ ->
-        {:error, {:unexpected_token, peek(tokens), "Expected ',' or 'in' in for loop"}}
+        unexpected_token_error(tokens, "Expected ',' or 'in' in for loop")
     end
   end
 
@@ -613,7 +601,7 @@ defmodule Lua.Parser do
             parse_assignment(targets ++ [expr], rest2)
 
           _ ->
-            {:error, {:unexpected_token, peek(rest2), "Expected '=' or ',' in assignment"}}
+            unexpected_token_error(rest2, "Expected '=' or ',' in assignment")
         end
 
       {:error, reason} ->
@@ -1002,7 +990,7 @@ defmodule Lua.Parser do
                 {:ok, [field | acc], rest}
 
               _ ->
-                {:error, {:unexpected_token, peek(rest), "Expected ',' or '}' in table"}}
+                unexpected_token_error(rest, "Expected ',' or '}' in table")
             end
 
           {:error, reason} ->
@@ -1101,7 +1089,7 @@ defmodule Lua.Parser do
         end
 
       _ ->
-        {:error, {:unexpected_token, peek(tokens), "Expected parameter name or ')'"}}
+        unexpected_token_error(tokens, "Expected parameter name or ')'")
     end
   end
 
@@ -1203,6 +1191,28 @@ defmodule Lua.Parser do
   defp token_position({_type, _value, pos}) when is_map(pos), do: pos
   defp token_position({_type, pos}) when is_map(pos), do: pos
   defp token_position(_), do: nil
+
+  # Build the canonical `{:unexpected_token, type, pos, message}` error
+  # tuple from the token at the head of `tokens`. The renderer
+  # (`convert_error/2` + `Lua.Parser.Error.format/2`) pattern-matches on
+  # this exact 4-tuple shape; any other shape falls through to the
+  # catch-all and is rendered as raw Elixir terms with no position.
+  #
+  # `peek/1` returns one of three shapes — a real 3-tuple token, a
+  # 2-tuple `:eof` token, or `nil` (when the token list is empty
+  # post-EOF). Each gets the appropriate canonical error.
+  defp unexpected_token_error(tokens, message) do
+    case peek(tokens) do
+      {type, _value, pos} ->
+        {:error, {:unexpected_token, type, pos, message}}
+
+      {:eof, pos} ->
+        {:error, {:unexpected_token, :eof, pos, message}}
+
+      nil ->
+        {:error, {:unexpected_end, message, nil}}
+    end
+  end
 
   # Drop leading comment tokens from a token stream.
   #
@@ -1375,6 +1385,17 @@ defmodule Lua.Parser do
 
       String.contains?(message, "Expected 'do'") ->
         "In Lua, 'while' and 'for' loops must have 'do' before the body."
+
+      # `{ "key" = value }` is a common mistake — users reach for
+      # JSON/map syntax. In Lua, only identifier keys may use the
+      # `name = value` shorthand; every other key (including strings)
+      # must be bracketed: `{ ["key"] = value }`.
+      type == :operator and String.contains?(message, "Expected ',' or '}' in table") ->
+        """
+        In a Lua table constructor, only identifier keys may use the
+        `name = value` shorthand. For string or computed keys, bracket
+        them: `{ ["key"] = value }` instead of `{ "key" = value }`.
+        """
 
       true ->
         nil

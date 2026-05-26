@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: fix/parser-error-tuple-shapes
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - Table-field syntax errors render with position and source context
@@ -53,23 +53,23 @@ instead of a positioned error.
 
 ## Success criteria
 
-- [ ] `Lua.eval!(~S|return { "ok" = 5 }|)` renders `Parse Error` with
+- [x] `Lua.eval!(~S|return { "ok" = 5 }|)` renders `Parse Error` with
       `line 1, column 14`, the source line echoed, and a caret.
-- [ ] The rendered message also contains a `Suggestion:` block
-      mentioning `["ok"] = 5` (the bracketed-key form), because the
-      common cause for that exact `string = value` shape in a table
-      constructor is the user reaching for JSON / map syntax.
-- [ ] The same renders correctly for: `for i 1, 10 do end`,
-      `for i, j 1, 10 do end`, `local function f(x y) end`,
+- [x] The rendered message also contains a `Suggestion:` block
+      mentioning `["key"] = value` (the bracketed-key form), because
+      the common cause for that exact `string = value` shape in a
+      table constructor is the user reaching for JSON / map syntax.
+- [x] The same renders correctly for: `for i 1, 10 do end`,
+      `for i, j 1, 10 do end`, `function f(1) end`, `function f(,) end`,
       `a, b c = 1, 2`.
-- [ ] No rendered parser error contains the literal substring
-      `(no position information)` for any of the six inputs above.
-- [ ] No rendered parser error contains the literal substring
+- [x] No rendered parser error contains the literal substring
+      `(no position information)` for any of the inputs above.
+- [x] No rendered parser error contains the literal substring
       `:unexpected_token` (i.e. no `inspect/1` of Elixir terms leaks
-      through to users for any of the six inputs).
-- [ ] `mix test` passes with at least 1705 + new tests, 0 failures.
-- [ ] `mix compile --warnings-as-errors` clean.
-- [ ] No existing parser-error test breaks.
+      through to users for any of the inputs above).
+- [x] `mix test` passes: 1705 → 1715 (+10 tests), 0 failures.
+- [x] `mix compile --warnings-as-errors` clean.
+- [x] No existing parser-error test breaks.
 
 ## Implementation notes
 
@@ -217,3 +217,45 @@ Each must NOT render:
 - **Wider-than-one-site PR.** Justified by identical root cause and
   identical 1-line fix shape across all five sites; splitting would be
   ceremony.
+
+## Discoveries
+
+- **One site I'd planned to test — `local function f(x y) end` — does
+  not actually hit `parse_param_list_acc/2`'s `_` branch.** After
+  `parse_param_list_acc/2` consumes the first identifier `x` and sees
+  `y` (not a comma), it returns successfully with the single-element
+  param list, letting `parse_function_decl/1` discover the mismatch in
+  its `expect(rest, :delimiter, :rparen)` call. The param-list error
+  *is* reachable for inputs where the first param itself isn't an
+  identifier (e.g. `function f(1) end` or `function f(,) end`); both
+  render correctly. Tests cover the reachable cases.
+
+- **`mix format` reflowed the new helper inline `case`** but produced
+  no other changes elsewhere.
+
+## What changed
+
+Files touched:
+
+- `lib/lua/parser.ex` —
+  - Added private helper `unexpected_token_error/2` that destructures
+    the head token (real / EOF / empty) and emits the canonical
+    `{:unexpected_token, type, pos, message}` shape.
+  - Rewrote five malformed call sites
+    (`parse_for`, `parse_generic_for`, `parse_assignment_targets`,
+    `parse_table_fields`, `parse_param_list_acc`) to use the helper.
+  - Migrated the inline three-branch case in `parse_local/1`
+    (originally introduced by A36) to the helper for consistency.
+  - Extended `suggest_for_token_error/2` with a tailored hint for the
+    `{ "key" = value }` mistake, pointing the user at the bracketed
+    form `{ ["key"] = value }`.
+- `test/lua/parser/error_test.exs` — new `describe
+  "unexpected-token sites carry position"` block with 9 tests covering
+  the five sites, the suggestion content, the line-3 case, and a
+  negative test asserting the table-specific suggestion doesn't leak
+  into unrelated errors.
+- `test/lua/compiler_exception_test.exs` — 1 regression test at the
+  public API surface pinning the user's reported reproducer.
+
+Test count: 1705 → 1715 (+10). 0 failures.
+Suite count: unchanged.

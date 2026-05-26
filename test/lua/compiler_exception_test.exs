@@ -75,4 +75,28 @@ defmodule Lua.CompilerExceptionTest do
     assert msg =~ "bare arithmetic"
     refute msg =~ "(no position information)"
   end
+
+  test "string-keyed table renders with location and a bracketed-key suggestion" do
+    # Regression: `{ "ok" = 5 }` previously fell through the parser's
+    # catch-all converter and rendered as raw Elixir terms with no
+    # position. Now it renders with location and a suggestion pointing
+    # the user at the bracketed-key form `{ ["ok"] = 5 }`.
+    e =
+      try do
+        Lua.eval!(Lua.new(), ~S|return { "ok" = 5 }|)
+      rescue
+        e in Lua.CompilerException -> e
+      end
+
+    msg = Exception.message(e)
+
+    assert msg =~ "Failed to compile Lua!"
+    assert msg =~ ~r/line\s+1/
+    assert msg =~ ~r/column\s+\d+/
+    assert msg =~ "Expected ',' or '}' in table"
+    assert msg =~ "Suggestion"
+    assert msg =~ ~S(["key"] = value)
+    refute msg =~ "(no position information)"
+    refute msg =~ ":unexpected_token"
+  end
 end

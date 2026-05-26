@@ -276,4 +276,102 @@ defmodule Lua.Parser.ErrorTest do
       assert msg =~ "after 'local'"
     end
   end
+
+  describe "unexpected-token sites carry position" do
+    # These sites previously built a malformed 3-tuple
+    # `{:unexpected_token, peek(tokens), msg}` instead of the canonical
+    # 4-tuple `{:unexpected_token, type, pos, msg}`, falling through to
+    # the catch-all converter and rendering as raw Elixir terms with no
+    # position. Every site below now produces a positioned error.
+
+    test "table field followed by unexpected operator (the `{ \"ok\" = 5 }` case)" do
+      assert {:error, msg} = Parser.parse(~S|return { "ok" = 5 }|)
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1"
+      assert msg =~ "column"
+      assert msg =~ "Expected ',' or '}' in table"
+      refute msg =~ "(no position information)"
+      # The catch-all renders the tuple via inspect/1 — make sure no
+      # Elixir term sneaks into the user-facing message.
+      refute msg =~ ":unexpected_token"
+      refute msg =~ ":operator"
+    end
+
+    test "string-keyed table field includes the bracketed-key suggestion" do
+      assert {:error, msg} = Parser.parse(~S|return { "ok" = 5 }|)
+      assert msg =~ "Suggestion"
+      assert msg =~ ~S(["key"] = value)
+      assert msg =~ "bracket"
+    end
+
+    test "the bracketed-key suggestion only fires for the table-field case" do
+      # `if 1 + then ... end` triggers `Expected expression`, which is
+      # a different message path. Make sure we don't leak the
+      # table-specific suggestion into unrelated errors.
+      assert {:error, msg} = Parser.parse("if 1 + then end")
+      refute msg =~ "bracketed"
+      refute msg =~ ~S(["key"] = value)
+    end
+
+    test "numeric-for with no `=` or `in` after the variable" do
+      assert {:error, msg} = Parser.parse("for i 1, 10 do end")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1"
+      assert msg =~ "column"
+      assert msg =~ "Expected '=' or 'in' after for variable"
+      refute msg =~ "(no position information)"
+      refute msg =~ ":unexpected_token"
+    end
+
+    test "generic-for variable list not terminated by `in`" do
+      assert {:error, msg} = Parser.parse("for i, j 1, 10 do end")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1"
+      assert msg =~ "column"
+      assert msg =~ "Expected ',' or 'in' in for loop"
+      refute msg =~ "(no position information)"
+      refute msg =~ ":unexpected_token"
+    end
+
+    test "multi-target assignment with a bad continuation token" do
+      assert {:error, msg} = Parser.parse("a, b c = 1, 2")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1"
+      assert msg =~ "column"
+      assert msg =~ "Expected '=' or ',' in assignment"
+      refute msg =~ "(no position information)"
+      refute msg =~ ":unexpected_token"
+    end
+
+    test "parameter list with a non-identifier token" do
+      assert {:error, msg} = Parser.parse("function f(1) end")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1"
+      assert msg =~ "column"
+      assert msg =~ "Expected parameter name or ')'"
+      refute msg =~ "(no position information)"
+      refute msg =~ ":unexpected_token"
+    end
+
+    test "parameter list with a leading comma" do
+      assert {:error, msg} = Parser.parse("function f(,) end")
+      assert msg =~ "Parse Error"
+      assert msg =~ "line 1"
+      assert msg =~ "column"
+      assert msg =~ "Expected parameter name or ')'"
+      refute msg =~ "(no position information)"
+    end
+
+    test "table-field error on a later line reports the right line" do
+      code = """
+      local x = 1
+      local y = 2
+      return { "ok" = 5 }
+      """
+
+      assert {:error, msg} = Parser.parse(code)
+      assert msg =~ "line 3"
+      assert msg =~ "Expected ',' or '}' in table"
+    end
+  end
 end
