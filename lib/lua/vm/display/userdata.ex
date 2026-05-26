@@ -1,7 +1,7 @@
 defmodule Lua.VM.Display.Userdata do
   @moduledoc """
   Display wrapper for a Lua userdata reference (`{:udref, id}`)
-  returned across the `Lua.eval/2` / `Lua.eval!/2` boundary in
+  returned across the `Lua.eval!/2` boundary in
   `decode: false` mode.
 
   Default `decode: true` returns `{:userdata, term}` and is unaffected

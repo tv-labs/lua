@@ -7,17 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Changed
-- Lua 5.3 suite test file now distinguishes "missing features" from
-  "deliberate non-goals". Four files (`main.lua`, `files.lua`,
-  `attrib.lua`, `verybig.lua`) are now grouped under "Deferred
-  (Intentional Non-Goals)" with per-file rationale captured in
-  `test/lua53_suite_test.exs` and `ROADMAP.md`. These tests exercise
-  shell-out, file I/O, or filesystem-backed `require` semantics that
-  conflict with this library's role as a sandboxed embedded Lua VM.
-  No behavioural change.
-
-## [v1.0.0-rc.1] - 2026-05-06
+## [v1.0.0-rc.0] - 2026-05-26
 
 This is the first release candidate for `1.0.0`. The library has been
 rewritten on a new Elixir-native Lua 5.3 virtual machine, and the public
@@ -26,21 +16,32 @@ API is intended to be stable. Please report any regressions before final.
 ### Added
 - New Elixir-native Lua 5.3 virtual machine: lexer, parser, compiler, and
   register-based executor, with no Erlang or C dependencies.
-- Standard library: `string` (including `string.format` width/precision and
-  the full pattern engine for `find`/`match`/`gmatch`/`gsub`), `table`,
-  `math`, `debug`, `io` stubs, `os` (sandboxed), `package`/`require`.
+- Standard library: `string` (including `string.format` width/precision,
+  `string.pack`/`unpack`/`packsize`, and the full pattern engine for
+  `find`/`match`/`gmatch`/`gsub`), `table`, `math` (including `math.fmod`),
+  `debug`, `io` stubs (sandboxed), `os` (sandboxed), `package`/`require`.
 - `_G` global table and Lua 5.3 `_ENV` semantics for global access.
 - Full metamethod dispatch: `__index`, `__newindex`, `__call`, plus the
-  arithmetic, comparison, length, concat, and `tostring` metamethods.
+  arithmetic, comparison (including `~=` via `__eq` and `<=`/`>=` falling
+  back through `__lt`), length, concat, and `tostring` metamethods.
 - Varargs (`...`), multiple returns, generic `for`, `goto`/`label`, `break`,
   protected calls (`pcall`, `xpcall`).
 - `userdata` support for passing arbitrary Elixir terms across the boundary.
 - Beautiful Lua-style stack traces and error messages with source line
-  tracking.
-- Lua 5.3 official test suite integration (5/29 files passing on this
-  release: `simple_test.lua`, `api.lua`, `bitwise.lua`, `code.lua`,
-  `vararg.lua`).
-- Benchmark harness comparing against Luerl and PUC-Lua.
+  tracking. Every runtime error carries line and source info (#214, #215),
+  and `attempt to call`/`attempt to index` errors name the offending
+  callee/target (#228).
+- `Inspect` protocol support for VM values returned across the
+  `Lua.eval!/2` boundary via display structs for tables, closures,
+  userdata, and native functions (#218).
+- Mix tasks: `mix lua.eval`, `mix lua.suite`, `mix lua.bench` (#220).
+- Lua 5.3 official test suite integration with per-file rationale for
+  suite files that are deferred as intentional non-goals (`main.lua`,
+  `files.lua`, `attrib.lua`, `verybig.lua` — shell-out, file I/O, and
+  filesystem `require` semantics that conflict with a sandboxed embedded
+  VM) (#216).
+- Benchmark harness comparing against Luerl and PUC-Lua, with quick mode
+  and multi-`n` inputs (#230) and a `setup_luaport.sh` helper (#225).
 
 ### Changed
 - **VM backend**: Luerl is no longer a runtime dependency. The library now
@@ -58,6 +59,8 @@ API is intended to be stable. Please report any regressions before final.
   compiled prototype and is reusable across `Lua.eval!/2` calls.
 - 64-bit integer arithmetic and bitwise ops wrap on overflow per Lua 5.3
   §3.4.1, instead of widening to bignums (Luerl's behaviour).
+- `Lua.RuntimeException` and `Lua.CompilerException` are now publicly
+  documented; user code can pattern-match and rescue them.
 
 ### Removed
 - The `{module(), atom(), list()}` MFA encoding form is no longer accepted
@@ -70,6 +73,8 @@ API is intended to be stable. Please report any regressions before final.
 - O(1) upvalue access by storing upvalues as a tuple (#155).
 - Fully tail-recursive CPS executor with line tracking moved off the heap
   (#156).
+- Fast-path the executor dispatch loop (#223).
+- Fast-path `Numeric.to_signed_int64` for in-range integers (#227).
 
 ### Fixed
 - 64-bit integer overflow wrapping for arithmetic and bitwise ops (#177).
@@ -95,6 +100,23 @@ API is intended to be stable. Please report any regressions before final.
 - Atom values encode to strings (#158).
 - Files containing only comments load successfully.
 - Unicode characters supported in Lua scripts.
+- `pairs` survives mid-iteration deletion by tracking dead keys (#202).
+- Metamethod closures receive operands through varargs (#203).
+- Float division by zero yields ±`math.huge` instead of raising (#204);
+  `//` and `%` with a float-zero divisor return `inf`/`nan` (#211).
+- Lexer treats vertical tab and form feed as whitespace (#206).
+- Table-library functions (`insert`, `remove`, `concat`, etc.) honor
+  `__index`, `__newindex`, and `__len` (#208).
+- Numeric `for` coerces string control values per Lua 5.3 §3.3.5 (#209).
+- `io` is now exposed as a table of sandboxed stubs (#210).
+- `~=` routes through the `__eq` metamethod (#212); `<=`/`>=` fall back
+  through `__lt` per Lua 5.3 §3.4.4 (#213).
+- Parser threads position info through bare-expression and
+  unexpected-end errors (#222).
+- Internal Lua VM frames pruned from `Lua.RuntimeException` stacks by
+  default; opt back in with `Lua.new(debug: true)` (#221).
+- Line number attribution for the first line of a chunk (#240).
+- `string.pack` no longer emits compile warnings (#224).
 
 ## [v0.4.0] - 2025-12-06
 
@@ -150,8 +172,8 @@ API is intended to be stable. Please report any regressions before final.
 - Upgrade to Luerl 1.4.1
 - Tables must now be explicitly decoded when receiving as arguments `deflua` and other Elixir callbacks
 
-[unreleased]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.1...HEAD
-[1.0.0-rc.1]: https://github.com/tv-labs/lua/compare/v0.4.0...v1.0.0-rc.1
+[unreleased]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.0...HEAD
+[1.0.0-rc.0]: https://github.com/tv-labs/lua/compare/v0.4.0...v1.0.0-rc.0
 [0.4.0]: https://github.com/tv-labs/lua/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/tv-labs/lua/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/tv-labs/lua/compare/v0.2.0...v0.2.1

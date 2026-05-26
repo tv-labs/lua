@@ -1,5 +1,18 @@
 defmodule Lua.RuntimeException do
-  @moduledoc false
+  @moduledoc """
+  Raised when a Lua program fails at runtime — bad argument types,
+  arithmetic on a non-number, indexing a nil, an explicit `error()`
+  call from Lua, or any other dynamic failure inside the VM.
+
+  Fields:
+
+    * `:message`     — formatted error string
+    * `:original`    — the underlying VM error term
+    * `:state`       — `Lua.VM.State` at the point of failure
+    * `:line`        — line number where the error was raised
+    * `:source`      — source name (filename or `<stdin>`)
+    * `:call_stack`  — list of Lua frames at failure
+  """
   alias Lua.Util
 
   defexception [:message, :original, :state, :line, :source, :call_stack]

@@ -1,5 +1,8 @@
 defmodule Lua.CompilerException do
-  @moduledoc false
+  @moduledoc """
+  Raised when Lua source cannot be lexed, parsed, or compiled. Carries
+  a list of formatted error messages in `:errors`.
+  """
   alias Lua.Util
 
   defexception [:errors, :state]

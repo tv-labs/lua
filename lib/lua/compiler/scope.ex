@@ -1,9 +1,5 @@
 defmodule Lua.Compiler.Scope do
-  @moduledoc """
-  Variable scope resolution for the Lua compiler.
-
-  Assigns registers to local variables and identifies upvalues and globals.
-  """
+  @moduledoc false
 
   alias Lua.AST.Block
   alias Lua.AST.Chunk

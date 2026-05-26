@@ -758,7 +758,7 @@ defmodule Lua do
 
   @doc """
   Returns the underlying VM tag tuple for a display struct returned by
-  `Lua.eval/2` / `Lua.eval!/2` in `decode: false` mode. Returns
+  `Lua.eval!/2` in `decode: false` mode. Returns
   values unchanged if they are not display structs, so it is safe to
   apply unconditionally to any value flowing back from `eval`.
 

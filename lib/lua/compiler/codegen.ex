@@ -1,7 +1,5 @@
 defmodule Lua.Compiler.Codegen do
-  @moduledoc """
-  Code generation - transforms AST into instructions.
-  """
+  @moduledoc false
 
   alias Lua.AST.Block
   alias Lua.AST.Chunk
