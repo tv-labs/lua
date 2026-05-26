@@ -178,19 +178,29 @@ defmodule DemoWeb.OpcodesLive do
 
                   <div class="grid sm:grid-cols-2 gap-3">
                     <%= for op <- ops do %>
-                      <div class="rounded-box border border-base-300/50 bg-base-200/40 p-4 hover:bg-base-200 transition-colors">
+                      <div
+                        id={"#{op}"}
+                        class="group scroll-mt-24 rounded-box border border-base-300/50 bg-base-200/40 p-4 hover:bg-base-200 transition-colors target:ring-2 target:ring-primary/60"
+                      >
                         <div class="flex items-baseline justify-between gap-3 mb-2">
                           <code class={["text-lg font-bold font-mono", Bytecode.op_class(op)]}>
                             {op}
                           </code>
                           <span class="text-[10px] uppercase tracking-wider text-base-content/40 font-mono">
-                            {op_signature(op)}
+                            {Bytecode.op_signature(op)}
                           </span>
                         </div>
                         <p class="text-sm text-base-content/75 leading-relaxed">
                           {Bytecode.opcode_doc(op) ||
                             raw("<em class='text-base-content/40'>(undocumented; see source)</em>")}
                         </p>
+                        <a
+                          href={"##{op}"}
+                          class="mt-2 inline-flex items-center gap-1 text-[11px] font-mono text-base-content/40 opacity-0 group-hover:opacity-100 transition-opacity hover:text-primary"
+                          aria-label={"Permalink to #{op}"}
+                        >
+                          # permalink
+                        </a>
                       </div>
                     <% end %>
                   </div>
@@ -219,124 +229,4 @@ defmodule DemoWeb.OpcodesLive do
   end
 
   defp all_visible(cats, q), do: Enum.sum(Enum.map(cats, &length(visible_ops(&1.ops, q))))
-
-  # Compact signature shown on each opcode card; not meant to be exhaustive,
-  # just enough for a reader skimming to know what the args look like.
-  defp op_signature(op) do
-    case op do
-      :load_constant ->
-        "rD, K"
-
-      :load_nil ->
-        "rD, N"
-
-      :load_boolean ->
-        "rD, bool"
-
-      :load_env ->
-        "rD"
-
-      :move ->
-        "rD, rS"
-
-      :get_global ->
-        "rD, name"
-
-      :set_global ->
-        "name, rS"
-
-      :get_upvalue ->
-        "rD, up[i]"
-
-      :set_upvalue ->
-        "up[i], rS"
-
-      :get_open_upvalue ->
-        "rD, rS"
-
-      :set_open_upvalue ->
-        "rD, rS"
-
-      :new_table ->
-        "rD, array, hash"
-
-      :get_table ->
-        "rD, rT, k"
-
-      :set_table ->
-        "rT, k, rV"
-
-      :get_field ->
-        "rD, rT, name"
-
-      :set_field ->
-        "rT, name, rV"
-
-      :set_list ->
-        "rT, start, count, off"
-
-      :self ->
-        "rD, rO, name"
-
-      :closure ->
-        "rD, proto[i]"
-
-      :call ->
-        "rB, argc, resc"
-
-      :tail_call ->
-        "rB, argc"
-
-      :return ->
-        "rB, count"
-
-      :return_vararg ->
-        "(varargs)"
-
-      :vararg ->
-        "rB, count"
-
-      :test ->
-        "rR"
-
-      :test_true ->
-        "rR"
-
-      :test_and ->
-        "rD, rS"
-
-      :test_or ->
-        "rD, rS"
-
-      :numeric_for ->
-        "rB"
-
-      :generic_for ->
-        "rB, vars"
-
-      :scope ->
-        "registers"
-
-      :source_line ->
-        "line"
-
-      op when op in [:add, :subtract, :multiply, :divide, :floor_divide, :modulo, :power] ->
-        "rD, rA, rB"
-
-      op when op in [:concatenate, :bitwise_and, :bitwise_or, :bitwise_xor] ->
-        "rD, rA, rB"
-
-      op when op in [:shift_left, :shift_right] ->
-        "rD, rA, rB"
-
-      op when op in [:equal, :less_than, :less_equal] ->
-        "rD, rA, rB"
-
-      op when op in [:negate, :not, :length, :bitwise_not] ->
-        "rD, rS"
-
-      _ ->
-        ""
-    end
-  end
 end

@@ -33,6 +33,9 @@ import {closeBrackets, closeBracketsKeymap} from "@codemirror/autocomplete"
 import {highlightSelectionMatches, searchKeymap} from "@codemirror/search"
 import {lua} from "@codemirror/legacy-modes/mode/lua"
 import {oneDark} from "@codemirror/theme-one-dark"
+import tippy, {delegate} from "tippy.js"
+import "tippy.js/dist/tippy.css"
+import "tippy.js/animations/shift-away.css"
 
 const themeCompartment = new Compartment()
 
@@ -80,9 +83,6 @@ function themeExt() {
   return darkActive() ? oneDark : []
 }
 
-// localStorage key used by the playground editor's autosave.
-const PLAYGROUND_STORAGE_KEY = "playground:source"
-
 const LuaEditor = {
   mounted() {
     const textarea = this.el.querySelector("textarea")
@@ -94,19 +94,27 @@ const LuaEditor = {
     textarea.setAttribute("tabindex", "-1")
     textarea.setAttribute("aria-hidden", "true")
 
-    const storageKey = this.el.dataset.storageKey
-    const restoreFromStorage = (() => {
-      if (!storageKey) return null
-      const url = new URL(window.location.href)
-      if (url.pathname !== "/playground") return null
-      if (url.searchParams.has("source")) return null
+    this.storageBase = this.el.dataset.storageKey || null
+    this.exampleId = this.el.dataset.exampleId || null
+    const computeStorageKey = () =>
+      this.storageBase && this.exampleId ? `${this.storageBase}:${this.exampleId}` : null
+    this.storageKey = computeStorageKey()
+
+    const readSaved = (key) => {
       try {
-        const saved = window.localStorage.getItem(storageKey)
-        if (!saved || saved === textarea.value) return null
-        return saved
+        return key ? window.localStorage.getItem(key) : null
       } catch (e) {
         return null
       }
+    }
+
+    const restoreFromStorage = (() => {
+      if (!this.storageKey) return null
+      const url = new URL(window.location.href)
+      if (url.searchParams.has("source")) return null
+      const saved = readSaved(this.storageKey)
+      if (!saved || saved === textarea.value) return null
+      return saved
     })()
 
     const submitForm = () => {
@@ -122,9 +130,9 @@ const LuaEditor = {
         // Trigger phx-change on the form
         this.textarea.dispatchEvent(new Event("input", {bubbles: true}))
       }
-      if (storageKey) {
+      if (this.storageKey) {
         try {
-          window.localStorage.setItem(storageKey, val)
+          window.localStorage.setItem(this.storageKey, val)
         } catch (e) {
           /* quota or private mode — ignore */
         }
@@ -132,24 +140,34 @@ const LuaEditor = {
     }
 
     let lastLine = null
-    const pushLine = (n) => {
+    const broadcastLine = (n) => {
       if (n == null) return
       if (n === lastLine) return
       lastLine = n
-      this.pushEvent("hover-line", {line: String(n)})
+      document.dispatchEvent(
+        new CustomEvent("lua-bytecode:highlight", {detail: {line: n}})
+      )
     }
 
     const pushCursorLine = () => {
       const state = this.view.state
       const head = state.selection.main.head
-      pushLine(state.doc.lineAt(head).number)
+      broadcastLine(state.doc.lineAt(head).number)
     }
 
     const pushHoverLine = (event) => {
       if (!this.view) return
       const pos = this.view.posAtCoords({x: event.clientX, y: event.clientY})
       if (pos == null) return
-      pushLine(this.view.state.doc.lineAt(pos).number)
+      broadcastLine(this.view.state.doc.lineAt(pos).number)
+    }
+
+    const clearHoverLine = () => {
+      if (lastLine === null) return
+      lastLine = null
+      document.dispatchEvent(
+        new CustomEvent("lua-bytecode:highlight", {detail: {line: null}})
+      )
     }
 
     this.view = new EditorView({
@@ -182,7 +200,7 @@ const LuaEditor = {
         ]),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) syncToTextarea()
-          if (update.docChanged || update.selectionSet) pushCursorLine()
+          if (update.selectionSet && !update.docChanged) pushCursorLine()
         }),
         editorTheme,
         themeCompartment.of(themeExt()),
@@ -199,25 +217,51 @@ const LuaEditor = {
     // Sync initial value (in case textarea had different value)
     syncToTextarea()
 
-    // Push line on mouse hover so users can scrub the editor and watch
-    // the bytecode panel light up without clicking. Throttled by line.
+    // Dispatch a DOM event on every editor-line change so the bytecode
+    // panel can highlight the matching rows. Deduped by line; cleared
+    // when the mouse leaves the editor.
     this.view.scrollDOM.addEventListener("mousemove", pushHoverLine)
+    this.view.scrollDOM.addEventListener("mouseleave", clearHoverLine)
     this._hoverHandler = pushHoverLine
+    this._hoverLeaveHandler = clearHoverLine
 
-    // Listen for server-pushed source updates (e.g. when loading an example)
-    this.handleEvent("lua-editor:set-source", ({source, target}) => {
+    // Listen for server-pushed source updates (e.g. when loading an example).
+    //
+    // `example_id` rebinds the storage key so each example's edits are saved
+    // independently. `clear_storage` wipes any saved edits for that example,
+    // used by the Reset button to drop back to the pristine source. When
+    // switching examples (no clear_storage), prefer the user's saved edits
+    // for that example over the pushed default.
+    this.handleEvent("lua-editor:set-source", ({source, example_id, clear_storage, target}) => {
       if (target && target !== this.el.id) return
+      if (example_id !== undefined) {
+        this.exampleId = example_id || null
+        this.storageKey = computeStorageKey()
+      }
+      if (clear_storage && this.storageKey) {
+        try {
+          window.localStorage.removeItem(this.storageKey)
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      let next = source
+      if (!clear_storage && this.storageKey) {
+        const saved = readSaved(this.storageKey)
+        if (saved) next = saved
+      }
       const current = this.view.state.doc.toString()
-      if (current === source) return
+      if (current === next) return
       this.view.dispatch({
-        changes: {from: 0, to: this.view.state.doc.length, insert: source},
+        changes: {from: 0, to: this.view.state.doc.length, insert: next},
       })
     })
 
-    // Listen for server-pushed cursor focus (e.g. clicking a bytecode row)
-    this.handleEvent("lua-editor:focus-line", ({line, target}) => {
-      if (target && target !== this.el.id) return
-      const lineNum = parseInt(line, 10)
+    // Listen for client-side focus requests (e.g. clicking a bytecode row).
+    // The BytecodeHighlight hook dispatches this directly on document; no
+    // server round-trip.
+    this._onFocusLine = (e) => {
+      const lineNum = parseInt(e.detail?.line, 10)
       if (!Number.isFinite(lineNum)) return
       const doc = this.view.state.doc
       if (lineNum < 1 || lineNum > doc.lines) return
@@ -227,7 +271,8 @@ const LuaEditor = {
         effects: EditorView.scrollIntoView(info.from, {y: "center"}),
       })
       this.view.focus()
-    })
+    }
+    document.addEventListener("lua-editor:focus-line", this._onFocusLine)
 
     // Listen for theme changes on the <html> element so highlight updates live.
     this.themeObserver = new MutationObserver(() => {
@@ -241,10 +286,82 @@ const LuaEditor = {
 
   destroyed() {
     if (this.themeObserver) this.themeObserver.disconnect()
-    if (this._hoverHandler && this.view) {
-      this.view.scrollDOM.removeEventListener("mousemove", this._hoverHandler)
+    if (this.view) {
+      if (this._hoverHandler) {
+        this.view.scrollDOM.removeEventListener("mousemove", this._hoverHandler)
+      }
+      if (this._hoverLeaveHandler) {
+        this.view.scrollDOM.removeEventListener("mouseleave", this._hoverLeaveHandler)
+      }
+    }
+    if (this._onFocusLine) {
+      document.removeEventListener("lua-editor:focus-line", this._onFocusLine)
     }
     if (this.view) this.view.destroy()
+  },
+}
+
+// Cross-highlights every bytecode row that shares a `data-line` with the
+// row currently under the mouse, and dispatches a focus-line event on
+// click so the editor scrolls to that source line. Also listens for
+// `lua-bytecode:highlight` events from the editor hook so editor
+// scrubbing drives the same highlight.
+//
+// Listeners attach to `this.el` (the scroll container) rather than the
+// inner tbody so they survive re-renders when the user clicks Run.
+const BytecodeHighlight = {
+  mounted() {
+    const root = this.el
+    let current = null
+    const setLine = (line) => {
+      const next = line == null || line === "" ? null : String(line)
+      if (next === current) return
+      if (current !== null) {
+        root
+          .querySelectorAll(`tr[data-line="${current}"]`)
+          .forEach((tr) => tr.classList.remove("is-hovered"))
+      }
+      if (next !== null) {
+        root
+          .querySelectorAll(`tr[data-line="${next}"]`)
+          .forEach((tr) => tr.classList.add("is-hovered"))
+      }
+      current = next
+    }
+
+    this._onOver = (e) => {
+      const tr = e.target.closest("tr[data-line]")
+      if (!tr || !root.contains(tr)) return
+      setLine(tr.dataset.line)
+    }
+    this._onLeave = () => setLine(null)
+    this._onClick = (e) => {
+      if (e.target.closest("a")) return
+      const tr = e.target.closest("tr[data-line]")
+      if (!tr || !root.contains(tr)) return
+      const n = parseInt(tr.dataset.line, 10)
+      if (!Number.isFinite(n)) return
+      document.dispatchEvent(
+        new CustomEvent("lua-editor:focus-line", {detail: {line: n}})
+      )
+    }
+    this._onExternalHighlight = (e) => setLine(e.detail?.line)
+
+    root.addEventListener("mouseover", this._onOver)
+    root.addEventListener("mouseleave", this._onLeave)
+    root.addEventListener("click", this._onClick)
+    document.addEventListener("lua-bytecode:highlight", this._onExternalHighlight)
+  },
+  destroyed() {
+    if (this._onOver) this.el.removeEventListener("mouseover", this._onOver)
+    if (this._onLeave) this.el.removeEventListener("mouseleave", this._onLeave)
+    if (this._onClick) this.el.removeEventListener("click", this._onClick)
+    if (this._onExternalHighlight) {
+      document.removeEventListener(
+        "lua-bytecode:highlight",
+        this._onExternalHighlight
+      )
+    }
   },
 }
 
@@ -444,7 +561,97 @@ const CopyButton = {
   },
 }
 
-const hooks = {...colocatedHooks, LuaEditor, ShareSnippet, CopyButton}
+// Tippy.js setup. One body-level delegator so tooltips survive LiveView
+// re-renders without per-element binding. Three content sources:
+//
+//   data-tip="text"             plain string
+//   data-tip-html="#tpl-id"     clone innerHTML of a hidden template element
+//   data-tip-op="opcode_name"   look up window.__opcodeDocs[op] and build a card
+//
+function readOpcodeDocs() {
+  const el = document.getElementById("opcode-docs")
+  if (!el) return {}
+  try {
+    return JSON.parse(el.textContent) || {}
+  } catch (_e) {
+    return {}
+  }
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
+// Markdown-lite: backticks → <code>, **bold** → <strong>. Source string
+// is HTML-escaped first so user-supplied content can never inject markup.
+function inlineMd(str) {
+  return escHtml(str)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+}
+
+function opcodeTipContent(op) {
+  const docs = readOpcodeDocs()
+  const entry = docs[op]
+  if (!entry) {
+    return `<div class="lua-tip"><div class="lua-tip-head"><code>${escHtml(op)}</code></div></div>`
+  }
+  const sig = entry.signature
+    ? `<code class="lua-tip-sig">${escHtml(entry.signature)}</code>`
+    : ""
+  return `
+    <div class="lua-tip">
+      <div class="lua-tip-head"><code>${escHtml(op)}</code>${sig}</div>
+      <div class="lua-tip-body">${inlineMd(entry.doc || "")}</div>
+      <a class="lua-tip-link" href="/reference/opcodes#${encodeURIComponent(op)}">
+        Full reference <span aria-hidden="true">→</span>
+      </a>
+    </div>
+  `
+}
+
+// Wrap a plain data-tip string in the same `.lua-tip` card so glossary
+// tips and opcode cards share visual styling.
+function plainTipContent(str) {
+  return `<div class="lua-tip"><div class="lua-tip-body">${inlineMd(str)}</div></div>`
+}
+
+tippy.setDefaultProps({
+  theme: "lua",
+  animation: "shift-away",
+  delay: [120, 0],
+  duration: [150, 100],
+  allowHTML: true,
+  appendTo: () => document.body,
+})
+
+delegate(document.body, {
+  target: "[data-tip], [data-tip-html], [data-tip-op]",
+  interactive: true,
+  interactiveBorder: 12,
+  maxWidth: 320,
+  content(reference) {
+    if (reference.dataset.tipOp) {
+      return opcodeTipContent(reference.dataset.tipOp)
+    }
+    if (reference.dataset.tipHtml) {
+      const sel = reference.dataset.tipHtml
+      const tpl = sel.startsWith("#") ? document.querySelector(sel) : null
+      return tpl ? tpl.innerHTML : ""
+    }
+    return reference.dataset.tip ? plainTipContent(reference.dataset.tip) : ""
+  },
+  onShow(instance) {
+    // Don't show if there's no content to render.
+    return !!instance.props.content
+  },
+})
+
+const hooks = {...colocatedHooks, LuaEditor, ShareSnippet, CopyButton, BytecodeHighlight}
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {

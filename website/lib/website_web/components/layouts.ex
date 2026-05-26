@@ -318,7 +318,7 @@ defmodule DemoWeb.Layouts do
             </a>
             and three decades of Lua.
           </span>
-          <span>MIT licensed</span>
+          <span>Apache 2.0 licensed</span>
         </div>
       </div>
     </footer>

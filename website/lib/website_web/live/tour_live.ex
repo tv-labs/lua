@@ -1,6 +1,7 @@
 defmodule DemoWeb.TourLive do
   use DemoWeb, :live_view
 
+  import DemoWeb.BytecodeComponents
   alias Website.LuaSandbox
 
   @lua_timeout_ms 1_500
@@ -18,6 +19,7 @@ defmodule DemoWeb.TourLive do
       |> assign(:result, nil)
       |> assign(:running, false)
       |> assign(:show_bytecode, false)
+      |> assign(:selected_block, 0)
       |> assign(:lua_timer_ref, nil)
 
     {:ok, socket}
@@ -37,7 +39,8 @@ defmodule DemoWeb.TourLive do
              |> cancel_lua_run()
              |> assign(:lesson, lesson)
              |> assign(:source, Map.get(lesson, :source, ""))
-             |> assign(:result, nil)}
+             |> assign(:result, nil)
+             |> assign(:selected_block, 0)}
         end
 
       _ ->
@@ -69,9 +72,9 @@ defmodule DemoWeb.TourLive do
     {:noreply, update(socket, :show_bytecode, &(!&1))}
   end
 
-  # The shared LuaEditor hook pushes cursor-line events; tour doesn't
-  # cross-highlight, so just acknowledge.
-  def handle_event("hover-line", _params, socket), do: {:noreply, socket}
+  def handle_event("select-block", %{"index" => idx}, socket) when is_binary(idx) do
+    {:noreply, assign(socket, :selected_block, String.to_integer(idx))}
+  end
 
   @impl true
   def handle_async(:lua_run, {:ok, result}, socket) do
@@ -173,8 +176,7 @@ defmodule DemoWeb.TourLive do
       <%= for {{chapter_slug, chapter_title}, chapter_idx} <- Enum.with_index(LuaSandbox.chapters()) do %>
         <div class="mb-5">
           <div class="px-3 pb-1.5 text-[11px] uppercase tracking-[0.14em] text-base-content/40 font-semibold">
-            <span class="text-base-content/30">{roman(chapter_idx + 1)}.</span>
-            &nbsp;{chapter_title}
+            <span class="text-base-content/30">{roman(chapter_idx + 1)}.</span> &nbsp;{chapter_title}
           </div>
           <ol class="space-y-1">
             <%= for lesson <- @lessons, lesson.chapter == chapter_slug do %>
@@ -391,7 +393,11 @@ defmodule DemoWeb.TourLive do
             <% end %>
 
             <%= if @show_bytecode and has_editor?(@lesson) and runnable?(@lesson) do %>
-              <.tour_bytecode source={@source} result={@result} />
+              <.tour_bytecode
+                source={@source}
+                result={@result}
+                selected={@selected_block}
+              />
             <% end %>
 
             <%= if (refs = Map.get(@lesson, :see_also)) && refs != [] do %>
@@ -496,6 +502,7 @@ defmodule DemoWeb.TourLive do
 
   attr :source, :string, required: true
   attr :result, :map, default: nil
+  attr :selected, :integer, default: 0
 
   defp tour_bytecode(assigns) do
     blocks =
@@ -513,31 +520,14 @@ defmodule DemoWeb.TourLive do
     assigns = assign(assigns, :blocks, blocks)
 
     ~H"""
-    <div class="mt-3 rounded-box border border-base-300/60 bg-base-200/30 overflow-hidden">
-      <div class="px-4 py-2 border-b border-base-300/60 bg-base-300/20 text-xs uppercase tracking-wider text-base-content/50 font-semibold">
-        Compiled bytecode
-      </div>
-      <div class="font-mono text-xs leading-5 max-h-[400px] overflow-auto p-2">
-        <%= for block <- @blocks do %>
-          <div class="px-3 py-1 text-base-content/60 italic">
-            ; {block.name} · registers={block.max_registers} · upvalues={block.upvalue_count}
-          </div>
-          <%= for ins <- block.instructions do %>
-            <div class={[
-              "flex gap-2 px-3 py-0.5",
-              ins.op == :source_line && "text-base-content/40 italic"
-            ]}>
-              <span class="text-base-content/40 w-8 text-right">{ins.pc}</span>
-              <span class="text-base-content/90">{ins.pretty}</span>
-            </div>
-          <% end %>
-        <% end %>
-        <%= if @blocks == [] do %>
-          <div class="px-3 py-2 text-base-content/50 italic">
-            Run the snippet to see bytecode.
-          </div>
-        <% end %>
-      </div>
+    <div class="mt-3">
+      <.bytecode_panel
+        blocks={@blocks}
+        selected={@selected}
+        variant={:full}
+        max_height="max-h-[400px]"
+        empty_label="Run the snippet to see bytecode."
+      />
     </div>
     """
   end

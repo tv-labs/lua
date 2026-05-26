@@ -1,7 +1,7 @@
 defmodule DemoWeb.PlaygroundLive do
   use DemoWeb, :live_view
 
-  alias DemoWeb.Bytecode
+  import DemoWeb.BytecodeComponents
   alias Website.LuaSandbox
 
   @max_shared_bytes 20_000
@@ -15,11 +15,11 @@ defmodule DemoWeb.PlaygroundLive do
       |> assign(:examples, LuaSandbox.examples())
       |> assign(:active_example, "hello")
       |> assign(:source, default_source("hello"))
+      |> assign(:blocks, LuaSandbox.example_blocks("hello"))
       |> assign(:result, nil)
       |> assign(:running, false)
       |> assign(:show_bytecode, true)
       |> assign(:selected_block, 0)
-      |> assign(:hover_line, nil)
       |> assign(:shared_source?, false)
       |> assign(:lua_timer_ref, nil)
 
@@ -49,10 +49,11 @@ defmodule DemoWeb.PlaygroundLive do
              socket
              |> assign(:active_example, id)
              |> assign(:source, source)
+             |> assign(:blocks, LuaSandbox.example_blocks(id))
              |> assign(:result, nil)
              |> assign(:selected_block, 0)
              |> assign(:shared_source?, false)
-             |> push_event("lua-editor:set-source", %{source: source})}
+             |> push_event("lua-editor:set-source", %{source: source, example_id: id})}
         end
 
       Map.has_key?(params, "source") ->
@@ -62,10 +63,11 @@ defmodule DemoWeb.PlaygroundLive do
              socket
              |> assign(:active_example, nil)
              |> assign(:source, source)
+             |> assign(:blocks, compile_blocks(source))
              |> assign(:result, nil)
              |> assign(:selected_block, 0)
              |> assign(:shared_source?, true)
-             |> push_event("lua-editor:set-source", %{source: source})}
+             |> push_event("lua-editor:set-source", %{source: source, example_id: nil})}
 
           :error ->
             {:noreply,
@@ -75,7 +77,7 @@ defmodule DemoWeb.PlaygroundLive do
         end
 
       true ->
-        {:noreply, socket}
+        {:noreply, push_patch(socket, to: ~p"/playground/#{default_example_id()}", replace: true)}
     end
   end
 
@@ -111,9 +113,10 @@ defmodule DemoWeb.PlaygroundLive do
      socket
      |> assign(:active_example, id)
      |> assign(:source, source)
+     |> assign(:blocks, LuaSandbox.example_blocks(id))
      |> assign(:result, nil)
      |> assign(:selected_block, 0)
-     |> push_event("lua-editor:set-source", %{source: source})
+     |> push_event("lua-editor:set-source", %{source: source, example_id: id})
      |> push_patch(to: ~p"/playground/#{id}")}
   end
 
@@ -129,42 +132,42 @@ defmodule DemoWeb.PlaygroundLive do
     {:noreply, assign(socket, :selected_block, String.to_integer(idx))}
   end
 
-  def handle_event("hover-line", %{"line" => line}, socket) do
-    {:noreply, assign(socket, :hover_line, parse_line(line))}
-  end
-
-  def handle_event("focus-line", %{"line" => line}, socket) do
-    parsed = parse_line(line)
-
-    socket =
-      socket
-      |> assign(:hover_line, parsed)
-      |> push_event("lua-editor:focus-line", %{line: parsed, target: "editor-wrap"})
-
+  def handle_event("reset", _params, %{assigns: %{active_example: nil}} = socket) do
     {:noreply, socket}
   end
 
-  def handle_event("clear", _params, socket) do
+  def handle_event("reset", _params, socket) do
+    id = socket.assigns.active_example
+    source = default_source(id)
+
     {:noreply,
      socket
-     |> assign(:source, "")
+     |> assign(:source, source)
+     |> assign(:blocks, LuaSandbox.example_blocks(id))
      |> assign(:result, nil)
      |> assign(:selected_block, 0)
-     |> push_event("lua-editor:set-source", %{source: ""})}
+     |> push_event("lua-editor:set-source", %{
+       source: source,
+       example_id: id,
+       clear_storage: true
+     })}
   end
-
-  defp parse_line(nil), do: nil
-  defp parse_line(""), do: nil
-  defp parse_line(line) when is_binary(line), do: String.to_integer(line)
-  defp parse_line(line) when is_integer(line), do: line
 
   @impl true
   def handle_async(:lua_run, {:ok, result}, socket) do
-    {:noreply,
-     socket
-     |> finish_lua_run()
-     |> assign(:result, result)
-     |> assign(:selected_block, 0)}
+    socket =
+      socket
+      |> finish_lua_run()
+      |> assign(:result, result)
+      |> assign(:selected_block, 0)
+
+    socket =
+      case result do
+        %{bytecode: [_ | _] = bs} -> assign(socket, :blocks, bs)
+        _ -> socket
+      end
+
+    {:noreply, socket}
   end
 
   def handle_async(:lua_run, {:exit, _reason}, socket) do
@@ -224,6 +227,8 @@ defmodule DemoWeb.PlaygroundLive do
     end
   end
 
+  defp default_example_id, do: hd(LuaSandbox.examples()).id
+
   defp active_blurb(examples, active_id) do
     case Enum.find(examples, &(&1.id == active_id)) do
       %{blurb: blurb} when is_binary(blurb) and blurb != "" -> blurb
@@ -260,8 +265,17 @@ defmodule DemoWeb.PlaygroundLive do
             </p>
           </div>
           <div class="flex items-center gap-2">
-            <button class="btn btn-ghost btn-sm" phx-click="clear">
-              <.icon name="hero-trash-micro" class="size-4" /> Clear
+            <button
+              class={["btn btn-ghost btn-sm", is_nil(@active_example) && "btn-disabled"]}
+              phx-click="reset"
+              disabled={is_nil(@active_example)}
+              title={
+                if is_nil(@active_example),
+                  do: "Pick an example to reset to.",
+                  else: "Restore this example's original source."
+              }
+            >
+              <.icon name="hero-arrow-uturn-left-micro" class="size-4" /> Reset
             </button>
             <button
               class={["btn btn-sm", @show_bytecode && "btn-primary", !@show_bytecode && "btn-ghost"]}
@@ -302,17 +316,12 @@ defmodule DemoWeb.PlaygroundLive do
           !@show_bytecode && "grid-cols-1"
         ]}>
           <div class="flex flex-col gap-4 min-w-0">
-            <.editor_panel source={@source} running={@running} />
+            <.editor_panel source={@source} running={@running} active_example={@active_example} />
             <.output_panel result={@result} running={@running} />
           </div>
 
           <%= if @show_bytecode do %>
-            <.bytecode_panel
-              result={@result}
-              source={@source}
-              selected={@selected_block}
-              hover_line={@hover_line}
-            />
+            <.playground_bytecode blocks={@blocks} selected={@selected_block} />
           <% end %>
         </div>
 
@@ -327,7 +336,7 @@ defmodule DemoWeb.PlaygroundLive do
             <span>+</span> <kbd class="kbd kbd-sm">Tab</kbd>
           </.kbd_card>
           <.kbd_card>
-            <:label>Heads-up</:label>
+            <:label><span class="whitespace-nowrap">Heads-up</span></:label>
             <span class="text-base-content/70">
               Snippets run in a sandboxed VM with a 1.5s timeout.
             </span>
@@ -356,6 +365,7 @@ defmodule DemoWeb.PlaygroundLive do
 
   attr :source, :string, required: true
   attr :running, :boolean, required: true
+  attr :active_example, :string, default: nil
 
   defp editor_panel(assigns) do
     ~H"""
@@ -404,6 +414,7 @@ defmodule DemoWeb.PlaygroundLive do
         phx-hook="LuaEditor"
         phx-update="ignore"
         data-storage-key="playground:source"
+        data-example-id={@active_example || ""}
         class="relative h-[420px] overflow-hidden"
       >
         <textarea
@@ -500,133 +511,28 @@ defmodule DemoWeb.PlaygroundLive do
     """
   end
 
-  attr :result, :map, default: nil
-  attr :source, :string, required: true
+  attr :blocks, :list, required: true
   attr :selected, :integer, required: true
-  attr :hover_line, :integer, default: nil
 
-  defp bytecode_panel(assigns) do
-    bytecode =
-      cond do
-        match?(%{bytecode: [_ | _]}, assigns.result) ->
-          assigns.result.bytecode
-
-        true ->
-          case LuaSandbox.compile(assigns.source) do
-            {:ok, _chunk, blocks} -> blocks
-            {:error, _} -> []
-          end
-      end
-
-    assigns = assign(assigns, :bytecode, bytecode)
-
+  defp playground_bytecode(assigns) do
     ~H"""
-    <div class="rounded-box border border-base-300/60 bg-base-200/50 overflow-hidden lg:sticky lg:top-20 self-start">
-      <div class="px-4 py-2 border-b border-base-300/60 bg-base-300/30 flex items-center justify-between">
-        <div class="text-sm font-semibold text-base-content/70">
-          Bytecode &middot; <span class="font-mono text-base-content/50">Lua.Compiler.Prototype</span>
-        </div>
-        <div class="text-xs font-mono text-base-content/50">
-          <%= if @bytecode != [] do %>
-            {length(@bytecode)} proto{if length(@bytecode) != 1, do: "s"}
-          <% else %>
-            —
-          <% end %>
-        </div>
-      </div>
-
-      <%= if @bytecode == [] do %>
-        <div class="p-6 text-sm text-base-content/50 font-mono">
-          Bytecode appears here after a successful parse.
-        </div>
-      <% else %>
-        <%= if length(@bytecode) > 1 do %>
-          <div class="px-3 pt-3 flex gap-1 flex-wrap">
-            <%= for block <- @bytecode do %>
-              <button
-                phx-click="select-block"
-                phx-value-index={block.index}
-                class={[
-                  "btn btn-xs font-mono",
-                  block.index == @selected && "btn-primary",
-                  block.index != @selected && "btn-ghost border border-base-300/60"
-                ]}
-              >
-                {block.name}
-              </button>
-            <% end %>
-          </div>
-        <% end %>
-
-        <%= for block <- @bytecode, block.index == @selected do %>
-          <div class="px-4 py-3 border-b border-base-300/40 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <.meta_pill label="params" value={block.param_count} />
-            <.meta_pill label="vararg" value={if block.is_vararg, do: "yes", else: "no"} />
-            <.meta_pill label="registers" value={block.max_registers} />
-            <.meta_pill label="upvalues" value={block.upvalue_count} />
-          </div>
-
-          <div class="font-mono text-xs leading-6 max-h-[520px] overflow-auto">
-            <table class="w-full">
-              <tbody>
-                <%= for ins <- block.instructions do %>
-                  <tr
-                    class={[
-                      "border-b border-base-300/30 hover:bg-base-300/30",
-                      ins.line && "cursor-pointer",
-                      @hover_line && ins.line == @hover_line && "bg-primary/15 ring-1 ring-primary/40",
-                      ins.op == :source_line && "text-base-content/40 italic"
-                    ]}
-                    phx-mouseover={ins.line && "focus-line"}
-                    phx-value-line={ins.line}
-                    phx-throttle="40"
-                  >
-                    <td class="px-3 py-1 text-base-content/40 select-none text-right w-12">
-                      {pad_pc(ins.pc)}
-                    </td>
-                    <td class="px-2 py-1 text-base-content/40 select-none w-10 text-right">
-                      <%= if ins.line do %>
-                        <span class={[
-                          "text-base-content/40",
-                          @hover_line && ins.line == @hover_line && "text-primary font-semibold"
-                        ]}>
-                          L{ins.line}
-                        </span>
-                      <% end %>
-                    </td>
-                    <td class="px-3 py-1">
-                      <span class={Bytecode.op_class(ins.op)}>{ins.op}</span>
-                      {" "}
-                      <span class="text-base-content/80">
-                        {Bytecode.format_args(ins.op, ins.args)}
-                      </span>
-                    </td>
-                  </tr>
-                <% end %>
-              </tbody>
-            </table>
-          </div>
-        <% end %>
-      <% end %>
+    <div class="lg:sticky lg:top-20 self-start">
+      <.bytecode_panel
+        blocks={@blocks}
+        selected={@selected}
+        variant={:full}
+        max_height="max-h-[520px]"
+      />
     </div>
     """
   end
 
-  attr :label, :string, required: true
-  attr :value, :any, required: true
-
-  defp meta_pill(assigns) do
-    ~H"""
-    <div class="rounded-box bg-base-100/60 border border-base-300/40 px-3 py-2">
-      <div class="text-[10px] uppercase tracking-wider text-base-content/50 font-semibold">
-        {@label}
-      </div>
-      <div class="font-mono text-sm text-base-content/90">{@value}</div>
-    </div>
-    """
+  defp compile_blocks(source) do
+    case LuaSandbox.compile(source) do
+      {:ok, _chunk, blocks} -> blocks
+      {:error, _} -> []
+    end
   end
-
-  defp pad_pc(n), do: n |> Integer.to_string() |> String.pad_leading(3, "0")
 
   defp format_us(us) when us < 1_000, do: "#{us} µs"
   defp format_us(us) when us < 1_000_000, do: "#{Float.round(us / 1_000, 2)} ms"

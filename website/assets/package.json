@@ -12,6 +12,7 @@
     "codemirror": "^6.0.1",
     "phoenix": "../deps/phoenix",
     "phoenix_html": "../deps/phoenix_html",
-    "phoenix_live_view": "../deps/phoenix_live_view"
+    "phoenix_live_view": "../deps/phoenix_live_view",
+    "tippy.js": "^6.3.7"
   }
 }

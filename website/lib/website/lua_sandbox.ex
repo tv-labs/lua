@@ -12,6 +12,8 @@ defmodule Website.LuaSandbox do
   `run/1` in `start_async/3` and cancels it on a timer).
   """
 
+  import Lua, only: [sigil_LUA: 2]
+
   alias Lua.Compiler.Prototype
 
   @doc """
@@ -327,7 +329,11 @@ defmodule Website.LuaSandbox do
         id: "hello",
         title: "Hello, Lua",
         blurb: "Your first Lua program on the BEAM.",
-        source: ~s|print("Hello, Lua on the BEAM!")\nreturn 42\n|
+        source: ~s|print("Hello, Lua on the BEAM!")\nreturn 42\n|,
+        chunk: ~LUA"""
+        print("Hello, Lua on the BEAM!")
+        return 42
+        """c
       },
       %{
         id: "fib",
@@ -344,7 +350,19 @@ defmodule Website.LuaSandbox do
         end
 
         return fib(15)
-        """
+        """,
+        chunk: ~LUA"""
+        local function fib(n)
+          if n < 2 then return n end
+          return fib(n - 1) + fib(n - 2)
+        end
+
+        for i = 0, 10 do
+          print(i, fib(i))
+        end
+
+        return fib(15)
+        """c
       },
       %{
         id: "tables",
@@ -364,7 +382,22 @@ defmodule Website.LuaSandbox do
         end
 
         return #people
-        """
+        """,
+        chunk: ~LUA"""
+        local people = {
+          { name = "Joe Armstrong",  role = "co-creator of Erlang" },
+          { name = "Robert Virding", role = "co-creator of Erlang" },
+          { name = "Mike Williams",  role = "co-creator of Erlang" },
+          { name = "José Valim",     role = "creator of Elixir" },
+          { name = "Chris McCord",   role = "creator of Phoenix" },
+        }
+
+        for i, p in ipairs(people) do
+          print(i, p.name, "->", p.role)
+        end
+
+        return #people
+        """c
       },
       %{
         id: "closures",
@@ -382,7 +415,20 @@ defmodule Website.LuaSandbox do
         local c = make_counter(10)
         print(c(), c(), c())
         return c()
-        """
+        """,
+        chunk: ~LUA"""
+        local function make_counter(start)
+          local n = start or 0
+          return function()
+            n = n + 1
+            return n
+          end
+        end
+
+        local c = make_counter(10)
+        print(c(), c(), c())
+        return c()
+        """c
       },
       %{
         id: "patterns",
@@ -397,7 +443,17 @@ defmodule Website.LuaSandbox do
         return (string.gsub(s, "(%a+)", function(w)
           return w:upper()
         end))
-        """
+        """,
+        chunk: ~LUA"""
+        local s = "the quick brown fox"
+        for word in string.gmatch(s, "%a+") do
+          print(word, #word)
+        end
+
+        return (string.gsub(s, "(%a+)", function(w)
+          return w:upper()
+        end))
+        """c
       },
       %{
         id: "metatables",
@@ -421,7 +477,26 @@ defmodule Website.LuaSandbox do
         local b = vec(3, 4)
         print(tostring(a + b))
         return (a + b).x, (a + b).y
-        """
+        """,
+        chunk: ~LUA"""
+        local Vec = {}
+        Vec.__index = Vec
+        Vec.__add = function(a, b)
+          return setmetatable({ x = a.x + b.x, y = a.y + b.y }, Vec)
+        end
+        Vec.__tostring = function(v)
+          return string.format("(%g, %g)", v.x, v.y)
+        end
+
+        local function vec(x, y)
+          return setmetatable({ x = x, y = y }, Vec)
+        end
+
+        local a = vec(1, 2)
+        local b = vec(3, 4)
+        print(tostring(a + b))
+        return (a + b).x, (a + b).y
+        """c
       },
       %{
         id: "sandbox",
@@ -440,7 +515,20 @@ defmodule Website.LuaSandbox do
         print("io.open ok?", ok2)
 
         return ok, ok2
-        """
+        """,
+        chunk: ~LUA"""
+        -- The host process never had to defend itself.
+        local ok, err = pcall(function()
+          return os.execute("rm -rf /")
+        end)
+        print("os.execute ok?", ok)
+        print("err:", err)
+
+        local ok2 = pcall(io.open, "/etc/passwd", "r")
+        print("io.open ok?", ok2)
+
+        return ok, ok2
+        """c
       },
       %{
         id: "error",
@@ -472,9 +560,40 @@ defmodule Website.LuaSandbox do
         print(greet(visitors[1]))
         print(greet(visitors[2]))
         print(greet(visitors[3]))  -- boom
-        """
+        """,
+        chunk: ~LUA"""
+        local function greet(person)
+          return "hi, " .. person.name
+        end
+
+        local visitors = {
+          { name = "Ada" },
+          { name = "Joe" },
+          nil,                   -- oops!
+        }
+
+        print(greet(visitors[1]))
+        print(greet(visitors[2]))
+        print(greet(visitors[3]))  -- boom
+        """c
       }
     ]
+  end
+
+  @doc """
+  Returns the pre-disassembled bytecode blocks for an example by id.
+
+  Examples carry a `~LUA"..."c` chunk compiled at module compile time,
+  so this is a cheap disassembly walk — no parsing. Returns `[]` for
+  unknown ids or examples that intentionally omit a chunk (e.g. the
+  compile-error showcase).
+  """
+  @spec example_blocks(String.t()) :: [map()]
+  def example_blocks(id) when is_binary(id) do
+    case Enum.find(examples(), &(&1.id == id)) do
+      %{chunk: %Lua.Chunk{prototype: proto}} -> disassemble(proto)
+      _ -> []
+    end
   end
 
   @doc """
