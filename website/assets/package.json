@@ -1,0 +1,18 @@
+{
+  "name": "website-assets",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@codemirror/commands": "^6.6.0",
+    "@codemirror/language": "^6.10.2",
+    "@codemirror/legacy-modes": "^6.4.0",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.26.3",
+    "codemirror": "^6.0.1",
+    "phoenix": "../deps/phoenix",
+    "phoenix_html": "../deps/phoenix_html",
+    "phoenix_live_view": "../deps/phoenix_live_view",
+    "tippy.js": "^6.3.7"
+  }
+}

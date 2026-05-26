@@ -1,0 +1,429 @@
+/* See the Tailwind configuration guide for advanced usage
+   https://tailwindcss.com/docs/configuration */
+
+@import "tailwindcss" source(none);
+@source "../css";
+@source "../js";
+@source "../../lib/website_web";
+
+/* A Tailwind plugin that makes "hero-#{ICON}" classes available.
+   The heroicons installation itself is managed by your mix.exs */
+@plugin "../vendor/heroicons";
+
+/* daisyUI Tailwind Plugin. You can update this file by fetching the latest version with:
+   curl -sLO https://github.com/saadeghi/daisyui/releases/latest/download/daisyui.js
+   Make sure to look at the daisyUI changelog: https://daisyui.com/docs/changelog/ */
+@plugin "../vendor/daisyui" {
+  themes: false;
+}
+
+/* daisyUI theme plugin. You can update this file by fetching the latest version with:
+  curl -sLO https://github.com/saadeghi/daisyui/releases/latest/download/daisyui-theme.js
+  We ship with two themes, a light one inspired on Phoenix colors and a dark one inspired
+  on Elixir colors. Build your own at: https://daisyui.com/theme-generator/ */
+@plugin "../vendor/daisyui-theme" {
+  name: "dark";
+  default: false;
+  prefersdark: true;
+  color-scheme: "dark";
+  --color-base-100: oklch(30.33% 0.016 252.42);
+  --color-base-200: oklch(25.26% 0.014 253.1);
+  --color-base-300: oklch(20.15% 0.012 254.09);
+  --color-base-content: oklch(97.807% 0.029 256.847);
+  --color-primary: oklch(58% 0.233 277.117);
+  --color-primary-content: oklch(96% 0.018 272.314);
+  --color-secondary: oklch(58% 0.233 277.117);
+  --color-secondary-content: oklch(96% 0.018 272.314);
+  --color-accent: oklch(60% 0.25 292.717);
+  --color-accent-content: oklch(96% 0.016 293.756);
+  --color-neutral: oklch(37% 0.044 257.287);
+  --color-neutral-content: oklch(98% 0.003 247.858);
+  --color-info: oklch(58% 0.158 241.966);
+  --color-info-content: oklch(97% 0.013 236.62);
+  --color-success: oklch(60% 0.118 184.704);
+  --color-success-content: oklch(98% 0.014 180.72);
+  --color-warning: oklch(66% 0.179 58.318);
+  --color-warning-content: oklch(98% 0.022 95.277);
+  --color-error: oklch(58% 0.253 17.585);
+  --color-error-content: oklch(96% 0.015 12.422);
+  --radius-selector: 0.25rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.21875rem;
+  --size-field: 0.21875rem;
+  --border: 1.5px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@plugin "../vendor/daisyui-theme" {
+  name: "light";
+  default: true;
+  prefersdark: false;
+  color-scheme: "light";
+  --color-base-100: oklch(98% 0 0);
+  --color-base-200: oklch(96% 0.001 286.375);
+  --color-base-300: oklch(92% 0.004 286.32);
+  --color-base-content: oklch(21% 0.006 285.885);
+  --color-primary: oklch(70% 0.213 47.604);
+  --color-primary-content: oklch(98% 0.016 73.684);
+  --color-secondary: oklch(55% 0.027 264.364);
+  --color-secondary-content: oklch(98% 0.002 247.839);
+  --color-accent: oklch(0% 0 0);
+  --color-accent-content: oklch(100% 0 0);
+  --color-neutral: oklch(44% 0.017 285.786);
+  --color-neutral-content: oklch(98% 0 0);
+  --color-info: oklch(62% 0.214 259.815);
+  --color-info-content: oklch(97% 0.014 254.604);
+  --color-success: oklch(70% 0.14 182.503);
+  --color-success-content: oklch(98% 0.014 180.72);
+  --color-warning: oklch(66% 0.179 58.318);
+  --color-warning-content: oklch(98% 0.022 95.277);
+  --color-error: oklch(58% 0.253 17.585);
+  --color-error-content: oklch(96% 0.015 12.422);
+  --radius-selector: 0.25rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.21875rem;
+  --size-field: 0.21875rem;
+  --border: 1.5px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* Add variants based on LiveView classes */
+@custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
+@custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
+@custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
+
+/* Use the data attribute for dark mode  */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* Make LiveView wrapper divs transparent for layout */
+[data-phx-session], [data-phx-teleported-src] { display: contents }
+
+/* Restore the standard <details> collapse behavior for site disclosures.
+   Tailwind v4 + daisyUI preflight removes the user-agent rule that hides
+   non-summary children when the disclosure is closed. Scoped to
+   `.disclosure` so ad-hoc <details> usage elsewhere (e.g. dev widgets)
+   isn't silently affected — apply the class to any <details> that should
+   collapse natively. */
+details.disclosure:not([open]) > *:not(summary) {
+  display: none;
+}
+
+/* Crescent Drop mark — theme-aware CSS variables consumed by the
+   inline SVG defined in DemoWeb.Layouts.lua_mark/1 and lua_orbit/1.
+   Light theme: near-black ink drop with a Phoenix-orange satellite.
+   Dark theme: Elixir-purple drop with a near-white satellite. */
+:root {
+  --lua-drop-from: oklch(22% 0.04 280);
+  --lua-drop-to:   oklch(32% 0.06 280);
+  --lua-satellite: oklch(70% 0.213 47.604);
+}
+[data-theme=dark] {
+  --lua-drop-from: oklch(58% 0.233 277.117);
+  --lua-drop-to:   oklch(60% 0.25 292.717);
+  --lua-satellite: oklch(95% 0.02 280);
+}
+
+/* Orbital satellite — rotates around the SVG's geometric center.
+   `transform-box: view-box` resolves the origin in viewBox units so
+   `transform-origin: 32px 32px` is the center of our 64x64 viewBox. */
+.lua-orbit-satellite {
+  transform-box: view-box;
+  transform-origin: 32px 32px;
+}
+
+@keyframes lua-orbit {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lua-orbit-satellite {
+    animation: lua-orbit 24s linear infinite;
+    animation-delay: -12s;
+  }
+}
+
+/* Small mark dot — one orbit on load, continuous on hover.
+   Reuses the @keyframes lua-orbit defined above. Scoped via a
+   distinct class so the homepage's always-orbiting background mark
+   (.lua-orbit-satellite) is unaffected. */
+.lua-mark-satellite {
+  transform-box: view-box;
+  transform-origin: 32px 32px;
+}
+
+.lua-mark {
+  transition: filter 120ms ease-out, transform 120ms ease-out;
+}
+
+.group:hover .lua-mark {
+  filter:
+    drop-shadow(0 0 3px var(--lua-satellite))
+    drop-shadow(0 0 9px color-mix(in oklch, var(--lua-satellite) 55%, transparent));
+  transform: scale(1.06);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lua-mark-satellite {
+    animation: lua-orbit 2.4s cubic-bezier(0.4, 0, 0.2, 1) 1;
+  }
+
+  .group:hover .lua-mark-satellite {
+    animation: lua-orbit 1.6s linear infinite;
+  }
+}
+
+/* This file is for your main application CSS */
+
+/* Makeup syntax highlighting — mapped to daisyUI theme tokens so it
+   adapts to both `light` and `dark` themes without two stylesheets.
+   Token classes are Pygments-compatible. */
+.highlight {
+  color: var(--color-base-content);
+}
+
+/* Comments */
+.highlight .c,
+.highlight .c1,
+.highlight .cm,
+.highlight .cs,
+.highlight .ch,
+.highlight .cp,
+.highlight .cpf {
+  color: color-mix(in oklch, var(--color-base-content) 40%, transparent);
+  font-style: italic;
+}
+
+/* Keywords (do, end, defmodule, case, when…) */
+.highlight .k,
+.highlight .kd,
+.highlight .kn,
+.highlight .kp,
+.highlight .kr,
+.highlight .kt {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+/* Pseudo keywords / builtin constants (true, false, nil) */
+.highlight .kc,
+.highlight .bp {
+  color: var(--color-warning);
+}
+
+/* Module names */
+.highlight .nc,
+.highlight .nn {
+  color: var(--color-secondary);
+}
+
+/* Function names */
+.highlight .nf,
+.highlight .fm {
+  color: var(--color-info);
+}
+
+/* Atoms (:foo) */
+.highlight .ss {
+  color: var(--color-accent);
+}
+
+/* Strings */
+.highlight .s,
+.highlight .s1,
+.highlight .s2,
+.highlight .sb,
+.highlight .sc,
+.highlight .sd,
+.highlight .se,
+.highlight .sh,
+.highlight .si,
+.highlight .sx,
+.highlight .sr,
+.highlight .dl {
+  color: var(--color-accent);
+}
+
+/* String interpolation punctuation: visually quieter */
+.highlight .si .o,
+.highlight .si .p {
+  color: color-mix(in oklch, var(--color-accent) 70%, transparent);
+}
+
+/* Numbers */
+.highlight .m,
+.highlight .mi,
+.highlight .mf,
+.highlight .mh,
+.highlight .mo,
+.highlight .mb,
+.highlight .il {
+  color: var(--color-warning);
+}
+
+/* Operators, punctuation: inherit but muted */
+.highlight .o,
+.highlight .ow,
+.highlight .p {
+  color: color-mix(in oklch, var(--color-base-content) 70%, transparent);
+}
+
+/* Variables / identifiers */
+.highlight .n,
+.highlight .nv,
+.highlight .nb,
+.highlight .nl,
+.highlight .py {
+  color: var(--color-base-content);
+}
+
+/* Module attributes (@moduledoc, @spec) */
+.highlight .na {
+  color: var(--color-info);
+}
+
+/* Errors should not vanish silently */
+.highlight .err {
+  color: var(--color-error);
+}
+
+/* Tippy.js — custom "lua" theme that follows DaisyUI's color variables
+   so the same tooltip styling works in both light and dark themes. */
+.tippy-box[data-theme~="lua"] {
+  background-color: var(--color-base-300);
+  color: var(--color-base-content);
+  border: 1px solid color-mix(in oklch, var(--color-base-content) 18%, transparent);
+  border-radius: 0.5rem;
+  box-shadow:
+    0 10px 30px -10px color-mix(in oklch, black 40%, transparent),
+    0 2px 6px -2px color-mix(in oklch, black 25%, transparent);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.tippy-box[data-theme~="lua"] > .tippy-content {
+  padding: 0.65rem 0.8rem;
+}
+
+.tippy-box[data-theme~="lua"][data-placement^="top"] > .tippy-arrow::before {
+  border-top-color: var(--color-base-300);
+}
+.tippy-box[data-theme~="lua"][data-placement^="bottom"] > .tippy-arrow::before {
+  border-bottom-color: var(--color-base-300);
+}
+.tippy-box[data-theme~="lua"][data-placement^="left"] > .tippy-arrow::before {
+  border-left-color: var(--color-base-300);
+}
+.tippy-box[data-theme~="lua"][data-placement^="right"] > .tippy-arrow::before {
+  border-right-color: var(--color-base-300);
+}
+
+/* Opcode tip card layout. */
+.lua-tip {
+  max-width: 280px;
+}
+.lua-tip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  margin-bottom: 0.3rem;
+}
+.lua-tip-head > code:first-child {
+  font-weight: 700;
+  color: var(--color-primary);
+  font-size: 13px;
+}
+.lua-tip-sig {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: color-mix(in oklch, var(--color-base-content) 55%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.lua-tip-body {
+  color: color-mix(in oklch, var(--color-base-content) 85%, transparent);
+  margin-bottom: 0.4rem;
+}
+.lua-tip-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+.lua-tip-link:hover {
+  text-decoration: underline;
+}
+
+/* Glossary tip — small text-only variant used for column headers,
+   meta pills, and the args-notation cell. */
+.lua-tip code {
+  background: color-mix(in oklch, var(--color-base-content) 10%, transparent);
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.2rem;
+  font-size: 0.92em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--color-primary);
+}
+
+.lua-tip strong {
+  font-weight: 600;
+  color: var(--color-base-content);
+}
+
+.lua-tip-section {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: color-mix(in oklch, var(--color-base-content) 55%, transparent);
+  margin-bottom: 0.45rem;
+}
+
+.lua-tip-defs {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 0.7rem;
+  row-gap: 0.25rem;
+  margin: 0;
+}
+.lua-tip-defs dt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.lua-tip-defs dt code {
+  background: transparent;
+  padding: 0;
+  color: var(--color-primary);
+  font-size: 11px;
+}
+.lua-tip-defs dd {
+  margin: 0;
+  font-size: 11.5px;
+  color: color-mix(in oklch, var(--color-base-content) 80%, transparent);
+}
+
+/* Bytecode row cross-highlight. Applied by the `BytecodeHighlight`
+   JS hook to every row whose `data-line` matches the line currently
+   under the mouse (or under the editor cursor). */
+tr.is-hovered {
+  background-color: color-mix(in oklch, var(--color-primary) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-primary) 40%, transparent);
+}
+tr.is-hovered:hover {
+  background-color: color-mix(in oklch, var(--color-primary) 20%, transparent);
+}
+tr.is-hovered .lua-row-line {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
