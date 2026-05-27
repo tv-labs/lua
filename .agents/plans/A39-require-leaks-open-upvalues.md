@@ -2,10 +2,10 @@
 id: A39
 title: require() leaks inner module's open_upvalues into outer caller
 issue: 244
-pr: null
+pr: 245
 branch: fix/require-leaks-open-upvalues
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - luassert.assertions
@@ -154,3 +154,32 @@ Suite count before this plan: 1772 passing, 0 failing, 30 skipped.
   behavior was the bug. Documented in `CHANGELOG.md`.
 - **Vendored luassert may shift if upstream changes.** Pinned to a
   specific tag; future updates are explicit PRs.
+
+## What changed
+
+- **`lib/lua/vm/executor.ex`** — `execute/5` now snapshots
+  `state.open_upvalues` before resetting it to `%{}` and restores the
+  snapshot on return. Matches the save/restore pattern already used by
+  `call_function/3` for `:lua_closure`, `call_value/5`, and the
+  dispatcher entry.
+- **`test/lua/vm/require_open_upvalue_test.exs`** — new unit
+  regression. Two pure-Lua repros: (1) minimal inner-closure-shadows-
+  outer-local at reg 0 case; (2) the luassert-shape "many local
+  function defs between require and method call" that surfaces the
+  exact `attempt to call a nil value (method 'register' on local
+  'assert')` from #244.
+- **`test/integration/luassert/`** — vendored luassert v1.9.0 + say
+  v1.4.1 under `lua/`, with upstream LICENSE files alongside. README
+  documents the pin and update procedure.
+- **`test/integration/luassert_test.exs`** — 18 tests, no opt-in tag
+  so they run on every `mix test` (including CI). Without the fix, 8
+  of 18 fail (exactly the modules called out in #244 plus their API
+  smoke tests).
+- **`CHANGELOG.md`** — Unreleased / Fixed entry for #244 with the
+  side-effect note about `Lua.call_function/3`.
+
+### Suite delta
+
+- `mix test`: 1772 → 1792 (+20 new tests, 0 failures).
+- `mix test --only lua53`: 29 tests / 0 failures / 23 skipped
+  (unchanged).
