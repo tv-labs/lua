@@ -123,4 +123,22 @@ defmodule Lua.VM.Stdlib.PackageTest do
       assert {[true, 1], _} = eval_with_path(code, tmp_dir)
     end
   end
+
+  describe "dotted module names" do
+    @tag :tmp_dir
+    test "require('foo.bar') resolves dots to directory separators", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "foo"))
+
+      File.write!(Path.join([tmp_dir, "foo", "bar.lua"]), """
+      return { ok = true }
+      """)
+
+      code = ~S"""
+      local m = require("foo.bar")
+      return m.ok
+      """
+
+      assert {[true], _} = eval_with_path(code, tmp_dir)
+    end
+  end
 end
