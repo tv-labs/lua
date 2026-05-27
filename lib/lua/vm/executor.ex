@@ -67,15 +67,28 @@ defmodule Lua.VM.Executor do
   Saves and restores any prior `current_position/0` snapshot so nested
   executions (e.g. an Elixir callback that itself calls `Lua.eval!`)
   don't leak source positions into each other.
+
+  Likewise saves and restores `state.open_upvalues` so that a nested
+  execution's upvalue cells — keyed by register index — cannot collide
+  with the caller's. Without this, a `require` that runs a module body
+  containing closures over its top-level locals would leak those cells
+  back to the caller; the caller's later closures would then reuse the
+  stale cells by register index, aliasing the caller's locals to
+  unrelated inner values.
   """
   @spec execute([tuple()], tuple(), list(), map(), State.t()) ::
           {list(), tuple(), State.t()}
   def execute(instructions, registers, upvalues, proto, state) do
     prev = Process.get(@position_key, @unset)
+    saved_open_upvalues = state.open_upvalues
 
     try do
       state = %{state | open_upvalues: %{}}
-      do_execute(instructions, registers, upvalues, proto, state, [], [], 0)
+
+      {results, regs, state} =
+        do_execute(instructions, registers, upvalues, proto, state, [], [], 0)
+
+      {results, regs, %{state | open_upvalues: saved_open_upvalues}}
     after
       restore_position(prev)
     end
