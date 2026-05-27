@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- `require` no longer leaks the loaded module's `open_upvalues` map back
+  to the calling chunk. Loading a module whose body created closures over
+  its own top-level locals could alias the caller's locals to stale inner
+  upvalue cells, breaking real-world libraries (e.g. `luassert.assertions`,
+  `luassert.array`, `luassert.spy`) that follow the pattern
+  `local x = require(...)` → many `local function` defs → `x:method(...)`.
+  As a side effect, `Lua.call_function/3` (public API) now preserves the
+  caller's `open_upvalues` across calls (#244).
+
 ## [v1.0.0-rc.0] - 2026-05-26
 
 This is the first release candidate for `1.0.0`. The library has been
