@@ -83,4 +83,87 @@ defmodule Mix.Tasks.Lua.SuiteTest do
       end
     end
   end
+
+  describe "--status" do
+    test "summarises a fixture skip file with totals and categories" do
+      skip_file = Path.join(@tmpdir, "skips.exs")
+
+      File.write!(skip_file, """
+      %{
+        "a.lua" => [%{lines: :all, category: :unimplemented, reason: "t", issue: nil}],
+        "b.lua" => [
+          %{lines: 1..3, category: :stdlib, reason: "t", issue: 42},
+          %{lines: 10..10, category: :executor, reason: "t", issue: nil}
+        ]
+      }
+      """)
+
+      output = capture_io(fn -> Suite.run(["--status", "--skip-file", skip_file]) end)
+
+      assert output =~ "a.lua"
+      assert output =~ ":all pending triage"
+      assert output =~ "b.lua"
+      assert output =~ "stdlib×1"
+      assert output =~ "executor×1"
+      assert output =~ "Total: 4 skipped lines across 2 ranges in 1 files. 1 files pending initial triage."
+      assert output =~ "By category: stdlib 1, executor 1"
+      assert output =~ "By issue: 1 ranges linked, 1 unassigned."
+    end
+  end
+
+  describe "--audit" do
+    test "reports CANDIDATE when a :all entry's file passes outright" do
+      write_lua("passing.lua", "return 1\n")
+      skip_file = Path.join(@tmpdir, "skips.exs")
+
+      File.write!(skip_file, """
+      %{"passing.lua" => [%{lines: :all, category: :unimplemented, reason: "t", issue: nil}]}
+      """)
+
+      output =
+        capture_io(fn ->
+          Suite.run(["--audit", "--dir", @tmpdir, "--skip-file", skip_file, "--timeout", "5000"])
+        end)
+
+      assert output =~ "passing.lua"
+      assert output =~ "CANDIDATE"
+      assert output =~ "1 promotion candidates"
+    end
+
+    test "reports STALE when a specific range is no longer needed" do
+      write_lua("a.lua", "local x = 1\nreturn x\n")
+      skip_file = Path.join(@tmpdir, "skips.exs")
+
+      File.write!(skip_file, """
+      %{"a.lua" => [%{lines: 1..1, category: :executor, reason: "t", issue: nil}]}
+      """)
+
+      output =
+        capture_io(fn ->
+          Suite.run(["--audit", "--dir", @tmpdir, "--skip-file", skip_file, "--timeout", "5000"])
+        end)
+
+      assert output =~ "a.lua:1"
+      assert output =~ "STALE"
+      assert output =~ "1 stale entries"
+    end
+
+    test "reports ACTIVE when a :all entry's file still fails without ranges" do
+      write_lua("broken.lua", "assert(false, 'still bad')\n")
+      skip_file = Path.join(@tmpdir, "skips.exs")
+
+      File.write!(skip_file, """
+      %{"broken.lua" => [%{lines: :all, category: :unimplemented, reason: "t", issue: nil}]}
+      """)
+
+      output =
+        capture_io(fn ->
+          Suite.run(["--audit", "--dir", @tmpdir, "--skip-file", skip_file, "--timeout", "5000"])
+        end)
+
+      assert output =~ "broken.lua"
+      assert output =~ "ACTIVE"
+      assert output =~ "first failure at line 1"
+    end
+  end
 end

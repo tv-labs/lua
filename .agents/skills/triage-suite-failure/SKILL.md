@@ -27,8 +27,8 @@ turning that understanding into a shippable plan.
 - Reducing it to a 5–20 line repro that lives in `test/lua/vm/`.
 - Producing one of three outputs:
   1. A new plan file under `.agents/plans/` if the fix is shippable.
-  2. An `@tag :skip` annotation in `test/lua53_suite_test.exs` with a clear
-     comment explaining the deferral, plus a deferred-issue label.
+  2. A line-range skip entry in `test/lua53_skips.exs` with a one-line
+     reason and (optionally) a tracking issue. See §6.C.
   3. An update to an existing plan if this failure is part of an ongoing fix.
 
 ## What this skill is NOT for
@@ -159,26 +159,68 @@ Required sections:
 Then open a corresponding GitHub issue and link them via `issue:` frontmatter
 field.
 
-#### C. Defer (out of scope for current direction)
+#### C. Defer with a line-range skip
 
-The bug is real but fixing it is weeks of work (coroutines, GC, full goto
-CFG, file I/O, etc.).
-
-In `test/lua53_suite_test.exs`:
+The bug is real but fixing it is out of scope for the current cycle
+(coroutines, GC, full goto CFG, etc.). Don't tag the whole suite file
+`@tag :skip` — that throws away signal from every other assertion in
+the file. Instead, add a *line-range* entry to `test/lua53_skips.exs`:
 
 ```elixir
-# Deferred: backward goto requires CFG pass in compiler.
-# See .agents/plans/A-goto-cfg.md (when written) or ROADMAP.md "Deferred".
-@tag :skip
-test "goto.lua" do ... end
+%{
+  "pm.lua" => [
+    %{lines: 245..289, category: :stdlib, reason: "string.gmatch frontier %f not implemented", issue: 312}
+  ]
+}
 ```
 
-Leave the unit test from step 4 in place — even if the suite file is
-skipped, the unit test documents the bug and will catch a regression if a
-future change accidentally fixes it.
+Entry fields:
 
-If there's no deferred-tracking issue yet, open one with label `defer` and
-reference it from the comment.
+- `:lines` — a `Range` covering the failing statement and any
+  dependent state. Use `:all` only for whole-file deferrals awaiting
+  initial triage (existing seed entries do this; you should replace
+  one with a real range).
+- `:category` — pick one from the table in §5 of this skill
+  (`:lexer | :parser | :codegen | :executor | :stdlib | :unimplemented | :semantic`).
+- `:reason` — one line, stands alone. Do **not** reference plan ids
+  (plans are ephemeral per CLAUDE.md repo conventions).
+- `:issue` — optional GitHub issue number, or `nil`. Issues are
+  durable; use them when there is a tracked fix.
+
+**Pick the smallest range that contains the failure.** The whole
+failing `assert(...)` line if it stands alone; the enclosing `do ...
+end` block if assertions depend on earlier `local`s. Then scan the
+range for other `assert(...)` calls — if there are more, either name
+them in `:reason` or split into multiple entries. Broad ranges
+silently hide bugs.
+
+**Edge cases that make a range fail to parse:**
+
+- Multi-line strings `[[...]]` and long comments `--[[...]]` — both
+  delimiters must be inside or outside the range; never split.
+- `local x = ...` referenced later in the file — skipping the
+  declaration breaks the downstream `x`; widen the range to cover
+  those uses too.
+- `if/then/.../end` — `then` block is skippable but `if`, `then`,
+  and `end` must survive. (Lua allows empty `then`.)
+
+If your range crosses a syntactic boundary, the suite test fails
+with a parse error pointing near the boundary; widen and re-run.
+
+**Re-run the file after adding the range:**
+
+```
+mix test test/lua53_suite_test.exs --only lua53
+```
+
+Confirm: the file either passes (test name now reads
+`pm.lua (47 lines skipped, 3 ranges)`) or progresses to a new,
+well-located failure. If a parse error appeared, the range crossed a
+boundary — widen.
+
+Leave the unit test from step 4 in place — even if the suite range is
+skipped, the unit test documents the bug and will catch a regression
+if a future change accidentally fixes it.
 
 ### 7. Output a triage report
 
@@ -195,7 +237,8 @@ Classification: <category>
 Decision: fix-in-plan | defer | follow-up
 
 If fix-in-plan: created .agents/plans/<id>-<slug>.md
-If defer: tagged @skip in test/lua53_suite_test.exs with reason
+If defer: added range <N..M> to test/lua53_skips.exs (issue #<N>)
+Lines skipped: <N..M>
 ```
 
 ## Conventions
