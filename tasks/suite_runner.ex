@@ -36,12 +36,23 @@ defmodule Lua.SuiteRunner do
   Returns `:ok` on success, `{:error, exception}` if the file raises.
   No exceptions escape this function.
 
+  ## Options
+
+    * `:skip_ranges` — a list of `Range` values. Each line in any of
+      the ranges is replaced with a one-line comment before the source
+      is evaluated. Line numbers are preserved, so assertion errors
+      still report the original source position.
+
   Use `prepare/1` if you need to inspect or modify the VM before
   running.
   """
-  @spec run_file(Path.t()) :: :ok | {:error, Exception.t()}
-  def run_file(path) do
-    source = File.read!(path)
+  @spec run_file(Path.t(), keyword) :: :ok | {:error, Exception.t()}
+  def run_file(path, opts \\ []) do
+    source =
+      path
+      |> File.read!()
+      |> apply_skip_ranges(Keyword.get(opts, :skip_ranges, []))
+
     lua = prepare(Path.dirname(path))
 
     try do
@@ -50,6 +61,53 @@ defmodule Lua.SuiteRunner do
     rescue
       e -> {:error, e}
     end
+  end
+
+  @doc """
+  Load and validate the suite skip map from an `.exs` file.
+
+  Raises if a file mixes `lines: :all` with specific ranges, since the
+  test driver treats `:all` as a hard skip and silently drops any
+  ranges alongside it.
+  """
+  @spec load_skip_map!(Path.t()) :: %{optional(String.t()) => [map()]}
+  def load_skip_map!(path) do
+    map = path |> Code.eval_file() |> elem(0)
+    validate_skip_map!(map, path)
+    map
+  end
+
+  defp validate_skip_map!(map, path) do
+    Enum.each(map, fn {file, entries} ->
+      has_all? = Enum.any?(entries, &(&1.lines == :all))
+      has_range? = Enum.any?(entries, &(&1.lines != :all))
+
+      if has_all? and has_range? do
+        raise ArgumentError,
+              "#{path}: #{file} mixes `lines: :all` with specific ranges. " <>
+                "Use one or the other — `:all` skips the whole file, so any " <>
+                "ranges alongside it would be silently ignored."
+      end
+    end)
+  end
+
+  @doc """
+  Replace each line covered by `ranges` with a one-line `--` comment,
+  preserving total line count. Used by `run_file/2` and the audit
+  helpers in `Mix.Tasks.Lua.Suite`.
+  """
+  @spec apply_skip_ranges(String.t(), [Range.t()]) :: String.t()
+  def apply_skip_ranges(source, []), do: source
+
+  def apply_skip_ranges(source, ranges) do
+    skip = ranges |> Enum.flat_map(&Enum.to_list/1) |> MapSet.new()
+
+    source
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.map_join("\n", fn {line, n} ->
+      if MapSet.member?(skip, n), do: "-- skipped (suite triage): was line #{n}", else: line
+    end)
   end
 
   defp add_test_paths(lua, test_dir) do

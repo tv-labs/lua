@@ -6,6 +6,7 @@ defmodule Lua.Lua53SuiteTest do
   @moduletag :lua53
 
   @test_dir "test/lua53_tests"
+  @skip_file "test/lua53_skips.exs"
 
   # Dynamically generate test cases for all .lua files in the test directory.
   # This ensures we don't miss any tests as the suite evolves.
@@ -14,8 +15,9 @@ defmodule Lua.Lua53SuiteTest do
              |> Enum.filter(&String.ends_with?(&1, ".lua"))
              |> Enum.sort()
 
-  # Tests that are ready to run (not skipped).
-  @ready_tests ["simple_test.lua", "api.lua", "bitwise.lua", "code.lua", "tpack.lua", "vararg.lua"]
+  # Per-file skip ranges. See test/lua53_skips.exs for shape and conventions.
+  @external_resource @skip_file
+  @skip_map Lua.SuiteRunner.load_skip_map!(@skip_file)
 
   # Suite files that we have deliberately decided not to support.
   #
@@ -50,25 +52,36 @@ defmodule Lua.Lua53SuiteTest do
     "verybig.lua" => "tests dofile()-of-tmpfile harness for >64K constants"
   }
 
-  # Tests that require features not yet implemented. As we implement
-  # features, move tests from here to @ready_tests.
-  @skipped_tests (@lua_files -- @ready_tests) -- Map.keys(@deferred_permanent)
+  @runnable_files @lua_files -- Map.keys(@deferred_permanent)
 
-  describe "Lua 5.3 Test Suite - Ready Tests" do
-    for test_file <- @ready_tests do
-      @test_file test_file
-      test test_file do
-        run_lua_file(Path.join(@test_dir, @test_file))
-      end
-    end
-  end
+  describe "Lua 5.3 Test Suite" do
+    for file <- @runnable_files do
+      entries = Map.get(@skip_map, file, [])
+      whole_file? = Enum.any?(entries, &(&1.lines == :all))
+      ranges = entries |> Enum.reject(&(&1.lines == :all)) |> Enum.map(& &1.lines)
 
-  describe "Lua 5.3 Test Suite - Skipped Tests (Missing Features)" do
-    for test_file <- @skipped_tests do
-      @test_file test_file
-      @tag :skip
-      test test_file do
-        run_lua_file(Path.join(@test_dir, @test_file))
+      @test_file file
+      @ranges ranges
+
+      cond do
+        whole_file? ->
+          @tag :skip
+          test "#{file} (pending initial triage)" do
+            run_lua_file(Path.join(@test_dir, @test_file))
+          end
+
+        ranges == [] ->
+          test file do
+            run_lua_file(Path.join(@test_dir, @test_file))
+          end
+
+        true ->
+          skipped =
+            Enum.reduce(ranges, 0, fn r, acc -> Enum.count(r) + acc end)
+
+          test "#{file} (#{skipped} lines skipped, #{length(ranges)} ranges)" do
+            run_lua_file(Path.join(@test_dir, @test_file), skip_ranges: @ranges)
+          end
       end
     end
   end

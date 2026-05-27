@@ -24,6 +24,8 @@ defmodule Mix.Tasks.Lua.Suite do
       mix lua.suite --filter math
       mix lua.suite --dir test/lua53_tests
       mix lua.suite --verbose
+      mix lua.suite --status
+      mix lua.suite --audit
 
   ## Options
 
@@ -35,6 +37,11 @@ defmodule Mix.Tasks.Lua.Suite do
       exceed it are reported as `timeout` (default: `30000`).
     * `--verbose` — Print the full error message for each failing
       file, not just the first line.
+    * `--status` — Print a per-file conformance summary from
+      `test/lua53_skips.exs`. Fast, no tests run.
+    * `--audit` — For each skip entry, re-run the file with that
+      entry removed and report whether it is stale (file passes
+      without it). Slow.
 
   ## Output
 
@@ -59,15 +66,33 @@ defmodule Mix.Tasks.Lua.Suite do
 
   use Mix.Task
 
+  @skip_file "test/lua53_skips.exs"
+
   @impl Mix.Task
   def run(args) do
     Mix.Task.run("app.start")
 
     {opts, _positional} =
       OptionParser.parse!(args,
-        strict: [dir: :string, filter: :string, timeout: :integer, verbose: :boolean]
+        strict: [
+          dir: :string,
+          filter: :string,
+          timeout: :integer,
+          verbose: :boolean,
+          status: :boolean,
+          audit: :boolean,
+          skip_file: :string
+        ]
       )
 
+    cond do
+      Keyword.get(opts, :status, false) -> run_status(opts)
+      Keyword.get(opts, :audit, false) -> run_audit(opts)
+      true -> run_suite(opts)
+    end
+  end
+
+  defp run_suite(opts) do
     dir = Keyword.get(opts, :dir, "test/lua53_tests")
     filter = Keyword.get(opts, :filter)
     timeout = Keyword.get(opts, :timeout, 30_000)
@@ -180,5 +205,198 @@ defmodule Mix.Tasks.Lua.Suite do
     |> Exception.message()
     |> String.split("\n", parts: 2)
     |> List.first()
+  end
+
+  # --- --status ---------------------------------------------------------
+
+  defp run_status(opts) do
+    skip_map = load_skip_map!(Keyword.get(opts, :skip_file, @skip_file))
+    files = skip_map |> Map.keys() |> Enum.sort()
+
+    if files == [] do
+      Mix.shell().info("No skip entries — suite is fully ranged.")
+    else
+      width = files |> Enum.map(&String.length/1) |> Enum.max()
+      stats = aggregate_skip_stats(skip_map)
+
+      Enum.each(files, fn file ->
+        entries = Map.get(skip_map, file)
+        print_file_status(file, entries, width)
+      end)
+
+      file_count = length(files) - stats.all_count
+
+      Mix.shell().info("")
+
+      Mix.shell().info(
+        "Total: #{stats.total_lines} skipped lines across #{stats.total_ranges} ranges " <>
+          "in #{file_count} files. #{stats.all_count} files pending initial triage."
+      )
+
+      if stats.categories != %{} do
+        cats_str =
+          stats.categories
+          |> Enum.sort_by(fn {_, n} -> -n end)
+          |> Enum.map_join(", ", fn {c, n} -> "#{c} #{n}" end)
+
+        Mix.shell().info("By category: #{cats_str}")
+      end
+
+      unassigned = stats.total_ranges - stats.issues_linked
+      Mix.shell().info("By issue: #{stats.issues_linked} ranges linked, #{unassigned} unassigned.")
+    end
+  end
+
+  defp aggregate_skip_stats(skip_map) do
+    initial = %{
+      total_lines: 0,
+      total_ranges: 0,
+      all_count: 0,
+      categories: %{},
+      issues_linked: 0
+    }
+
+    skip_map
+    |> Map.values()
+    |> List.flatten()
+    |> Enum.reduce(initial, fn entry, acc ->
+      if entry.lines == :all do
+        %{acc | all_count: acc.all_count + 1}
+      else
+        %{
+          acc
+          | total_lines: acc.total_lines + Enum.count(entry.lines),
+            total_ranges: acc.total_ranges + 1,
+            categories: Map.update(acc.categories, entry.category, 1, &(&1 + 1)),
+            issues_linked: acc.issues_linked + if(entry.issue, do: 1, else: 0)
+        }
+      end
+    end)
+  end
+
+  defp print_file_status(file, entries, width) do
+    label = String.pad_trailing(file, width + 2)
+
+    if Enum.any?(entries, &(&1.lines == :all)) do
+      Mix.shell().info("  #{label}:all pending triage")
+    else
+      lines = Enum.reduce(entries, 0, fn e, acc -> Enum.count(e.lines) + acc end)
+
+      cats_str =
+        entries
+        |> Enum.map(& &1.category)
+        |> Enum.frequencies()
+        |> Enum.map_join(", ", fn {c, n} -> "#{c}×#{n}" end)
+
+      Mix.shell().info("  #{label}#{lines} lines, #{length(entries)} ranges (#{cats_str})")
+    end
+  end
+
+  # --- --audit ----------------------------------------------------------
+
+  defp run_audit(opts) do
+    dir = Keyword.get(opts, :dir, "test/lua53_tests")
+    timeout = Keyword.get(opts, :timeout, 30_000)
+    skip_map = load_skip_map!(Keyword.get(opts, :skip_file, @skip_file))
+
+    files = skip_map |> Map.keys() |> Enum.sort()
+
+    total_entries =
+      skip_map |> Map.values() |> List.flatten() |> length()
+
+    Mix.shell().info("Auditing #{total_entries} skip entries across #{length(files)} files...")
+    Mix.shell().info("")
+
+    {stale, candidates} =
+      Enum.reduce(files, {0, 0}, fn file, {stale_acc, cand_acc} ->
+        entries = Map.get(skip_map, file)
+        path = Path.join(dir, file)
+
+        if Enum.any?(entries, &(&1.lines == :all)) do
+          case run_with_ranges(path, [], timeout) do
+            :ok ->
+              report(file, nil, "CANDIDATE", "file passes with no ranges — try promoting")
+              {stale_acc, cand_acc + 1}
+
+            {:error, e} ->
+              report(file, nil, "ACTIVE", ":all entry, first failure at #{error_line_label(e)}")
+              {stale_acc, cand_acc}
+
+            :timeout ->
+              report(file, nil, "TIMEOUT", "exceeded #{timeout}ms with no ranges")
+              {stale_acc, cand_acc}
+          end
+        else
+          Enum.reduce(entries, {stale_acc, cand_acc}, fn entry, {s, c} ->
+            others = entries |> Enum.reject(&(&1 == entry)) |> Enum.map(& &1.lines)
+
+            case run_with_ranges(path, others, timeout) do
+              :ok ->
+                report(file, entry.lines, "STALE", "file passes without this range — try removing")
+                {s + 1, c}
+
+              {:error, e} ->
+                new_line = error_line(e)
+
+                if new_line && new_line not in entry.lines do
+                  report(file, entry.lines, "MOVED", "failure now at line #{new_line} — consider narrowing")
+                  {s, c}
+                else
+                  {s, c}
+                end
+
+              :timeout ->
+                report(file, entry.lines, "TIMEOUT", "exceeded #{timeout}ms without this range")
+                {s, c}
+            end
+          end)
+        end
+      end)
+
+    Mix.shell().info("")
+    Mix.shell().info("#{stale} stale entries, #{candidates} promotion candidates.")
+  end
+
+  defp run_with_ranges(path, ranges, timeout) do
+    task = Task.async(fn -> Lua.SuiteRunner.run_file(path, skip_ranges: ranges) end)
+
+    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, :ok} -> :ok
+      {:ok, {:error, e}} -> {:error, e}
+      _ -> :timeout
+    end
+  end
+
+  defp error_line(e) when is_exception(e), do: Map.get(e, :line)
+  defp error_line(_), do: nil
+
+  defp error_line_label(e) when is_exception(e) do
+    case Map.get(e, :line) do
+      nil -> "unknown line (#{e.__struct__ |> Module.split() |> List.last()})"
+      n -> "line #{n}"
+    end
+  end
+
+  defp error_line_label(_), do: "unknown line"
+
+  defp report(file, nil, status, msg) do
+    Mix.shell().info("  #{String.pad_trailing(file, 24)}#{String.pad_trailing(status, 12)}#{msg}")
+  end
+
+  defp report(file, range, status, msg) do
+    label = "#{file}:#{range_to_string(range)}"
+    Mix.shell().info("  #{String.pad_trailing(label, 24)}#{String.pad_trailing(status, 12)}#{msg}")
+  end
+
+  defp range_to_string(%Range{first: a, last: a}), do: "#{a}"
+  defp range_to_string(%Range{first: a, last: b, step: 1}), do: "#{a}..#{b}"
+  defp range_to_string(%Range{first: a, last: b, step: s}), do: "#{a}..#{b}//#{s}"
+
+  defp load_skip_map!(path) do
+    if !File.exists?(path) do
+      Mix.raise("#{path} not found — nothing to report.")
+    end
+
+    Lua.SuiteRunner.load_skip_map!(path)
   end
 end

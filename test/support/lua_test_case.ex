@@ -10,8 +10,8 @@ defmodule Lua.TestCase do
   use ExUnit.CaseTemplate
 
   @doc false
-  def run_lua_file(path, _opts \\ []) do
-    case Lua.SuiteRunner.run_file(path) do
+  def run_lua_file(path, opts \\ []) do
+    case Lua.SuiteRunner.run_file(path, opts) do
       :ok -> :ok
       {:error, e} -> raise e
     end
