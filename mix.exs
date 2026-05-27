@@ -15,7 +15,9 @@ defmodule Lua.MixProject do
 
       # Dialyzer
       dialyzer: [
-        plt_add_apps: [:ex_unit, :mix]
+        plt_add_apps: [:ex_unit],
+        plt_core_path: "priv/plts/core",
+        plt_local_path: "priv/plts/local"
       ],
 
       # Docs
