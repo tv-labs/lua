@@ -750,8 +750,10 @@ defmodule Lua.VM.Stdlib do
 
   # Find a module file by searching the patterns
   defp find_module_file(modname, patterns) do
+    resolved = String.replace(modname, ".", "/")
+
     Enum.find_value(patterns, {:error, :not_found}, fn pattern ->
-      file_path = String.replace(pattern, "?", modname)
+      file_path = String.replace(pattern, "?", resolved)
 
       case File.read(file_path) do
         {:ok, content} -> {:ok, file_path, content}
