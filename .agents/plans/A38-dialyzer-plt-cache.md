@@ -2,10 +2,10 @@
 id: A38
 title: "Cache the Dialyzer PLT in CI to cut job time from ~3m30s to <60s"
 issue: null
-pr: null
+pr: 243
 branch: ci/dialyzer-plt-cache
 base: main
-status: in-progress
+status: review
 direction: A
 ---
 
@@ -87,3 +87,11 @@ mix dialyzer          # must exit 0
   and confirming the directory exists.
 - **Cache storage budget**: PLT files are ~30-50 MB per Elixir/OTP
   combination, well within the typical 10 GB org cache cap.
+
+## What changed
+
+- `mix.exs`: added `plt_core_path: "priv/plts/core"`, `plt_local_path: "priv/plts/local"`, removed `:mix` from `plt_add_apps`
+- `.gitignore`: added `/priv/plts/`
+- `.github/workflows/ci.yml`: added `Restore PLT cache` step, split `mix dialyzer` into `Build PLT` + `Run dialyzer`
+
+PR: https://github.com/tv-labs/lua/pull/243
