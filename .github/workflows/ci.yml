@@ -230,5 +230,17 @@ jobs:
       - *bootstrap-beam
       - *cache-deps
       - *install-deps
+
+      - name: Restore PLT cache
+        uses: actions/cache@v4
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-elixir${{ matrix.elixir }}-otp${{ matrix.otp }}-plt-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-elixir${{ matrix.elixir }}-otp${{ matrix.otp }}-plt-
+
+      - name: Build PLT
+        run: mix dialyzer --plt
+
       - name: Run dialyzer
         run: mix dialyzer

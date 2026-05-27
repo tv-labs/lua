@@ -22,6 +22,9 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 lua-*.tar
 
+# Dialyzer PLT files (build artefacts, cached in CI via actions/cache).
+/priv/plts/
+
 # Temporary files, for example, from tests.
 /tmp/
 
