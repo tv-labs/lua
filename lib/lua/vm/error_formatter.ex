@@ -1,17 +1,18 @@
 defmodule Lua.VM.ErrorFormatter do
   @moduledoc """
-  Beautiful error formatting for Lua runtime errors.
+  Error formatting for Lua runtime errors.
 
-  Provides detailed error messages with:
-  - ANSI-colored error type headers
-  - Clear error messages
-  - Source context with line numbers and pointer
-  - Stack traces
-  - Suggestions for common mistakes
+  Two entry points share the same underlying data:
+
+    * `format/3` renders an ANSI-colored multi-line string for terminal output
+      (headers, source context with pointer, stack trace, suggestion).
+    * `to_map/3` returns a wire-safe structured map for non-terminal consumers
+      (HTML rendering, JSON payloads, structured logs). No ANSI escapes appear
+      in any string field.
   """
 
   @doc """
-  Formats a runtime error into a beautiful multi-line string.
+  Formats a runtime error into a multi-line ANSI-colored string.
 
   ## Options
 
@@ -43,6 +44,54 @@ defmodule Lua.VM.ErrorFormatter do
     |> Enum.join("\n")
   end
 
+  @doc """
+  Returns a wire-safe structured representation of an error.
+
+  The shape:
+
+      %{
+        type: atom(),
+        message: String.t(),
+        source: String.t() | nil,
+        line: pos_integer() | nil,
+        call_stack: [%{source: String.t() | nil, line: pos_integer() | nil, name: String.t() | nil}],
+        source_context: %{
+          lines: [%{number: pos_integer(), text: String.t(), highlight?: boolean()}],
+          pointer_column: pos_integer() | nil
+        } | nil,
+        suggestion: String.t() | nil,
+        error_kind: atom() | nil
+      }
+
+  `source_context` is only populated when both `:source_code` and `:line` are
+  provided. `pointer_column` reflects the column where the `^` marker points;
+  the formatter does not currently track real column positions, so it is `1`
+  when a highlighted line is present and `nil` otherwise.
+
+  ## Options
+
+  Accepts the same options as `format/3`.
+  """
+  def to_map(error_type, message, opts \\ []) do
+    source = Keyword.get(opts, :source)
+    line = Keyword.get(opts, :line)
+    call_stack = Keyword.get(opts, :call_stack, [])
+    source_code = Keyword.get(opts, :source_code)
+    error_kind = Keyword.get(opts, :error_kind)
+    value_type = Keyword.get(opts, :value_type)
+
+    %{
+      type: error_type,
+      message: message,
+      source: source,
+      line: line,
+      call_stack: build_call_stack(call_stack),
+      source_context: build_source_context(source_code, line),
+      suggestion: build_suggestion(error_type, error_kind, value_type),
+      error_kind: error_kind
+    }
+  end
+
   defp format_header(:type_error) do
     IO.ANSI.red() <> IO.ANSI.bright() <> "Runtime Type Error" <> IO.ANSI.reset()
   end
@@ -66,44 +115,60 @@ defmodule Lua.VM.ErrorFormatter do
     "\n  #{message}"
   end
 
-  defp format_source_context(nil, _line), do: nil
-  defp format_source_context(_source_code, nil), do: nil
+  defp format_source_context(source_code, line) do
+    case build_source_context(source_code, line) do
+      nil -> nil
+      %{lines: lines} -> render_source_context(lines)
+    end
+  end
 
-  defp format_source_context(source_code, line) when is_binary(source_code) do
+  defp render_source_context(lines) do
+    context_lines =
+      Enum.flat_map(lines, fn %{number: num, text: text, highlight?: highlight?} ->
+        line_str = format_line_number(num) <> " │ " <> text
+
+        if highlight? do
+          pointer_offset = String.length(format_line_number(num)) + 3
+
+          pointer =
+            String.duplicate(" ", pointer_offset) <> IO.ANSI.red() <> "^" <> IO.ANSI.reset()
+
+          [
+            "\n" <> IO.ANSI.red() <> line_str <> IO.ANSI.reset(),
+            pointer
+          ]
+        else
+          ["\n" <> IO.ANSI.faint() <> line_str <> IO.ANSI.reset()]
+        end
+      end)
+
+    "\n" <> Enum.join(context_lines)
+  end
+
+  defp build_source_context(nil, _line), do: nil
+  defp build_source_context(_source_code, nil), do: nil
+
+  defp build_source_context(source_code, line) when is_binary(source_code) and is_integer(line) do
     lines = String.split(source_code, "\n")
+    total = length(lines)
 
-    if line > 0 and line <= length(lines) do
-      # Show 2 lines before and after
+    if line > 0 and line <= total do
       start_line = max(1, line - 2)
-      end_line = min(length(lines), line + 2)
+      end_line = min(total, line + 2)
 
-      context_lines =
+      rendered_lines =
         lines
         |> Enum.slice((start_line - 1)..(end_line - 1))
         |> Enum.with_index(start_line)
-        |> Enum.flat_map(fn {line_text, num} ->
-          line_str = format_line_number(num) <> " │ " <> line_text
-
-          if num == line do
-            # Error line - add pointer
-            pointer_offset = String.length(format_line_number(num)) + 3
-
-            pointer =
-              String.duplicate(" ", pointer_offset) <> IO.ANSI.red() <> "^" <> IO.ANSI.reset()
-
-            [
-              "\n" <> IO.ANSI.red() <> line_str <> IO.ANSI.reset(),
-              pointer
-            ]
-          else
-            # Context line
-            ["\n" <> IO.ANSI.faint() <> line_str <> IO.ANSI.reset()]
-          end
+        |> Enum.map(fn {text, num} ->
+          %{number: num, text: text, highlight?: num == line}
         end)
 
-      "\n" <> Enum.join(context_lines)
+      %{lines: rendered_lines, pointer_column: 1}
     end
   end
+
+  defp build_source_context(_source_code, _line), do: nil
 
   defp format_line_number(num) do
     num
@@ -114,10 +179,25 @@ defmodule Lua.VM.ErrorFormatter do
   defp format_stack_trace([]), do: nil
 
   defp format_stack_trace(call_stack) when is_list(call_stack) do
-    frames = Enum.map_join(call_stack, "\n", &format_frame/1)
+    frames =
+      call_stack
+      |> build_call_stack()
+      |> Enum.map_join("\n", &format_frame/1)
 
     "\n\n" <> IO.ANSI.cyan() <> "Stack trace:" <> IO.ANSI.reset() <> "\n" <> frames
   end
+
+  defp build_call_stack(call_stack) when is_list(call_stack) do
+    Enum.map(call_stack, fn frame ->
+      %{
+        source: Map.get(frame, :source),
+        line: Map.get(frame, :line),
+        name: Map.get(frame, :name)
+      }
+    end)
+  end
+
+  defp build_call_stack(_), do: []
 
   defp format_frame(%{source: source, line: line, name: name}) do
     location = "  #{source || "-no-source-"}:#{line}:"
@@ -131,41 +211,38 @@ defmodule Lua.VM.ErrorFormatter do
     location <> context
   end
 
-  defp format_suggestion(:type_error, error_kind, value_type) do
-    case error_kind do
-      :call_nil ->
-        suggestion(
-          "The value you're trying to call as a function is nil. Check that the function exists and is defined before this point."
-        )
-
-      :call_non_function ->
-        type_name = format_type_name(value_type)
-
-        suggestion("You can only call function values. Check that you're calling a function, not a #{type_name}.")
-
-      :index_non_table ->
-        type_name = format_type_name(value_type)
-
-        suggestion("You can only index tables. Make sure the value you're indexing is a table, not a #{type_name}.")
-
-      :arithmetic_type_error ->
-        suggestion(
-          "Arithmetic operations require numbers. Make sure both operands are numbers or strings that can be converted to numbers."
-        )
-
-      :concatenate_type_error ->
-        suggestion("String concatenation (..) requires strings or numbers, not other types.")
-
-      _ ->
-        nil
+  defp format_suggestion(error_type, error_kind, value_type) do
+    case build_suggestion(error_type, error_kind, value_type) do
+      nil -> nil
+      text -> suggestion(text)
     end
   end
 
-  defp format_suggestion(:assertion_error, _error_kind, _value_type) do
-    suggestion("The assertion condition evaluated to false or nil. Check your logic.")
+  defp build_suggestion(:type_error, :call_nil, _value_type) do
+    "The value you're trying to call as a function is nil. Check that the function exists and is defined before this point."
   end
 
-  defp format_suggestion(_, _, _), do: nil
+  defp build_suggestion(:type_error, :call_non_function, value_type) do
+    "You can only call function values. Check that you're calling a function, not a #{format_type_name(value_type)}."
+  end
+
+  defp build_suggestion(:type_error, :index_non_table, value_type) do
+    "You can only index tables. Make sure the value you're indexing is a table, not a #{format_type_name(value_type)}."
+  end
+
+  defp build_suggestion(:type_error, :arithmetic_type_error, _value_type) do
+    "Arithmetic operations require numbers. Make sure both operands are numbers or strings that can be converted to numbers."
+  end
+
+  defp build_suggestion(:type_error, :concatenate_type_error, _value_type) do
+    "String concatenation (..) requires strings or numbers, not other types."
+  end
+
+  defp build_suggestion(:assertion_error, _error_kind, _value_type) do
+    "The assertion condition evaluated to false or nil. Check your logic."
+  end
+
+  defp build_suggestion(_, _, _), do: nil
 
   defp suggestion(text) do
     "\n\n" <> IO.ANSI.cyan() <> "Suggestion:" <> IO.ANSI.reset() <> "\n  " <> text

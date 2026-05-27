@@ -15,15 +15,15 @@ defmodule Lua.RuntimeException do
   """
   alias Lua.Util
 
+  @runtime_prefix "Lua runtime error: "
+
   defexception [:message, :original, :state, :line, :source, :call_stack]
 
   @impl true
   def exception({:lua_error, error, _state}) do
-    message = Util.format_error(error)
-
     %__MODULE__{
       original: error,
-      message: "Lua runtime error: #{message}"
+      message: prefix_message(Util.format_error(error))
     }
   end
 
@@ -39,12 +39,12 @@ defmodule Lua.RuntimeException do
     %__MODULE__{
       original: list,
       state: nil,
-      message: "Lua runtime error: #{format_function(scope, function)} failed, #{message}"
+      message: prefix_message("#{format_function(scope, function)} failed, #{message}")
     }
   end
 
   def exception(error) when is_binary(error) do
-    %__MODULE__{message: "Lua runtime error: #{String.trim(error)}"}
+    %__MODULE__{message: prefix_message(String.trim(error))}
   end
 
   def exception(error) do
@@ -62,12 +62,15 @@ defmodule Lua.RuntimeException do
 
     %__MODULE__{
       original: error,
-      message: "Lua runtime error: #{message}",
+      message: prefix_message(message),
       line: line,
       source: source,
       call_stack: call_stack
     }
   end
+
+  defp prefix_message(@runtime_prefix <> _ = msg), do: msg
+  defp prefix_message(msg), do: @runtime_prefix <> msg
 
   defp extract_context(error) when is_struct(error) do
     {Map.get(error, :line), Map.get(error, :source), Map.get(error, :call_stack)}

@@ -433,6 +433,69 @@ defmodule Lua.RuntimeExceptionTest do
     end
   end
 
+  describe "single-prefix invariant" do
+    # Wrapping an already-prefixed message should not produce
+    # "Lua runtime error: Lua runtime error: ..." chains.
+
+    test "binary clause does not double-prefix" do
+      exception = RuntimeException.exception("Lua runtime error: already prefixed")
+
+      assert exception.message == "Lua runtime error: already prefixed"
+    end
+
+    test "binary clause trims then guards" do
+      exception = RuntimeException.exception("  Lua runtime error: trimmed  \n")
+
+      assert exception.message == "Lua runtime error: trimmed"
+    end
+
+    test "lua_error tuple clause does not double-prefix" do
+      exception =
+        RuntimeException.exception({:lua_error, "Lua runtime error: from inner error", State.new()})
+
+      assert exception.message == "Lua runtime error: from inner error"
+    end
+
+    test "catch-all clause does not double-prefix when wrapping a VM exception" do
+      inner =
+        Lua.VM.RuntimeError.exception(
+          value: "boom",
+          source: "t.lua",
+          line: 3,
+          message: "Lua runtime error: boom"
+        )
+
+      exception = RuntimeException.exception(inner)
+
+      assert exception.message == "Lua runtime error: boom"
+    end
+
+    test "catch-all clause does not double-prefix when wrapping a built-in exception" do
+      inner = RuntimeError.exception("Lua runtime error: already wrapped")
+
+      exception = RuntimeException.exception(inner)
+
+      assert exception.message == "Lua runtime error: already wrapped"
+    end
+
+    test "keyword list clause still prefixes (inner never starts with prefix)" do
+      exception =
+        RuntimeException.exception(
+          scope: ["m"],
+          function: "f",
+          message: "boom"
+        )
+
+      assert exception.message == "Lua runtime error: m.f() failed, boom"
+    end
+
+    test "binary clause still prefixes plain messages" do
+      exception = RuntimeException.exception("plain message")
+
+      assert exception.message == "Lua runtime error: plain message"
+    end
+  end
+
   describe "stack trace pruning" do
     # The rescued Elixir stacktrace should not contain frames from the
     # VM, compiler, parser, or lexer internals — those are noise to a
