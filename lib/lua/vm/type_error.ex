@@ -12,6 +12,8 @@ defmodule Lua.VM.TypeError do
   attribution automatically.
   """
 
+  alias Lua.VM.ErrorFormatter
+
   defexception [:value, :source, :message, :call_stack, :line, :error_kind, :value_type]
 
   @impl true
@@ -40,10 +42,25 @@ defmodule Lua.VM.TypeError do
     }
   end
 
-  defp format_message(value, source, line, call_stack, error_kind, value_type) do
-    error_msg = stringify(value)
+  @doc """
+  Returns a wire-safe structured map for this error. See
+  `Lua.VM.ErrorFormatter.to_map/3` for the shape.
 
-    Lua.VM.ErrorFormatter.format(:type_error, error_msg,
+  Pass `:source_code` to populate `source_context`.
+  """
+  def to_map(%__MODULE__{} = error, opts \\ []) do
+    ErrorFormatter.to_map(:type_error, raw_message(error.value),
+      source: error.source,
+      line: error.line,
+      call_stack: error.call_stack,
+      error_kind: error.error_kind,
+      value_type: error.value_type,
+      source_code: Keyword.get(opts, :source_code)
+    )
+  end
+
+  defp format_message(value, source, line, call_stack, error_kind, value_type) do
+    ErrorFormatter.format(:type_error, raw_message(value),
       source: source,
       line: line,
       call_stack: call_stack,
@@ -51,6 +68,8 @@ defmodule Lua.VM.TypeError do
       value_type: value_type
     )
   end
+
+  defp raw_message(value), do: stringify(value)
 
   defp stringify(nil), do: "nil"
   defp stringify(v) when is_binary(v), do: v

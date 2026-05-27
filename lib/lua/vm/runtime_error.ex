@@ -13,6 +13,8 @@ defmodule Lua.VM.RuntimeError do
   attribution automatically.
   """
 
+  alias Lua.VM.ErrorFormatter
+
   defexception [:value, :source, :message, :call_stack, :line]
 
   @impl true
@@ -34,15 +36,30 @@ defmodule Lua.VM.RuntimeError do
     }
   end
 
-  defp format_message(value, source, line, call_stack) do
-    error_msg = "runtime error: #{stringify(value)}"
+  @doc """
+  Returns a wire-safe structured map for this error. See
+  `Lua.VM.ErrorFormatter.to_map/3` for the shape.
 
-    Lua.VM.ErrorFormatter.format(:runtime_error, error_msg,
+  Pass `:source_code` to populate `source_context`.
+  """
+  def to_map(%__MODULE__{} = error, opts \\ []) do
+    ErrorFormatter.to_map(:runtime_error, raw_message(error.value),
+      source: error.source,
+      line: error.line,
+      call_stack: error.call_stack,
+      source_code: Keyword.get(opts, :source_code)
+    )
+  end
+
+  defp format_message(value, source, line, call_stack) do
+    ErrorFormatter.format(:runtime_error, raw_message(value),
       source: source,
       line: line,
       call_stack: call_stack
     )
   end
+
+  defp raw_message(value), do: "runtime error: #{stringify(value)}"
 
   defp stringify(nil), do: "nil"
   defp stringify(v) when is_binary(v), do: v
