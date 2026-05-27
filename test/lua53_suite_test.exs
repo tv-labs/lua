@@ -17,7 +17,7 @@ defmodule Lua.Lua53SuiteTest do
 
   # Per-file skip ranges. See test/lua53_skips.exs for shape and conventions.
   @external_resource @skip_file
-  @skip_map @skip_file |> Code.eval_file() |> elem(0)
+  @skip_map Lua.SuiteRunner.load_skip_map!(@skip_file)
 
   # Suite files that we have deliberately decided not to support.
   #

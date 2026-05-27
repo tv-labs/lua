@@ -165,5 +165,45 @@ defmodule Mix.Tasks.Lua.SuiteTest do
       assert output =~ "ACTIVE"
       assert output =~ "first failure at line 1"
     end
+
+    test "labels failures that lack a :line field with the exception name" do
+      # Syntax garbage triggers Lua.CompilerException, which carries
+      # formatted error messages but no top-level :line field. Audit
+      # should fall back to a struct-name label instead of bare "?".
+      write_lua("bad_syntax.lua", "@@@ not lua @@@\n")
+      skip_file = Path.join(@tmpdir, "skips.exs")
+
+      File.write!(skip_file, """
+      %{"bad_syntax.lua" => [%{lines: :all, category: :unimplemented, reason: "t", issue: nil}]}
+      """)
+
+      output =
+        capture_io(fn ->
+          Suite.run(["--audit", "--dir", @tmpdir, "--skip-file", skip_file, "--timeout", "5000"])
+        end)
+
+      assert output =~ "bad_syntax.lua"
+      assert output =~ "ACTIVE"
+      assert output =~ "unknown line (CompilerException)"
+    end
+  end
+
+  describe "skip-file validation" do
+    test "raises when a file mixes lines: :all with specific ranges" do
+      skip_file = Path.join(@tmpdir, "skips.exs")
+
+      File.write!(skip_file, """
+      %{
+        "mixed.lua" => [
+          %{lines: :all, category: :unimplemented, reason: "t", issue: nil},
+          %{lines: 1..3, category: :stdlib, reason: "t", issue: nil}
+        ]
+      }
+      """)
+
+      assert_raise ArgumentError, ~r/mixed\.lua mixes `lines: :all`/, fn ->
+        Suite.run(["--status", "--skip-file", skip_file])
+      end
+    end
   end
 end

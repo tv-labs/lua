@@ -64,6 +64,34 @@ defmodule Lua.SuiteRunner do
   end
 
   @doc """
+  Load and validate the suite skip map from an `.exs` file.
+
+  Raises if a file mixes `lines: :all` with specific ranges, since the
+  test driver treats `:all` as a hard skip and silently drops any
+  ranges alongside it.
+  """
+  @spec load_skip_map!(Path.t()) :: %{optional(String.t()) => [map()]}
+  def load_skip_map!(path) do
+    map = path |> Code.eval_file() |> elem(0)
+    validate_skip_map!(map, path)
+    map
+  end
+
+  defp validate_skip_map!(map, path) do
+    Enum.each(map, fn {file, entries} ->
+      has_all? = Enum.any?(entries, &(&1.lines == :all))
+      has_range? = Enum.any?(entries, &(&1.lines != :all))
+
+      if has_all? and has_range? do
+        raise ArgumentError,
+              "#{path}: #{file} mixes `lines: :all` with specific ranges. " <>
+                "Use one or the other — `:all` skips the whole file, so any " <>
+                "ranges alongside it would be silently ignored."
+      end
+    end)
+  end
+
+  @doc """
   Replace each line covered by `ranges` with a one-line `--` comment,
   preserving total line count. Used by `run_file/2` and the audit
   helpers in `Mix.Tasks.Lua.Suite`.
