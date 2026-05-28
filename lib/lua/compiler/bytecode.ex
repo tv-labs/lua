@@ -127,14 +127,19 @@ defmodule Lua.Compiler.Bytecode do
   defp encode({:get_field, dest, table_reg, name, name_hint}),
     do: {:ok, {@op_get_field, dest, table_reg, name, name_hint}}
 
-  defp encode({:add, dest, a, b}), do: {:ok, {@op_add, dest, a, b}}
-  defp encode({:subtract, dest, a, b}), do: {:ok, {@op_subtract, dest, a, b}}
-  defp encode({:multiply, dest, a, b}), do: {:ok, {@op_multiply, dest, a, b}}
-  defp encode({:divide, dest, a, b}), do: {:ok, {@op_divide, dest, a, b}}
-  defp encode({:floor_divide, dest, a, b}), do: {:ok, {@op_floor_divide, dest, a, b}}
-  defp encode({:modulo, dest, a, b}), do: {:ok, {@op_modulo, dest, a, b}}
-  defp encode({:power, dest, a, b}), do: {:ok, {@op_power, dest, a, b}}
-  defp encode({:negate, dest, src}), do: {:ok, {@op_negate, dest, src}}
+  # Arithmetic instructions carry per-operand hint tuples for error
+  # attribution. The v2 dispatcher threads them into
+  # `Executor.dispatcher_binop/7` / `dispatcher_unop/5` so on-disk
+  # bytecode preserves the hint suffix (e.g. `(local 'n')`) on
+  # arithmetic type errors.
+  defp encode({:add, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_add, dest, a, b, hint_a, hint_b}}
+  defp encode({:subtract, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_subtract, dest, a, b, hint_a, hint_b}}
+  defp encode({:multiply, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_multiply, dest, a, b, hint_a, hint_b}}
+  defp encode({:divide, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_divide, dest, a, b, hint_a, hint_b}}
+  defp encode({:floor_divide, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_floor_divide, dest, a, b, hint_a, hint_b}}
+  defp encode({:modulo, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_modulo, dest, a, b, hint_a, hint_b}}
+  defp encode({:power, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_power, dest, a, b, hint_a, hint_b}}
+  defp encode({:negate, dest, src, hint}), do: {:ok, {@op_negate, dest, src, hint}}
 
   defp encode({:less_than, dest, a, b}), do: {:ok, {@op_less_than, dest, a, b}}
   defp encode({:less_equal, dest, a, b}), do: {:ok, {@op_less_equal, dest, a, b}}

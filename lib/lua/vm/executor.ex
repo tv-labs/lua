@@ -202,39 +202,54 @@ defmodule Lua.VM.Executor do
   # process-dictionary bridge installed at the call boundary.
 
   @doc false
-  @spec dispatcher_binop(atom(), term(), term(), State.t(), term()) :: {term(), State.t()}
-  def dispatcher_binop(:add, a, b, state, proto) do
-    try_binary_metamethod("__add", a, b, state, fn -> safe_add(a, b, 0, proto.source) end)
+  @spec dispatcher_binop(atom(), term(), term(), State.t(), term(), term(), term()) ::
+          {term(), State.t()}
+  def dispatcher_binop(:add, a, b, state, proto, hint_a, hint_b) do
+    try_binary_metamethod("__add", a, b, state, fn ->
+      safe_add(a, b, 0, proto.source, hint_a, hint_b)
+    end)
   end
 
-  def dispatcher_binop(:subtract, a, b, state, proto) do
-    try_binary_metamethod("__sub", a, b, state, fn -> safe_subtract(a, b, 0, proto.source) end)
+  def dispatcher_binop(:subtract, a, b, state, proto, hint_a, hint_b) do
+    try_binary_metamethod("__sub", a, b, state, fn ->
+      safe_subtract(a, b, 0, proto.source, hint_a, hint_b)
+    end)
   end
 
-  def dispatcher_binop(:multiply, a, b, state, proto) do
-    try_binary_metamethod("__mul", a, b, state, fn -> safe_multiply(a, b, 0, proto.source) end)
+  def dispatcher_binop(:multiply, a, b, state, proto, hint_a, hint_b) do
+    try_binary_metamethod("__mul", a, b, state, fn ->
+      safe_multiply(a, b, 0, proto.source, hint_a, hint_b)
+    end)
   end
 
-  def dispatcher_binop(:divide, a, b, state, proto) do
-    try_binary_metamethod("__div", a, b, state, fn -> safe_divide(a, b, 0, proto.source) end)
+  def dispatcher_binop(:divide, a, b, state, proto, hint_a, hint_b) do
+    try_binary_metamethod("__div", a, b, state, fn ->
+      safe_divide(a, b, 0, proto.source, hint_a, hint_b)
+    end)
   end
 
-  def dispatcher_binop(:floor_divide, a, b, state, proto) do
-    try_binary_metamethod("__idiv", a, b, state, fn -> safe_floor_divide(a, b, 0, proto.source) end)
+  def dispatcher_binop(:floor_divide, a, b, state, proto, hint_a, hint_b) do
+    try_binary_metamethod("__idiv", a, b, state, fn ->
+      safe_floor_divide(a, b, 0, proto.source, hint_a, hint_b)
+    end)
   end
 
-  def dispatcher_binop(:modulo, a, b, state, proto) do
-    try_binary_metamethod("__mod", a, b, state, fn -> safe_modulo(a, b, 0, proto.source) end)
+  def dispatcher_binop(:modulo, a, b, state, proto, hint_a, hint_b) do
+    try_binary_metamethod("__mod", a, b, state, fn ->
+      safe_modulo(a, b, 0, proto.source, hint_a, hint_b)
+    end)
   end
 
-  def dispatcher_binop(:power, a, b, state, proto) do
-    try_binary_metamethod("__pow", a, b, state, fn -> safe_power(a, b, 0, proto.source) end)
+  def dispatcher_binop(:power, a, b, state, proto, hint_a, hint_b) do
+    try_binary_metamethod("__pow", a, b, state, fn ->
+      safe_power(a, b, 0, proto.source, hint_a, hint_b)
+    end)
   end
 
   @doc false
-  @spec dispatcher_unop(atom(), term(), State.t(), term()) :: {term(), State.t()}
-  def dispatcher_unop(:negate, val, state, proto) do
-    try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, 0, proto.source) end)
+  @spec dispatcher_unop(atom(), term(), State.t(), term(), term()) :: {term(), State.t()}
+  def dispatcher_unop(:negate, val, state, proto, hint) do
+    try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, 0, proto.source, hint) end)
   end
 
   @doc false
@@ -976,14 +991,14 @@ defmodule Lua.VM.Executor do
   # for Lua 5.3 §3.4.1 wrap-around; mixed and float-only fall through to
   # native `+`/`-`/`*`.
 
-  defp do_execute([{:add, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line)
+  defp do_execute([{:add, dest, a, b, _hint_a, _hint_b} | rest], regs, upvalues, proto, state, cont, frames, line)
        when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
     sum = :erlang.element(a + 1, regs) + :erlang.element(b + 1, regs)
     regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(sum))
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
-  defp do_execute([{:add, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:add, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
@@ -994,21 +1009,23 @@ defmodule Lua.VM.Executor do
       src = proto.source
 
       {result, new_state} =
-        try_binary_metamethod("__add", val_a, val_b, state, fn -> safe_add(val_a, val_b, line, src) end)
+        try_binary_metamethod("__add", val_a, val_b, state, fn ->
+          safe_add(val_a, val_b, line, src, hint_a, hint_b)
+        end)
 
       regs = put_elem(regs, dest, result)
       do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
     end
   end
 
-  defp do_execute([{:subtract, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line)
+  defp do_execute([{:subtract, dest, a, b, _hint_a, _hint_b} | rest], regs, upvalues, proto, state, cont, frames, line)
        when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
     diff = :erlang.element(a + 1, regs) - :erlang.element(b + 1, regs)
     regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(diff))
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
-  defp do_execute([{:subtract, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:subtract, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
@@ -1019,21 +1036,23 @@ defmodule Lua.VM.Executor do
       src = proto.source
 
       {result, new_state} =
-        try_binary_metamethod("__sub", val_a, val_b, state, fn -> safe_subtract(val_a, val_b, line, src) end)
+        try_binary_metamethod("__sub", val_a, val_b, state, fn ->
+          safe_subtract(val_a, val_b, line, src, hint_a, hint_b)
+        end)
 
       regs = put_elem(regs, dest, result)
       do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
     end
   end
 
-  defp do_execute([{:multiply, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line)
+  defp do_execute([{:multiply, dest, a, b, _hint_a, _hint_b} | rest], regs, upvalues, proto, state, cont, frames, line)
        when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
     prod = :erlang.element(a + 1, regs) * :erlang.element(b + 1, regs)
     regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(prod))
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
-  defp do_execute([{:multiply, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:multiply, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
@@ -1044,58 +1063,66 @@ defmodule Lua.VM.Executor do
       src = proto.source
 
       {result, new_state} =
-        try_binary_metamethod("__mul", val_a, val_b, state, fn -> safe_multiply(val_a, val_b, line, src) end)
+        try_binary_metamethod("__mul", val_a, val_b, state, fn ->
+          safe_multiply(val_a, val_b, line, src, hint_a, hint_b)
+        end)
 
       regs = put_elem(regs, dest, result)
       do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
     end
   end
 
-  defp do_execute([{:divide, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:divide, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
 
     {result, new_state} =
-      try_binary_metamethod("__div", val_a, val_b, state, fn -> safe_divide(val_a, val_b, line, src) end)
-
-    regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
-  end
-
-  defp do_execute([{:floor_divide, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    val_a = elem(regs, a)
-    val_b = elem(regs, b)
-    src = proto.source
-
-    {result, new_state} =
-      try_binary_metamethod("__idiv", val_a, val_b, state, fn ->
-        safe_floor_divide(val_a, val_b, line, src)
+      try_binary_metamethod("__div", val_a, val_b, state, fn ->
+        safe_divide(val_a, val_b, line, src, hint_a, hint_b)
       end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
-  defp do_execute([{:modulo, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:floor_divide, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
 
     {result, new_state} =
-      try_binary_metamethod("__mod", val_a, val_b, state, fn -> safe_modulo(val_a, val_b, line, src) end)
+      try_binary_metamethod("__idiv", val_a, val_b, state, fn ->
+        safe_floor_divide(val_a, val_b, line, src, hint_a, hint_b)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
-  defp do_execute([{:power, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:modulo, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
 
     {result, new_state} =
-      try_binary_metamethod("__pow", val_a, val_b, state, fn -> safe_power(val_a, val_b, line, src) end)
+      try_binary_metamethod("__mod", val_a, val_b, state, fn ->
+        safe_modulo(val_a, val_b, line, src, hint_a, hint_b)
+      end)
+
+    regs = put_elem(regs, dest, result)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
+  end
+
+  defp do_execute([{:power, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+    val_a = elem(regs, a)
+    val_b = elem(regs, b)
+    src = proto.source
+
+    {result, new_state} =
+      try_binary_metamethod("__pow", val_a, val_b, state, fn ->
+        safe_power(val_a, val_b, line, src, hint_a, hint_b)
+      end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -1138,83 +1165,87 @@ defmodule Lua.VM.Executor do
 
   # ── Bitwise operations ─────────────────────────────────────────────────────
 
-  defp do_execute([{:bitwise_and, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:bitwise_and, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
 
     {result, new_state} =
       try_binary_metamethod("__band", val_a, val_b, state, fn ->
-        Numeric.to_signed_int64(Bitwise.band(to_integer!(val_a, line, src), to_integer!(val_b, line, src)))
+        Numeric.to_signed_int64(
+          Bitwise.band(to_integer!(val_a, line, src, hint_a), to_integer!(val_b, line, src, hint_b))
+        )
       end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
-  defp do_execute([{:bitwise_or, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:bitwise_or, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
 
     {result, new_state} =
       try_binary_metamethod("__bor", val_a, val_b, state, fn ->
-        Numeric.to_signed_int64(Bitwise.bor(to_integer!(val_a, line, src), to_integer!(val_b, line, src)))
+        Numeric.to_signed_int64(Bitwise.bor(to_integer!(val_a, line, src, hint_a), to_integer!(val_b, line, src, hint_b)))
       end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
-  defp do_execute([{:bitwise_xor, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:bitwise_xor, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
 
     {result, new_state} =
       try_binary_metamethod("__bxor", val_a, val_b, state, fn ->
-        Numeric.to_signed_int64(Bitwise.bxor(to_integer!(val_a, line, src), to_integer!(val_b, line, src)))
+        Numeric.to_signed_int64(
+          Bitwise.bxor(to_integer!(val_a, line, src, hint_a), to_integer!(val_b, line, src, hint_b))
+        )
       end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
-  defp do_execute([{:shift_left, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:shift_left, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
 
     {result, new_state} =
       try_binary_metamethod("__shl", val_a, val_b, state, fn ->
-        lua_shift_left(to_integer!(val_a, line, src), to_integer!(val_b, line, src))
+        lua_shift_left(to_integer!(val_a, line, src, hint_a), to_integer!(val_b, line, src, hint_b))
       end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
-  defp do_execute([{:shift_right, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:shift_right, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
 
     {result, new_state} =
       try_binary_metamethod("__shr", val_a, val_b, state, fn ->
-        lua_shift_right(to_integer!(val_a, line, src), to_integer!(val_b, line, src))
+        lua_shift_right(to_integer!(val_a, line, src, hint_a), to_integer!(val_b, line, src, hint_b))
       end)
 
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
 
-  defp do_execute([{:bitwise_not, dest, source} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:bitwise_not, dest, source, hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val = elem(regs, source)
     src = proto.source
 
     {result, new_state} =
       try_unary_metamethod("__bnot", val, state, fn ->
-        Numeric.to_signed_int64(Bitwise.bnot(to_integer!(val, line, src)))
+        Numeric.to_signed_int64(Bitwise.bnot(to_integer!(val, line, src, hint)))
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1364,10 +1395,10 @@ defmodule Lua.VM.Executor do
 
   # ── Unary operations ───────────────────────────────────────────────────────
 
-  defp do_execute([{:negate, dest, source} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:negate, dest, source, hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val = elem(regs, source)
     src = proto.source
-    {result, new_state} = try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, line, src) end)
+    {result, new_state} = try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, line, src, hint) end)
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
@@ -2239,36 +2270,41 @@ defmodule Lua.VM.Executor do
   # passed verbatim from the executor's threaded `line` and `proto.source`,
   # so they cost nothing on the success path beyond two register reads.
 
-  defp safe_add(a, b, line, source) do
-    with {:ok, na} <- to_number(a),
-         {:ok, nb} <- to_number(b) do
-      narrow_if_integer(na + nb)
-    else
-      {:error, val} -> raise_arith_type_error(val, line, source)
+  defp safe_add(a, b, line, source, hint_a, hint_b) do
+    na = number_or_arith_raise!(a, line, source, hint_a)
+    nb = number_or_arith_raise!(b, line, source, hint_b)
+    narrow_if_integer(na + nb)
+  end
+
+  defp safe_subtract(a, b, line, source, hint_a, hint_b) do
+    na = number_or_arith_raise!(a, line, source, hint_a)
+    nb = number_or_arith_raise!(b, line, source, hint_b)
+    narrow_if_integer(na - nb)
+  end
+
+  defp safe_multiply(a, b, line, source, hint_a, hint_b) do
+    na = number_or_arith_raise!(a, line, source, hint_a)
+    nb = number_or_arith_raise!(b, line, source, hint_b)
+    narrow_if_integer(na * nb)
+  end
+
+  # Coerce a value to a number, or raise an arithmetic type error pointing
+  # at the failing operand. Per-operand hint lets the error suffix point
+  # to the originating variable / field (PUC-Lua mirrors this via debug
+  # info; we resolve at compile time and thread the hint through the
+  # instruction tuple).
+  defp number_or_arith_raise!(v, line, source, hint) do
+    case to_number(v) do
+      {:ok, n} -> n
+      {:error, val} -> raise_arith_type_error(val, line, source, hint)
     end
   end
 
-  defp safe_subtract(a, b, line, source) do
-    with {:ok, na} <- to_number(a),
-         {:ok, nb} <- to_number(b) do
-      narrow_if_integer(na - nb)
-    else
-      {:error, val} -> raise_arith_type_error(val, line, source)
-    end
-  end
-
-  defp safe_multiply(a, b, line, source) do
-    with {:ok, na} <- to_number(a),
-         {:ok, nb} <- to_number(b) do
-      narrow_if_integer(na * nb)
-    else
-      {:error, val} -> raise_arith_type_error(val, line, source)
-    end
-  end
-
-  defp raise_arith_type_error(val, line, source) do
+  defp raise_arith_type_error(val, line, source, hint) do
     raise TypeError,
-      value: "attempt to perform arithmetic on a #{Value.type_name(val)} value",
+      value:
+        "attempt to perform arithmetic on a #{Value.type_name(val)} value" <>
+          format_target_hint(hint),
       line: line,
       source: source,
       error_kind: :arithmetic_on_non_number,
@@ -2289,20 +2325,18 @@ defmodule Lua.VM.Executor do
   # Arithmetic on `:nan` will surface a TypeError via `to_number/1`; that's
   # an accepted divergence from real IEEE 754, since the suite tests we
   # care about don't propagate NaN through further arithmetic.
-  defp safe_divide(a, b, line, source) do
-    with {:ok, na} <- to_number(a),
-         {:ok, nb} <- to_number(b) do
-      if nb == 0 or nb == 0.0 do
-        cond do
-          na == 0 or na == 0.0 -> :nan
-          na > 0 -> 1.0e308
-          true -> -1.0e308
-        end
-      else
-        na / nb
+  defp safe_divide(a, b, line, source, hint_a, hint_b) do
+    na = number_or_arith_raise!(a, line, source, hint_a)
+    nb = number_or_arith_raise!(b, line, source, hint_b)
+
+    if nb == 0 or nb == 0.0 do
+      cond do
+        na == 0 or na == 0.0 -> :nan
+        na > 0 -> 1.0e308
+        true -> -1.0e308
       end
     else
-      {:error, val} -> raise_arith_type_error(val, line, source)
+      na / nb
     end
   end
 
@@ -2316,52 +2350,48 @@ defmodule Lua.VM.Executor do
   #
   # An integer-zero divisor still raises — that's correct per spec, since
   # `//` between two integers is integer floor division.
-  defp safe_floor_divide(a, b, line, source) do
-    with {:ok, na} <- to_number(a),
-         {:ok, nb} <- to_number(b) do
-      cond do
-        is_integer(nb) and nb == 0 ->
-          raise RuntimeError, value: "attempt to perform 'n//0'", line: line, source: source
+  defp safe_floor_divide(a, b, line, source, hint_a, hint_b) do
+    na = number_or_arith_raise!(a, line, source, hint_a)
+    nb = number_or_arith_raise!(b, line, source, hint_b)
 
-        is_integer(na) and is_integer(nb) ->
-          Numeric.to_signed_int64(lua_idiv(na, nb))
+    cond do
+      is_integer(nb) and nb == 0 ->
+        raise RuntimeError, value: "attempt to perform 'n//0'", line: line, source: source
 
-        is_float(nb) and nb == 0.0 ->
-          cond do
-            na == 0 or na == 0.0 -> :nan
-            na > 0 -> 1.0e308
-            true -> -1.0e308
-          end
+      is_integer(na) and is_integer(nb) ->
+        Numeric.to_signed_int64(lua_idiv(na, nb))
 
-        true ->
-          Float.floor(na / nb) * 1.0
-      end
-    else
-      {:error, val} -> raise_arith_type_error(val, line, source)
+      is_float(nb) and nb == 0.0 ->
+        cond do
+          na == 0 or na == 0.0 -> :nan
+          na > 0 -> 1.0e308
+          true -> -1.0e308
+        end
+
+      true ->
+        Float.floor(na / nb) * 1.0
     end
   end
 
   # Lua 5.3 §3.4.1: `a % b = a - floor(a/b)*b`. With a float zero divisor,
   # `a/0.0` is inf or nan, and `inf * 0.0 = nan`, so `a % 0.0` is always
   # `:nan` regardless of `a`. An integer-zero divisor still raises.
-  defp safe_modulo(a, b, line, source) do
-    with {:ok, na} <- to_number(a),
-         {:ok, nb} <- to_number(b) do
-      cond do
-        is_integer(nb) and nb == 0 ->
-          raise RuntimeError, value: "attempt to perform 'n%0'", line: line, source: source
+  defp safe_modulo(a, b, line, source, hint_a, hint_b) do
+    na = number_or_arith_raise!(a, line, source, hint_a)
+    nb = number_or_arith_raise!(b, line, source, hint_b)
 
-        is_integer(na) and is_integer(nb) ->
-          Numeric.to_signed_int64(na - lua_idiv(na, nb) * nb)
+    cond do
+      is_integer(nb) and nb == 0 ->
+        raise RuntimeError, value: "attempt to perform 'n%0'", line: line, source: source
 
-        is_float(nb) and nb == 0.0 ->
-          :nan
+      is_integer(na) and is_integer(nb) ->
+        Numeric.to_signed_int64(na - lua_idiv(na, nb) * nb)
 
-        true ->
-          na - Float.floor(na / nb) * nb
-      end
-    else
-      {:error, val} -> raise_arith_type_error(val, line, source)
+      is_float(nb) and nb == 0.0 ->
+        :nan
+
+      true ->
+        na - Float.floor(na / nb) * nb
     end
   end
 
@@ -2371,13 +2401,10 @@ defmodule Lua.VM.Executor do
     if r != 0 and Bitwise.bxor(r, b) < 0, do: q - 1, else: q
   end
 
-  defp safe_power(a, b, line, source) do
-    with {:ok, na} <- to_number(a),
-         {:ok, nb} <- to_number(b) do
-      pow_ieee(na, nb)
-    else
-      {:error, val} -> raise_arith_type_error(val, line, source)
-    end
+  defp safe_power(a, b, line, source, hint_a, hint_b) do
+    na = number_or_arith_raise!(a, line, source, hint_a)
+    nb = number_or_arith_raise!(b, line, source, hint_b)
+    pow_ieee(na, nb)
   end
 
   # `:math.pow` raises ArithmeticError on 0^(negative), inf ^ 0, etc.
@@ -2391,13 +2418,13 @@ defmodule Lua.VM.Executor do
     ArithmeticError -> :nan
   end
 
-  defp safe_negate(a, line, source) do
+  defp safe_negate(a, line, source, hint) do
     case to_number(a) do
       {:ok, na} ->
         narrow_if_integer(-na)
 
       {:error, val} ->
-        raise_arith_type_error(val, line, source)
+        raise_arith_type_error(val, line, source, hint)
     end
   end
 
@@ -2514,14 +2541,16 @@ defmodule Lua.VM.Executor do
       value_type: value_type(v)
   end
 
-  defp to_integer!(v, _line, _source) when is_integer(v), do: v
-  defp to_integer!(v, line, source) when is_float(v), do: float_to_integer!(v, line, source)
+  defp to_integer!(v, _line, _source, _hint) when is_integer(v), do: v
+  defp to_integer!(v, line, source, hint) when is_float(v), do: float_to_integer!(v, line, source, hint)
 
-  defp to_integer!(v, line, source) when is_binary(v) do
+  defp to_integer!(v, line, source, hint) when is_binary(v) do
     case Value.parse_number(v) do
       nil ->
         raise TypeError,
-          value: "attempt to perform bitwise operation on a string value",
+          value:
+            "attempt to perform bitwise operation on a string value" <>
+              format_target_hint(hint),
           line: line,
           source: source,
           error_kind: :bitwise_on_non_integer,
@@ -2531,13 +2560,15 @@ defmodule Lua.VM.Executor do
         n
 
       n when is_float(n) ->
-        float_to_integer!(n, line, source)
+        float_to_integer!(n, line, source, hint)
     end
   end
 
-  defp to_integer!(v, line, source) do
+  defp to_integer!(v, line, source, hint) do
     raise TypeError,
-      value: "attempt to perform bitwise operation on a #{Value.type_name(v)} value",
+      value:
+        "attempt to perform bitwise operation on a #{Value.type_name(v)} value" <>
+          format_target_hint(hint),
       line: line,
       source: source,
       error_kind: :bitwise_on_non_integer,
@@ -2546,14 +2577,14 @@ defmodule Lua.VM.Executor do
 
   # Per Lua 5.3 §3.4.3: a float converts to integer for bitwise ops only if
   # it represents an integer exactly and fits in the signed 64-bit range.
-  defp float_to_integer!(f, line, source) when is_float(f) do
+  defp float_to_integer!(f, line, source, hint) when is_float(f) do
     truncated = trunc(f)
 
     if f == truncated * 1.0 and Numeric.signed?(truncated) do
       truncated
     else
       raise TypeError,
-        value: "number has no integer representation",
+        value: "number has no integer representation" <> format_target_hint(hint),
         line: line,
         source: source,
         error_kind: :bitwise_on_non_integer,

@@ -36,24 +36,37 @@ defmodule Lua.Compiler.Instruction do
   def set_field(table, name, value, name_hint \\ nil), do: {:set_field, table, name, value, name_hint}
   def set_list(table, start, count, offset), do: {:set_list, table, start, count, offset}
 
-  # Arithmetic
-  def add(dest, a, b), do: {:add, dest, a, b}
-  def subtract(dest, a, b), do: {:subtract, dest, a, b}
-  def multiply(dest, a, b), do: {:multiply, dest, a, b}
-  def divide(dest, a, b), do: {:divide, dest, a, b}
-  def floor_divide(dest, a, b), do: {:floor_divide, dest, a, b}
-  def modulo(dest, a, b), do: {:modulo, dest, a, b}
-  def power(dest, a, b), do: {:power, dest, a, b}
-  def negate(dest, source), do: {:negate, dest, source}
+  # Arithmetic.
+  #
+  # `hint_a` / `hint_b` carry the lexical origin of each operand
+  # (`{:global|:local|:upvalue|:field, name}` tuples produced by
+  # `Lua.Compiler.Codegen.name_hint/2`) so the executor can render
+  # PUC-Lua-style suffixes like `(field 'huge')` on type errors. `nil`
+  # means "no useful name" (e.g. expression operand).
+  def add(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:add, dest, a, b, hint_a, hint_b}
+  def subtract(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:subtract, dest, a, b, hint_a, hint_b}
+  def multiply(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:multiply, dest, a, b, hint_a, hint_b}
+  def divide(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:divide, dest, a, b, hint_a, hint_b}
+
+  def floor_divide(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:floor_divide, dest, a, b, hint_a, hint_b}
+
+  def modulo(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:modulo, dest, a, b, hint_a, hint_b}
+  def power(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:power, dest, a, b, hint_a, hint_b}
+  def negate(dest, source, hint \\ nil), do: {:negate, dest, source, hint}
   def concatenate(dest, a, b), do: {:concatenate, dest, a, b}
 
-  # Bitwise
-  def bitwise_and(dest, a, b), do: {:bitwise_and, dest, a, b}
-  def bitwise_or(dest, a, b), do: {:bitwise_or, dest, a, b}
-  def bitwise_xor(dest, a, b), do: {:bitwise_xor, dest, a, b}
-  def shift_left(dest, a, b), do: {:shift_left, dest, a, b}
-  def shift_right(dest, a, b), do: {:shift_right, dest, a, b}
-  def bitwise_not(dest, source), do: {:bitwise_not, dest, source}
+  # Bitwise. Same hint convention as arithmetic.
+  def bitwise_and(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:bitwise_and, dest, a, b, hint_a, hint_b}
+
+  def bitwise_or(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:bitwise_or, dest, a, b, hint_a, hint_b}
+
+  def bitwise_xor(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:bitwise_xor, dest, a, b, hint_a, hint_b}
+
+  def shift_left(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:shift_left, dest, a, b, hint_a, hint_b}
+
+  def shift_right(dest, a, b, hint_a \\ nil, hint_b \\ nil), do: {:shift_right, dest, a, b, hint_a, hint_b}
+
+  def bitwise_not(dest, source, hint \\ nil), do: {:bitwise_not, dest, source, hint}
 
   # Comparison
   def equal(dest, a, b), do: {:equal, dest, a, b}
