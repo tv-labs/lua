@@ -67,6 +67,31 @@ defmodule Lua.Compiler.Bytecode do
   @op_length 35
   @op_numeric_for 36
 
+  # B5c-v2: closures, upvalues, varargs, multi-return, loops, self, concat.
+  # After this block lands, the only opcodes the encoder still rejects are
+  # the data-shape concerns explicitly out of scope (`:goto` / `:label` for
+  # label-resolution semantics, `:set_global` for codegen vestige, and the
+  # bitwise family — none of which are blockers for the closures / OOP /
+  # string_ops benchmarks).
+  @op_closure 37
+  @op_set_upvalue 38
+  @op_get_open_upvalue 39
+  @op_set_open_upvalue 40
+  @op_vararg 41
+  # `:return_vararg` (returns `proto.varargs`) and the `:return base count<0` /
+  # `{:multi_return, fixed}` form (collects from regs) are different data
+  # sources, so they get distinct tags. Both unwind through `return_multi/3`.
+  @op_return_proto_varargs 42
+  @op_return_collect 43
+  @op_return_multi 44
+  @op_call_multi 45
+  @op_self 46
+  @op_concatenate 47
+  @op_break 48
+  @op_while_loop 49
+  @op_repeat_loop 50
+  @op_generic_for 51
+
   @doc """
   Compile a prototype, populating its `bytecode` field on success.
 
@@ -176,16 +201,18 @@ defmodule Lua.Compiler.Bytecode do
     end
   end
 
-  # `:call` shapes the dispatcher covers:
+  # `:call` shapes:
   #
-  #   - `result_count == 1`: the expression-call hot path (every
-  #     recursive call in fib/factorial, every `f(x)` used as an rvalue).
-  #   - `result_count == 0`: the statement-call form, e.g.
-  #     `table.sort(t)`. Results are discarded.
+  #   - `result_count == 1` with fixed positive arg_count → `:call_one`,
+  #     the expression-call hot path (every recursive call in fib /
+  #     factorial, every `f(x)` used as an rvalue).
+  #   - `result_count == 0` with fixed positive arg_count → `:call_zero`,
+  #     the statement-call form (e.g. `table.sort(t)`).
+  #   - Anything else (multi-return result, negative result count,
+  #     `{:multi, _}` arg shape, negative arg count) → `:call_multi`.
+  #     This is the B5c-v2 catch-all for the multi-return machinery.
   #
-  # Multi-return (`{:multi, _}`), negative result counts, and tail-call
-  # marker shapes all stay on the interpreter via the catchall.
-  # `name_hint` is preserved on both shapes for error attribution.
+  # `name_hint` is preserved on every shape for error attribution.
   defp encode({:call, base, arg_count, 1, name_hint}) when is_integer(arg_count) and arg_count >= 0 do
     {:ok, {@op_call_one, base, arg_count, name_hint}}
   end
@@ -194,11 +221,39 @@ defmodule Lua.Compiler.Bytecode do
     {:ok, {@op_call_zero, base, arg_count, name_hint}}
   end
 
-  # `:return` shapes: single-value is the hot path (every recursive return
-  # in fib/factorial), zero-value falls through to the interpreter's "no
-  # explicit return = nil" handling.
+  defp encode({:call, base, arg_count, result_count, name_hint}) do
+    {:ok, {@op_call_multi, base, arg_count, result_count, name_hint}}
+  end
+
+  # `:return` shapes:
+  #
+  #   - `count == 1` is the hot path (every recursive return in fib/factorial).
+  #     Stays a dedicated opcode so the dispatcher can avoid the result-list
+  #     allocation on the bottom of the call stack.
+  #   - `count == 0` is the codegen-emitted "no explicit return" form;
+  #     handled by `:return_zero`.
+  #   - `count > 1` is the explicit multi-return form (`return a, b, c`).
+  #   - `count < 0` is `-1` for forwarding all results to caller's caller,
+  #     `-2` for expansion. Both share the multi-return collection path.
+  #   - `{:multi_return, fixed}` is the codegen sentinel for "fixed plus
+  #     `state.multi_return_count` trailing values"; equivalent to the
+  #     negative-count form but encoded explicitly.
   defp encode({:return, base, 1}), do: {:ok, {@op_return_one, base}}
   defp encode({:return, _base, 0}), do: {:ok, {@op_return_zero}}
+
+  defp encode({:return, base, count}) when is_integer(count) and count > 1 do
+    {:ok, {@op_return_multi, base, count}}
+  end
+
+  defp encode({:return, base, count}) when is_integer(count) and count < 0 do
+    # Negative counts: `-(count + 1)` is the fixed prefix; the rest comes
+    # from `state.multi_return_count` at dispatch time.
+    {:ok, {@op_return_collect, base, -(count + 1)}}
+  end
+
+  defp encode({:return, base, {:multi_return, fixed_count}}) do
+    {:ok, {@op_return_collect, base, fixed_count}}
+  end
 
   # ── Table opcodes ──────────────────────────────────────────────────────
   #
@@ -235,46 +290,81 @@ defmodule Lua.Compiler.Bytecode do
 
   defp encode({:length, dest, source}), do: {:ok, {@op_length, dest, source}}
 
-  # `:numeric_for` carries a nested instruction list for the loop body.
-  # The body encodes recursively; any uncovered opcode (or a `:break`
-  # atom — `break`'s loop_exit machinery is its own follow-up) collapses
-  # the whole loop to interpretation.
-  defp encode({:numeric_for, base, loop_var, body}) do
-    if contains_break?(body) do
-      :fallback
-    else
-      case encode_list(body, []) do
-        {:ok, body_enc} ->
-          {:ok, {@op_numeric_for, base, loop_var, List.to_tuple(body_enc)}}
+  # `:numeric_for`, `:while_loop`, `:repeat_loop`, `:generic_for` each
+  # carry nested instruction lists for the loop body (and, for while /
+  # repeat, the condition). Bodies encode recursively. The B5b-v2 guard
+  # against `:break` inside `:numeric_for` is gone — `:break` is a
+  # first-class opcode now and the dispatcher's `find_loop_exit/1`
+  # handles the unwind.
 
-        :fallback ->
-          :fallback
-      end
+  defp encode({:numeric_for, base, loop_var, body}) do
+    case encode_list(body, []) do
+      {:ok, body_enc} ->
+        {:ok, {@op_numeric_for, base, loop_var, List.to_tuple(body_enc)}}
+
+      :fallback ->
+        :fallback
     end
   end
 
-  # Anything else — `:closure`, `:concatenate`, while/repeat/generic-for
-  # loops, multi-return calls, vararg, etc. — is out of scope for v2.
+  defp encode({:while_loop, cond_body, test_reg, loop_body}) do
+    with {:ok, cond_enc} <- encode_list(cond_body, []),
+         {:ok, body_enc} <- encode_list(loop_body, []) do
+      {:ok, {@op_while_loop, test_reg, List.to_tuple(cond_enc), List.to_tuple(body_enc)}}
+    end
+  end
+
+  defp encode({:repeat_loop, loop_body, cond_body, test_reg}) do
+    with {:ok, body_enc} <- encode_list(loop_body, []),
+         {:ok, cond_enc} <- encode_list(cond_body, []) do
+      {:ok, {@op_repeat_loop, test_reg, List.to_tuple(body_enc), List.to_tuple(cond_enc)}}
+    end
+  end
+
+  # `:generic_for` carries a list of variable register indices that
+  # receive successive iterator results plus the body. The variable list
+  # is small (typically one or two regs) so we encode it as a tuple for
+  # the dispatcher to walk with `:erlang.element/2`.
+  defp encode({:generic_for, base, var_regs, body}) when is_list(var_regs) do
+    case encode_list(body, []) do
+      {:ok, body_enc} ->
+        {:ok, {@op_generic_for, base, List.to_tuple(var_regs), List.to_tuple(body_enc)}}
+
+      :fallback ->
+        :fallback
+    end
+  end
+
+  # ── Closures, upvalues, varargs, self, concat, break ────────────────────
+
+  defp encode({:closure, dest, proto_index}), do: {:ok, {@op_closure, dest, proto_index}}
+
+  defp encode({:set_upvalue, index, source}), do: {:ok, {@op_set_upvalue, index, source}}
+
+  defp encode({:get_open_upvalue, dest, reg}), do: {:ok, {@op_get_open_upvalue, dest, reg}}
+
+  defp encode({:set_open_upvalue, reg, source}), do: {:ok, {@op_set_open_upvalue, reg, source}}
+
+  defp encode({:vararg, base, count}), do: {:ok, {@op_vararg, base, count}}
+
+  defp encode({:return_vararg}), do: {:ok, {@op_return_proto_varargs}}
+
+  defp encode({:self, base, obj_reg, method_name, name_hint}),
+    do: {:ok, {@op_self, base, obj_reg, method_name, name_hint}}
+
+  defp encode({:concatenate, dest, a, b}), do: {:ok, {@op_concatenate, dest, a, b}}
+
+  defp encode(:break), do: {:ok, {@op_break}}
+
+  # Anything else — `:goto` / `:label` (label-resolution semantics not
+  # ported to the dispatcher), `:set_global` (codegen vestige; modern
+  # codegen uses `:set_field` on `_ENV` instead), and the bitwise family
+  # (out of scope for B5c-v2; their own follow-up) — stays on the
+  # interpreter.
   #
   # `:source_line` is stripped upstream in `encode_list/2`, so it never
   # reaches this clause table.
   defp encode(_other), do: :fallback
-
-  # ── Helpers ─────────────────────────────────────────────────────────────
-
-  # `:break` inside a `:numeric_for` body forces the enclosing loop to
-  # fall back. The interpreter's loop_exit continuation walk relies on
-  # the broader `cont` shape; reproducing it inside the dispatcher is a
-  # B5c-v2 concern, not a table-coverage one.
-  defp contains_break?(body) when is_list(body) do
-    Enum.any?(body, fn
-      :break -> true
-      {:test, _reg, then_body, else_body} -> contains_break?(then_body) or contains_break?(else_body)
-      _ -> false
-    end)
-  end
-
-  defp contains_break?(_), do: false
 
   # ── Opcode tag accessors ────────────────────────────────────────────────
   #
@@ -319,4 +409,19 @@ defmodule Lua.Compiler.Bytecode do
   def op_set_list, do: @op_set_list
   def op_length, do: @op_length
   def op_numeric_for, do: @op_numeric_for
+  def op_closure, do: @op_closure
+  def op_set_upvalue, do: @op_set_upvalue
+  def op_get_open_upvalue, do: @op_get_open_upvalue
+  def op_set_open_upvalue, do: @op_set_open_upvalue
+  def op_vararg, do: @op_vararg
+  def op_return_proto_varargs, do: @op_return_proto_varargs
+  def op_return_collect, do: @op_return_collect
+  def op_return_multi, do: @op_return_multi
+  def op_call_multi, do: @op_call_multi
+  def op_self, do: @op_self
+  def op_concatenate, do: @op_concatenate
+  def op_break, do: @op_break
+  def op_while_loop, do: @op_while_loop
+  def op_repeat_loop, do: @op_repeat_loop
+  def op_generic_for, do: @op_generic_for
 end

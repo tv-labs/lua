@@ -55,9 +55,35 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
       op == Bytecode.op_not_equal() -> [1, 2, 3]
       op == Bytecode.op_not() -> [1, 2]
       op == Bytecode.op_test() -> [1]
+      op == Bytecode.op_call_zero() -> [1]
       op == Bytecode.op_call_one() -> [1]
       op == Bytecode.op_return_one() -> [1]
       op == Bytecode.op_return_zero() -> []
+      # Table opcodes (B5b-v2).
+      op == Bytecode.op_new_table() -> [1]
+      op == Bytecode.op_get_table() -> [1, 2, 3]
+      op == Bytecode.op_set_table() -> [1, 2, 3]
+      op == Bytecode.op_set_field() -> [1, 3]
+      op == Bytecode.op_set_list() -> [1, 2]
+      op == Bytecode.op_length() -> [1, 2]
+      op == Bytecode.op_numeric_for() -> :numeric_for
+      # B5c-v2 additions. Bytecode tags for closures, upvalues, varargs,
+      # multi-return, loops, self, concat, break.
+      op == Bytecode.op_closure() -> [1]
+      op == Bytecode.op_set_upvalue() -> [2]
+      op == Bytecode.op_get_open_upvalue() -> [1, 2]
+      op == Bytecode.op_set_open_upvalue() -> [1, 2]
+      op == Bytecode.op_vararg() -> :vararg
+      op == Bytecode.op_return_proto_varargs() -> []
+      op == Bytecode.op_return_collect() -> [1]
+      op == Bytecode.op_return_multi() -> :return_multi
+      op == Bytecode.op_call_multi() -> [1]
+      op == Bytecode.op_self() -> [1, 2]
+      op == Bytecode.op_concatenate() -> [1, 2, 3]
+      op == Bytecode.op_break() -> []
+      op == Bytecode.op_while_loop() -> :while_loop
+      op == Bytecode.op_repeat_loop() -> :repeat_loop
+      op == Bytecode.op_generic_for() -> :generic_for
       true -> raise "register_positions/1 is missing a case for opcode #{inspect(op)}"
     end
   end
@@ -77,6 +103,51 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
         dest = :erlang.element(2, instr)
         count = :erlang.element(3, instr)
         dest + count - 1
+
+      :numeric_for ->
+        # {tag, base, loop_var, body_bc}: reads base..base+2, writes loop_var,
+        # recurses into body_bc.
+        base = :erlang.element(2, instr)
+        loop_var = :erlang.element(3, instr)
+        body_bc = :erlang.element(4, instr)
+        Enum.max([base + 2, loop_var, max_register_used(body_bc)])
+
+      :vararg ->
+        # {tag, base, count}: writes base..base+count-1 when count>0.
+        # When count==0 the runtime writes all varargs starting at base,
+        # but we can only bound by the syntactic count operand. Codegen
+        # is responsible for sizing max_registers correctly here.
+        base = :erlang.element(2, instr)
+        count = :erlang.element(3, instr)
+        if count == 0, do: base, else: base + count - 1
+
+      :return_multi ->
+        # {tag, base, count}: reads base..base+count-1.
+        base = :erlang.element(2, instr)
+        count = :erlang.element(3, instr)
+        base + count - 1
+
+      :while_loop ->
+        # {tag, test_reg, cond_bc, body_bc}.
+        test_reg = :erlang.element(2, instr)
+        cond_bc = :erlang.element(3, instr)
+        body_bc = :erlang.element(4, instr)
+        Enum.max([test_reg, max_register_used(cond_bc), max_register_used(body_bc)])
+
+      :repeat_loop ->
+        # {tag, test_reg, body_bc, cond_bc}.
+        test_reg = :erlang.element(2, instr)
+        body_bc = :erlang.element(3, instr)
+        cond_bc = :erlang.element(4, instr)
+        Enum.max([test_reg, max_register_used(body_bc), max_register_used(cond_bc)])
+
+      :generic_for ->
+        # {tag, base, var_regs_tuple, body_bc}.
+        base = :erlang.element(2, instr)
+        var_regs_tuple = :erlang.element(3, instr)
+        body_bc = :erlang.element(4, instr)
+        var_max = Enum.reduce(Tuple.to_list(var_regs_tuple), -1, &max/2)
+        Enum.max([base + 2, var_max, max_register_used(body_bc)])
 
       positions when is_list(positions) ->
         direct = Enum.reduce(positions, -1, fn pos, acc -> max(acc, :erlang.element(pos + 1, instr)) end)
