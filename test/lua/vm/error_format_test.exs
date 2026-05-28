@@ -87,4 +87,67 @@ defmodule Lua.VM.ErrorFormatTest do
       end
     end
   end
+
+  # PUC-Lua appends `(global 'X')` / `(local 'X')` / `(upvalue 'X')` /
+  # `(field 'X')` to arithmetic and bitwise type errors when the failing
+  # operand's lexical origin is recoverable. We resolve at compile time
+  # and bake the hint into the instruction tuple — see codegen
+  # `name_hint/2` and `format_target_hint/1` in the executor.
+  describe "arithmetic type error carries operand hint" do
+    test "global operand surfaces (global 'X')" do
+      assert_raise LuaTypeError,
+                   ~r/attempt to perform arithmetic on a nil value \(global 'foo'\)/,
+                   fn -> run("return foo + 1") end
+    end
+
+    test "local operand surfaces (local 'X')" do
+      assert_raise LuaTypeError,
+                   ~r/attempt to perform arithmetic on a nil value \(local 'x'\)/,
+                   fn -> run("local x; return x + 1") end
+    end
+
+    test "field operand surfaces (field 'X')" do
+      assert_raise LuaTypeError,
+                   ~r/attempt to perform arithmetic on a nil value \(field 'x'/,
+                   fn -> run("local t = {}; return t.x + 1") end
+    end
+
+    test "upvalue operand surfaces (upvalue 'X')" do
+      code = """
+      local y
+      local function f() return y + 1 end
+      return f()
+      """
+
+      assert_raise LuaTypeError,
+                   ~r/attempt to perform arithmetic on a nil value \(upvalue 'y'\)/,
+                   fn -> run(code) end
+    end
+
+    test "unary minus on a nil local surfaces the hint" do
+      assert_raise LuaTypeError,
+                   ~r/attempt to perform arithmetic on a nil value \(local 'x'\)/,
+                   fn -> run("local x; return -x") end
+    end
+  end
+
+  describe "bitwise type error carries operand hint" do
+    test "shift on a string local surfaces (local 'X')" do
+      assert_raise LuaTypeError,
+                   ~r/attempt to perform bitwise operation on a string value \(local 's'\)/,
+                   fn -> run("local s = 'x'; return s << 1") end
+    end
+
+    test "bnot on a nil global surfaces (global 'X')" do
+      assert_raise LuaTypeError,
+                   ~r/attempt to perform bitwise operation on a nil value \(global 'foo'\)/,
+                   fn -> run("return ~foo") end
+    end
+
+    test "non-representable float through a field surfaces (field 'X')" do
+      assert_raise LuaTypeError,
+                   ~r/number has no integer representation \(field 'huge'/,
+                   fn -> run("return math.huge << 1") end
+    end
+  end
 end

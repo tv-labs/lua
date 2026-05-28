@@ -908,6 +908,14 @@ defmodule Lua.Compiler.Codegen do
   end
 
   defp gen_expr(%Expr.BinOp{op: op, left: left, right: right}, ctx) do
+    # Resolve operand origin hints before codegen consumes them so the
+    # executor can render PUC-Lua-style `(field 'huge')` / `(global 'x')`
+    # suffixes on arithmetic / bitwise type errors. Only meaningful for
+    # ops that can raise on operand type — comparisons and concat go
+    # through different raise paths.
+    hint_a = name_hint(left, ctx)
+    hint_b = name_hint(right, ctx)
+
     # Generate code for left operand
     {left_instructions, left_reg, ctx} = gen_expr(left, ctx)
 
@@ -921,18 +929,18 @@ defmodule Lua.Compiler.Codegen do
     # Generate the operation instruction
     operation_instruction =
       case op do
-        :add -> Instruction.add(dest_reg, left_reg, right_reg)
-        :sub -> Instruction.subtract(dest_reg, left_reg, right_reg)
-        :mul -> Instruction.multiply(dest_reg, left_reg, right_reg)
-        :div -> Instruction.divide(dest_reg, left_reg, right_reg)
-        :floordiv -> Instruction.floor_divide(dest_reg, left_reg, right_reg)
-        :mod -> Instruction.modulo(dest_reg, left_reg, right_reg)
-        :pow -> Instruction.power(dest_reg, left_reg, right_reg)
-        :band -> Instruction.bitwise_and(dest_reg, left_reg, right_reg)
-        :bor -> Instruction.bitwise_or(dest_reg, left_reg, right_reg)
-        :bxor -> Instruction.bitwise_xor(dest_reg, left_reg, right_reg)
-        :shl -> Instruction.shift_left(dest_reg, left_reg, right_reg)
-        :shr -> Instruction.shift_right(dest_reg, left_reg, right_reg)
+        :add -> Instruction.add(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :sub -> Instruction.subtract(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :mul -> Instruction.multiply(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :div -> Instruction.divide(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :floordiv -> Instruction.floor_divide(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :mod -> Instruction.modulo(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :pow -> Instruction.power(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :band -> Instruction.bitwise_and(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :bor -> Instruction.bitwise_or(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :bxor -> Instruction.bitwise_xor(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :shl -> Instruction.shift_left(dest_reg, left_reg, right_reg, hint_a, hint_b)
+        :shr -> Instruction.shift_right(dest_reg, left_reg, right_reg, hint_a, hint_b)
         :concat -> Instruction.concatenate(dest_reg, left_reg, right_reg)
         :eq -> Instruction.equal(dest_reg, left_reg, right_reg)
         :ne -> {:not_equal, dest_reg, left_reg, right_reg}
@@ -947,6 +955,8 @@ defmodule Lua.Compiler.Codegen do
   end
 
   defp gen_expr(%Expr.UnOp{op: op, operand: operand}, ctx) do
+    hint = name_hint(operand, ctx)
+
     # Generate code for operand
     {operand_instructions, operand_reg, ctx} = gen_expr(operand, ctx)
 
@@ -957,10 +967,10 @@ defmodule Lua.Compiler.Codegen do
     # Generate the operation instruction
     operation_instruction =
       case op do
-        :neg -> Instruction.negate(dest_reg, operand_reg)
+        :neg -> Instruction.negate(dest_reg, operand_reg, hint)
         :not -> Instruction.logical_not(dest_reg, operand_reg)
         :len -> Instruction.length(dest_reg, operand_reg)
-        :bnot -> Instruction.bitwise_not(dest_reg, operand_reg)
+        :bnot -> Instruction.bitwise_not(dest_reg, operand_reg, hint)
       end
 
     {operand_instructions ++ [operation_instruction], dest_reg, ctx}

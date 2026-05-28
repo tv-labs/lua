@@ -75,7 +75,8 @@
     %{
       lines: :all,
       category: :stdlib,
-      reason: "checkmessage/checksyntax/checkerr helpers expect PUC-Lua error message formats throughout",
+      reason:
+        "checkmessage/checksyntax expect PUC-Lua [string \"...\"]:N: prefixes on load() errors; many parse-error templates still differ",
       issue: nil
     }
   ],
@@ -148,7 +149,8 @@
     %{
       lines: :all,
       category: :stdlib,
-      reason: "math.huge is finite (1.0e308) and many checkerror tests expect PUC-Lua-specific error messages",
+      reason:
+        "math.huge is a finite 1.0e308 stand-in so identities like math.huge + 1 == math.huge fail; not a wording issue",
       issue: nil
     }
   ],
@@ -159,7 +161,7 @@
     %{
       lines: :all,
       category: :stdlib,
-      reason: "checkerror() expects PUC-Lua error message formats; os.clock not implemented",
+      reason: "times out (>30s) on the comparison-heavy section; os.clock not implemented",
       issue: nil
     }
   ],
@@ -167,7 +169,7 @@
     %{
       lines: :all,
       category: :stdlib,
-      reason: "string.rep with large counts and checkerror format mismatches; pending finer triage",
+      reason: "times out (>30s) on string.rep with large counts; pending finer triage",
       issue: nil
     }
   ]

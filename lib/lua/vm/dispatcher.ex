@@ -236,7 +236,7 @@ defmodule Lua.VM.Dispatcher do
       # when both operands are already numeric. The two `is_number`
       # guards inline directly in the case body.
 
-      {@op_add, dest, a, b} ->
+      {@op_add, dest, a, b, hint_a, hint_b} ->
         va = :erlang.element(a + 1, regs)
         vb = :erlang.element(b + 1, regs)
 
@@ -252,12 +252,12 @@ defmodule Lua.VM.Dispatcher do
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
           true ->
-            {value, state} = Executor.dispatcher_binop(:add, va, vb, state, proto)
+            {value, state} = Executor.dispatcher_binop(:add, va, vb, state, proto, hint_a, hint_b)
             regs = :erlang.setelement(dest + 1, regs, value)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
         end
 
-      {@op_subtract, dest, a, b} ->
+      {@op_subtract, dest, a, b, hint_a, hint_b} ->
         va = :erlang.element(a + 1, regs)
         vb = :erlang.element(b + 1, regs)
 
@@ -273,12 +273,12 @@ defmodule Lua.VM.Dispatcher do
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
           true ->
-            {value, state} = Executor.dispatcher_binop(:subtract, va, vb, state, proto)
+            {value, state} = Executor.dispatcher_binop(:subtract, va, vb, state, proto, hint_a, hint_b)
             regs = :erlang.setelement(dest + 1, regs, value)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
         end
 
-      {@op_multiply, dest, a, b} ->
+      {@op_multiply, dest, a, b, hint_a, hint_b} ->
         va = :erlang.element(a + 1, regs)
         vb = :erlang.element(b + 1, regs)
 
@@ -294,66 +294,74 @@ defmodule Lua.VM.Dispatcher do
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
           true ->
-            {value, state} = Executor.dispatcher_binop(:multiply, va, vb, state, proto)
+            {value, state} = Executor.dispatcher_binop(:multiply, va, vb, state, proto, hint_a, hint_b)
             regs = :erlang.setelement(dest + 1, regs, value)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
         end
 
-      {@op_divide, dest, a, b} ->
+      {@op_divide, dest, a, b, hint_a, hint_b} ->
         {value, state} =
           Executor.dispatcher_binop(
             :divide,
             :erlang.element(a + 1, regs),
             :erlang.element(b + 1, regs),
             state,
-            proto
+            proto,
+            hint_a,
+            hint_b
           )
 
         regs = :erlang.setelement(dest + 1, regs, value)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
-      {@op_floor_divide, dest, a, b} ->
+      {@op_floor_divide, dest, a, b, hint_a, hint_b} ->
         {value, state} =
           Executor.dispatcher_binop(
             :floor_divide,
             :erlang.element(a + 1, regs),
             :erlang.element(b + 1, regs),
             state,
-            proto
+            proto,
+            hint_a,
+            hint_b
           )
 
         regs = :erlang.setelement(dest + 1, regs, value)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
-      {@op_modulo, dest, a, b} ->
+      {@op_modulo, dest, a, b, hint_a, hint_b} ->
         {value, state} =
           Executor.dispatcher_binop(
             :modulo,
             :erlang.element(a + 1, regs),
             :erlang.element(b + 1, regs),
             state,
-            proto
+            proto,
+            hint_a,
+            hint_b
           )
 
         regs = :erlang.setelement(dest + 1, regs, value)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
-      {@op_power, dest, a, b} ->
+      {@op_power, dest, a, b, hint_a, hint_b} ->
         {value, state} =
           Executor.dispatcher_binop(
             :power,
             :erlang.element(a + 1, regs),
             :erlang.element(b + 1, regs),
             state,
-            proto
+            proto,
+            hint_a,
+            hint_b
           )
 
         regs = :erlang.setelement(dest + 1, regs, value)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
-      {@op_negate, dest, src} ->
+      {@op_negate, dest, src, hint} ->
         {value, state} =
-          Executor.dispatcher_unop(:negate, :erlang.element(src + 1, regs), state, proto)
+          Executor.dispatcher_unop(:negate, :erlang.element(src + 1, regs), state, proto, hint)
 
         regs = :erlang.setelement(dest + 1, regs, value)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
