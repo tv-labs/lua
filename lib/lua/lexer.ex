@@ -133,7 +133,10 @@ defmodule Lua.Lexer do
   defp do_tokenize(<<"[", rest::binary>>, acc, pos) do
     case scan_long_bracket(rest, 0) do
       {:ok, equals, after_bracket} ->
-        scan_long_string(after_bracket, "", acc, advance_column(pos, 2 + equals), pos, equals)
+        start_pos = pos
+        open_pos = advance_column(pos, 2 + equals)
+        {body_rest, body_pos} = drop_leading_newline(after_bracket, open_pos)
+        scan_long_string(body_rest, "", acc, body_pos, start_pos, equals)
 
       :error ->
         # Not a long string, treat as delimiter
@@ -582,7 +585,19 @@ defmodule Lua.Lexer do
     end
   end
 
-  defp scan_long_string(<<?\n, rest::binary>>, str_acc, acc, pos, start_pos, level) do
+  # Per Lua 5.3 §3.1, long strings normalize end-of-line sequences (`\r`,
+  # `\n`, `\r\n`, `\n\r`) to a single `\n`.
+  defp scan_long_string(<<?\r, ?\n, rest::binary>>, str_acc, acc, pos, start_pos, level) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 2}
+    scan_long_string(rest, str_acc <> "\n", acc, new_pos, start_pos, level)
+  end
+
+  defp scan_long_string(<<?\n, ?\r, rest::binary>>, str_acc, acc, pos, start_pos, level) do
+    new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 2}
+    scan_long_string(rest, str_acc <> "\n", acc, new_pos, start_pos, level)
+  end
+
+  defp scan_long_string(<<c, rest::binary>>, str_acc, acc, pos, start_pos, level) when c == ?\n or c == ?\r do
     new_pos = %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}
     scan_long_string(rest, str_acc <> "\n", acc, new_pos, start_pos, level)
   end
@@ -594,6 +609,20 @@ defmodule Lua.Lexer do
   defp scan_long_string(<<c, rest::binary>>, str_acc, acc, pos, start_pos, level) do
     scan_long_string(rest, str_acc <> <<c>>, acc, advance_column(pos, 1), start_pos, level)
   end
+
+  # Per Lua 5.3 §3.1: "when the opening long bracket is immediately followed
+  # by a newline, the newline is not included in the string." Applies to any
+  # line-break sequence (`\n`, `\r`, `\r\n`, `\n\r`).
+  defp drop_leading_newline(<<?\r, ?\n, rest::binary>>, pos),
+    do: {rest, %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 2}}
+
+  defp drop_leading_newline(<<?\n, ?\r, rest::binary>>, pos),
+    do: {rest, %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 2}}
+
+  defp drop_leading_newline(<<c, rest::binary>>, pos) when c == ?\n or c == ?\r,
+    do: {rest, %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + 1}}
+
+  defp drop_leading_newline(rest, pos), do: {rest, pos}
 
   # Scan identifier or keyword
   defp scan_identifier(<<c, rest::binary>>, id_acc, acc, pos, start_pos)

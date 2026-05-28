@@ -18,18 +18,34 @@ defmodule Lua.VM.Stdlib.Pattern do
   Returns `{start, stop, captures}` or `:nomatch`.
   """
   def find(subject, pattern, init \\ 1) do
-    {anchored, pattern_elems} = compile(pattern)
-    start_pos = max(init - 1, 0)
+    len = byte_size(subject)
 
-    if anchored do
-      case match_pattern(subject, start_pos, pattern_elems, subject) do
-        {:match, end_pos, captures} -> {start_pos + 1, end_pos, captures}
-        :nomatch -> :nomatch
-      end
-    else
-      find_from(subject, start_pos, byte_size(subject), pattern_elems)
+    case normalize_init(init, len) do
+      :out_of_range ->
+        :nomatch
+
+      start_pos ->
+        {anchored, pattern_elems} = compile(pattern)
+
+        if anchored do
+          case match_pattern(subject, start_pos, pattern_elems, subject) do
+            {:match, end_pos, captures} -> {start_pos + 1, end_pos, captures}
+            :nomatch -> :nomatch
+          end
+        else
+          find_from(subject, start_pos, len, pattern_elems)
+        end
     end
   end
+
+  # Per Lua 5.3 §6.4, init follows the same indexing rules as string.sub:
+  # negative values count from the end; out-of-range low values clamp to 1.
+  # A positive init beyond `len + 1` yields no match — even the empty
+  # pattern doesn't match past that point.
+  defp normalize_init(init, len) when init > len + 1, do: :out_of_range
+  defp normalize_init(init, _len) when init > 0, do: init - 1
+  defp normalize_init(init, len) when init < 0, do: max(len + init, 0)
+  defp normalize_init(_init, _len), do: 0
 
   defp find_from(_subject, pos, len, _pattern) when pos > len, do: :nomatch
 

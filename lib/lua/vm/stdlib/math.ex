@@ -34,6 +34,8 @@ defmodule Lua.VM.Stdlib.Math do
 
   @behaviour Lua.VM.Stdlib.Library
 
+  import Bitwise
+
   alias Lua.VM.ArgumentError
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
@@ -56,6 +58,7 @@ defmodule Lua.VM.Stdlib.Math do
       "log" => {:native_func, &math_log/2},
       "max" => {:native_func, &math_max/2},
       "min" => {:native_func, &math_min/2},
+      "modf" => {:native_func, &math_modf/2},
       "pi" => :math.pi(),
       "random" => {:native_func, &math_random/2},
       "randomseed" => {:native_func, &math_randomseed/2},
@@ -64,6 +67,7 @@ defmodule Lua.VM.Stdlib.Math do
       "tan" => {:native_func, &math_tan/2},
       "tointeger" => {:native_func, &math_tointeger/2},
       "type" => {:native_func, &math_type/2},
+      "ult" => {:native_func, &math_ult/2},
       "huge" => 1.0e308,
       "maxinteger" => 9_223_372_036_854_775_807,
       "mininteger" => -9_223_372_036_854_775_808
@@ -515,5 +519,70 @@ defmodule Lua.VM.Stdlib.Math do
 
   defp math_type([], _state) do
     raise ArgumentError.value_expected("math.type", 1)
+  end
+
+  # math.modf(x) — returns the integer and fractional parts of x.
+  # Per Lua 5.3 §6.7: integer input returns itself plus 0.0 (float);
+  # float input returns floor/ceil-toward-zero as a float plus the
+  # fractional remainder.
+  defp math_modf([:nan | _], state), do: {[:nan, :nan], state}
+
+  defp math_modf([x | _], state) when is_integer(x) do
+    {[x, 0.0], state}
+  end
+
+  defp math_modf([x | _], state) when is_float(x) do
+    cond do
+      x == 0.0 ->
+        {[x, x], state}
+
+      x > 0.0 ->
+        i = Float.floor(x)
+        {[i, x - i], state}
+
+      true ->
+        i = Float.ceil(x)
+        {[i, x - i], state}
+    end
+  end
+
+  defp math_modf([x | _], _state) do
+    raise ArgumentError,
+      function_name: "math.modf",
+      arg_num: 1,
+      expected: "number",
+      got: Util.typeof(x)
+  end
+
+  defp math_modf([], _state) do
+    raise ArgumentError.value_expected("math.modf", 1)
+  end
+
+  # math.ult(a, b) — unsigned 64-bit comparison of two integers.
+  defp math_ult([a, b | _], state) when is_integer(a) and is_integer(b) do
+    mask = 0xFFFFFFFFFFFFFFFF
+    ua = a &&& mask
+    ub = b &&& mask
+    {[ua < ub], state}
+  end
+
+  defp math_ult([a, _ | _], _state) when not is_integer(a) do
+    raise ArgumentError,
+      function_name: "math.ult",
+      arg_num: 1,
+      expected: "integer",
+      got: Util.typeof(a)
+  end
+
+  defp math_ult([_, b | _], _state) do
+    raise ArgumentError,
+      function_name: "math.ult",
+      arg_num: 2,
+      expected: "integer",
+      got: Util.typeof(b)
+  end
+
+  defp math_ult(_args, _state) do
+    raise ArgumentError.value_expected("math.ult", 1)
   end
 end

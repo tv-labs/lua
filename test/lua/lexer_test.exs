@@ -234,13 +234,50 @@ defmodule Lua.LexerTest do
       #
       #   "'\]])
       #
-      # The long string body is a literal newline, blank line, then "'\, then
-      # ]] closes. The trailing ]) is a literal `]` followed by `)` that closes
-      # the assert call. Inside a long string, `\` has no escape meaning.
+      # Per Lua 5.3 §3.1, the opening `[[` is immediately followed by a
+      # newline, which is dropped. The remaining body is `\n"'\`, matching
+      # the short string `'\n\"\'\\'` (4 bytes).
       assert {:ok, [{:string, body, _}, {:delimiter, :rparen, _}, {:eof, _}]} =
                Lexer.tokenize("[[\n\n\"'\\]])")
 
-      assert body == "\n\n\"'\\"
+      assert body == "\n\"'\\"
+    end
+
+    test "long strings drop a single leading newline" do
+      # §3.1: "when the opening long bracket is immediately followed by a
+      # newline, the newline is not included in the string."
+      assert {:ok, [{:string, "alo\nalo\n\n", _}, {:eof, _}]} =
+               Lexer.tokenize("[[\nalo\nalo\n\n]]")
+    end
+
+    test "long strings drop a single leading carriage return" do
+      assert {:ok, [{:string, "alo", _}, {:eof, _}]} =
+               Lexer.tokenize("[[\ralo]]")
+    end
+
+    test "long strings drop leading CRLF as one line break" do
+      assert {:ok, [{:string, "alo", _}, {:eof, _}]} =
+               Lexer.tokenize("[[\r\nalo]]")
+    end
+
+    test "long strings drop leading LFCR as one line break" do
+      assert {:ok, [{:string, "alo", _}, {:eof, _}]} =
+               Lexer.tokenize("[[\n\ralo]]")
+    end
+
+    test "long strings normalize \\r to \\n in body" do
+      assert {:ok, [{:string, "alo\nalo\n\n", _}, {:eof, _}]} =
+               Lexer.tokenize("[[\nalo\ralo\n\n]]")
+    end
+
+    test "long strings normalize \\r\\n to a single \\n in body" do
+      assert {:ok, [{:string, "alo\nalo\n", _}, {:eof, _}]} =
+               Lexer.tokenize("[[\nalo\ralo\r\n]]")
+    end
+
+    test "long strings normalize \\n\\r to a single \\n in body" do
+      assert {:ok, [{:string, "alo\nalo\n", _}, {:eof, _}]} =
+               Lexer.tokenize("[[\ralo\n\ralo\r\n]]")
     end
   end
 

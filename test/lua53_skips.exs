@@ -41,7 +41,13 @@
     }
   ],
   "calls.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage", issue: nil}
+    %{
+      lines: :all,
+      category: :semantic,
+      reason:
+        "FuncDecl target name resolved at codegen against post-block scope; print does not call user-overridden tostring",
+      issue: nil
+    }
   ],
   "closure.lua" => [
     %{
@@ -52,7 +58,12 @@
     }
   ],
   "constructs.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage", issue: nil}
+    %{
+      lines: :all,
+      category: :semantic,
+      reason: "parenthesized call/vararg does not adjust to a single value (Lua 5.3 §3.4)",
+      issue: nil
+    }
   ],
   "coroutine.lua" => [
     %{lines: :all, category: :unimplemented, reason: "coroutines not implemented", issue: nil}
@@ -61,48 +72,110 @@
     %{lines: :all, category: :unimplemented, reason: "full debug library not implemented", issue: nil}
   ],
   "errors.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage", issue: nil}
+    %{
+      lines: :all,
+      category: :stdlib,
+      reason: "checkmessage/checksyntax/checkerr helpers expect PUC-Lua error message formats throughout",
+      issue: nil
+    }
   ],
   "events.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage", issue: nil}
+    %{
+      lines: 403..432,
+      category: :unimplemented,
+      reason: "debug.setmetatable on primitive types (number, boolean, nil) not supported",
+      issue: nil
+    }
   ],
   "gc.lua" => [
     %{lines: :all, category: :unimplemented, reason: "garbage collection / weak tables not implemented", issue: nil}
   ],
   "goto.lua" => [
     %{
-      lines: :all,
-      category: :unimplemented,
-      reason: "backward goto / goto-out-of-conditional not implemented",
+      lines: 12..40,
+      category: :stdlib,
+      reason: "load() parse-error messages do not match PUC-Lua 'label/local' format",
       issue: nil
     }
   ],
   "literals.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage", issue: nil}
+    %{
+      lines: 40..47,
+      category: :semantic,
+      reason: "debug.getinfo(1).currentline reports per-statement line, not per-call-site",
+      issue: nil
+    },
+    %{
+      lines: 72..112,
+      category: :stdlib,
+      reason: "load() parse-error messages do not match PUC-Lua 'near ...' format",
+      issue: nil
+    },
+    %{
+      lines: 219..223,
+      category: :semantic,
+      reason: "debug.getinfo(1).currentline reports per-statement line, not per-call-site",
+      issue: nil
+    },
+    %{
+      lines: 247..261,
+      category: :unimplemented,
+      reason: "coroutine.wrap / yield not implemented",
+      issue: nil
+    },
+    %{
+      lines: 264..288,
+      category: :unimplemented,
+      reason: "os.setlocale not implemented; locale-dependent number parsing",
+      issue: nil
+    },
+    %{
+      lines: 297..302,
+      category: :stdlib,
+      reason: "load() parse-error format for unterminated strings differs from PUC-Lua",
+      issue: nil
+    }
   ],
   "locals.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage", issue: nil}
+    %{
+      lines: :all,
+      category: :unimplemented,
+      reason: "debug.getupvalue not implemented; _ENV introspection via debug library missing",
+      issue: nil
+    }
   ],
   "math.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage", issue: nil}
-  ],
-  "nextvar.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage", issue: nil}
+    %{
+      lines: :all,
+      category: :stdlib,
+      reason: "math.huge is finite (1.0e308) and many checkerror tests expect PUC-Lua-specific error messages",
+      issue: nil
+    }
   ],
   "pm.lua" => [
     %{lines: :all, category: :unimplemented, reason: "pending initial triage (pattern engine work in A9)", issue: nil}
   ],
   "sort.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage", issue: nil}
+    %{
+      lines: :all,
+      category: :stdlib,
+      reason: "checkerror() expects PUC-Lua error message formats; os.clock not implemented",
+      issue: nil
+    }
   ],
   "strings.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage", issue: nil}
+    %{
+      lines: :all,
+      category: :stdlib,
+      reason: "string.rep with large counts and checkerror format mismatches; pending finer triage",
+      issue: nil
+    }
   ],
   "utf8.lua" => [
     %{
       lines: :all,
       category: :unimplemented,
-      reason: "pending initial triage (suspected timeout per ROADMAP A10)",
+      reason: "utf8 standard library not implemented",
       issue: nil
     }
   ]

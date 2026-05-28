@@ -23,6 +23,7 @@ defmodule Lua.VM.Stdlib.Debug do
 
   @behaviour Lua.VM.Stdlib.Library
 
+  alias Lua.VM.Executor
   alias Lua.VM.State
   alias Lua.VM.Value
 
@@ -76,13 +77,7 @@ defmodule Lua.VM.Stdlib.Debug do
           }
 
         n when is_integer(n) ->
-          # Stack level - return info about calling function
-          %{
-            "source" => "=?",
-            "currentline" => -1,
-            "what" => "main",
-            "name" => nil
-          }
+          stack_info_for_level(n, state)
 
         _ ->
           %{
@@ -108,6 +103,46 @@ defmodule Lua.VM.Stdlib.Debug do
 
     {[info_tref], state}
   end
+
+  # Per Lua 5.3, debug.getinfo(level) reports info about the function `level`
+  # frames up the stack. Level 1 is the function that called `getinfo` (the
+  # currently-running Lua chunk from the native callback's perspective).
+  # Higher levels walk the saved call frames.
+  defp stack_info_for_level(level, state) do
+    case stack_position_for_level(level, state) do
+      {line, source} ->
+        %{
+          "source" => source || "=?",
+          "currentline" => line || -1,
+          "what" => "Lua",
+          "name" => nil
+        }
+
+      nil ->
+        %{
+          "source" => "=?",
+          "currentline" => -1,
+          "what" => "main",
+          "name" => nil
+        }
+    end
+  end
+
+  defp stack_position_for_level(1, _state) do
+    case Executor.current_position() do
+      {nil, nil} -> nil
+      pos -> pos
+    end
+  end
+
+  defp stack_position_for_level(level, state) when level > 1 do
+    case Enum.at(state.call_stack, level - 2) do
+      nil -> nil
+      frame -> {Map.get(frame, :line), Map.get(frame, :source)}
+    end
+  end
+
+  defp stack_position_for_level(_, _state), do: nil
 
   # debug.traceback([message [, level]]) — returns traceback string
   defp debug_traceback(args, state) do

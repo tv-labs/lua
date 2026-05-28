@@ -110,7 +110,7 @@ defmodule Lua.VM.Stdlib do
 
   # type(v) — returns the type of v as a string
   defp lua_type([value | _], state), do: {[Value.type_name(value)], state}
-  defp lua_type([], state), do: {["nil"], state}
+  defp lua_type([], _state), do: raise(ArgumentError.value_expected("type", 1))
 
   # tostring(v) — converts a value to its string representation
   defp lua_tostring([value | _], state) do
@@ -352,16 +352,16 @@ defmodule Lua.VM.Stdlib do
 
   # ipairs(table) — returns iterator function, table, 0
   defp lua_ipairs([{:tref, _} = tref | _], state) do
+    # Per Lua 5.3 §6.1, ipairs reads through the indexing operator, so
+    # __index is honoured. Iteration stops at the first nil.
     iterator =
       {:native_func,
        fn [table_ref, index], state ->
          i = index + 1
-         {:tref, id} = table_ref
-         table = Map.fetch!(state.tables, id)
 
-         case Map.get(table.data, i) do
-           nil -> {[nil], state}
-           v -> {[i, v], state}
+         case Executor.table_index(table_ref, i, state) do
+           {nil, state} -> {[nil], state}
+           {v, state} -> {[i, v], state}
          end
        end}
 

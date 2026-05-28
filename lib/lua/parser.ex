@@ -610,22 +610,47 @@ defmodule Lua.Parser do
   end
 
   defp parse_assignment(targets, [{:operator, :assign, pos} | rest]) do
-    case parse_expr_list(rest) do
-      {:ok, values, rest2} ->
-        # Create meta from first target's position
-        meta =
-          if hd(targets).meta do
-            %{hd(targets).meta | start: hd(targets).meta.start || pos}
-          else
-            Meta.new(pos)
-          end
+    case validate_assign_targets(targets) do
+      :ok ->
+        case parse_expr_list(rest) do
+          {:ok, values, rest2} ->
+            # Create meta from first target's position
+            meta =
+              if hd(targets).meta do
+                %{hd(targets).meta | start: hd(targets).meta.start || pos}
+              else
+                Meta.new(pos)
+              end
 
-        {:ok, %Statement.Assign{targets: targets, values: values, meta: meta}, rest2}
+            {:ok, %Statement.Assign{targets: targets, values: values, meta: meta}, rest2}
 
-      {:error, reason} ->
-        {:error, reason}
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
+
+  # Per Lua 5.3 §3.3.3, the lhs of an assignment must be a `var`:
+  # Name | prefixexp '[' exp ']' | prefixexp '.' Name. Anything else
+  # (number, string, function call, parenthesised expression) is a
+  # syntax error.
+  defp validate_assign_targets(targets) do
+    Enum.reduce_while(targets, :ok, fn target, :ok ->
+      case target do
+        %Expr.Var{} -> {:cont, :ok}
+        %Expr.Property{} -> {:cont, :ok}
+        %Expr.Index{} -> {:cont, :ok}
+        other -> {:halt, {:error, {:invalid_assign_target, target_position(other), other.__struct__}}}
+      end
+    end)
+  end
+
+  defp target_position(%{meta: %Meta{start: %{} = pos}}), do: pos
+  defp target_position(%{meta: %{start: %{} = pos}}), do: pos
+  defp target_position(_), do: nil
 
   # Helper: parse list of names (for local declarations, for loops)
   defp parse_name_list(tokens) do
@@ -1286,6 +1311,15 @@ defmodule Lua.Parser do
   defp convert_error({:bare_expression, pos, expr_struct}, _code) do
     {message, suggestion} = bare_expression_message(expr_struct)
     Error.new(:invalid_syntax, message, pos, suggestion: suggestion)
+  end
+
+  defp convert_error({:invalid_assign_target, pos, _expr_struct}, _code) do
+    Error.new(
+      :invalid_syntax,
+      "syntax error near '='",
+      pos,
+      suggestion: "Only variables, table fields, and table indexes can appear on the left of '='."
+    )
   end
 
   defp convert_error(other, _code) do
