@@ -2321,7 +2321,7 @@ defmodule Lua.VM.Executor do
          {:ok, nb} <- to_number(b) do
       cond do
         is_integer(nb) and nb == 0 ->
-          raise RuntimeError, value: "attempt to divide by zero", line: line, source: source
+          raise RuntimeError, value: "attempt to perform 'n//0'", line: line, source: source
 
         is_integer(na) and is_integer(nb) ->
           Numeric.to_signed_int64(lua_idiv(na, nb))
@@ -2349,7 +2349,7 @@ defmodule Lua.VM.Executor do
          {:ok, nb} <- to_number(b) do
       cond do
         is_integer(nb) and nb == 0 ->
-          raise RuntimeError, value: "attempt to perform modulo by zero", line: line, source: source
+          raise RuntimeError, value: "attempt to perform 'n%0'", line: line, source: source
 
         is_integer(na) and is_integer(nb) ->
           Numeric.to_signed_int64(na - lua_idiv(na, nb) * nb)

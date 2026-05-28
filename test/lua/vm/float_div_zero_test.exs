@@ -80,13 +80,13 @@ defmodule Lua.VM.FloatDivZeroTest do
 
   describe "floor div and modulo with integer-zero divisor still raise" do
     test "1 // 0 raises" do
-      assert_raise Lua.RuntimeException, ~r/divide by zero/, fn ->
+      assert_raise Lua.RuntimeException, ~r/attempt to perform 'n\/\/0'/, fn ->
         Lua.eval!(Lua.new(), "return 1 // 0")
       end
     end
 
     test "1 % 0 raises" do
-      assert_raise Lua.RuntimeException, ~r/modulo by zero/, fn ->
+      assert_raise Lua.RuntimeException, ~r/attempt to perform 'n%0'/, fn ->
         Lua.eval!(Lua.new(), "return 1 % 0")
       end
     end
@@ -150,7 +150,7 @@ defmodule Lua.VM.FloatDivZeroTest do
     end
 
     test "1.0 // 0 still raises — integer divisor" do
-      assert_raise Lua.RuntimeException, ~r/divide by zero/, fn ->
+      assert_raise Lua.RuntimeException, ~r/attempt to perform 'n\/\/0'/, fn ->
         Lua.eval!(Lua.new(), "return 1.0 // 0")
       end
     end
@@ -160,7 +160,7 @@ defmodule Lua.VM.FloatDivZeroTest do
     end
 
     test "1.0 % 0 still raises — integer divisor" do
-      assert_raise Lua.RuntimeException, ~r/modulo by zero/, fn ->
+      assert_raise Lua.RuntimeException, ~r/attempt to perform 'n%0'/, fn ->
         Lua.eval!(Lua.new(), "return 1.0 % 0")
       end
     end

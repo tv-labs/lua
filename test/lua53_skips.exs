@@ -170,13 +170,5 @@
       reason: "string.rep with large counts and checkerror format mismatches; pending finer triage",
       issue: nil
     }
-  ],
-  "utf8.lua" => [
-    %{
-      lines: :all,
-      category: :unimplemented,
-      reason: "utf8 standard library not implemented",
-      issue: nil
-    }
   ]
 }
