@@ -2,16 +2,16 @@
 id: A40
 title: Thread name hints into arithmetic & bitwise type errors
 issue: 252
-pr: null
+pr: 270
 branch: errors/arith-bitwise-hints
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
-  - math.lua (narrowed)
-  - sort.lua (narrowed)
-  - errors.lua (narrowed)
-  - strings.lua (narrowed)
+  - math.lua (reason narrowed)
+  - sort.lua (reason narrowed)
+  - errors.lua (reason narrowed)
+  - strings.lua (reason narrowed)
 ---
 
 ## Goal
