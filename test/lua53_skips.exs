@@ -42,10 +42,42 @@
   ],
   "calls.lua" => [
     %{
-      lines: :all,
-      category: :semantic,
+      lines: 24..36,
+      category: :stdlib,
+      reason: "print does not call user-overridden _ENV.tostring at each invocation",
+      issue: nil
+    },
+    %{
+      lines: 65..69,
+      category: :executor,
       reason:
-        "FuncDecl target name resolved at codegen against post-block scope; print does not call user-overridden tostring",
+        "stale upvalue cell across do blocks: register reused for a new local still resolves through the previous block's open_upvalues entry",
+      issue: nil
+    },
+    %{
+      lines: 135..137,
+      category: :parser,
+      reason:
+        "parser treats `(fn)(args)` on a new line as a call on the previous expression (Lua 5.3 §3.3.1 ambiguity wart); test expects two statements",
+      issue: nil
+    },
+    %{
+      lines: 207..208,
+      category: :semantic,
+      reason: "parenthesized call/vararg does not adjust to a single value (Lua 5.3 §3.4)",
+      issue: 254
+    },
+    %{
+      lines: 217..218,
+      category: :stdlib,
+      reason: "math.sin / table.sort reject extra args; PUC-Lua silently ignores them",
+      issue: nil
+    },
+    %{
+      lines: 219..401,
+      category: :unimplemented,
+      reason:
+        "load() / string.dump / debug.getupvalue / coroutine.wrap and tail-call counting all exercised below this line; needs its own triage pass",
       issue: nil
     }
   ],
