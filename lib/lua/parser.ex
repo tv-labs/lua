@@ -952,12 +952,17 @@ defmodule Lua.Parser do
   end
 
   # Parse parenthesized expression: (expr)
-  defp parse_paren_expr([{:delimiter, :lparen, _} | rest]) do
+  #
+  # Per Lua 5.3 §3.4, parenthesised function calls and vararg
+  # expressions adjust to exactly one result, so they're wrapped in
+  # `Expr.Paren` to mark the boundary. Other inners are semantically
+  # transparent and the parens are dropped.
+  defp parse_paren_expr([{:delimiter, :lparen, pos} | rest]) do
     case parse_expr(rest) do
       {:ok, expr, rest2} ->
         case expect(rest2, :delimiter, :rparen) do
           {:ok, _, rest3} ->
-            {:ok, expr, rest3}
+            {:ok, wrap_paren(expr, pos), rest3}
 
           {:error, reason} ->
             {:error, reason}
@@ -967,6 +972,14 @@ defmodule Lua.Parser do
         {:error, reason}
     end
   end
+
+  defp wrap_paren(%Expr.Call{} = inner, pos), do: %Expr.Paren{inner: inner, meta: Meta.new(pos)}
+
+  defp wrap_paren(%Expr.MethodCall{} = inner, pos), do: %Expr.Paren{inner: inner, meta: Meta.new(pos)}
+
+  defp wrap_paren(%Expr.Vararg{} = inner, pos), do: %Expr.Paren{inner: inner, meta: Meta.new(pos)}
+
+  defp wrap_paren(inner, _pos), do: inner
 
   # Parse table constructor: { fields }
   defp parse_table([{:delimiter, :lbrace, pos} | rest]) do

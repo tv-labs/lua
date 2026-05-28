@@ -93,6 +93,10 @@ defmodule Lua.AST.PrettyPrinter do
 
   defp do_print(%Expr.Vararg{}, _level, _indent_size), do: "..."
 
+  defp do_print(%Expr.Paren{inner: inner}, level, indent_size) do
+    "(#{do_print(inner, level, indent_size)})"
+  end
+
   defp do_print(%Expr.Var{name: name}, _level, _indent_size), do: name
 
   defp do_print(%Expr.BinOp{op: op, left: left, right: right}, level, indent_size) do

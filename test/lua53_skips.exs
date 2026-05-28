@@ -62,12 +62,6 @@
       issue: nil
     },
     %{
-      lines: 207..208,
-      category: :semantic,
-      reason: "parenthesized call/vararg does not adjust to a single value (Lua 5.3 §3.4)",
-      issue: 254
-    },
-    %{
       lines: 217..218,
       category: :stdlib,
       reason: "math.sin / table.sort reject extra args; PUC-Lua silently ignores them",
@@ -91,9 +85,10 @@
   ],
   "constructs.lua" => [
     %{
-      lines: :all,
-      category: :semantic,
-      reason: "parenthesized call/vararg does not adjust to a single value (Lua 5.3 §3.4)",
+      lines: 225..313,
+      category: :unimplemented,
+      reason:
+        "debug.getinfo(...).name / os.time / load()-driven short-circuit harness exercised below line 225; pending separate triage",
       issue: nil
     }
   ],
