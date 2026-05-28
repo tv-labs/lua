@@ -85,10 +85,35 @@
   ],
   "constructs.lua" => [
     %{
-      lines: 225..313,
-      category: :unimplemented,
+      lines: 225..231,
+      category: :stdlib,
+      reason: "debug.getinfo(level, 'n') returns nil for name/namewhat",
+      issue: 279
+    },
+    %{
+      lines: 237..237,
+      category: :stdlib,
+      reason: "os.time missing; assignment to _ENV.GLOB1 fails",
+      issue: 280
+    },
+    %{
+      lines: 248..248,
+      category: :stdlib,
+      reason: "concatenates _ENV.GLOB1 (nil because os.time is missing)",
+      issue: 280
+    },
+    %{
+      lines: 284..299,
+      category: :executor,
       reason:
-        "debug.getinfo(...).name / os.time / load()-driven short-circuit harness exercised below line 225; pending separate triage",
+        "short-circuit harness fails at level=4 deep composition; createcases(4) also exceeds the 60s test timeout (load() itself works)",
+      issue: 281
+    },
+    %{
+      lines: 302..311,
+      category: :stdlib,
+      reason:
+        "checkload helper expects lowercase 'expected' and 'too long' in load() error messages; suite-runner load() uses title-cased parser errors and the compiler has no control-structure-too-long check",
       issue: nil
     }
   ],
