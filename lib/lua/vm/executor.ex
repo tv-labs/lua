@@ -382,6 +382,111 @@ defmodule Lua.VM.Executor do
     close_open_upvalues_at_or_above(state, threshold)
   end
 
+  # ── Dispatcher bridges: B5c-v2 ──────────────────────────────────────────
+  #
+  # `:self` method resolution. Wraps `index_value/6` so __index metamethod
+  # dispatch matches the interpreter clause-for-clause. Line attribution is
+  # `0` for the same reason as the other bridges — error positions are
+  # B5d-v2.
+  @doc false
+  @spec dispatcher_index_method_target(term(), term(), State.t(), term(), term()) ::
+          {term(), State.t()}
+  def dispatcher_index_method_target(obj, method_name, state, proto, name_hint) do
+    index_value(obj, method_name, state, 0, proto.source, name_hint)
+  end
+
+  # `:generic_for` step: invoke the iterator function. The iterator can be
+  # any callable value (Lua closure, compiled closure, native function,
+  # value with `__call`), so we route through `call_value/5` which handles
+  # the whole shape via the interpreter's call machinery.
+  @doc false
+  @spec dispatcher_call_value(term(), [term()], term(), State.t()) ::
+          {[term()], State.t()}
+  def dispatcher_call_value(callable, args, proto, state) do
+    call_value(callable, args, proto, state, 0)
+  end
+
+  # `:concatenate` slow path. Mirrors the interpreter's three-way fallback:
+  # both-binary → `<>`, both binary-or-number → `concat_coerce/3 . <>`,
+  # otherwise `__concat` metamethod via `try_binary_metamethod/5`.
+  # The dispatcher inlines the binary-binary fast path itself, but defers
+  # the metatable case and the coerce path here so the type-error wording
+  # stays in sync with the interpreter.
+  @doc false
+  @spec dispatcher_concat(term(), term(), State.t(), term()) ::
+          {binary(), State.t()}
+  def dispatcher_concat(left, right, state, proto) do
+    src = proto.source
+
+    try_binary_metamethod("__concat", left, right, state, fn ->
+      concat_coerce(left, 0, src) <> concat_coerce(right, 0, src)
+    end)
+  end
+
+  # `:call_*` out-of-mode bridge with name_hint-aware error wording.
+  # The plain `call_function/3` path doesn't take a hint, so calling a
+  # nil/non-function with `(upvalue 'x')`-style attribution would drop
+  # the suffix. This wraps the same dispatch as `call_function/3` for
+  # the callable shapes and inlines the type-error paths so the
+  # dispatcher's error messages match the interpreter's `:call` opcode.
+  @doc false
+  @spec dispatcher_call_function(term(), [term()], State.t(), term(), term()) ::
+          {[term()], State.t()}
+  def dispatcher_call_function(nil, _args, state, proto, name_hint) do
+    raise TypeError,
+      value: "attempt to call a nil value" <> format_target_hint(name_hint),
+      source: proto.source,
+      call_stack: state.call_stack,
+      line: 0,
+      error_kind: :call_nil,
+      value_type: nil
+  end
+
+  def dispatcher_call_function({:lua_closure, _, _} = closure, args, state, _proto, _name_hint),
+    do: call_function(closure, args, state)
+
+  def dispatcher_call_function({:compiled_closure, _, _} = closure, args, state, _proto, _name_hint),
+    do: call_function(closure, args, state)
+
+  def dispatcher_call_function({:native_func, _} = nf, args, state, _proto, _name_hint),
+    do: call_function(nf, args, state)
+
+  def dispatcher_call_function(other, args, state, proto, name_hint) do
+    case get_metatable(other, state) do
+      nil ->
+        raise TypeError,
+          value: "attempt to call a #{Value.type_name(other)} value" <> format_target_hint(name_hint),
+          source: proto.source,
+          call_stack: state.call_stack,
+          line: 0,
+          error_kind: :call_non_function,
+          value_type: value_type(other)
+
+      {:tref, mt_id} ->
+        mt = Map.fetch!(state.tables, mt_id)
+
+        case Map.get(mt.data, "__call") do
+          nil ->
+            raise TypeError,
+              value: "attempt to call a #{Value.type_name(other)} value" <> format_target_hint(name_hint),
+              source: proto.source,
+              call_stack: state.call_stack,
+              line: 0,
+              error_kind: :call_non_function,
+              value_type: value_type(other)
+
+          call_mm ->
+            call_function(call_mm, [other | args], state)
+        end
+    end
+  end
+
+  @doc false
+  @spec dispatcher_call_info(term(), term(), non_neg_integer()) :: map()
+  def dispatcher_call_info(proto, name_hint, line) do
+    %{source: proto.source, line: line, name: hint_name(name_hint)}
+  end
+
   # ── Break ──────────────────────────────────────────────────────────────────
 
   defp do_execute([:break | _rest], regs, upvalues, proto, state, cont, frames, line) do

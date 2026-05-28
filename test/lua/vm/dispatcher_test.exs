@@ -345,18 +345,19 @@ defmodule Lua.VM.DispatcherTest do
   end
 
   describe "interop with interpreter" do
-    test "compiled callee returns to interpreted caller correctly" do
-      # The outer chunk's `:call` (multi-return into `return`) is not
-      # bytecode-compilable, so it stays on the interpreter. The inner
-      # `add` function compiles. This exercises the interpreter →
-      # dispatcher → interpreter round-trip.
+    test "compiled callee + compiled outer chunk round-trip" do
+      # After B5c-v2 the chunk's `:closure` + multi-return `:call` + tail
+      # `:return_collect` all compile, so the whole program is dispatcher-
+      # routed. This still exercises the dispatcher → dispatcher call
+      # path; pinning correctness here guards against frame plumbing
+      # regressions.
       {proto, results} =
         run!("""
         function add(a, b) return a + b end
         return add(2, 3)
         """)
 
-      assert proto.bytecode == nil, "outer chunk should fall back"
+      assert proto.bytecode != nil, "outer chunk should compile after B5c-v2"
       assert first_sub(proto).bytecode != nil, "inner fn should compile"
       assert results == [5]
     end
@@ -370,10 +371,218 @@ defmodule Lua.VM.DispatcherTest do
         return (x + y)
         """)
 
-      # The __add closure compiles; the chunk falls back due to
-      # setmetatable/table-construction opcodes outside coverage.
       _ = proto
       assert results == [30]
+    end
+  end
+
+  # ── B5c-v2 opcodes ────────────────────────────────────────────────────
+
+  describe "closures + upvalues" do
+    test ":closure with upvalue capture (parent_local)" do
+      {proto, results} =
+        run!("""
+        function make_adder(x)
+          return function(y) return x + y end
+        end
+        local f = make_adder(10)
+        return f(5)
+        """)
+
+      [make_adder | _] = proto.prototypes
+      [inner | _] = make_adder.prototypes
+      assert is_tuple(inner.bytecode)
+      assert results == [15]
+    end
+
+    test ":set_upvalue mutates a captured local" do
+      # The counter pattern from the closures benchmark.
+      {_proto, results} =
+        run!("""
+        function make_counter()
+          local count = 0
+          return function() count = count + 1 return count end
+        end
+        local c = make_counter()
+        c()
+        c()
+        c()
+        return c()
+        """)
+
+      assert results == [4]
+    end
+
+    test "deeply-nested closure cascade" do
+      {_proto, results} =
+        run!("""
+        function outer(a)
+          return function(b)
+            return function(c) return a + b + c end
+          end
+        end
+        return outer(1)(2)(3)
+        """)
+
+      assert results == [6]
+    end
+
+    test "multiple closures sharing one open upvalue" do
+      {_proto, results} =
+        run!("""
+        function make_pair()
+          local x = 0
+          local function get() return x end
+          local function set(v) x = v end
+          set(42)
+          return get()
+        end
+        return make_pair()
+        """)
+
+      assert results == [42]
+    end
+  end
+
+  describe "vararg + multi-return" do
+    test ":vararg expansion" do
+      {_proto, results} =
+        run!("""
+        function f(...)
+          return select('#', ...)
+        end
+        return f(1, 2, 3, 4)
+        """)
+
+      assert results == [4]
+    end
+
+    test ":return_collect (return ... )" do
+      {_proto, results} =
+        run!("""
+        function f(...)
+          return ...
+        end
+        return f(10, 20, 30)
+        """)
+
+      assert results == [10, 20, 30]
+    end
+
+    test "multi-return :call with -2 (table-construction-like expansion)" do
+      {_proto, results} =
+        run!("""
+        function pair() return 1, 2 end
+        function trio() local a, b = pair() return a, b, 3 end
+        return trio()
+        """)
+
+      assert results == [1, 2, 3]
+    end
+
+    test "fixed-count assignment from multi-return takes first N" do
+      {_proto, results} =
+        run!("""
+        function three() return 1, 2, 3 end
+        local a, b = three()
+        return a + b
+        """)
+
+      assert results == [3]
+    end
+  end
+
+  describe "self + concatenate (OOP)" do
+    test ":self method call via __index metatable" do
+      {_proto, results} =
+        run!("""
+        local Greeter = {}
+        Greeter.__index = Greeter
+        function Greeter.new(name)
+          local self = setmetatable({}, Greeter)
+          self.name = name
+          return self
+        end
+        function Greeter:hello() return "hi " .. self.name end
+        local g = Greeter.new("world")
+        return g:hello()
+        """)
+
+      assert results == ["hi world"]
+    end
+
+    test ":concatenate chains binaries and numbers" do
+      {_proto, results} =
+        run!("""
+        function f(a, b) return a .. " " .. b end
+        return f("hello", 42)
+        """)
+
+      assert results == ["hello 42"]
+    end
+  end
+
+  describe "loops + break" do
+    test ":while_loop with break" do
+      {_proto, results} =
+        run!("""
+        function f(n)
+          local i = 0
+          while true do
+            i = i + 1
+            if i >= n then break end
+          end
+          return i
+        end
+        return f(7)
+        """)
+
+      assert results == [7]
+    end
+
+    test ":repeat_loop terminates on truthy condition" do
+      {_proto, results} =
+        run!("""
+        function f(n)
+          local i = 0
+          repeat i = i + 1 until i >= n
+          return i
+        end
+        return f(5)
+        """)
+
+      assert results == [5]
+    end
+
+    test ":generic_for with pairs" do
+      {_proto, results} =
+        run!("""
+        function f(t)
+          local sum = 0
+          for _, v in pairs(t) do sum = sum + v end
+          return sum
+        end
+        return f({1, 2, 3, 4})
+        """)
+
+      assert results == [10]
+    end
+
+    test ":break inside :numeric_for now compiles and runs" do
+      {_proto, results} =
+        run!("""
+        function f(n)
+          local last = 0
+          for i = 1, n do
+            if i > 5 then break end
+            last = i
+          end
+          return last
+        end
+        return f(100)
+        """)
+
+      assert results == [5]
     end
   end
 

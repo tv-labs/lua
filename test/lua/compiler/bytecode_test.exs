@@ -54,19 +54,16 @@ defmodule Lua.Compiler.BytecodeTest do
     end
   end
 
-  describe "fallback on unsupported opcodes" do
-    test ":closure causes the enclosing prototype to fall back" do
-      # The chunk emits `:closure` to materialize `f`, so the chunk
-      # itself falls back. The nested `f` body still compiles.
+  describe "supported opcodes (B5c-v2)" do
+    test ":closure compiles to bytecode" do
+      # B5c-v2: chunks that build closures now compile end-to-end.
       proto = compile!("function f() return 1 end")
-      assert proto.bytecode == nil
+      assert is_tuple(proto.bytecode)
       [fn_proto] = proto.prototypes
       assert is_tuple(fn_proto.bytecode)
     end
 
-    test ":generic_for causes fallback" do
-      # `for k, v in pairs(t)` emits `:generic_for`, which sits outside
-      # the dispatcher's loop coverage (only numeric-for is wired up).
+    test ":generic_for compiles" do
       proto =
         compile!("""
         function iter(t)
@@ -77,18 +74,18 @@ defmodule Lua.Compiler.BytecodeTest do
         """)
 
       [fn_proto] = proto.prototypes
-      assert fn_proto.bytecode == nil
+      assert is_tuple(fn_proto.bytecode)
     end
 
-    test ":concatenate causes fallback" do
+    test ":concatenate compiles" do
       proto = compile!("function f(a, b) return a .. b end")
       [fn_proto] = proto.prototypes
-      assert fn_proto.bytecode == nil
+      assert is_tuple(fn_proto.bytecode)
     end
 
-    test "multi-return call causes fallback" do
+    test "multi-return call compiles" do
       # `return f(x)` compiles as a tail-call-style multi-return (-1),
-      # which is outside dispatcher coverage.
+      # which routes through `:call_multi` in B5c-v2.
       proto =
         compile!("""
         function caller()
@@ -97,12 +94,10 @@ defmodule Lua.Compiler.BytecodeTest do
         """)
 
       [caller_proto] = proto.prototypes
-      assert caller_proto.bytecode == nil
+      assert is_tuple(caller_proto.bytecode)
     end
 
-    test "while-loops cause fallback" do
-      # While/repeat/generic-for stay on the interpreter; only
-      # numeric-for is covered by the dispatcher in B5b-v2.
+    test "while-loop compiles" do
       proto =
         compile!("""
         function f(n)
@@ -113,13 +108,10 @@ defmodule Lua.Compiler.BytecodeTest do
         """)
 
       [fn_proto] = proto.prototypes
-      assert fn_proto.bytecode == nil
+      assert is_tuple(fn_proto.bytecode)
     end
 
-    test ":break inside numeric_for causes fallback" do
-      # `:break` requires loop_exit continuation walking which the
-      # dispatcher doesn't model. The whole enclosing numeric-for
-      # collapses to interpretation when the body contains a break.
+    test ":break inside numeric_for compiles" do
       proto =
         compile!("""
         function f(n)
@@ -131,18 +123,41 @@ defmodule Lua.Compiler.BytecodeTest do
         """)
 
       [fn_proto] = proto.prototypes
-      assert fn_proto.bytecode == nil
+      assert is_tuple(fn_proto.bytecode)
     end
 
-    test ":vararg opcode causes fallback" do
-      # Using `...` as an expression emits a `:vararg` opcode, which is
-      # out of scope. A vararg signature alone (without using `...`)
-      # doesn't emit anything special and is fine.
+    test ":vararg opcode compiles" do
       proto = compile!("function f(...) local first = ... return first end")
       [fn_proto] = proto.prototypes
-      assert fn_proto.bytecode == nil
+      assert is_tuple(fn_proto.bytecode)
     end
 
+    test ":self method-call compiles" do
+      proto =
+        compile!("""
+        function obj_method(obj) return obj:method(1, 2) end
+        """)
+
+      [fn_proto] = proto.prototypes
+      assert is_tuple(fn_proto.bytecode)
+    end
+
+    test "repeat loop compiles" do
+      proto =
+        compile!("""
+        function f(n)
+          local i = 0
+          repeat i = i + 1 until i >= n
+          return i
+        end
+        """)
+
+      [fn_proto] = proto.prototypes
+      assert is_tuple(fn_proto.bytecode)
+    end
+  end
+
+  describe "fallback on unsupported opcodes" do
     test ":set_list with count == 0 falls back (interpreter's multi-return sentinel)" do
       # Current codegen never emits `{:set_list, _, _, 0, _}` from a
       # literal constructor — the interpreter treats `count == 0` as
@@ -179,14 +194,12 @@ defmodule Lua.Compiler.BytecodeTest do
 
   describe "cascade independence" do
     test "child prototype compiles even when sibling falls back" do
-      # `pure` is pure arithmetic (covered). `impure` returns the
-      # result of a function call with all results forwarded — a
-      # multi-return shape (`:call` with `result_count = -1` plus
-      # `:return_vararg`) that stays outside dispatcher coverage.
+      # `pure` is pure arithmetic (covered). `impure` uses bitwise AND
+      # which is not yet in dispatcher coverage (its own follow-up plan).
       proto =
         compile!("""
         function pure(a, b) return a + b end
-        function impure(t) return next(t) end
+        function impure(a, b) return a & b end
         """)
 
       [pure_proto, impure_proto] = proto.prototypes
@@ -195,12 +208,12 @@ defmodule Lua.Compiler.BytecodeTest do
     end
 
     test "deeply-nested function compiles even when its parent falls back" do
-      # The outer `make` builds a table (fallback), but the inner adder
-      # is a pure-arithmetic single-result function (compiles).
+      # The outer `make` uses bitwise AND (fallback), but the inner
+      # adder is a pure-arithmetic single-result function (compiles).
       proto =
         compile!("""
         function make()
-          local fns = {}
+          local m = 1 & 0
           local function add(a, b) return a + b end
           return add
         end
@@ -215,12 +228,12 @@ defmodule Lua.Compiler.BytecodeTest do
   end
 
   describe "edge cases" do
-    test "an empty function body falls back gracefully (return 0 args)" do
+    test "an empty function body compiles" do
       # Empty body codegen emits `{:return, 0, 0}` which is the
-      # zero-result form. Currently encoded as `@op_return_zero`.
+      # zero-result form. Encoded as `@op_return_zero`.
       proto = compile!("function f() end")
       [fn_proto] = proto.prototypes
-      assert is_tuple(fn_proto.bytecode) or fn_proto.bytecode == nil
+      assert is_tuple(fn_proto.bytecode)
     end
 
     test "source_line opcodes are stripped from the encoding" do
@@ -243,8 +256,10 @@ defmodule Lua.Compiler.BytecodeTest do
     end
 
     test "fallback returns a Prototype with bytecode: nil, never an error" do
-      # The encoder must not crash on any well-formed prototype.
-      proto = compile!("function f() return coroutine.yield() end")
+      # The encoder must not crash on any well-formed prototype. Bitwise
+      # operations stay on the interpreter (out of scope for B5c-v2),
+      # so use one to exercise the fallback path.
+      proto = compile!("function f(a, b) return a | b end")
       [fn_proto] = proto.prototypes
       assert %Prototype{} = fn_proto
       assert fn_proto.bytecode == nil
