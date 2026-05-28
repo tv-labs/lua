@@ -139,4 +139,19 @@ defmodule Lua.VM.ArgumentError do
       got: got
     )
   end
+
+  @doc """
+  Builds the PUC-Lua "wrong number of arguments to 'X'" runtime error.
+
+  This is not a bad-argument error — it is the top-level message PUC-Lua's
+  `luaL_error(L, "wrong number of arguments to '%s'", name)` emits when a
+  variadic stdlib function is called with too few or too many positional
+  arguments. Returns a `Lua.VM.RuntimeError` so callers can `raise` it
+  directly:
+
+      raise ArgumentError.wrong_number_of_arguments("insert")
+  """
+  def wrong_number_of_arguments(function_name) do
+    Lua.VM.RuntimeError.exception(value: "wrong number of arguments to '#{function_name}'")
+  end
 end

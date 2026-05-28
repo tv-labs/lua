@@ -48,6 +48,7 @@ defmodule Lua.VM.Stdlib do
     |> install_library(Lua.VM.Stdlib.String)
     |> install_library(Lua.VM.Stdlib.Math)
     |> install_library(Lua.VM.Stdlib.Table)
+    |> install_library(Lua.VM.Stdlib.Utf8)
     |> install_library(Lua.VM.Stdlib.Debug)
     |> preload_stdlib_modules()
     |> install_unpack_alias()
@@ -98,7 +99,7 @@ defmodule Lua.VM.Stdlib do
   # table, debug), so this pass is a safety net for any future stdlib tables
   # that may be added as globals before this call.
   defp preload_stdlib_modules(state) do
-    modules = ["string", "math", "table", "debug"]
+    modules = ["string", "math", "table", "utf8", "debug"]
 
     Enum.reduce(modules, state, fn name, acc ->
       case State.get_global(acc, name) do
