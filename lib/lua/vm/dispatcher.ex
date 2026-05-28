@@ -24,6 +24,8 @@ defmodule Lua.VM.Dispatcher do
   alias Lua.VM.Executor
   alias Lua.VM.Numeric
   alias Lua.VM.State
+  alias Lua.VM.Table
+  alias Lua.VM.Value
 
   # Opcode tags. These must stay in lockstep with `Lua.Compiler.Bytecode`.
   # The module-attribute form lets each case branch match a constant
@@ -61,14 +63,22 @@ defmodule Lua.VM.Dispatcher do
   @op_not_equal 22
   @op_not 23
   @op_test 24
-  # `25` was `@op_test_true`; codegen never emitted it so it has been
-  # removed. Tag is free for reuse.
+  # Tag `25` was `@op_test_true`; codegen never emitted it. Reused by
+  # B5b-v2 for `:call` with `result_count == 0` (statement calls).
+  @op_call_zero 25
   @op_call_one 26
   @op_return_one 27
   @op_return_zero 28
   # `@op_source_line 29` is reserved but never reaches the dispatcher: the
   # bytecode encoder strips `:source_line` entries in `encode_list/2`.
   # Line tracking for compiled prototypes is B5d-v2.
+  @op_new_table 30
+  @op_get_table 31
+  @op_set_table 32
+  @op_set_field 33
+  @op_set_list 34
+  @op_length 35
+  @op_numeric_for 36
 
   @doc """
   Execute a compiled prototype against `args` and `state`.
@@ -512,10 +522,45 @@ defmodule Lua.VM.Dispatcher do
       # ── Calls ───────────────────────────────────────────────────────
       #
       # `:call_one` always asks for exactly one result placed at `base`.
-      # `:compiled_closure` callees stay in the dispatcher via the
-      # frame stack — no Erlang stack growth. Everything else bridges
-      # to the interpreter through `Executor.call_function/3`, which
-      # grows the Erlang stack by one frame at the mode boundary.
+      # `:call_zero` is the statement-call form (`table.sort(t)`,
+      # `print(x)`): results are discarded. `:compiled_closure` callees
+      # stay in the dispatcher via the frame stack — no Erlang stack
+      # growth. Everything else bridges to the interpreter through
+      # `Executor.call_function/3`, which grows the Erlang stack by one
+      # frame at the mode boundary.
+      #
+      # The `:discard` sentinel in the frame's `base` slot signals
+      # "throw the return value away"; `return_one/3` skips its
+      # setelement write when it sees it.
+
+      {@op_call_zero, base, arg_count, _name_hint} ->
+        func_value = :erlang.element(base + 1, regs)
+
+        case func_value do
+          {:compiled_closure, callee_proto, callee_upvalues} ->
+            callee_regs = init_callee_regs(callee_proto, regs, base + 1, arg_count)
+
+            frame =
+              {code, pc + 1, regs, upvalues, proto, cont, :discard, state.open_upvalues}
+
+            state = %{state | open_upvalues: %{}}
+
+            dispatch(
+              callee_proto.bytecode,
+              1,
+              callee_regs,
+              callee_upvalues,
+              callee_proto,
+              state,
+              [],
+              [frame | frames]
+            )
+
+          _ ->
+            args = collect_args(regs, base + 1, arg_count)
+            {_results, state} = Executor.call_function(func_value, args, state)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        end
 
       {@op_call_one, base, arg_count, _name_hint} ->
         func_value = :erlang.element(base + 1, regs)
@@ -575,6 +620,144 @@ defmodule Lua.VM.Dispatcher do
 
       {@op_return_zero} ->
         return_one(nil, state, frames)
+
+      # ── Table opcodes ───────────────────────────────────────────────
+      #
+      # The fast paths mirror the interpreter clauses in `:get_field` /
+      # `:set_field` / `:length`: tref + integer-or-binary key + no
+      # metatable resolves to a direct map access; anything else bridges
+      # to `Executor.dispatcher_*` so metamethod fidelity matches.
+
+      {@op_new_table, dest} ->
+        {tref, state} = State.alloc_table(state)
+        regs = :erlang.setelement(dest + 1, regs, tref)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+      {@op_get_table, dest, table_reg, key_reg, name_hint} ->
+        table_val = :erlang.element(table_reg + 1, regs)
+        key = :erlang.element(key_reg + 1, regs)
+
+        case table_val do
+          {:tref, id} when is_integer(key) or is_binary(key) ->
+            table = :erlang.map_get(id, state.tables)
+            data = :erlang.map_get(:data, table)
+
+            case data do
+              %{^key => value} ->
+                regs = :erlang.setelement(dest + 1, regs, value)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+              _ ->
+                case :erlang.map_get(:metatable, table) do
+                  nil ->
+                    regs = :erlang.setelement(dest + 1, regs, nil)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+                  _ ->
+                    {value, state} =
+                      Executor.dispatcher_get_table(table_val, key, state, proto, name_hint)
+
+                    regs = :erlang.setelement(dest + 1, regs, value)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+                end
+            end
+
+          _ ->
+            {value, state} =
+              Executor.dispatcher_get_table(table_val, key, state, proto, name_hint)
+
+            regs = :erlang.setelement(dest + 1, regs, value)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        end
+
+      {@op_set_table, table_reg, key_reg, value_reg, name_hint} ->
+        table_val = :erlang.element(table_reg + 1, regs)
+        key = :erlang.element(key_reg + 1, regs)
+        value = :erlang.element(value_reg + 1, regs)
+        state = Executor.dispatcher_set_table(table_val, key, value, state, proto, name_hint)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+      {@op_set_field, table_reg, name, value_reg, name_hint} ->
+        table_val = :erlang.element(table_reg + 1, regs)
+        value = :erlang.element(value_reg + 1, regs)
+        state = Executor.dispatcher_set_field(table_val, name, value, state, proto, name_hint)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+      # `:set_list` runs only the integer-count form (see encoder). The
+      # multi-return form (`{:multi, _}`) was filtered upstream and never
+      # reaches the dispatcher.
+      {@op_set_list, table_reg, start, count, offset} ->
+        {:tref, id} = :erlang.element(table_reg + 1, regs)
+
+        state =
+          State.update_table(state, {:tref, id}, fn table ->
+            set_list_into_table(table, regs, start, count, offset, 0)
+          end)
+
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+      {@op_length, dest, source} ->
+        value = :erlang.element(source + 1, regs)
+
+        case value do
+          {:tref, id} ->
+            table = :erlang.map_get(id, state.tables)
+
+            case :erlang.map_get(:metatable, table) do
+              nil ->
+                # No __len possible — Lua 5.3 §3.4.7: # on a table
+                # without __len is the border length of the data map.
+                len = Value.sequence_length(:erlang.map_get(:data, table))
+                regs = :erlang.setelement(dest + 1, regs, len)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+              _ ->
+                {len, state} = Executor.dispatcher_length(value, state, proto)
+                regs = :erlang.setelement(dest + 1, regs, len)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+            end
+
+          v when is_binary(v) ->
+            regs = :erlang.setelement(dest + 1, regs, byte_size(v))
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+          _ ->
+            {len, state} = Executor.dispatcher_length(value, state, proto)
+            regs = :erlang.setelement(dest + 1, regs, len)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        end
+
+      # ── numeric_for ─────────────────────────────────────────────────
+      #
+      # Coerce the three control registers once, write the canonical
+      # numbers back, then test `should_continue`. If the loop runs at
+      # least once, push a `:cps_for` marker onto `cont`; the body-end
+      # handler in `finish_body/6` increments the counter and either
+      # re-enters the body or pops back to `outer_pc`.
+
+      {@op_numeric_for, base, loop_var, body_bc} ->
+        {counter, limit, step} =
+          Executor.dispatcher_coerce_numeric_for_controls(
+            :erlang.element(base + 1, regs),
+            :erlang.element(base + 2, regs),
+            :erlang.element(base + 3, regs)
+          )
+
+        regs = :erlang.setelement(base + 1, regs, counter)
+        regs = :erlang.setelement(base + 2, regs, limit)
+        regs = :erlang.setelement(base + 3, regs, step)
+
+        should_continue =
+          if step > 0, do: counter <= limit, else: counter >= limit
+
+        if should_continue do
+          regs = :erlang.setelement(loop_var + 1, regs, counter)
+          state = Executor.dispatcher_close_open_upvalues_at_or_above(state, loop_var)
+          marker = {:cps_for, base, loop_var, body_bc, code, pc + 1}
+          dispatch(body_bc, 1, regs, upvalues, proto, state, [marker | cont], frames)
+        else
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        end
     end
   end
 
@@ -582,6 +765,36 @@ defmodule Lua.VM.Dispatcher do
 
   defp finish_body(regs, upvalues, proto, state, [{next_code, next_pc} | rest_cont], frames) do
     dispatch(next_code, next_pc, regs, upvalues, proto, state, rest_cont, frames)
+  end
+
+  # `:numeric_for` body ran to completion. Increment the counter, re-test,
+  # and either restart the body (keeping the marker for the next pass) or
+  # pop back to the post-loop PC. A `step` of zero infinite-loops here,
+  # matching the interpreter's behaviour at `do_execute([{:numeric_for, …}])`;
+  # neither path implements PUC-Lua's "for step is zero" runtime check.
+  # Fixing that is a separate concern across both executors.
+  defp finish_body(
+         regs,
+         upvalues,
+         proto,
+         state,
+         [{:cps_for, base, loop_var, body_bc, outer_code, outer_pc} = marker | rest_cont],
+         frames
+       ) do
+    counter = :erlang.element(base + 1, regs)
+    step = :erlang.element(base + 3, regs)
+    new_counter = counter + step
+    regs = :erlang.setelement(base + 1, regs, new_counter)
+    limit = :erlang.element(base + 2, regs)
+    should_continue = if step > 0, do: new_counter <= limit, else: new_counter >= limit
+
+    if should_continue do
+      regs = :erlang.setelement(loop_var + 1, regs, new_counter)
+      state = Executor.dispatcher_close_open_upvalues_at_or_above(state, loop_var)
+      dispatch(body_bc, 1, regs, upvalues, proto, state, [marker | rest_cont], frames)
+    else
+      dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames)
+    end
   end
 
   # Body exhausted with no continuation: prototype ran off the end.
@@ -603,7 +816,13 @@ defmodule Lua.VM.Dispatcher do
 
   defp return_one(value, state, [frame | rest_frames]) do
     {code, pc, regs, upvalues, proto, cont, base, saved_open} = frame
-    regs = :erlang.setelement(base + 1, regs, value)
+
+    regs =
+      case base do
+        :discard -> regs
+        b -> :erlang.setelement(b + 1, regs, value)
+      end
+
     state = %{state | open_upvalues: saved_open}
     dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames)
   end
@@ -644,5 +863,17 @@ defmodule Lua.VM.Dispatcher do
 
   defp collect_args_rev(regs, off, count, acc) do
     collect_args_rev(regs, off - 1, count - 1, [:erlang.element(off + 1, regs) | acc])
+  end
+
+  # `:set_list` writes `count` consecutive register values into the table
+  # at keys `[offset + 1, offset + count]`. Inline loop so the BEAM keeps
+  # the hot path allocation-free apart from the `Table.put/3` updates
+  # themselves (which sit in the table-storage churn category the parent
+  # plan flagged as the post-B5b ceiling).
+  defp set_list_into_table(table, _regs, _start, 0, _offset, _i), do: table
+
+  defp set_list_into_table(table, regs, start, count, offset, i) do
+    value = :erlang.element(start + i + 1, regs)
+    set_list_into_table(Table.put(table, offset + i + 1, value), regs, start, count - 1, offset, i + 1)
   end
 end

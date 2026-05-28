@@ -427,4 +427,310 @@ defmodule Lua.VM.DispatcherTest do
       assert results == [nil]
     end
   end
+
+  describe "table opcodes (dispatcher-compiled body)" do
+    test ":new_table — empty constructor returns a fresh tref" do
+      {proto, results} =
+        run!("""
+        function f() return {} end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert [{:tref, _id}] = results
+    end
+
+    test ":set_list — table constructor with literals" do
+      {proto, results} =
+        run!("""
+        function f() local t = {10, 20, 30} return t[2] end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [20]
+    end
+
+    test ":length — sequence after :set_list" do
+      {proto, results} =
+        run!("""
+        function f()
+          local t = {1, 2, 3, 4}
+          return \#t
+        end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [4]
+    end
+
+    test ":length — string source" do
+      {proto, results} =
+        run!("""
+        function f(s) return #s end
+        return f("hello")
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [5]
+    end
+
+    test ":set_field then :get_field via dot notation" do
+      {proto, results} =
+        run!("""
+        function f()
+          local t = {}
+          t.x = 7
+          t.y = 11
+          return t.x + t.y
+        end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [18]
+    end
+
+    test ":get_table — integer-key fast path" do
+      {proto, results} =
+        run!("""
+        function f()
+          local t = {100, 200, 300}
+          return t[1] + t[2] + t[3]
+        end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [600]
+    end
+
+    test ":set_table with computed integer key" do
+      {proto, results} =
+        run!("""
+        function f(n)
+          local t = {}
+          t[n] = 42
+          t[n + 1] = 99
+          return t[n] + t[n + 1]
+        end
+        return f(5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [141]
+    end
+  end
+
+  describe "numeric_for (dispatcher-compiled body)" do
+    test "sum 1..n" do
+      {proto, results} =
+        run!("""
+        function f(n)
+          local s = 0
+          for i = 1, n do s = s + i end
+          return s
+        end
+        return f(10)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [55]
+    end
+
+    test "non-unit step" do
+      {proto, results} =
+        run!("""
+        function f()
+          local s = 0
+          for i = 0, 10, 2 do s = s + i end
+          return s
+        end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      # 0+2+4+6+8+10 = 30
+      assert results == [30]
+    end
+
+    test "negative step" do
+      {proto, results} =
+        run!("""
+        function f()
+          local s = 0
+          for i = 10, 1, -1 do s = s + i end
+          return s
+        end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [55]
+    end
+
+    test "loop runs zero times when initial value already past limit" do
+      {proto, results} =
+        run!("""
+        function f()
+          local s = 0
+          for i = 10, 1 do s = s + i end
+          return s
+        end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [0]
+    end
+
+    test "nested numeric_for" do
+      {proto, results} =
+        run!("""
+        function f(n)
+          local s = 0
+          for i = 1, n do
+            for j = 1, n do
+              s = s + 1
+            end
+          end
+          return s
+        end
+        return f(4)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [16]
+    end
+
+    test "float-coerced controls (limit promoted to float)" do
+      {proto, results} =
+        run!("""
+        function f()
+          local s = 0
+          for i = 1, 5.0 do s = s + i end
+          return s
+        end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [15.0]
+    end
+  end
+
+  describe "table_ops benchmark shapes (dispatcher-compiled)" do
+    # The benchmarks in `benchmarks/table_ops.exs` are the public
+    # motivation for B5b-v2: they should all run on the dispatcher
+    # end-to-end. Asserting that here pins the goal so a future
+    # refactor can't silently regress coverage.
+
+    setup do
+      lua = Lua.new()
+
+      {_, lua} =
+        Lua.eval!(lua, """
+        function run_table_build(n)
+          local t = {}
+          for i = 1, n do
+            t[i] = i * i
+          end
+          return #t
+        end
+
+        function run_table_sort(n)
+          local t = {}
+          for i = 1, n do
+            t[i] = n - i + 1
+          end
+          table.sort(t)
+          return t[1]
+        end
+
+        function run_table_sum(n)
+          local t = {}
+          for i = 1, n do
+            t[i] = i
+          end
+          local sum = 0
+          for j = 1, n do
+            sum = sum + t[j]
+          end
+          return sum
+        end
+
+        function run_table_map_reduce(n)
+          local t = {}
+          for i = 1, n do
+            t[i] = i
+          end
+          local mapped = {}
+          for j = 1, n do
+            mapped[j] = t[j] * t[j]
+          end
+          local sum = 0
+          for k = 1, n do
+            sum = sum + mapped[k]
+          end
+          return sum
+        end
+        """)
+
+      %{lua: lua}
+    end
+
+    test "every table_ops function is compiled (not interpreted)", %{lua: lua} do
+      names = ~w(run_table_build run_table_sort run_table_sum run_table_map_reduce)
+
+      for name <- names do
+        case State.get_global(lua.state, name) do
+          {:compiled_closure, _proto, _ups} ->
+            :ok
+
+          {:lua_closure, _proto, _ups} ->
+            flunk("expected #{name} to be :compiled_closure, got :lua_closure")
+        end
+      end
+    end
+
+    test "run_table_build(10) → 10", %{lua: lua} do
+      {[result], _} = Lua.eval!(lua, "return run_table_build(10)")
+      assert result == 10
+    end
+
+    test "run_table_sort(10) → 1", %{lua: lua} do
+      {[result], _} = Lua.eval!(lua, "return run_table_sort(10)")
+      assert result == 1
+    end
+
+    test "run_table_sum(10) → 55", %{lua: lua} do
+      {[result], _} = Lua.eval!(lua, "return run_table_sum(10)")
+      assert result == 55
+    end
+
+    test "run_table_map_reduce(10) → 385", %{lua: lua} do
+      {[result], _} = Lua.eval!(lua, "return run_table_map_reduce(10)")
+      assert result == 385
+    end
+  end
+
+  describe ":call_zero — statement call form" do
+    test "discards results from a native function" do
+      # `print` is the canonical statement-call target. Routing through
+      # the dispatcher must not propagate its return values.
+      {proto, results} =
+        run!("""
+        function f()
+          local t = {3, 1, 2}
+          table.sort(t)
+          return t[1]
+        end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [1]
+    end
+  end
 end

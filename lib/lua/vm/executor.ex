@@ -305,6 +305,83 @@ defmodule Lua.VM.Executor do
     index_value(value, name, state, 0, proto.source, name_hint)
   end
 
+  # ── Dispatcher bridges: table opcodes ───────────────────────────────────
+  #
+  # These wrap the same `defp` helpers that the interpreter's `:get_table`
+  # / `:set_table` / `:set_field` / `:length` clauses call, so the
+  # dispatcher inherits metamethod fidelity for free. Line attribution
+  # is uniformly `0` here; threading honest line info into compiled
+  # prototypes is B5d-v2. Native callbacks reached via metamethods still
+  # see accurate positions via the process-dictionary bridge installed
+  # at the call boundary.
+
+  @doc false
+  @spec dispatcher_get_table(term(), term(), State.t(), term(), term()) ::
+          {term(), State.t()}
+  def dispatcher_get_table(value, key, state, proto, name_hint) do
+    index_value(value, key, state, 0, proto.source, name_hint)
+  end
+
+  @doc false
+  @spec dispatcher_set_table(term(), term(), term(), State.t(), term(), term()) ::
+          State.t() | no_return()
+  def dispatcher_set_table({:tref, _} = tref, key, value, state, _proto, _name_hint) do
+    table_newindex(tref, key, value, state)
+  end
+
+  def dispatcher_set_table(value, _key, _value, _state, proto, name_hint) do
+    raise_index_type_error(value, 0, proto.source, name_hint)
+  end
+
+  @doc false
+  @spec dispatcher_set_field(term(), binary(), term(), State.t(), term(), term()) ::
+          State.t() | no_return()
+  def dispatcher_set_field({:tref, _} = tref, name, value, state, _proto, _name_hint) do
+    table_newindex(tref, name, value, state)
+  end
+
+  def dispatcher_set_field(value, _name, _value, _state, proto, name_hint) do
+    raise_index_type_error(value, 0, proto.source, name_hint)
+  end
+
+  # The `_proto` parameter is unused today because `try_unary_metamethod`
+  # doesn't thread a `source` through; B5d-v2 will route `__len` errors
+  # back to `proto.source` (matching the other bridges' attribution),
+  # so the parameter stays in the signature for forward-compat.
+  @doc false
+  @spec dispatcher_length(term(), State.t(), term()) :: {term(), State.t()}
+  def dispatcher_length(value, state, _proto) do
+    try_unary_metamethod("__len", value, state, fn ->
+      case value do
+        {:tref, id} ->
+          table = Map.fetch!(state.tables, id)
+          Value.sequence_length(table.data)
+
+        v when is_binary(v) ->
+          byte_size(v)
+
+        v when is_list(v) ->
+          length(v)
+
+        _ ->
+          0
+      end
+    end)
+  end
+
+  @doc false
+  @spec dispatcher_coerce_numeric_for_controls(term(), term(), term()) ::
+          {number(), number(), number()}
+  def dispatcher_coerce_numeric_for_controls(init, limit, step) do
+    coerce_numeric_for_controls(init, limit, step)
+  end
+
+  @doc false
+  @spec dispatcher_close_open_upvalues_at_or_above(State.t(), non_neg_integer()) :: State.t()
+  def dispatcher_close_open_upvalues_at_or_above(state, threshold) do
+    close_open_upvalues_at_or_above(state, threshold)
+  end
+
   # ── Break ──────────────────────────────────────────────────────────────────
 
   defp do_execute([:break | _rest], regs, upvalues, proto, state, cont, frames, line) do

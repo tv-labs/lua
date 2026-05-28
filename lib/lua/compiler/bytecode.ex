@@ -46,12 +46,26 @@ defmodule Lua.Compiler.Bytecode do
   @op_not_equal 22
   @op_not 23
   @op_test 24
-  # `25` was `@op_test_true`; codegen never emitted it so it has been
-  # removed. Tag is free for reuse.
+  # Tag `25` was `@op_test_true`; codegen never emitted it. Reused by
+  # B5b-v2 for `:call` with `result_count == 0` — the statement-call
+  # form (e.g. `table.sort(t)`).
+  @op_call_zero 25
   @op_call_one 26
   @op_return_one 27
   @op_return_zero 28
   @op_source_line 29
+
+  # Table opcodes plus `:numeric_for`, added by B5b-v2 to unlock the
+  # `table_ops` benchmark family. The tags pick up where the foundation
+  # left off; keeping the block contiguous helps the BEAM lay out the
+  # dispatcher's jump table densely.
+  @op_new_table 30
+  @op_get_table 31
+  @op_set_table 32
+  @op_set_field 33
+  @op_set_list 34
+  @op_length 35
+  @op_numeric_for 36
 
   @doc """
   Compile a prototype, populating its `bytecode` field on success.
@@ -162,12 +176,22 @@ defmodule Lua.Compiler.Bytecode do
     end
   end
 
-  # `:call` with `result_count == 1` is the dispatcher's only call form.
-  # Anything else (multi-return, return-position tail calls, zero-result
-  # statement calls) bails out so the interpreter's full machinery handles
-  # it. The `name_hint` operand survives for error attribution.
+  # `:call` shapes the dispatcher covers:
+  #
+  #   - `result_count == 1`: the expression-call hot path (every
+  #     recursive call in fib/factorial, every `f(x)` used as an rvalue).
+  #   - `result_count == 0`: the statement-call form, e.g.
+  #     `table.sort(t)`. Results are discarded.
+  #
+  # Multi-return (`{:multi, _}`), negative result counts, and tail-call
+  # marker shapes all stay on the interpreter via the catchall.
+  # `name_hint` is preserved on both shapes for error attribution.
   defp encode({:call, base, arg_count, 1, name_hint}) when is_integer(arg_count) and arg_count >= 0 do
     {:ok, {@op_call_one, base, arg_count, name_hint}}
+  end
+
+  defp encode({:call, base, arg_count, 0, name_hint}) when is_integer(arg_count) and arg_count >= 0 do
+    {:ok, {@op_call_zero, base, arg_count, name_hint}}
   end
 
   # `:return` shapes: single-value is the hot path (every recursive return
@@ -176,12 +200,81 @@ defmodule Lua.Compiler.Bytecode do
   defp encode({:return, base, 1}), do: {:ok, {@op_return_one, base}}
   defp encode({:return, _base, 0}), do: {:ok, {@op_return_zero}}
 
-  # Anything else — `:closure`, `:get_table`, `:concatenate`, loops,
-  # multi-return calls, vararg, etc. — is out of scope for v2.
+  # ── Table opcodes ──────────────────────────────────────────────────────
+  #
+  # The dispatcher inlines the tref + integer/binary-key fast path for
+  # `:get_table` / `:set_table` / `:set_field` / `:length` and bridges to
+  # `Lua.VM.Executor.dispatcher_*` helpers for the metatable / non-tref
+  # slow paths. Array/hash hints on `:new_table` are discarded — the
+  # executor handler also ignores them.
+
+  defp encode({:new_table, dest, _array_hint, _hash_hint}), do: {:ok, {@op_new_table, dest}}
+
+  defp encode({:get_table, dest, table_reg, key_reg, name_hint}),
+    do: {:ok, {@op_get_table, dest, table_reg, key_reg, name_hint}}
+
+  defp encode({:set_table, table_reg, key_reg, value_reg, name_hint}),
+    do: {:ok, {@op_set_table, table_reg, key_reg, value_reg, name_hint}}
+
+  defp encode({:set_field, table_reg, name, value_reg, name_hint}),
+    do: {:ok, {@op_set_field, table_reg, name, value_reg, name_hint}}
+
+  # `:set_list` with a positive integer `count` is the table-constructor
+  # form (`{1, 2, 3}`). Two adjacent shapes stay on the interpreter:
+  #
+  # - `{:multi, _}` absorbs a multi-return call's results (e.g.
+  #   `{f(), 1}`); it's covered by B5c-v2 alongside the rest of the
+  #   multi-return machinery.
+  # - `count == 0` is the interpreter's "consume `multi_return_count`
+  #   trailing values" sentinel. Current codegen never emits it from a
+  #   literal constructor, but encoding it as a no-op would silently
+  #   diverge from the interpreter if codegen ever did. The guard makes
+  #   that contract explicit.
+  defp encode({:set_list, table_reg, start, count, offset}) when is_integer(count) and count > 0,
+    do: {:ok, {@op_set_list, table_reg, start, count, offset}}
+
+  defp encode({:length, dest, source}), do: {:ok, {@op_length, dest, source}}
+
+  # `:numeric_for` carries a nested instruction list for the loop body.
+  # The body encodes recursively; any uncovered opcode (or a `:break`
+  # atom — `break`'s loop_exit machinery is its own follow-up) collapses
+  # the whole loop to interpretation.
+  defp encode({:numeric_for, base, loop_var, body}) do
+    if contains_break?(body) do
+      :fallback
+    else
+      case encode_list(body, []) do
+        {:ok, body_enc} ->
+          {:ok, {@op_numeric_for, base, loop_var, List.to_tuple(body_enc)}}
+
+        :fallback ->
+          :fallback
+      end
+    end
+  end
+
+  # Anything else — `:closure`, `:concatenate`, while/repeat/generic-for
+  # loops, multi-return calls, vararg, etc. — is out of scope for v2.
   #
   # `:source_line` is stripped upstream in `encode_list/2`, so it never
   # reaches this clause table.
   defp encode(_other), do: :fallback
+
+  # ── Helpers ─────────────────────────────────────────────────────────────
+
+  # `:break` inside a `:numeric_for` body forces the enclosing loop to
+  # fall back. The interpreter's loop_exit continuation walk relies on
+  # the broader `cont` shape; reproducing it inside the dispatcher is a
+  # B5c-v2 concern, not a table-coverage one.
+  defp contains_break?(body) when is_list(body) do
+    Enum.any?(body, fn
+      :break -> true
+      {:test, _reg, then_body, else_body} -> contains_break?(then_body) or contains_break?(else_body)
+      _ -> false
+    end)
+  end
+
+  defp contains_break?(_), do: false
 
   # ── Opcode tag accessors ────────────────────────────────────────────────
   #
@@ -214,8 +307,16 @@ defmodule Lua.Compiler.Bytecode do
   def op_not_equal, do: @op_not_equal
   def op_not, do: @op_not
   def op_test, do: @op_test
+  def op_call_zero, do: @op_call_zero
   def op_call_one, do: @op_call_one
   def op_return_one, do: @op_return_one
   def op_return_zero, do: @op_return_zero
   def op_source_line, do: @op_source_line
+  def op_new_table, do: @op_new_table
+  def op_get_table, do: @op_get_table
+  def op_set_table, do: @op_set_table
+  def op_set_field, do: @op_set_field
+  def op_set_list, do: @op_set_list
+  def op_length, do: @op_length
+  def op_numeric_for, do: @op_numeric_for
 end

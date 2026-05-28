@@ -64,8 +64,18 @@ defmodule Lua.Compiler.BytecodeTest do
       assert is_tuple(fn_proto.bytecode)
     end
 
-    test ":new_table causes fallback" do
-      proto = compile!("function f() return {1, 2, 3} end")
+    test ":generic_for causes fallback" do
+      # `for k, v in pairs(t)` emits `:generic_for`, which sits outside
+      # the dispatcher's loop coverage (only numeric-for is wired up).
+      proto =
+        compile!("""
+        function iter(t)
+          local n = 0
+          for _ in pairs(t) do n = n + 1 end
+          return n
+        end
+        """)
+
       [fn_proto] = proto.prototypes
       assert fn_proto.bytecode == nil
     end
@@ -90,18 +100,38 @@ defmodule Lua.Compiler.BytecodeTest do
       assert caller_proto.bytecode == nil
     end
 
-    test "for-loops cause fallback" do
+    test "while-loops cause fallback" do
+      # While/repeat/generic-for stay on the interpreter; only
+      # numeric-for is covered by the dispatcher in B5b-v2.
       proto =
         compile!("""
-        function sum(n)
-          local total = 0
-          for i = 1, n do total = total + i end
-          return total
+        function f(n)
+          local i = 0
+          while i < n do i = i + 1 end
+          return i
         end
         """)
 
-      [sum_proto] = proto.prototypes
-      assert sum_proto.bytecode == nil
+      [fn_proto] = proto.prototypes
+      assert fn_proto.bytecode == nil
+    end
+
+    test ":break inside numeric_for causes fallback" do
+      # `:break` requires loop_exit continuation walking which the
+      # dispatcher doesn't model. The whole enclosing numeric-for
+      # collapses to interpretation when the body contains a break.
+      proto =
+        compile!("""
+        function f(n)
+          for i = 1, n do
+            if i > 5 then break end
+          end
+          return n
+        end
+        """)
+
+      [fn_proto] = proto.prototypes
+      assert fn_proto.bytecode == nil
     end
 
     test ":vararg opcode causes fallback" do
@@ -112,14 +142,51 @@ defmodule Lua.Compiler.BytecodeTest do
       [fn_proto] = proto.prototypes
       assert fn_proto.bytecode == nil
     end
+
+    test ":set_list with count == 0 falls back (interpreter's multi-return sentinel)" do
+      # Current codegen never emits `{:set_list, _, _, 0, _}` from a
+      # literal constructor — the interpreter treats `count == 0` as
+      # "consume `state.multi_return_count` trailing values," a shape
+      # only reachable through multi-return splicing. The dispatcher
+      # has no `multi_return_count` plumbing, so the encoder forces
+      # fallback on the literal shape to keep the divergence explicit
+      # if codegen ever changes.
+      proto = %Prototype{
+        instructions: [{:set_list, 0, 1, 0, 0}, {:return, 0, 0}],
+        max_registers: 2,
+        source: "test-synthetic"
+      }
+
+      result = Bytecode.compile(proto)
+      assert result.bytecode == nil
+    end
+
+    test ":set_list with {:multi, _} count falls back" do
+      # Same multi-return splicing shape, produced by codegen when a
+      # constructor's last element is `f()` (and so absorbs the call's
+      # full result list). The dispatcher only handles literal-count
+      # constructors.
+      proto = %Prototype{
+        instructions: [{:set_list, 0, 1, {:multi, 2}, 0}, {:return, 0, 0}],
+        max_registers: 2,
+        source: "test-synthetic"
+      }
+
+      result = Bytecode.compile(proto)
+      assert result.bytecode == nil
+    end
   end
 
   describe "cascade independence" do
     test "child prototype compiles even when sibling falls back" do
+      # `pure` is pure arithmetic (covered). `impure` returns the
+      # result of a function call with all results forwarded — a
+      # multi-return shape (`:call` with `result_count = -1` plus
+      # `:return_vararg`) that stays outside dispatcher coverage.
       proto =
         compile!("""
         function pure(a, b) return a + b end
-        function impure() return {1, 2, 3} end
+        function impure(t) return next(t) end
         """)
 
       [pure_proto, impure_proto] = proto.prototypes
