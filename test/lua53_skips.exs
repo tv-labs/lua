@@ -52,7 +52,7 @@
       category: :executor,
       reason:
         "stale upvalue cell across do blocks: register reused for a new local still resolves through the previous block's open_upvalues entry",
-      issue: nil
+      issue: 276
     },
     %{
       lines: 135..137,
