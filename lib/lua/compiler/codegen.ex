@@ -673,9 +673,10 @@ defmodule Lua.Compiler.Codegen do
 
         {closure_instructions ++ store_instructions, ctx}
 
-      [first | rest] ->
-        # Dotted name: get the table chain, then set the final field
-        {get_instructions, table_reg, ctx} = gen_var_by_name(first, ctx)
+      [_first | rest] ->
+        # Dotted name: load the head value via the var_map entry resolved
+        # by scope analysis, then walk the field chain and set the leaf.
+        {get_instructions, table_reg, ctx} = gen_func_decl_head(decl, ctx)
 
         {final_instructions, final_table_reg, ctx} =
           Enum.reduce(Enum.slice(rest, 0..-2//1), {get_instructions, table_reg, ctx}, fn field, {instrs, reg, ctx} ->
@@ -747,6 +748,34 @@ defmodule Lua.Compiler.Codegen do
 
   # Stub for other statements
   defp gen_statement(_stmt, ctx), do: {[], ctx}
+
+  # Emit instructions that load the head value of a multi-name FuncDecl
+  # (`function a.b.c(...)`) into a register, using the var_map entry
+  # populated by scope analysis. Mirrors the four cases of `gen_expr` on
+  # `%Expr.Var{}` — local register, captured-local cell, parent upvalue,
+  # or free name read through `_ENV`.
+  defp gen_func_decl_head(decl, ctx) do
+    case Map.get(ctx.scope.var_map, {:func_decl_head, decl}) do
+      {:register, reg} ->
+        {[], reg, ctx}
+
+      {:captured_local, reg} ->
+        dest = ctx.next_reg
+        ctx = %{ctx | next_reg: dest + 1}
+        {[Instruction.get_open_upvalue(dest, reg)], dest, ctx}
+
+      {:upvalue, index} ->
+        dest = ctx.next_reg
+        ctx = %{ctx | next_reg: dest + 1}
+        {[Instruction.get_upvalue(dest, index)], dest, ctx}
+
+      {:env_field, env_ref, name} ->
+        gen_env_field_get(env_ref, name, ctx)
+
+      nil ->
+        raise "codegen: missing var_map entry for FuncDecl head #{inspect(decl.name)}"
+    end
+  end
 
   # Helpers for assignment target code generation
   defp gen_assign_target(%Expr.Var{} = target_var, value_reg, ctx) do
@@ -1434,90 +1463,6 @@ defmodule Lua.Compiler.Codegen do
     reg = ctx.next_reg
     ctx = %{ctx | next_reg: reg + 1}
     {[Instruction.load_constant(reg, nil)], reg, ctx}
-  end
-
-  # Look up a variable by name (not by AST node identity).
-  # Used when we need to resolve a variable name that doesn't have a corresponding
-  # scope-resolved Expr.Var node (e.g., FuncDecl table chain names).
-  #
-  # Note: this path operates on the chunk-level locals map. It only matches
-  # chunk-level locals (and chunk-level `_ENV` at register 0). This means for
-  # `function foo.bar()` where `foo` is an upvalue of an outer function, this
-  # path will fall through to `_ENV.foo`, which is the correct Lua 5.3
-  # behaviour for a free name in a chunk. Pre-existing limitation: if `foo`
-  # is captured from a deeper enclosing scope, this won't walk the upvalue
-  # chain — `_ENV.foo` is used instead. Acceptable: all FuncDecl table-chain
-  # head names that aren't chunk-level locals are conventionally globals.
-  defp gen_var_by_name(name, ctx) do
-    case Map.get(ctx.scope.locals, name) do
-      nil ->
-        # Not a chunk-level local — treat as `_ENV.name`. Resolve `_ENV`
-        # itself via the same chain as scope.ex so we use the right cell
-        # (chunk register 0, captured local, or upvalue).
-        env_ref = compute_env_var_ref_at_codegen(ctx)
-        gen_env_field_get(env_ref, name, ctx)
-
-      local_reg ->
-        if MapSet.member?(ctx.scope.captured_locals, name) do
-          # Captured local — read from open upvalue cell
-          dest = ctx.next_reg
-          ctx = %{ctx | next_reg: dest + 1}
-          {[Instruction.get_open_upvalue(dest, local_reg)], dest, ctx}
-        else
-          {[], local_reg, ctx}
-        end
-    end
-  end
-
-  # Resolve `_ENV` as a `var_ref` at codegen time. This is used by
-  # `gen_var_by_name`, which doesn't go through the AST tag path; it
-  # operates on the *current function's* scope (`ctx.scope.locals`).
-  #
-  # `gen_var_by_name` is only invoked from FuncDecl statement codegen at
-  # the top level of a chunk (or nested fn body), so the lookup happens
-  # against the function whose locals are reflected in `ctx.scope`. The
-  # chunk's `_ENV` is at register 0; nested functions hold `_ENV` as an
-  # upvalue.
-  defp compute_env_var_ref_at_codegen(ctx) do
-    case Map.get(ctx.scope.locals, "_ENV") do
-      nil ->
-        # No local _ENV — must be an upvalue. Find its index in the current
-        # function's upvalue_descriptors. Note: the scope resolver should
-        # have ensured this upvalue exists (any FuncDecl in a non-chunk
-        # function will have triggered ensure_upvalue when free names were
-        # resolved). If somehow the function has no free names elsewhere,
-        # we still need _ENV — fall back to looking at the current
-        # function's upvalues for a `_ENV` entry.
-        case current_function_env_upvalue_index(ctx) do
-          {:ok, index} -> {:upvalue, index}
-          :not_found -> raise "codegen: _ENV unreachable in gen_var_by_name (Plan A16)"
-        end
-
-      reg ->
-        if MapSet.member?(ctx.scope.captured_locals, "_ENV") do
-          {:captured_local, reg}
-        else
-          {:register, reg}
-        end
-    end
-  end
-
-  defp current_function_env_upvalue_index(ctx) do
-    # The codegen ctx doesn't expose the current function key directly, but
-    # we can look it up via ctx.scope.functions for the function we're
-    # currently generating. The chunk's locals map should always have
-    # `_ENV`, so this path is only hit for nested functions, where we'd
-    # have a `_ENV` upvalue allocated by scope resolution. If not, that's
-    # a scope-resolution bug.
-    func_scope = ctx.scope.functions[ctx.current_function]
-
-    case Enum.find_index(func_scope.upvalue_descriptors, fn
-           {:parent_local, _, n} -> n == "_ENV"
-           {:parent_upvalue, _, n} -> n == "_ENV"
-         end) do
-      nil -> :not_found
-      idx -> {:ok, idx}
-    end
   end
 
   # Emit a `_ENV` lookup followed by a `get_field` for `name`.

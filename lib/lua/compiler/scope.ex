@@ -286,6 +286,24 @@ defmodule Lua.Compiler.Scope do
     end
   end
 
+  defp resolve_statement(
+         %Statement.FuncDecl{name: [first | rest], params: params, body: body, is_method: is_method} = decl,
+         state
+       )
+       when rest != [] do
+    # Multi-name FuncDecl (`function a.b.c(...)` / `function a:m(...)`).
+    # Process the body FIRST so `state.captured_locals` reflects whether
+    # the head name is captured by the function body (e.g. `a.y = ...`
+    # inside `function a:m`). `resolve_function_scope` restores the outer
+    # scope's `locals` and merges newly-captured names into
+    # `captured_locals`, so the post-call state matches what the head
+    # lookup needs. Mirrors the single-name FuncDecl ordering above.
+    all_params = if is_method, do: ["self" | params], else: params
+    state = resolve_function_scope(decl, all_params, body, state)
+
+    resolve_func_decl_head(first, decl, state)
+  end
+
   defp resolve_statement(%Statement.FuncDecl{params: params, body: body, is_method: is_method} = decl, state) do
     all_params = if is_method, do: ["self" | params], else: params
     resolve_function_scope(decl, all_params, body, state)
@@ -430,6 +448,33 @@ defmodule Lua.Compiler.Scope do
 
   # For now, stub out other expression types
   defp resolve_expr(_expr, state), do: state
+
+  # Resolve the head name of a multi-name FuncDecl the same way an
+  # `Expr.Var` read is resolved. The result is stashed under
+  # `{:func_decl_head, decl}` so codegen can replay the lookup without
+  # re-reading the post-block locals snapshot.
+  defp resolve_func_decl_head(name, decl, state) do
+    key = {:func_decl_head, decl}
+
+    case Map.get(state.locals, name) do
+      nil ->
+        case find_upvalue(name, state.parent_scopes, state) do
+          {:ok, upvalue_index, state} ->
+            %{state | var_map: Map.put(state.var_map, key, {:upvalue, upvalue_index})}
+
+          :not_found ->
+            {env_ref, state} = resolve_env_ref(state)
+            %{state | var_map: Map.put(state.var_map, key, {:env_field, env_ref, name})}
+        end
+
+      reg ->
+        if MapSet.member?(state.captured_locals, name) do
+          %{state | var_map: Map.put(state.var_map, key, {:captured_local, reg})}
+        else
+          %{state | var_map: Map.put(state.var_map, key, {:register, reg})}
+        end
+    end
+  end
 
   # Walk up the scope chain to find a variable and create upvalue descriptors.
   # Delegates to ensure_upvalue which handles multi-level nesting correctly.
@@ -594,13 +639,12 @@ defmodule Lua.Compiler.Scope do
 
     state = %{state | functions: Map.put(state.functions, func_key, func_scope)}
 
-    # Plan A16: every nested function inherits `_ENV` as an upvalue. We
-    # eagerly resolve `_ENV` before the body is processed so codegen paths
-    # that need it (notably `gen_var_by_name` for FuncDecl table-chain
-    # heads) can rely on it being present, and so the upvalue index is
-    # known up-front. If the function shadows `_ENV` with a parameter or
-    # later `local _ENV = ...`, those local bindings still take precedence
-    # for free-name resolution, which is the correct Lua 5.3 behaviour.
+    # Every nested function inherits `_ENV` as an upvalue. Resolve it
+    # eagerly before the body is processed so codegen paths that read
+    # free names through `_ENV` can rely on the upvalue being present
+    # with a known index. A parameter or `local _ENV = ...` still takes
+    # precedence for free-name resolution, which is the correct Lua 5.3
+    # behaviour.
     state =
       if Map.has_key?(state.locals, "_ENV") do
         # `_ENV` is a parameter — no upvalue allocation needed at this entry
