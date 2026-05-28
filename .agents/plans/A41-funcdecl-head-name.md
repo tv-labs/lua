@@ -5,7 +5,7 @@ issue: 255
 pr: null
 branch: fix/funcdecl-head-name
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - calls.lua
