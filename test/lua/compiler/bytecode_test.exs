@@ -142,6 +142,39 @@ defmodule Lua.Compiler.BytecodeTest do
       [fn_proto] = proto.prototypes
       assert fn_proto.bytecode == nil
     end
+
+    test ":set_list with count == 0 falls back (interpreter's multi-return sentinel)" do
+      # Current codegen never emits `{:set_list, _, _, 0, _}` from a
+      # literal constructor — the interpreter treats `count == 0` as
+      # "consume `state.multi_return_count` trailing values," a shape
+      # only reachable through multi-return splicing. The dispatcher
+      # has no `multi_return_count` plumbing, so the encoder forces
+      # fallback on the literal shape to keep the divergence explicit
+      # if codegen ever changes.
+      proto = %Prototype{
+        instructions: [{:set_list, 0, 1, 0, 0}, {:return, 0, 0}],
+        max_registers: 2,
+        source: "test-synthetic"
+      }
+
+      result = Bytecode.compile(proto)
+      assert result.bytecode == nil
+    end
+
+    test ":set_list with {:multi, _} count falls back" do
+      # Same multi-return splicing shape, produced by codegen when a
+      # constructor's last element is `f()` (and so absorbs the call's
+      # full result list). The dispatcher only handles literal-count
+      # constructors.
+      proto = %Prototype{
+        instructions: [{:set_list, 0, 1, {:multi, 2}, 0}, {:return, 0, 0}],
+        max_registers: 2,
+        source: "test-synthetic"
+      }
+
+      result = Bytecode.compile(proto)
+      assert result.bytecode == nil
+    end
   end
 
   describe "cascade independence" do

@@ -219,11 +219,18 @@ defmodule Lua.Compiler.Bytecode do
   defp encode({:set_field, table_reg, name, value_reg, name_hint}),
     do: {:ok, {@op_set_field, table_reg, name, value_reg, name_hint}}
 
-  # `:set_list` with an integer `count` is the table-constructor form
-  # (`{1, 2, 3}`). The `{:multi, _}` variant absorbs a multi-return
-  # call's results and is out of scope for v2 along with the rest of
-  # the multi-return machinery.
-  defp encode({:set_list, table_reg, start, count, offset}) when is_integer(count),
+  # `:set_list` with a positive integer `count` is the table-constructor
+  # form (`{1, 2, 3}`). Two adjacent shapes stay on the interpreter:
+  #
+  # - `{:multi, _}` absorbs a multi-return call's results (e.g.
+  #   `{f(), 1}`); it's covered by B5c-v2 alongside the rest of the
+  #   multi-return machinery.
+  # - `count == 0` is the interpreter's "consume `multi_return_count`
+  #   trailing values" sentinel. Current codegen never emits it from a
+  #   literal constructor, but encoding it as a no-op would silently
+  #   diverge from the interpreter if codegen ever did. The guard makes
+  #   that contract explicit.
+  defp encode({:set_list, table_reg, start, count, offset}) when is_integer(count) and count > 0,
     do: {:ok, {@op_set_list, table_reg, start, count, offset}}
 
   defp encode({:length, dest, source}), do: {:ok, {@op_length, dest, source}}

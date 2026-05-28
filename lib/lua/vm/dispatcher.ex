@@ -24,6 +24,7 @@ defmodule Lua.VM.Dispatcher do
   alias Lua.VM.Executor
   alias Lua.VM.Numeric
   alias Lua.VM.State
+  alias Lua.VM.Table
   alias Lua.VM.Value
 
   # Opcode tags. These must stay in lockstep with `Lua.Compiler.Bytecode`.
@@ -768,10 +769,10 @@ defmodule Lua.VM.Dispatcher do
 
   # `:numeric_for` body ran to completion. Increment the counter, re-test,
   # and either restart the body (keeping the marker for the next pass) or
-  # pop back to the post-loop PC. Stepping by zero stays out of scope — the
-  # encoder accepts arbitrary step values but the executor's
-  # `dispatcher_coerce_numeric_for_controls` mirrors PUC's "step must not
-  # be zero" check at loop entry, so we never see step=0 here.
+  # pop back to the post-loop PC. A `step` of zero infinite-loops here,
+  # matching the interpreter's behaviour at `do_execute([{:numeric_for, …}])`;
+  # neither path implements PUC-Lua's "for step is zero" runtime check.
+  # Fixing that is a separate concern across both executors.
   defp finish_body(
          regs,
          upvalues,
@@ -873,6 +874,6 @@ defmodule Lua.VM.Dispatcher do
 
   defp set_list_into_table(table, regs, start, count, offset, i) do
     value = :erlang.element(start + i + 1, regs)
-    set_list_into_table(Lua.VM.Table.put(table, offset + i + 1, value), regs, start, count - 1, offset, i + 1)
+    set_list_into_table(Table.put(table, offset + i + 1, value), regs, start, count - 1, offset, i + 1)
   end
 end

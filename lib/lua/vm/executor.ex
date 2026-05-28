@@ -324,7 +324,7 @@ defmodule Lua.VM.Executor do
 
   @doc false
   @spec dispatcher_set_table(term(), term(), term(), State.t(), term(), term()) ::
-          State.t()
+          State.t() | no_return()
   def dispatcher_set_table({:tref, _} = tref, key, value, state, _proto, _name_hint) do
     table_newindex(tref, key, value, state)
   end
@@ -335,7 +335,7 @@ defmodule Lua.VM.Executor do
 
   @doc false
   @spec dispatcher_set_field(term(), binary(), term(), State.t(), term(), term()) ::
-          State.t()
+          State.t() | no_return()
   def dispatcher_set_field({:tref, _} = tref, name, value, state, _proto, _name_hint) do
     table_newindex(tref, name, value, state)
   end
@@ -344,6 +344,10 @@ defmodule Lua.VM.Executor do
     raise_index_type_error(value, 0, proto.source, name_hint)
   end
 
+  # The `_proto` parameter is unused today because `try_unary_metamethod`
+  # doesn't thread a `source` through; B5d-v2 will route `__len` errors
+  # back to `proto.source` (matching the other bridges' attribution),
+  # so the parameter stays in the signature for forward-compat.
   @doc false
   @spec dispatcher_length(term(), State.t(), term()) :: {term(), State.t()}
   def dispatcher_length(value, state, _proto) do
