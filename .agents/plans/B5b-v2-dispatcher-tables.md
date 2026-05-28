@@ -2,10 +2,10 @@
 id: B5b-v2
 title: Dispatcher table opcodes — make table-heavy workloads bypass the interpreter
 issue: 271
-pr: null
+pr: 275
 branch: perf/dispatcher-tables
 base: main
-status: in-progress
+status: review
 direction: B
 unlocks:
   - ~2x speedup on table_ops benchmarks
@@ -267,4 +267,130 @@ MIX_ENV=benchmark mix run benchmarks/dispatcher_vs_interpreter.exs
 
 ## Discoveries
 
-(Empty until implementation.)
+### `:call` with `result_count == 0` was needed to compile `run_table_sort`
+
+The original B5b coverage list did not include `:call_zero` (statement
+calls). `run_table_sort` calls `table.sort(t)` at statement position,
+which the codegen lowers to `{:call, base, 1, 0, name_hint}`. Without
+coverage, `run_table_sort` falls back even though `:numeric_for` /
+`:set_table` etc. are all supported.
+
+Added `@op_call_zero 25` (reusing the slot freed by the removed
+`@op_test_true`). The dispatcher's `:call_one` and `:call_zero`
+clauses share the same compiled-closure / interpreter-bridge shape;
+the only difference is the frame slot's "where to write the result"
+marker (`base` integer vs `:discard` sentinel) and the bridge
+discards the native-call result list.
+
+This kept the PR honest to its acceptance criterion — "all four
+table_ops benchmarks compile end-to-end" — without expanding to the
+broader multi-return machinery, which stays B5c-v2.
+
+### string_ops orchestrators do **not** fully compile
+
+The issue claimed "orchestrators in `closures` and `string_ops`"
+would compile. Closures' `run_closures` does (the inner `make_counter`
+falls back as expected because of `:closure`). But both
+`string_ops` orchestrators end with `return table.concat(...)` /
+`return string.format(...)`, which the codegen lowers as
+`:call` with `result_count = -1` followed by `:return_vararg` —
+multi-return shapes that are explicitly out of scope per the parent
+plan ("multi-return calls, vararg ... fall back").
+
+Three paths considered:
+
+1. Extend scope to handle `:call` with `result_count = -1` +
+   `:return_vararg`. This pulls in the `multi_return_count`
+   threading and the vararg-args collection machinery, which is the
+   exact domain of B5c-v2.
+2. Stay narrow and accept the partial outcome.
+3. Mid-ground: handle `:return_vararg` alone for single-return-value
+   callees only. Brittle — the codegen doesn't distinguish, so the
+   dispatcher would have to look at the callee at runtime.
+
+Picked (2): stay scoped. Documented here so a future B5c-v2 can pick
+this up alongside the rest of multi-return.
+
+### `:break` inside `:numeric_for` forces fallback
+
+The interpreter's `:break` opcode unwinds the continuation stack via
+`find_loop_exit/1`, which scans for the nearest `{:loop_exit, _}`
+marker. Reproducing that in the dispatcher would require mixing
+`{code, pc}` post-test markers with `{:loop_exit, _}` markers and
+extending `find_loop_exit` to walk dispatcher-side `cont` stacks.
+That's plumbing churn for what's effectively a B5c-v2 concern (the
+generic-for / while-loop / break family all want the same
+machinery).
+
+The encoder rejects `:numeric_for` bodies containing a `:break`
+opcode upfront, walking the body recursively to catch `:break`s
+buried inside `:test` branches. The whole enclosing prototype falls
+back. Pinned with a `test/lua/compiler/bytecode_test.exs` case.
+
+### Numeric-for continuation marker integrates cleanly
+
+The B5a `cont` stack carried only `{code, pc}` post-test resume
+points. Adding `{:cps_for, base, loop_var, body_bc, code, pc + 1}`
+markers expands `finish_body/6` to three clauses. The marker stays
+on the stack across each loop iteration — re-pushed when the body
+restarts — so nested numeric-fors compose naturally on the same
+stack. No perf hit measurable on fib (the marker doesn't fire on
+non-loop workloads).
+
+### Perf is a soft win on `table_ops`, healthy on fib
+
+Mini-bench results (`mix run -e`, 100–200 iter median, warmed):
+
+| Workload                    | Dispatcher | Interpreter | Speedup |
+|-----------------------------|------------|-------------|---------|
+| `run_table_build(500)`      | 90 µs      | 106 µs      | 1.18x   |
+| `run_table_sum(500)`        | 121 µs     | 129 µs      | 1.06x   |
+| `run_table_sum(1000)`       | 254 µs     | 289 µs      | 1.13x   |
+| `run_table_map_reduce(500)` | 241 µs     | 245 µs      | 1.02x   |
+| `fib(22)`                   | 12.2 ms    | 18.7 ms     | 1.54x   |
+
+The hard floor (no regression) is met across the board. The soft
+target (≥1.5x on `run_table_sum(1000)`) is **not** met — the
+dispatcher is at 1.13x. Profile attribution: `Table.put/3`
+allocation churn and `setelement/3` register writes dominate the
+table workloads, exactly as the parent plan flagged ("table-storage
+churn is the post-B5b ceiling, not addressed here").
+
+fib (which has neither cost) lands at 1.54x, well above B5a-v2's
+1.17x median — a sign the table-opcode additions did not push the
+arithmetic path off any inlining cliff.
+
+The follow-up plan for closing the gap on table workloads is
+mutable table storage, not more dispatch work.
+
+### `set_list_into_table` calls `Lua.VM.Table.put/3` directly
+
+The interpreter wraps the same loop in `State.update_table/3` plus a
+`Table.put/3` per iteration. The dispatcher's inline reduce-loop
+calls `Lua.VM.Table.put/3` against the table struct and only writes
+back to `state.tables` once via `State.update_table/3` at the end.
+Single-allocation per iteration matches the interpreter; the
+encoding boundary doesn't introduce a new allocation pattern.
+
+## What changed
+
+- New: 7 table opcodes + `:numeric_for` + `:call_zero` in
+  `lib/lua/compiler/bytecode.ex` and `lib/lua/vm/dispatcher.ex`.
+  Six `dispatcher_*` public bridges in `lib/lua/vm/executor.ex`.
+- New: `:cps_for` continuation marker in
+  `Lua.VM.Dispatcher.finish_body/6` for numeric-for body
+  completion; `:discard` sentinel in the frame's `base` slot for
+  statement-call result suppression.
+- Modified: `test/lua/compiler/bytecode_test.exs` — flipped two
+  fallback assertions (`:new_table`, "for-loops cause fallback"),
+  added three: `:generic_for causes fallback`, `while-loops cause
+  fallback`, `:break inside numeric_for causes fallback`. The
+  "cascade independence" sibling-fallback test was retargeted to
+  use a multi-return shape (`return next(t)`) since `{1, 2, 3}` now
+  compiles.
+- New: 21 dispatcher goldens (7 table opcodes, 6 numeric_for shapes,
+  4 table_ops benchmark functions, 1 `:call_zero`, plus a setup
+  block that compiles all four `run_table_*` benchmarks and asserts
+  they're `:compiled_closure`).
+- Tests: **1882 → 1902** (+20), **0 failures**, 25 skipped.
+- PR: https://github.com/tv-labs/lua/pull/275
