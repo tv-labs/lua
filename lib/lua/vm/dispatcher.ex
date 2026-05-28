@@ -1059,20 +1059,13 @@ defmodule Lua.VM.Dispatcher do
         left = :erlang.element(a + 1, regs)
         right = :erlang.element(b + 1, regs)
 
-        cond do
-          is_binary(left) and is_binary(right) ->
-            regs = :erlang.setelement(dest + 1, regs, left <> right)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
-
-          (is_binary(left) or is_number(left)) and (is_binary(right) or is_number(right)) ->
-            {result, state} = Executor.dispatcher_concat(left, right, state, proto)
-            regs = :erlang.setelement(dest + 1, regs, result)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
-
-          true ->
-            {result, state} = Executor.dispatcher_concat(left, right, state, proto)
-            regs = :erlang.setelement(dest + 1, regs, result)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        if is_binary(left) and is_binary(right) do
+          regs = :erlang.setelement(dest + 1, regs, left <> right)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        else
+          {result, state} = Executor.dispatcher_concat(left, right, state, proto)
+          regs = :erlang.setelement(dest + 1, regs, result)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
         end
     end
   end
@@ -1477,14 +1470,19 @@ defmodule Lua.VM.Dispatcher do
   end
 
   # `:generic_for` result distribution: each var_reg in the tuple gets
-  # `Enum.at(results, i)`. Iterates by tuple index (var_regs is a tuple
-  # in the encoded form to keep the dispatch case tight).
+  # the next value from `results`. Walks `var_regs` by tuple index and
+  # consumes `results` head-by-head so each step is O(1); slots past the
+  # end of `results` receive `nil`.
   defp assign_iter_results(regs, var_regs, _results, i) when i >= tuple_size(var_regs), do: regs
 
-  defp assign_iter_results(regs, var_regs, results, i) do
+  defp assign_iter_results(regs, var_regs, [], i) do
     reg = :erlang.element(i + 1, var_regs)
-    value = Enum.at(results, i)
-    assign_iter_results(:erlang.setelement(reg + 1, regs, value), var_regs, results, i + 1)
+    assign_iter_results(:erlang.setelement(reg + 1, regs, nil), var_regs, [], i + 1)
+  end
+
+  defp assign_iter_results(regs, var_regs, [v | rest], i) do
+    reg = :erlang.element(i + 1, var_regs)
+    assign_iter_results(:erlang.setelement(reg + 1, regs, v), var_regs, rest, i + 1)
   end
 
   # Multi-return result writers used by `:call_multi` and `return_multi/3`.
