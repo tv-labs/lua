@@ -2,10 +2,10 @@
 id: A42
 title: Adjust parenthesised call/vararg to a single value (Lua 5.3 §3.4)
 issue: 254
-pr: null
+pr: 278
 branch: fix/paren-adjust-single-value
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - constructs.lua
@@ -135,4 +135,37 @@ delta in `## What changed`.
 
 ## Discoveries
 
-(filled in during implementation)
+- The codegen multi-value detection sites all pattern-match on the
+  bare `Expr.Call` / `Expr.MethodCall` / `Expr.Vararg` structs, so a
+  single `gen_expr(%Expr.Paren{inner: e}, ctx) -> gen_expr(e, ctx)`
+  passthrough is enough. No per-site changes (Return / Assign / Local
+  / Call args / MethodCall args / Table) were needed.
+- `constructs.lua` advanced past the §3.4 case but fails at line 226
+  on `assert(debug.getinfo(1, "n").name == 'F')` — the `"n"` field of
+  `debug.getinfo` is unimplemented for the currently-executing closure.
+  Past 226 the file also exercises `os.time` (line 237) and a
+  `load()`-driven short-circuit harness (lines 287–298). The skip was
+  narrowed to `225..313` with a triage note rather than expanding this
+  PR's scope. Worth a future plan to triage individually.
+
+## What changed
+
+PR: #278
+
+Files touched:
+
+- `lib/lua/ast/expr.ex` — new `Expr.Paren{inner, meta}` AST node.
+- `lib/lua/parser.ex` — `parse_paren_expr/1` wraps only Call /
+  MethodCall / Vararg inners.
+- `lib/lua/compiler/scope.ex` — passthrough resolve clause.
+- `lib/lua/compiler/codegen.ex` — passthrough gen_expr clause.
+- `lib/lua/ast/walker.ex` — Paren in `do_map` and `children`.
+- `lib/lua/ast/pretty_printer.ex` — Paren prints `(inner)`.
+- `test/lua/vm/paren_adjust_test.exs` — new file pinning all four
+  multi-value positions for Call and Vararg (10 tests).
+- `test/lua53_skips.exs` — drop `calls.lua` 207..208 §3.4 entry;
+  narrow `constructs.lua` from `:all` to `225..313` with a fresh
+  reason.
+
+Suite delta: 2008 → 2019 passing unit tests (+11), 24 → 23 skipped.
+lua53 suite: 12 → 13 files passing.
