@@ -170,6 +170,9 @@ defmodule Lua.AST.Walker do
         %Expr.Function{body: body} = expr ->
           %{expr | body: do_map(body, mapper)}
 
+        %Expr.Paren{inner: inner} = expr ->
+          %{expr | inner: do_map(inner, mapper)}
+
         # Statements
         %Statement.Assign{targets: targets, values: values} = stmt ->
           %{
@@ -294,6 +297,9 @@ defmodule Lua.AST.Walker do
 
       %Expr.Function{body: body} ->
         [body]
+
+      %Expr.Paren{inner: inner} ->
+        [inner]
 
       # Statements with children
       %Statement.Assign{targets: targets, values: values} ->

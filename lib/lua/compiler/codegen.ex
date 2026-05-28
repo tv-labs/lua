@@ -1458,6 +1458,8 @@ defmodule Lua.Compiler.Codegen do
     {[Instruction.vararg(reg, 1)], reg, ctx}
   end
 
+  defp gen_expr(%Expr.Paren{inner: inner}, ctx), do: gen_expr(inner, ctx)
+
   # Stub for other expressions
   defp gen_expr(_expr, ctx) do
     reg = ctx.next_reg

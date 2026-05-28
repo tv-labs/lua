@@ -204,6 +204,26 @@ defmodule Lua.AST.Expr do
     @type t :: %__MODULE__{meta: Meta.t() | nil}
   end
 
+  defmodule Paren do
+    @moduledoc """
+    Wraps a call, method call, or vararg expression that appears in
+    source-level parentheses. Per Lua 5.3 §3.4, parenthesised
+    multi-value expressions adjust to exactly one result.
+
+    Only `Call`, `MethodCall`, and `Vararg` are wrapped — other
+    parenthesised expressions are semantically transparent and the
+    parser drops the parens.
+    """
+    defstruct [:inner, :meta]
+
+    @type inner :: Expr.Call.t() | Expr.MethodCall.t() | Expr.Vararg.t()
+
+    @type t :: %__MODULE__{
+            inner: inner(),
+            meta: Meta.t() | nil
+          }
+  end
+
   @type t ::
           Nil.t()
           | Bool.t()
@@ -219,4 +239,5 @@ defmodule Lua.AST.Expr do
           | Property.t()
           | Function.t()
           | Vararg.t()
+          | Paren.t()
 end

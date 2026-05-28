@@ -446,6 +446,8 @@ defmodule Lua.Compiler.Scope do
 
   defp resolve_expr(%Expr.Vararg{}, state), do: state
 
+  defp resolve_expr(%Expr.Paren{inner: inner}, state), do: resolve_expr(inner, state)
+
   # For now, stub out other expression types
   defp resolve_expr(_expr, state), do: state
 
