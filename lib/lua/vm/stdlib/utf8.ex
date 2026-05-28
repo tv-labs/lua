@@ -63,23 +63,17 @@ defmodule Lua.VM.Stdlib.Utf8 do
     {[IO.iodata_to_binary(iolist)], state}
   end
 
-  defp encode_one(cp, _idx) when is_integer(cp) and cp >= 0 and cp <= @max_codepoint do
-    encode_codepoint(cp)
-  end
+  defp encode_one(cp, idx) do
+    cp = check_integer(cp, "utf8.char", idx)
 
-  defp encode_one(cp, idx) when is_integer(cp) do
-    raise ArgumentError,
-      function_name: "utf8.char",
-      arg_num: idx,
-      details: "value out of range"
-  end
-
-  defp encode_one(v, idx) do
-    raise ArgumentError,
-      function_name: "utf8.char",
-      arg_num: idx,
-      expected: "number",
-      got: Util.typeof(v)
+    if cp >= 0 and cp <= @max_codepoint do
+      encode_codepoint(cp)
+    else
+      raise ArgumentError,
+        function_name: "utf8.char",
+        arg_num: idx,
+        details: "value out of range"
+    end
   end
 
   defp encode_codepoint(cp) when cp < 0x80, do: <<cp>>
@@ -104,15 +98,15 @@ defmodule Lua.VM.Stdlib.Utf8 do
     raise ArgumentError.value_expected("utf8.codepoint", 1)
   end
 
-  defp utf8_codepoint([s | rest], state) do
-    if !is_binary(s) do
-      raise ArgumentError,
-        function_name: "utf8.codepoint",
-        arg_num: 1,
-        expected: "string",
-        got: Util.typeof(s)
-    end
+  defp utf8_codepoint([s | _], _state) when not is_binary(s) do
+    raise ArgumentError,
+      function_name: "utf8.codepoint",
+      arg_num: 1,
+      expected: "string",
+      got: Util.typeof(s)
+  end
 
+  defp utf8_codepoint([s | rest], state) do
     len = byte_size(s)
     i = check_integer(Enum.at(rest, 0, 1), "utf8.codepoint", 2)
     j = check_integer(Enum.at(rest, 1, i), "utf8.codepoint", 3)
@@ -156,15 +150,15 @@ defmodule Lua.VM.Stdlib.Utf8 do
     raise ArgumentError.value_expected("utf8.len", 1)
   end
 
-  defp utf8_len([s | rest], state) do
-    if !is_binary(s) do
-      raise ArgumentError,
-        function_name: "utf8.len",
-        arg_num: 1,
-        expected: "string",
-        got: Util.typeof(s)
-    end
+  defp utf8_len([s | _], _state) when not is_binary(s) do
+    raise ArgumentError,
+      function_name: "utf8.len",
+      arg_num: 1,
+      expected: "string",
+      got: Util.typeof(s)
+  end
 
+  defp utf8_len([s | rest], state) do
     len = byte_size(s)
     i = check_integer(Enum.at(rest, 0, 1), "utf8.len", 2)
     j = check_integer(Enum.at(rest, 1, -1), "utf8.len", 3)
@@ -206,27 +200,19 @@ defmodule Lua.VM.Stdlib.Utf8 do
     raise ArgumentError.value_expected("utf8.offset", 1)
   end
 
-  defp utf8_offset([s], _state) do
-    if !is_binary(s) do
-      raise ArgumentError,
-        function_name: "utf8.offset",
-        arg_num: 1,
-        expected: "string",
-        got: Util.typeof(s)
-    end
+  defp utf8_offset([s | _], _state) when not is_binary(s) do
+    raise ArgumentError,
+      function_name: "utf8.offset",
+      arg_num: 1,
+      expected: "string",
+      got: Util.typeof(s)
+  end
 
+  defp utf8_offset([s], _state) when is_binary(s) do
     raise ArgumentError.value_expected("utf8.offset", 2)
   end
 
   defp utf8_offset([s | rest], state) do
-    if !is_binary(s) do
-      raise ArgumentError,
-        function_name: "utf8.offset",
-        arg_num: 1,
-        expected: "string",
-        got: Util.typeof(s)
-    end
-
     n = check_integer(Enum.at(rest, 0), "utf8.offset", 2)
     len = byte_size(s)
     default_i = if n >= 0, do: 1, else: len + 1
@@ -253,7 +239,7 @@ defmodule Lua.VM.Stdlib.Utf8 do
   end
 
   defp do_offset(s, n, pos, len) do
-    if pos < len and is_continuation_byte?(:binary.at(s, pos)) do
+    if pos < len and continuation_byte?(:binary.at(s, pos)) do
       raise RuntimeError, value: "initial position is a continuation byte"
     end
 
@@ -284,7 +270,7 @@ defmodule Lua.VM.Stdlib.Utf8 do
   defp scan_back_to_char_start(_s, pos) when pos <= 0, do: 0
 
   defp scan_back_to_char_start(s, pos) do
-    if is_continuation_byte?(:binary.at(s, pos)) do
+    if continuation_byte?(:binary.at(s, pos)) do
       scan_back_to_char_start(s, pos - 1)
     else
       pos
@@ -294,7 +280,7 @@ defmodule Lua.VM.Stdlib.Utf8 do
   defp skip_continuations(_s, pos, len) when pos >= len, do: pos
 
   defp skip_continuations(s, pos, len) do
-    if is_continuation_byte?(:binary.at(s, pos)) do
+    if continuation_byte?(:binary.at(s, pos)) do
       skip_continuations(s, pos + 1, len)
     else
       pos
@@ -353,7 +339,7 @@ defmodule Lua.VM.Stdlib.Utf8 do
   defp skip_continuations_1based(_s, pos, len) when pos > len, do: pos
 
   defp skip_continuations_1based(s, pos, len) do
-    if is_continuation_byte?(:binary.at(s, pos - 1)) do
+    if continuation_byte?(:binary.at(s, pos - 1)) do
       skip_continuations_1based(s, pos + 1, len)
     else
       pos
@@ -394,7 +380,7 @@ defmodule Lua.VM.Stdlib.Utf8 do
   defp u_posrelat(pos, len) when -pos > len, do: 0
   defp u_posrelat(pos, len), do: len + pos + 1
 
-  defp is_continuation_byte?(byte), do: (byte &&& 0xC0) == 0x80
+  defp continuation_byte?(byte), do: (byte &&& 0xC0) == 0x80
 
   # Decode the UTF-8 sequence starting at 1-based position `pos` in `s`.
   # Returns `{codepoint, byte_length}` or `:invalid` if the bytes at `pos`

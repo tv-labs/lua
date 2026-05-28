@@ -48,6 +48,18 @@ defmodule Lua.VM.Stdlib.Utf8Test do
                      run("return utf8.char('a')")
                    end
     end
+
+    test "accepts floats with integer representation" do
+      assert {:ok, ["a"], _} = run("return utf8.char(97.0)")
+    end
+
+    test "raises on float with no integer representation" do
+      assert_raise LuaArgumentError,
+                   ~r/bad argument #1 to 'utf8\.char' \(number has no integer representation\)/,
+                   fn ->
+                     run("return utf8.char(97.5)")
+                   end
+    end
   end
 
   describe "utf8.codepoint" do
