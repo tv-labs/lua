@@ -2,10 +2,10 @@
 id: A41
 title: Resolve FuncDecl head names at scope analysis (not post-block codegen)
 issue: 255
-pr: null
+pr: 274
 branch: fix/funcdecl-head-name
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - calls.lua
@@ -166,8 +166,78 @@ delta in the PR body.
 
 ## Discoveries
 
-(populated during implementation)
+1. **Body-first ordering matters.** The first draft of the multi-name
+   FuncDecl scope clause resolved the head name *before* calling
+   `resolve_function_scope/4`. That made the head's `captured_locals`
+   check race the body, so a head that the body captured (e.g.
+   `function a:add (x) ... a.y = 20 ... end`) was tagged as a plain
+   `{:register, _}` instead of `{:captured_local, _}`. Single-name
+   FuncDecl already resolves *after* the body for this exact reason
+   (see the comment at `scope.ex:261`). Multi-name now matches.
+
+2. **`gen_var_by_name/2` was the only chunk-level by-name caller.**
+   With the multi-name FuncDecl head migrated to the var_map, the
+   `gen_var_by_name/2` / `compute_env_var_ref_at_codegen/1` /
+   `current_function_env_upvalue_index/1` trio in
+   `lib/lua/compiler/codegen.ex` had no remaining callers and tripped
+   `--warnings-as-errors`. Removed all three; the var_map approach is
+   strictly more general (it walks the upvalue chain, where
+   `gen_var_by_name` could only see chunk-level locals).
+
+3. **Pre-existing open-upvalue staleness across `do` blocks.**
+   `pm.lua` was lucky; `calls.lua:65–69` is not. When a `do` block
+   declares a captured local (e.g. `local function fact (n) ...
+   fact(n-1) ... end`), the executor's `state.open_upvalues` map
+   records a cell at that register. The mapping is never closed when
+   the block ends. The *next* `do` block to reuse the same register
+   for a different captured local (e.g. `local a = {x=0}` followed by
+   `function a:add (x) ... a.y = ... end`) inherits the stale cell —
+   the closure handler at `executor.ex:707` reuses the existing cell
+   ref, so reads of `a` through `get_open_upvalue` return the prior
+   block's value. This is unrelated to FuncDecl head resolution and
+   blocks `calls.lua:65–69`. Narrowed via skip; needs its own plan
+   (likely "close open upvalues at block end").
+
+4. **calls.lua progress is bigger than the FuncDecl head fix alone.**
+   After landing this PR, `calls.lua` runs lines 1–218 cleanly (the
+   first ~54% of the file). The remaining ranges are deferred for
+   reasons documented inline in `test/lua53_skips.exs` — three of the
+   five new skip ranges correspond to known concerns (#254
+   parenthesized adjustment, parser ambiguity wart, stdlib
+   extra-arg-tolerance) and one (`lines: 65..69`) is the new
+   open-upvalue staleness discovery above.
 
 ## What changed
 
-(populated when PR opens)
+PR: [#274](https://github.com/tv-labs/lua/pull/274)
+
+Files touched:
+
+- `lib/lua/compiler/scope.ex` — new `Statement.FuncDecl` clause for
+  multi-name (`[first | rest]` with `rest != []`). Resolves the head
+  name via the new `resolve_func_decl_head/3` helper *after*
+  `resolve_function_scope/4` so `captured_locals` is fully populated.
+  Removed the stale `gen_var_by_name`-era comment from the
+  `_ENV` upvalue preamble.
+
+- `lib/lua/compiler/codegen.ex` — multi-name arm of the
+  `Statement.FuncDecl` codegen now loads the head value via the
+  new `gen_func_decl_head/2` helper (`var_map` lookup), mirroring the
+  four `Expr.Var` cases. Deleted `gen_var_by_name/2`,
+  `compute_env_var_ref_at_codegen/1`, and
+  `current_function_env_upvalue_index/1` (no remaining callers).
+
+- `test/lua/vm/func_decl_test.exs` — new file, six regression tests
+  covering: method-sugar against block-local, dotted multi-name
+  against block-local, three-deep dotted name, head-as-upvalue (inner
+  function), body captures head (calls.lua:65–69 shape), and the
+  no-local-in-scope `_ENV` fallback.
+
+- `test/lua53_skips.exs` — replaced `calls.lua` `:all` skip with five
+  narrowed ranges. The file now runs lines 1–218 (54% of 401 lines);
+  remaining skips are categorised by underlying cause.
+
+Suite delta: unit suite 1963 → 1970 passed (+7, no regressions, six
+new tests in `func_decl_test.exs` plus one previously-skipped suite
+test now running). lua53 official suite: `calls.lua` moved out of the
+`:all`/`@tag :skip` bucket into the ranged-skip bucket.
