@@ -294,7 +294,7 @@ defmodule Lua.VM.MetatableTest do
       assert {:ok, [true, false], _state} = VM.execute(proto, state)
     end
 
-    test "__eq only triggers if both have same metamethod" do
+    test "__eq is called when only the first operand defines it (§3.4.4)" do
       code = """
       local a = {value = 10}
       local b = {value = 10}
@@ -317,8 +317,35 @@ defmodule Lua.VM.MetatableTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = Stdlib.install(State.new())
 
-      # Different metamethods, so falls back to reference equality (false)
-      assert {:ok, [false], _state} = VM.execute(proto, state)
+      # Lua 5.3 dropped the same-metamethod requirement from Lua 5.1.
+      assert {:ok, [true], _state} = VM.execute(proto, state)
+    end
+
+    test "__eq is called when only the first operand has a metatable" do
+      code = """
+      local a = setmetatable({}, {__eq = function() return true end})
+      local b = {}
+      return a == b
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [true], _state} = VM.execute(proto, state)
+    end
+
+    test "__eq is not consulted for table-vs-non-table comparisons" do
+      code = """
+      local a = setmetatable({}, {__eq = function() return true end})
+      return a == 5, a == "x", a == nil, a == true
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [false, false, false, false], _state} = VM.execute(proto, state)
     end
 
     test "~= dispatches through __eq metamethod" do
@@ -386,7 +413,7 @@ defmodule Lua.VM.MetatableTest do
                VM.execute(proto, state)
     end
 
-    test "~= falls back to raw inequality when metamethods differ" do
+    test "~= dispatches through __eq even when metamethods differ (§3.4.4)" do
       code = """
       local a = {value = 10}
       local b = {value = 10}
@@ -394,8 +421,6 @@ defmodule Lua.VM.MetatableTest do
       local mt2 = { __eq = function() return true end }
       setmetatable(a, mt1)
       setmetatable(b, mt2)
-      -- Different __eq metamethods → fall back to raw equality.
-      -- Two distinct tables are raw-unequal, so ~= is true.
       return a ~= b
       """
 
@@ -403,7 +428,8 @@ defmodule Lua.VM.MetatableTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = Stdlib.install(State.new())
 
-      assert {:ok, [true], _state} = VM.execute(proto, state)
+      # The first operand's __eq returns true, so ~= is false.
+      assert {:ok, [false], _state} = VM.execute(proto, state)
     end
 
     test "__lt metamethod" do

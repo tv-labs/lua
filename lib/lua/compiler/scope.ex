@@ -118,6 +118,18 @@ defmodule Lua.Compiler.Scope do
     Enum.reduce(stmts, state, &resolve_statement/2)
   end
 
+  # Per Lua 5.3 §3.3.4, each control-flow block (then/else, while/repeat
+  # body, for body) is its own lexical scope: locals declared inside it
+  # must not leak past the block's end.
+  defp with_block_scope(state, fun) do
+    saved_locals = state.locals
+    saved_next_register = state.next_register
+
+    state = fun.(state)
+
+    %{state | locals: saved_locals, next_register: saved_next_register}
+  end
+
   defp resolve_statement(%Statement.Return{values: values}, state) do
     Enum.reduce(values, state, &resolve_expr/2)
   end
@@ -169,75 +181,66 @@ defmodule Lua.Compiler.Scope do
          %Statement.If{condition: condition, then_block: then_block, elseifs: elseifs, else_block: else_block},
          state
        ) do
-    # Resolve the main condition
+    # Per Lua 5.3 §3.3.4, each branch of an `if` is its own block, so locals
+    # declared inside it do not leak past `end`.
     state = resolve_expr(condition, state)
+    state = with_block_scope(state, &resolve_block(then_block, &1))
 
-    # Resolve the then block
-    state = resolve_block(then_block, state)
-
-    # Resolve all elseif clauses
     state =
       Enum.reduce(elseifs, state, fn {elseif_cond, elseif_block}, state ->
         state = resolve_expr(elseif_cond, state)
-        resolve_block(elseif_block, state)
+        with_block_scope(state, &resolve_block(elseif_block, &1))
       end)
 
-    # Resolve the else block if present
     if else_block do
-      resolve_block(else_block, state)
+      with_block_scope(state, &resolve_block(else_block, &1))
     else
       state
     end
   end
 
   defp resolve_statement(%Statement.While{condition: condition, body: body}, state) do
-    # Resolve the condition
     state = resolve_expr(condition, state)
-    # Resolve the body
-    resolve_block(body, state)
+    with_block_scope(state, &resolve_block(body, &1))
   end
 
   defp resolve_statement(%Statement.Repeat{body: body, condition: condition}, state) do
-    # Resolve the body first (in Lua, the condition can reference variables declared in the body)
+    # In Lua, repeat-until's condition is part of the body's scope so it can
+    # reference locals declared inside the loop. Restore the outer scope only
+    # after the condition has been resolved.
+    saved_locals = state.locals
+    saved_next_register = state.next_register
+
     state = resolve_block(body, state)
-    # Resolve the condition
-    resolve_expr(condition, state)
+    state = resolve_expr(condition, state)
+
+    %{state | locals: saved_locals, next_register: saved_next_register}
   end
 
   defp resolve_statement(
          %Statement.ForNum{var: var, start: start_expr, limit: limit_expr, step: step_expr, body: body} = for_stmt,
          state
        ) do
-    # Resolve start, limit, and step expressions with current scope
     state = resolve_expr(start_expr, state)
     state = resolve_expr(limit_expr, state)
     state = if step_expr, do: resolve_expr(step_expr, state), else: state
 
-    # The loop variable is a local within the loop body
-    # Assign it a register
+    saved_locals = state.locals
+    saved_next_register = state.next_register
+
     loop_var_reg = state.next_register
     state = %{state | locals: Map.put(state.locals, var, loop_var_reg)}
-    # Reserve 3 registers: the loop variable shares with the internal counter,
-    # plus limit and step registers (codegen allocates base, base+1, base+2)
     state = %{state | next_register: loop_var_reg + 3}
 
-    # Store this loop's variable register in var_map so codegen can find the
-    # correct register even when consecutive `for` statements share a variable
-    # name (each loop binds the same name to a fresh register, but
-    # `state.locals[var]` only retains the most recent binding).
     state = %{state | var_map: Map.put(state.var_map, {:for_num_var_reg, for_stmt}, loop_var_reg)}
 
-    # Update max_register
     func_scope = state.functions[state.current_function]
     func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
     state = %{state | functions: Map.put(state.functions, state.current_function, func_scope)}
 
-    # Resolve the body with the loop variable in scope
     state = resolve_block(body, state)
 
-    # Remove the loop variable from scope after the loop
-    # (In real implementation, we'd need scope stack management, but for now this is fine)
-    state
+    %{state | locals: saved_locals, next_register: saved_next_register}
   end
 
   defp resolve_statement(
@@ -293,10 +296,11 @@ defmodule Lua.Compiler.Scope do
   end
 
   defp resolve_statement(%Statement.ForIn{vars: vars, iterators: iterators, body: body} = for_stmt, state) do
-    # Resolve iterator expressions with current scope
     state = Enum.reduce(iterators, state, &resolve_expr/2)
 
-    # Assign registers for loop variables (same pattern as ForNum)
+    saved_locals = state.locals
+    saved_next_register = state.next_register
+
     {state, _, var_regs} =
       Enum.reduce(vars, {state, state.next_register, []}, fn name, {state, reg, acc} ->
         state = %{state | locals: Map.put(state.locals, name, reg)}
@@ -304,19 +308,15 @@ defmodule Lua.Compiler.Scope do
         {state, reg + 1, [reg | acc]}
       end)
 
-    # Store this loop's variable registers in var_map so codegen can find the
-    # correct registers even when consecutive `for` statements share variable
-    # names (each loop binds the same names to fresh registers, but
-    # `state.locals[name]` only retains the most recent binding).
     state = %{state | var_map: Map.put(state.var_map, {:for_in_var_regs, for_stmt}, Enum.reverse(var_regs))}
 
-    # Update max_register
     func_scope = state.functions[state.current_function]
     func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
     state = %{state | functions: Map.put(state.functions, state.current_function, func_scope)}
 
-    # Resolve the body with loop variables in scope
-    resolve_block(body, state)
+    state = resolve_block(body, state)
+
+    %{state | locals: saved_locals, next_register: saved_next_register}
   end
 
   defp resolve_statement(%Statement.LocalFunc{name: name, params: params, body: body} = local_func, state) do

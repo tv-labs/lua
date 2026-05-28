@@ -251,18 +251,18 @@ defmodule Lua.VM.Stdlib.String do
         expected: "number"
     end
 
+    # Per Lua 5.3 §6.4.2, string.byte semantics: posi = max(i, 1) (after
+    # normalising negative indices); posj = min(j, #s). If posj < posi the
+    # call returns no bytes.
     len = byte_size(str)
-    start_idx = normalize_index(i, len)
-    end_idx = normalize_index(j, len)
+    posi = if i < 0, do: max(len + i + 1, 1), else: max(i, 1)
+    posj = if j < 0, do: len + j + 1, else: min(j, len)
 
     bytes =
-      if start_idx > end_idx or start_idx >= len do
+      if posj < posi or posi > len or posj < 1 do
         []
       else
-        start_byte = max(0, start_idx)
-        end_byte = min(len - 1, end_idx)
-
-        Enum.map(start_byte..end_byte, fn idx -> :binary.at(str, idx) end)
+        Enum.map(posi..posj//1, fn idx -> :binary.at(str, idx - 1) end)
       end
 
     {bytes, state}
@@ -679,16 +679,27 @@ defmodule Lua.VM.Stdlib.String do
 
     init = if is_number(init), do: trunc(init), else: 1
 
-    if plain == true do
+    if plain != nil and plain != false do
       # Plain substring search
-      search_pos = max(init - 1, 0)
+      len = byte_size(s)
 
-      case :binary.match(s, pattern, scope: {search_pos, byte_size(s) - search_pos}) do
-        {start, len} ->
-          {[start + 1, start + len], state}
+      if init > len + 1 do
+        {[nil], state}
+      else
+        search_pos =
+          cond do
+            init > 0 -> init - 1
+            init < 0 -> max(len + init, 0)
+            true -> 0
+          end
 
-        :nomatch ->
-          {[nil], state}
+        case :binary.match(s, pattern, scope: {search_pos, len - search_pos}) do
+          {start, found_len} ->
+            {[start + 1, start + found_len], state}
+
+          :nomatch ->
+            {[nil], state}
+        end
       end
     else
       case Pattern.find(s, pattern, init) do
@@ -826,9 +837,6 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   # Helper: convert Lua 1-based index to 0-based, handle negative indices
-  defp normalize_index(idx, _len) when idx > 0, do: idx - 1
-  defp normalize_index(idx, len) when idx < 0, do: len + idx
-  defp normalize_index(0, _len), do: 0
 
   # PUC-Lua's posrelat: keep 1-based positions, translate negatives.
   # Negative indices are relative to len+1 (so -1 = len). If a negative is

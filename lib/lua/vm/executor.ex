@@ -2182,16 +2182,29 @@ defmodule Lua.VM.Executor do
     invoke_metamethod(metamethod, [a], state, default_fn)
   end
 
+  # Per Lua 5.3 §3.4.4, __eq is only consulted when both operands have the
+  # same primitive type and rawequal returns false. Lua looks at the first
+  # operand's __eq, falling back to the second operand's. The two metamethods
+  # do *not* need to be the same function (that was Lua 5.1 behaviour).
   defp try_equality_metamethod(a, b, state, default_fn) do
-    eq_a = lookup_metamethod(a, "__eq", state)
-    eq_b = lookup_metamethod(b, "__eq", state)
+    if eq_metamethod_eligible?(a, b) do
+      case lookup_metamethod(a, "__eq", state) do
+        nil ->
+          case lookup_metamethod(b, "__eq", state) do
+            nil -> {default_fn.(), state}
+            eq -> invoke_metamethod(eq, [a, b], state, default_fn)
+          end
 
-    if not is_nil(eq_a) and eq_a == eq_b do
-      invoke_metamethod(eq_a, [a, b], state, default_fn)
+        eq ->
+          invoke_metamethod(eq, [a, b], state, default_fn)
+      end
     else
       {default_fn.(), state}
     end
   end
+
+  defp eq_metamethod_eligible?({:tref, _}, {:tref, _}), do: true
+  defp eq_metamethod_eligible?(_, _), do: false
 
   # Invokes a metamethod (native or Lua closure) with the given args, falling
   # back to default_fn when the metamethod is missing or unsupported. Delegates
@@ -2361,10 +2374,21 @@ defmodule Lua.VM.Executor do
   defp safe_power(a, b, line, source) do
     with {:ok, na} <- to_number(a),
          {:ok, nb} <- to_number(b) do
-      :math.pow(na, nb)
+      pow_ieee(na, nb)
     else
       {:error, val} -> raise_arith_type_error(val, line, source)
     end
+  end
+
+  # `:math.pow` raises ArithmeticError on 0^(negative), inf ^ 0, etc.
+  # Lua 5.3 follows IEEE 754: 0^(-x) is +inf for positive x; we approximate
+  # inf with our sentinel float (`1.0e308`) since BEAM has no float inf.
+  defp pow_ieee(base, exp) when base == 0 and is_number(exp) and exp < 0, do: 1.0e308
+
+  defp pow_ieee(base, exp) do
+    :math.pow(base / 1, exp / 1)
+  rescue
+    ArithmeticError -> :nan
   end
 
   defp safe_negate(a, line, source) do
@@ -2394,6 +2418,10 @@ defmodule Lua.VM.Executor do
 
   # ── Type-safe comparison ───────────────────────────────────────────────────
 
+  # IEEE 754 §5.11: any ordered comparison involving NaN is false.
+  defp safe_compare_lt(:nan, _, _, _), do: false
+  defp safe_compare_lt(_, :nan, _, _), do: false
+
   defp safe_compare_lt(a, b, line, source) do
     cond do
       is_number(a) and is_number(b) ->
@@ -2406,6 +2434,9 @@ defmodule Lua.VM.Executor do
         raise_compare_type_error(a, b, line, source)
     end
   end
+
+  defp safe_compare_le(:nan, _, _, _), do: false
+  defp safe_compare_le(_, :nan, _, _), do: false
 
   defp safe_compare_le(a, b, line, source) do
     cond do

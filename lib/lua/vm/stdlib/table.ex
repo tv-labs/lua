@@ -83,6 +83,10 @@ defmodule Lua.VM.Stdlib.Table do
     {[], state}
   end
 
+  defp table_insert(args, _state) when length(args) > 3 do
+    raise Lua.VM.RuntimeError, value: "wrong number of arguments to 'insert'"
+  end
+
   defp table_insert([tref | _], _state) do
     raise ArgumentError,
       function_name: "table.insert",

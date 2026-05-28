@@ -149,4 +149,20 @@ defmodule Lua.VM.NextvarSemanticsTest do
       end
     end
   end
+
+  describe "ipairs honours __index (§6.1)" do
+    test "ipairs walks values produced by __index until the first nil" do
+      code = """
+      local a = {n=3}
+      setmetatable(a, {__index = function (t,k)
+        if k <= t.n then return k * 10 end
+      end})
+      local seen = {}
+      for k, v in ipairs(a) do seen[k] = v end
+      return seen[1], seen[2], seen[3], seen[4]
+      """
+
+      assert run!(code) == [10, 20, 30, nil]
+    end
+  end
 end
