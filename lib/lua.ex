@@ -86,18 +86,41 @@ defmodule Lua do
   * `:exclude` - list of paths to exclude from the sandbox, e.g. `exclude: [[:require], [:package]]`
   * `:debug` - (default `false`) when `true`, internal Lua VM frames are preserved in stack traces
     instead of being pruned. Useful when debugging library bugs.
+  * `:max_call_depth` - (default `:infinity`) caps the depth of nested function calls. When a
+    script recurses deeper than this, a catchable `"stack overflow"` runtime error is raised
+    instead of letting the recursion exhaust the host process. Accepts a positive integer or
+    `:infinity` for no limit.
+
+    Note: this VM does not implement proper tail-call optimization, so a call in tail position
+    (`return f(x)`) consumes a frame like any other call. A finite `:max_call_depth` therefore
+    bounds tail recursion too — including loops that PUC-Lua would run indefinitely. Leave the
+    default `:infinity` if you rely on unbounded tail recursion.
+
+      iex> lua = Lua.new(max_call_depth: 10)
+      iex> {[false, message], _lua} = Lua.eval!(lua, "local function f() return f() end return pcall(f)")
+      iex> message =~ "stack overflow"
+      true
   """
   def new(opts \\ []) do
-    opts = Keyword.validate!(opts, sandboxed: @default_sandbox, exclude: [], debug: false)
+    opts = Keyword.validate!(opts, sandboxed: @default_sandbox, exclude: [], debug: false, max_call_depth: :infinity)
     exclude = Keyword.fetch!(opts, :exclude)
     debug = Keyword.fetch!(opts, :debug)
+    max_call_depth = validate_max_call_depth!(Keyword.fetch!(opts, :max_call_depth))
 
-    state = Lua.VM.Stdlib.install(State.new())
+    state = %{Lua.VM.Stdlib.install(State.new()) | max_call_depth: max_call_depth}
 
     opts
     |> Keyword.fetch!(:sandboxed)
     |> Enum.reject(fn path -> path in exclude end)
     |> Enum.reduce(%__MODULE__{state: state, debug: debug}, &sandbox(&2, &1))
+  end
+
+  defp validate_max_call_depth!(:infinity), do: :infinity
+  defp validate_max_call_depth!(depth) when is_integer(depth) and depth > 0, do: depth
+
+  defp validate_max_call_depth!(other) do
+    raise ArgumentError,
+          ":max_call_depth must be a positive integer or :infinity, got: #{inspect(other)}"
   end
 
   @doc """

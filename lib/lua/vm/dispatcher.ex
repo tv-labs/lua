@@ -567,7 +567,14 @@ defmodule Lua.VM.Dispatcher do
               {code, pc + 1, regs, upvalues, proto, cont, :discard, state.open_upvalues}
 
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            state = %{state | call_stack: [call_info | state.call_stack], open_upvalues: %{}}
+            State.check_call_depth!(state)
+
+            state = %{
+              state
+              | call_stack: [call_info | state.call_stack],
+                call_depth: state.call_depth + 1,
+                open_upvalues: %{}
+            }
 
             dispatch(
               callee_proto.bytecode,
@@ -583,9 +590,10 @@ defmodule Lua.VM.Dispatcher do
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, arg_count)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            state = %{state | call_stack: [call_info | state.call_stack]}
+            State.check_call_depth!(state)
+            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
             {_results, state} = Executor.call_function(closure, args, state)
-            state = %{state | call_stack: tl(state.call_stack)}
+            state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
           _ ->
@@ -612,7 +620,14 @@ defmodule Lua.VM.Dispatcher do
               {code, pc + 1, regs, upvalues, proto, cont, base, state.open_upvalues}
 
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            state = %{state | call_stack: [call_info | state.call_stack], open_upvalues: %{}}
+            State.check_call_depth!(state)
+
+            state = %{
+              state
+              | call_stack: [call_info | state.call_stack],
+                call_depth: state.call_depth + 1,
+                open_upvalues: %{}
+            }
 
             dispatch(
               callee_proto.bytecode,
@@ -628,9 +643,10 @@ defmodule Lua.VM.Dispatcher do
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, arg_count)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            state = %{state | call_stack: [call_info | state.call_stack]}
+            State.check_call_depth!(state)
+            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
             {results, state} = Executor.call_function(closure, args, state)
-            state = %{state | call_stack: tl(state.call_stack)}
+            state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
 
             first =
               case results do
@@ -1004,7 +1020,14 @@ defmodule Lua.VM.Dispatcher do
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, dest, state.open_upvalues}
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            state = %{state | call_stack: [call_info | state.call_stack], open_upvalues: %{}}
+            State.check_call_depth!(state)
+
+            state = %{
+              state
+              | call_stack: [call_info | state.call_stack],
+                call_depth: state.call_depth + 1,
+                open_upvalues: %{}
+            }
 
             dispatch(
               callee_proto.bytecode,
@@ -1020,9 +1043,10 @@ defmodule Lua.VM.Dispatcher do
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, total_args)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            state = %{state | call_stack: [call_info | state.call_stack]}
+            State.check_call_depth!(state)
+            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
             {results, state} = Executor.call_function(closure, args, state)
-            state = %{state | call_stack: tl(state.call_stack)}
+            state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
             apply_multi_call_result(result_count, base, results, code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
           _ ->
@@ -1263,7 +1287,7 @@ defmodule Lua.VM.Dispatcher do
     # Every dispatcher frame corresponds to a Lua-level call that pushed a
     # call_stack entry. Pop it on the way out — the interpreter's
     # `do_frame_return/6` does the same at executor.ex:1767.
-    state = %{state | open_upvalues: saved_open, call_stack: tl(state.call_stack)}
+    state = %{state | open_upvalues: saved_open, call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
 
     case dest do
       :discard ->
@@ -1298,7 +1322,7 @@ defmodule Lua.VM.Dispatcher do
 
   defp return_multi(results, state, [frame | rest_frames]) do
     {code, pc, regs, upvalues, proto, cont, dest, saved_open} = frame
-    state = %{state | open_upvalues: saved_open, call_stack: tl(state.call_stack)}
+    state = %{state | open_upvalues: saved_open, call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
 
     case dest do
       :discard ->

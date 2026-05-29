@@ -323,6 +323,50 @@ defmodule Lua.ErrorMessagesTest do
       assert formatted =~ "test.lua:5"
       assert formatted =~ "helper"
     end
+
+    test "truncates very deep stack traces" do
+      alias Lua.VM.ErrorFormatter
+
+      # 200 frames: innermost recursion down to the main chunk.
+      call_stack =
+        for n <- 1..199, do: %{source: "deep.lua", line: n, name: "f"}
+
+      call_stack = call_stack ++ [%{source: "deep.lua", line: 1, name: nil}]
+
+      formatted =
+        ErrorFormatter.format(:runtime_error, "stack overflow",
+          source: "deep.lua",
+          line: 1,
+          call_stack: call_stack
+        )
+
+      # Keeps the innermost and outermost frames, collapses the middle.
+      assert formatted =~ "deep.lua:1: in function 'f'"
+      assert formatted =~ "in main chunk"
+      assert formatted =~ "... 190 more frames ..."
+
+      # The wall of 200 lines is gone: head (7) + tail (3) = 10 rendered
+      # frames, plus the single gap line.
+      frame_lines =
+        formatted
+        |> String.split("Stack trace:")
+        |> List.last()
+        |> String.split("\n")
+        |> Enum.count(&String.contains?(&1, "deep.lua:"))
+
+      assert frame_lines == 10
+    end
+
+    test "does not truncate short stack traces" do
+      alias Lua.VM.ErrorFormatter
+
+      call_stack = for n <- 1..8, do: %{source: "x.lua", line: n, name: "f"}
+
+      formatted =
+        ErrorFormatter.format(:runtime_error, "boom", source: "x.lua", line: 1, call_stack: call_stack)
+
+      refute formatted =~ "more frames"
+    end
   end
 
   describe "Lua.eval! preserves line/source on the public exception" do

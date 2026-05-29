@@ -176,15 +176,36 @@ defmodule Lua.VM.ErrorFormatter do
     |> String.pad_leading(4)
   end
 
+  # A deep recursion (see `:max_call_depth`) can push hundreds of frames
+  # onto the stack. Rendering all of them produces an unreadable wall of
+  # near-identical lines, so we keep the innermost frames (where the error
+  # fired) and the outermost frames (down to the main chunk), collapsing
+  # the middle into a single count. Only kicks in when the gap line
+  # replaces at least two frames.
+  @trace_head 7
+  @trace_tail 3
+
   defp format_stack_trace([]), do: nil
 
   defp format_stack_trace(call_stack) when is_list(call_stack) do
     frames =
       call_stack
       |> build_call_stack()
+      |> truncate_frames()
       |> Enum.map_join("\n", &format_frame/1)
 
     "\n\n" <> IO.ANSI.cyan() <> "Stack trace:" <> IO.ANSI.reset() <> "\n" <> frames
+  end
+
+  defp truncate_frames(frames) do
+    count = length(frames)
+
+    if count > @trace_head + @trace_tail + 1 do
+      omitted = count - @trace_head - @trace_tail
+      Enum.take(frames, @trace_head) ++ [{:omitted, omitted}] ++ Enum.take(frames, -@trace_tail)
+    else
+      frames
+    end
   end
 
   defp build_call_stack(call_stack) when is_list(call_stack) do
@@ -198,6 +219,11 @@ defmodule Lua.VM.ErrorFormatter do
   end
 
   defp build_call_stack(_), do: []
+
+  defp format_frame({:omitted, count}) do
+    IO.ANSI.faint() <>
+      "  ... #{count} more frames ..." <> IO.ANSI.reset()
+  end
 
   defp format_frame(%{source: source, line: line, name: name}) do
     location = "  #{source || "-no-source-"}:#{line}:"
