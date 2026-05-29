@@ -91,7 +91,10 @@ defmodule Lua do
     instead of letting the recursion exhaust the host process. Accepts a positive integer or
     `:infinity` for no limit.
 
-      iex> Lua.new(max_call_depth: 500)
+      iex> lua = Lua.new(max_call_depth: 10)
+      iex> {[false, message], _lua} = Lua.eval!(lua, "local function f() return f() end return pcall(f)")
+      iex> message =~ "stack overflow"
+      true
   """
   def new(opts \\ []) do
     opts = Keyword.validate!(opts, sandboxed: @default_sandbox, exclude: [], debug: false, max_call_depth: :infinity)
