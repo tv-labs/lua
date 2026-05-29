@@ -43,6 +43,17 @@ defmodule Lua.VM.RecursionDepthTest do
       # call_depth was restored on the rescue, so the VM is healthy.
       assert {[2], _lua} = eval!(lua, "return 1 + 1")
     end
+
+    test "tail recursion is bounded too (no tail-call optimization)" do
+      # `return f(...)` is in tail position, which PUC-Lua would run
+      # unbounded. This VM does not implement TCO, so every call — tail or
+      # not — consumes a frame and a finite cap stops the recursion.
+      lua = Lua.new(max_call_depth: 10)
+
+      assert_raise RuntimeException, ~r/stack overflow/, fn ->
+        eval!(lua, "local function loop(n) return loop(n + 1) end loop(1)")
+      end
+    end
   end
 
   describe "default behavior (:infinity)" do

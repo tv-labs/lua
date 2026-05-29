@@ -18,8 +18,9 @@ defmodule Website.LuaSandbox do
 
   # Cap recursion so a runaway snippet (`local function f() return f() end`)
   # fails with a catchable "stack overflow" instead of growing the BEAM
-  # stack until the process dies. 200 mirrors PUC-Lua's LUAI_MAXCCALLS, so
-  # the limit lands where a Lua author expects it to.
+  # stack until the process dies. The VM has no tail-call optimization, so
+  # this bounds tail recursion too — 200 is generous for the teaching
+  # snippets here while still stopping an accidental infinite recursion.
   @max_call_depth 200
 
   @doc """
@@ -60,10 +61,12 @@ defmodule Website.LuaSandbox do
     output_pid = start_output_collector()
 
     lua =
-      [max_call_depth: @max_call_depth]
-      |> Lua.new()
+      Lua.new(max_call_depth: @max_call_depth)
       |> Lua.set!([:print], fn args ->
-        line = Enum.map_join(args, "\t", &to_lua_string/1)
+        line =
+          args
+          |> Enum.map(&to_lua_string/1)
+          |> Enum.join("\t")
 
         send(output_pid, {:line, line})
         []
@@ -213,7 +216,8 @@ defmodule Website.LuaSandbox do
     acc = [block | acc]
     next_index = next_index + 1
 
-    Enum.reduce(Enum.with_index(proto.prototypes), {acc, next_index}, fn {child, child_local_idx}, {acc, next_idx} ->
+    Enum.reduce(Enum.with_index(proto.prototypes), {acc, next_index}, fn {child, child_local_idx},
+                                                                         {acc, next_idx} ->
       name = "function ##{next_idx} (proto[#{child_local_idx}])"
       walk_proto(child, name, next_idx, acc)
     end)
@@ -240,9 +244,12 @@ defmodule Website.LuaSandbox do
               :equal,
               :less_than,
               :less_equal
-            ], do: "r#{a}, r#{b}, r#{c}"
+            ],
+       do: "r#{a}, r#{b}, r#{c}"
 
-  defp format_op_args(op, [a, b]) when op in [:negate, :not, :length, :bitwise_not, :move], do: "r#{a}, r#{b}"
+  defp format_op_args(op, [a, b])
+       when op in [:negate, :not, :length, :bitwise_not, :move],
+       do: "r#{a}, r#{b}"
 
   defp format_op_args(:load_constant, [d, val]), do: "r#{d}, #{format_lit(val)}"
   defp format_op_args(:load_nil, [d, count]), do: "r#{d}, #{count}"
@@ -260,9 +267,11 @@ defmodule Website.LuaSandbox do
   defp format_op_args(:get_field, [d, t, name | _]), do: ~s|r#{d}, r#{t}.#{name}|
   defp format_op_args(:set_field, [t, name, v | _]), do: ~s|r#{t}.#{name}, r#{v}|
 
-  defp format_op_args(:set_list, [t, s, c, o]), do: "r#{t}, start=#{s}, count=#{count(c)}, off=#{o}"
+  defp format_op_args(:set_list, [t, s, c, o]),
+    do: "r#{t}, start=#{s}, count=#{count(c)}, off=#{o}"
 
-  defp format_op_args(:call, [b, ac, rc | _]), do: "r#{b}, args=#{count(ac)}, results=#{count(rc)}"
+  defp format_op_args(:call, [b, ac, rc | _]),
+    do: "r#{b}, args=#{count(ac)}, results=#{count(rc)}"
 
   defp format_op_args(:tail_call, [b, ac | _]), do: "r#{b}, args=#{count(ac)}"
   defp format_op_args(:return, [b, c]), do: "r#{b}, count=#{count(c)}"
@@ -278,7 +287,7 @@ defmodule Website.LuaSandbox do
   defp format_op_args(:generic_for, [b, vc | _]), do: "r#{b}, vars=#{vc}"
   defp format_op_args(:scope, [n | _]), do: "registers=#{n}"
   defp format_op_args(:source_line, [ln]), do: "line #{ln}"
-  defp format_op_args(_op, args), do: Enum.map_join(args, ", ", &pretty_arg/1)
+  defp format_op_args(_op, args), do: args |> Enum.map(&pretty_arg/1) |> Enum.join(", ")
 
   defp pretty_arg({:constant, val}), do: format_lit(val)
   defp pretty_arg({:global, name}), do: ~s|<#{name}>|
@@ -499,7 +508,8 @@ defmodule Website.LuaSandbox do
       %{
         id: "sandbox",
         title: "Sandbox escape",
-        blurb: "Watch the VM refuse to run dangerous stdlib calls. This is the reason it's agent-ready.",
+        blurb:
+          "Watch the VM refuse to run dangerous stdlib calls. This is the reason it's agent-ready.",
         source: """
         -- The host process never had to defend itself.
         local ok, err = pcall(function()
@@ -652,7 +662,8 @@ defmodule Website.LuaSandbox do
         two subtypes (64-bit *integer* and *float*) and Lua tracks which
         is which. Strings are interned immutable byte sequences.
         """,
-        exercise: "Add a line that prints `type(3.0 == 3)` and predict the result before running.",
+        exercise:
+          "Add a line that prints `type(3.0 == 3)` and predict the result before running.",
         source: """
         print(type(nil), type(true), type(1), type(1.5))
         print(type("hi"), type(print), type({}))
@@ -704,7 +715,7 @@ defmodule Website.LuaSandbox do
         `(cond and a) or b` is Lua's ternary expression.
         """,
         exercise:
-          ~s{Make `(false and "a") or "b"` return `"b"`. Now make it return `false` when the first branch is false. Why is `(c and a) or b` unsafe when `a` can be `false`?},
+          "Make `(false and \"a\") or \"b\"` return `\"b\"`. Now make it return `false` when the first branch is false. Why is `(c and a) or b` unsafe when `a` can be `false`?",
         source: """
         print(0 and "zero is truthy")
         print("" and "empty string is truthy")
@@ -756,7 +767,8 @@ defmodule Website.LuaSandbox do
         slug: "tables",
         title: "Tables are everything",
         chapter: :basics,
-        objective: "Build arrays, records, and nested tables, and know what `#t` actually counts.",
+        objective:
+          "Build arrays, records, and nested tables, and know what `#t` actually counts.",
         body: """
         Tables are *the* data structure: arrays, hash maps, records,
         modules, all tables. Indexed from `1` by convention. `#t` is
@@ -765,7 +777,7 @@ defmodule Website.LuaSandbox do
         literal.
         """,
         exercise:
-          ~s(Add `user.prefs.shortcuts = { save = "⌘S" }` and print `user.prefs.shortcuts.save`. Then add `user[5] = "trailing"`. What does `#user` return now?),
+          "Add `user.prefs.shortcuts = { save = \"⌘S\" }` and print `user.prefs.shortcuts.save`. Then add `user[5] = \"trailing\"`. What does `#user` return now?",
         source: """
         local user = {
           "first row",                 -- user[1]
@@ -788,7 +800,8 @@ defmodule Website.LuaSandbox do
         slug: "iteration",
         title: "Iteration",
         chapter: :basics,
-        objective: "Use `pairs` for hash walks, `ipairs` for sequences, and write your own iterator.",
+        objective:
+          "Use `pairs` for hash walks, `ipairs` for sequences, and write your own iterator.",
         body: """
         `ipairs` walks the array part from `1` and stops at the first
         `nil`. `pairs` walks every key in unspecified order. The generic
@@ -796,7 +809,8 @@ defmodule Website.LuaSandbox do
         how to write one yourself: return `(iter, state, control)` and
         Lua takes care of the rest.
         """,
-        exercise: "Add a `step` parameter to `range` so `range(10, 2)` yields `1, 3, 5, 7, 9` with their squares.",
+        exercise:
+          "Add a `step` parameter to `range` so `range(10, 2)` yields `1, 3, 5, 7, 9` with their squares.",
         source: """
         local t = { 10, 20, 30, name = "trio" }
         for i, v in ipairs(t) do print("ipairs", i, v) end
@@ -877,7 +891,8 @@ defmodule Website.LuaSandbox do
         slug: "closures",
         title: "Closures & upvalues",
         chapter: :idioms,
-        objective: "Capture an outer-scope binding and watch the `closure` op build the function at runtime.",
+        objective:
+          "Capture an outer-scope binding and watch the `closure` op build the function at runtime.",
         body: """
         Inner functions capture outer locals *by reference*. These
         captured bindings are called *upvalues*. Two closures over the
@@ -927,7 +942,8 @@ defmodule Website.LuaSandbox do
         slug: "metatables-index",
         title: "Metatables: `__index`",
         chapter: :idioms,
-        objective: "Use `__index` (table or function) for fallback lookup and single-inheritance chains.",
+        objective:
+          "Use `__index` (table or function) for fallback lookup and single-inheritance chains.",
         body: """
         Every table can have a *metatable*. When a key is missing on
         `t`, Lua consults `t`'s metatable's `__index`. If `__index` is a
@@ -960,7 +976,8 @@ defmodule Website.LuaSandbox do
         slug: "metatables-ops",
         title: "Operator overloading",
         chapter: :idioms,
-        objective: "Implement `__add`, `__eq`, `__tostring`, and `__call` so a Vector feels like a native value.",
+        objective:
+          "Implement `__add`, `__eq`, `__tostring`, and `__call` so a Vector feels like a native value.",
         body: """
         Metamethods customise operators (`__add`, `__sub`, `__mul`,
         `__div`, `__unm`, `__pow`, `__concat`), equality (`__eq`),
@@ -968,7 +985,8 @@ defmodule Website.LuaSandbox do
         (`__tostring`), and the call protocol (`__call`). Pair them
         with `__index = self` to make instance methods discoverable.
         """,
-        exercise: "Add a `__sub` metamethod and a `:dot(other)` method. Use them: `print((a - b):dot(a + b))`.",
+        exercise:
+          "Add a `__sub` metamethod and a `:dot(other)` method. Use them: `print((a - b):dot(a + b))`.",
         source: """
         local Vec = {}
         Vec.__index = Vec
@@ -992,7 +1010,8 @@ defmodule Website.LuaSandbox do
         slug: "errors",
         title: "Errors, `pcall`, `xpcall`",
         chapter: :idioms,
-        objective: "Raise errors as strings *or* tables, catch them with `pcall`, and add a handler with `xpcall`.",
+        objective:
+          "Raise errors as strings *or* tables, catch them with `pcall`, and add a handler with `xpcall`.",
         body: """
         `error(value)` raises. The value is usually a string, but a
         table works and is great for structured failures. `pcall(f, …)`
@@ -1027,7 +1046,8 @@ defmodule Website.LuaSandbox do
         title: "Coroutines (preview)",
         chapter: :idioms,
         runnable: false,
-        objective: "Read the coroutine API and see why it's the engine behind stateful iterators.",
+        objective:
+          "Read the coroutine API and see why it's the engine behind stateful iterators.",
         body: """
         Coroutines are cooperative threads inside a single OS thread:
         `create` builds one, `resume` runs it, `yield` suspends it and
@@ -1065,7 +1085,8 @@ defmodule Website.LuaSandbox do
         slug: "strings",
         title: "Strings & patterns",
         chapter: :stdlib,
-        objective: "Format, slice, and concatenate strings, then capture matches with `gmatch` and `gsub`.",
+        objective:
+          "Format, slice, and concatenate strings, then capture matches with `gmatch` and `gsub`.",
         body: """
         `..` concatenates, `#s` is byte length (not codepoints),
         `string.format` is `printf`. Patterns are *not* regex: `%a`
@@ -1075,7 +1096,7 @@ defmodule Website.LuaSandbox do
         function.
         """,
         exercise:
-          ~s{Use `gsub` with a function replacement to capitalise every word: `"hello there"` → `"Hello There"`. Hint: pattern `(%a)(%a*)`.},
+          "Use `gsub` with a function replacement to capitalise every word: `\"hello there\"` → `\"Hello There\"`. Hint: pattern `(%a)(%a*)`.",
         source: """
         local s = "Hello, World!"
         print(#s, s:upper(), s:sub(1, 5))
@@ -1099,7 +1120,8 @@ defmodule Website.LuaSandbox do
         slug: "tables-stdlib",
         title: "Working with tables",
         chapter: :stdlib,
-        objective: "Use `table.insert`, `remove`, `sort`, `concat`, and `unpack` to manipulate sequences.",
+        objective:
+          "Use `table.insert`, `remove`, `sort`, `concat`, and `unpack` to manipulate sequences.",
         body: """
         `table.insert(t, v)` pushes; `table.insert(t, pos, v)` inserts
         at `pos`. `table.remove(t)` pops the tail. `table.concat(t,
@@ -1132,7 +1154,8 @@ defmodule Website.LuaSandbox do
         slug: "math-and-numbers",
         title: "Numbers: int & float",
         chapter: :stdlib,
-        objective: "Tell integers from floats, convert between them, and know which operator returns which.",
+        objective:
+          "Tell integers from floats, convert between them, and know which operator returns which.",
         body: """
         Lua 5.3 has two number subtypes: 64-bit *integer* and *float*
         (double). `/` always returns a float; `//` floor-divides and
@@ -1223,7 +1246,8 @@ defmodule Website.LuaSandbox do
         slug: "set-and-get",
         title: "Reading & writing state",
         chapter: :integration,
-        objective: "Define globals from Elixir with `Lua.set!` and read them back with `Lua.get!`.",
+        objective:
+          "Define globals from Elixir with `Lua.set!` and read them back with `Lua.get!`.",
         body: """
         `Lua.set!(lua, [:greeting], "hi")` writes a global. `Lua.get!(
         lua, [:total])` reads one. Paths nest into tables:
@@ -1263,7 +1287,8 @@ defmodule Website.LuaSandbox do
         slug: "deflua",
         title: "Exposing Elixir with `deflua`",
         chapter: :integration,
-        objective: "Define a module with `use Lua.API` + `deflua`, then load it with `Lua.load_api/2`.",
+        objective:
+          "Define a module with `use Lua.API` + `deflua`, then load it with `Lua.load_api/2`.",
         body: """
         `deflua` turns an Elixir function into a Lua-callable. The
         optional `scope:` puts it under a namespace, so `scope:
@@ -1304,7 +1329,8 @@ defmodule Website.LuaSandbox do
         slug: "call-function",
         title: "Calling Lua from Elixir",
         chapter: :integration,
-        objective: "Define a Lua function in a snippet, then invoke it from Elixir with `call_function!`.",
+        objective:
+          "Define a Lua function in a snippet, then invoke it from Elixir with `call_function!`.",
         body: """
         `Lua.call_function!(lua, [:name], [arg1, arg2])` calls a Lua
         function from Elixir. Path tuples work too: `[:string, :upper]`
@@ -1343,7 +1369,8 @@ defmodule Website.LuaSandbox do
         slug: "put-private",
         title: "Private host context",
         chapter: :integration,
-        objective: "Pass authenticated context to `deflua` handlers without exposing it to Lua scripts.",
+        objective:
+          "Pass authenticated context to `deflua` handlers without exposing it to Lua scripts.",
         body: """
         `Lua.put_private(lua, :user_id, 42)` stores host state inside
         the VM that *Lua scripts cannot see*. In a `deflua` body taking
@@ -1428,7 +1455,8 @@ defmodule Website.LuaSandbox do
         title: "Errors across the boundary",
         chapter: :integration,
         expect: :runtime_error,
-        objective: "Catch `Lua.RuntimeException` on the Elixir side. Line, source, and call stack come along.",
+        objective:
+          "Catch `Lua.RuntimeException` on the Elixir side. Line, source, and call stack come along.",
         body: """
         Runtime errors in Lua raise `Lua.RuntimeException` on the
         Elixir side. The exception carries the offending line, the
@@ -1470,7 +1498,8 @@ defmodule Website.LuaSandbox do
         slug: "bytecode",
         title: "The bytecode model",
         chapter: :internals,
-        objective: "Read a disassembled prototype: instructions, registers, upvalues, and nested protos.",
+        objective:
+          "Read a disassembled prototype: instructions, registers, upvalues, and nested protos.",
         body: """
         The compiler lowers Lua to a stream of *register-based*
         opcodes. No labels, no PC-relative jumps. Each function

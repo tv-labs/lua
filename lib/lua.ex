@@ -91,6 +91,11 @@ defmodule Lua do
     instead of letting the recursion exhaust the host process. Accepts a positive integer or
     `:infinity` for no limit.
 
+    Note: this VM does not implement proper tail-call optimization, so a call in tail position
+    (`return f(x)`) consumes a frame like any other call. A finite `:max_call_depth` therefore
+    bounds tail recursion too — including loops that PUC-Lua would run indefinitely. Leave the
+    default `:infinity` if you rely on unbounded tail recursion.
+
       iex> lua = Lua.new(max_call_depth: 10)
       iex> {[false, message], _lua} = Lua.eval!(lua, "local function f() return f() end return pcall(f)")
       iex> message =~ "stack overflow"
