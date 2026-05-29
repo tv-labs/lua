@@ -984,7 +984,14 @@ defmodule Lua.VM.Executor do
 
         call_info = %{source: proto.source, line: line, name: hint_name(name_hint)}
 
-        state = %{state | call_stack: [call_info | state.call_stack], open_upvalues: %{}}
+        State.check_call_depth!(state)
+
+        state = %{
+          state
+          | call_stack: [call_info | state.call_stack],
+            call_depth: state.call_depth + 1,
+            open_upvalues: %{}
+        }
 
         # Tail call — Erlang stack does not grow
         do_execute(
@@ -1869,7 +1876,12 @@ defmodule Lua.VM.Executor do
       open_upvalues: saved_open_upvalues
     } = frame
 
-    state = %{state | call_stack: tl(state.call_stack), open_upvalues: saved_open_upvalues}
+    state = %{
+      state
+      | call_stack: tl(state.call_stack),
+        call_depth: state.call_depth - 1,
+        open_upvalues: saved_open_upvalues
+    }
 
     case result_count do
       -1 ->

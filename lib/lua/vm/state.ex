@@ -6,6 +6,12 @@ defmodule Lua.VM.State do
   alias Lua.VM.Table
 
   defstruct call_stack: [],
+            # Call depth tracked as an O(1) counter that moves in lockstep
+            # with `call_stack` — `length(call_stack)` would be O(depth) per
+            # call. `max_call_depth` bounds it; `:infinity` (the default)
+            # means no limit. See `check_call_depth!/1`.
+            call_depth: 0,
+            max_call_depth: :infinity,
             metatables: %{},
             upvalue_cells: %{},
             open_upvalues: %{},
@@ -23,6 +29,8 @@ defmodule Lua.VM.State do
 
   @type t :: %__MODULE__{
           call_stack: list(),
+          call_depth: non_neg_integer(),
+          max_call_depth: pos_integer() | :infinity,
           metatables: map(),
           upvalue_cells: map(),
           tables: %{optional(non_neg_integer()) => Table.t()},
@@ -44,6 +52,25 @@ defmodule Lua.VM.State do
     state = %__MODULE__{}
     {g_ref, state} = alloc_table(state)
     %{state | g_ref: g_ref}
+  end
+
+  @doc """
+  Guards against unbounded recursion.
+
+  Raises a Lua `"stack overflow"` runtime error when the call depth has
+  reached `max_call_depth`. Call it immediately before pushing a frame
+  onto `call_stack`.
+
+  No-op when depth is under the limit or when `max_call_depth` is
+  `:infinity` (the default). The clauses are ordered so both common cases
+  resolve in a single function-head match with no struct rebuild.
+  """
+  @spec check_call_depth!(t()) :: :ok
+  def check_call_depth!(%__MODULE__{max_call_depth: :infinity}), do: :ok
+  def check_call_depth!(%__MODULE__{call_depth: depth, max_call_depth: max}) when depth < max, do: :ok
+
+  def check_call_depth!(%__MODULE__{call_stack: call_stack}) do
+    raise Lua.VM.RuntimeError, value: "stack overflow", call_stack: call_stack
   end
 
   @doc """
