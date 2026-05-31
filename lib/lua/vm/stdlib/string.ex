@@ -820,26 +820,31 @@ defmodule Lua.VM.Stdlib.String do
   defp apply_width_flags(str, flags, width) do
     width = width || 0
 
-    # Width is a byte count. The numeric specifiers (%d/%f/%x/...) emit
-    # single-byte ASCII, and PUC-Lua measures `%s` by bytes too, so
-    # `byte_size/1` matches the reference without the grapheme walk that
-    # `String.length/1` would do.
-    if byte_size(str) >= width do
+    # Width and padding are measured in bytes, matching PUC-Lua, which hands
+    # the width straight to C's printf. The numeric specifiers (%d/%f/%x/...)
+    # emit single-byte ASCII so bytes and codepoints coincide there, but `%s`
+    # can carry multibyte text, so both the threshold and the fill must count
+    # bytes (e.g. format("%6s", "café") -> " café", one fill byte, not two).
+    deficit = width - byte_size(str)
+
+    if deficit <= 0 do
       str
     else
       pad_char =
         if String.contains?(flags, "0") and not String.contains?(flags, "-"), do: "0", else: " "
 
+      pad = String.duplicate(pad_char, deficit)
+
       if String.contains?(flags, "-") do
         # Left justify
-        String.pad_trailing(str, width, pad_char)
+        str <> pad
       else
         # Right justify (default)
         # Handle zero-padding with sign
         if pad_char == "0" and String.starts_with?(str, "-") do
-          "-" <> String.pad_leading(String.slice(str, 1..-1//1), width - 1, "0")
+          "-" <> pad <> binary_part(str, 1, byte_size(str) - 1)
         else
-          String.pad_leading(str, width, pad_char)
+          pad <> str
         end
       end
     end

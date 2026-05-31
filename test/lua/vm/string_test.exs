@@ -415,6 +415,36 @@ defmodule Lua.VM.StringTest do
       assert {:ok, ["hello     "], _state} = VM.execute(proto, state)
     end
 
+    # PUC-Lua measures %s width in bytes, not codepoints: "café" is 5 bytes,
+    # so "%6s" prepends a single fill byte (" café"), and the result is 6
+    # bytes, never 7. The padding count must agree with the width threshold.
+    test "width with multibyte string pads by bytes", %{state: state} do
+      code = ~s{return string.format("%6s", "café")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      assert result == " café"
+      assert byte_size(result) == 6
+    end
+
+    test "width equal to byte length of multibyte string does not pad", %{state: state} do
+      code = ~s{return string.format("%5s", "café")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      assert result == "café"
+      assert byte_size(result) == 5
+    end
+
+    test "left-justify multibyte string pads by bytes", %{state: state} do
+      code = ~s{return string.format("%-6s", "café")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      assert result == "café "
+      assert byte_size(result) == 6
+    end
+
     test "width and precision combined for float", %{state: state} do
       code = ~s{return string.format("%8.2f", 3.14159)}
       assert {:ok, ast} = Parser.parse(code)
