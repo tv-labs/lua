@@ -98,24 +98,33 @@ defmodule Lua.VM.ErrorToMapTest do
   end
 
   describe "Lua.VM.AssertionError.to_map/2" do
-    test "returns assertion suggestion without ANSI" do
+    test "carries the message and no filler suggestion" do
       error = VMAssertionError.exception(value: "expected true", source: "t.lua", line: 1)
 
       map = VMAssertionError.to_map(error)
 
       assert map.type == :assertion_error
       assert map.message == "assertion failed: expected true"
-      assert is_binary(map.suggestion)
-      refute String.contains?(map.suggestion, @ansi_escape)
+      # Assertions no longer carry a generic "check your logic" suggestion;
+      # the message body already says what failed.
+      assert map.suggestion == nil
       assert map.error_kind == nil
     end
   end
 
   describe "Lua.VM.ErrorFormatter.format/3 stability" do
-    # Golden snapshots locking the terminal output. If a refactor changes
-    # what terminal callers see, these fail loudly.
+    # Golden snapshots locking the rendered output. The test suite runs with
+    # ANSI disabled, so these pin the plain-text render: location first, no
+    # redundant header, category-specific suggestion. If a refactor changes
+    # what callers see, these fail loudly.
 
-    test "type_error with source_code, stack, and suggestion" do
+    test "ANSI is gated on IO.ANSI.enabled?" do
+      refute IO.ANSI.enabled?(), "test env should have ANSI disabled"
+      output = ErrorFormatter.format(:type_error, "attempt to call a nil value", source: "t.lua", line: 2)
+      refute String.contains?(output, @ansi_escape)
+    end
+
+    test "type_error leads with location and emits a category suggestion" do
       output =
         ErrorFormatter.format(:type_error, "attempt to call a nil value",
           source: "t.lua",
@@ -126,7 +135,7 @@ defmodule Lua.VM.ErrorToMapTest do
         )
 
       expected =
-        "\e[31m\e[1mRuntime Type Error\e[0m\n\n  at t.lua:2:\n\n  attempt to call a nil value\n\n\n\e[2m   1 │ local x\e[0m\n\e[31m   2 │ x()\e[0m       \e[31m^\e[0m\n\e[2m   3 │ return 0\e[0m\n\n\n\e[36mStack trace:\e[0m\n  t.lua:2: in main chunk\n\n\n\e[36mSuggestion:\e[0m\n  The value you're trying to call as a function is nil. Check that the function exists and is defined before this point."
+        "at t.lua:2:\n\n  attempt to call a nil value\n\n   1 │ local x\n   2 │ x()       ^\n   3 │ return 0\n\nStack trace:\n  t.lua:2: in main chunk\n\nSuggestion:\n  The value you're trying to call as a function is nil. Check that the function exists and is defined before this point."
 
       assert output == expected
     end
@@ -140,21 +149,15 @@ defmodule Lua.VM.ErrorToMapTest do
         )
 
       expected =
-        "\e[31m\e[1mRuntime Error\e[0m\n\n  at t.lua:1:\n\n  runtime error: boom\n\n\n\e[36mStack trace:\e[0m\n  t.lua:1: in function 'f'"
+        "at t.lua:1:\n\n  runtime error: boom\n\nStack trace:\n  t.lua:1: in function 'f'"
 
       assert output == expected
     end
 
-    test "assertion_error with empty stack still emits suggestion" do
+    test "assertion_error carries the body and no filler suggestion" do
       output = ErrorFormatter.format(:assertion_error, "assertion failed: nope")
 
-      expected =
-        "\e[31m\e[1mAssertion Failed\e[0m" <>
-          "\n\n  assertion failed: nope" <>
-          "\n\n\n\e[36mSuggestion:\e[0m" <>
-          "\n  The assertion condition evaluated to false or nil. Check your logic."
-
-      assert output == expected
+      assert output == "assertion failed: nope"
     end
   end
 end

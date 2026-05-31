@@ -1,0 +1,11 @@
+=== category: concat_non_string ===
+=== source ===
+local t = {}
+print(t .. "x")
+=== expected output ===
+Lua runtime error: at gallery.lua:2:
+
+  attempt to concatenate a table value
+
+Suggestion:
+  Concatenation (..) requires strings or numbers. Convert other values with tostring() first.

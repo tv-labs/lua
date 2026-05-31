@@ -1,0 +1,7 @@
+=== category: assert_no_message ===
+=== source ===
+assert(false)
+=== expected output ===
+Lua runtime error: at gallery.lua:1:
+
+  assertion failed: assertion failed!

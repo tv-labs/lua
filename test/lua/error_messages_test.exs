@@ -281,9 +281,9 @@ defmodule Lua.ErrorMessagesTest do
       message = "attempt to call a nil value"
       formatted = ErrorFormatter.format(:type_error, message, source: "test.lua", line: 5)
 
-      assert formatted =~ "Runtime Type Error"
-      assert formatted =~ "test.lua"
-      assert formatted =~ "5"
+      # Location leads the output, on its own line before the message body.
+      assert String.starts_with?(formatted, "at test.lua:5:")
+      assert formatted =~ message
     end
 
     test "includes suggestions for common errors" do

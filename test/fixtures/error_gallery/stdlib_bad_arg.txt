@@ -1,0 +1,7 @@
+=== category: stdlib_bad_arg ===
+=== source ===
+string.upper(nil)
+=== expected output ===
+Lua runtime error: at gallery.lua:1:
+
+  bad argument #1 to 'string.upper' (string expected, got nil)

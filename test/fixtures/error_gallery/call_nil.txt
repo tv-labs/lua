@@ -1,0 +1,11 @@
+=== category: call_nil ===
+=== source ===
+local f = nil
+f()
+=== expected output ===
+Lua runtime error: at gallery.lua:2:
+
+  attempt to call a nil value (local 'f')
+
+Suggestion:
+  The value you're trying to call as a function is nil. Check that the function exists and is defined before this point.

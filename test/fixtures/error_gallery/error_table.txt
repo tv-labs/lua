@@ -1,0 +1,7 @@
+=== category: error_table ===
+=== source ===
+error({code = 1})
+=== expected output ===
+Lua runtime error: at gallery.lua:1:
+
+  runtime error: (error object is a table value)
