@@ -898,6 +898,13 @@ defmodule Lua.VM.StringTest do
       assert msg =~ "invalid use of '%'"
     end
 
+    test "string.gsub raises on a trailing lone '%' in replacement string" do
+      code = ~s{return pcall(string.gsub, "alo", ".", "x%")}
+      {[ok, msg], _state} = Lua.eval!(code)
+      assert ok == false
+      assert msg =~ "invalid use of '%' in replacement string"
+    end
+
     test "string.gsub raises when a table replacement yields a table value" do
       code = """
       return pcall(string.gsub, "alo", ".", {a = {}})
