@@ -181,8 +181,9 @@
     %{
       lines: :all,
       category: :stdlib,
-      reason: "times out (>30s) on the comparison-heavy section; os.clock not implemented",
-      issue: nil
+      reason:
+        "times out: the 2000-element unpack loop and O(n^2) table.sort over the perm/timesort sections run for minutes; the os.clock timing harness is also unimplemented",
+      issue: 262
     }
   ],
   "strings.lua" => [
