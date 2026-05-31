@@ -153,6 +153,10 @@ defmodule Lua.VM.Stdlib.Os do
   defp os_setlocale(_args, state), do: {["C"], state}
 
   # os.tmpname() — a name usable for a temporary file.
+  #
+  # FUTURE: this leans on the host filesystem via System.tmp_dir/0. Once the
+  # VFS layer lands we want tmpname to resolve against the sandboxed virtual
+  # filesystem instead of the real host, so the VM never touches host paths.
   defp os_tmpname(_args, state) do
     name = Path.join(System.tmp_dir() || "/tmp", "lua_#{:erlang.unique_integer([:positive])}")
     {[name], state}
