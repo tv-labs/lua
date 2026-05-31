@@ -1,11 +1,11 @@
 ---
 id: A30
 title: examples/ directory — runnable, linked from README
-issue: null
+issue: 264
 pr: null
 branch: docs/examples
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - "embedding patterns are obvious" promise
