@@ -2,10 +2,10 @@
 id: B9
 title: "stdlib hot paths: string.format iolist + plain-table fast paths"
 issue: 273
-pr: null
+pr: 299
 branch: perf/stdlib-hot-paths
 base: main
-status: in-progress
+status: review
 direction: B
 unlocks:
   - closes most of the string.format gap vs Luerl (1.77x) and C Lua (5.5x)
@@ -181,3 +181,35 @@ test expectations, since the change is behavior-preserving.
   "fix while here." Do not. Leave `sort_values/2` / `insert_sorted/4` and
   `Table.put` `order_tail` exactly as-is; log any new finding under
   `## Discoveries`.
+
+## What changed
+
+Shipped as PR #299.
+
+Files touched:
+
+- `lib/lua/vm/stdlib/string.ex`
+  - `format_string/3` now accumulates an iolist (`[acc, piece]`) and
+    materializes once with `IO.iodata_to_binary/1` at the `""` base
+    clause. The initial seed in `string_format/2` switched from `""` to
+    `[]`. No `acc <> ...` concatenation remains.
+  - `apply_width_flags/3` compares width with `byte_size/1` instead of
+    `String.length/1`. This also brings `%s` width into line with
+    PUC-Lua, which measures by bytes.
+- `lib/lua/vm/stdlib/table.ex`
+  - Added `alias Lua.VM.Table`.
+  - `table_concat/2` binds the `tref` id, fetches the table once, and
+    reads slots via `Table.get_data/2` when `metatable == nil`; the
+    metatable case keeps `Executor.table_index/3`. Per-element coercion
+    extracted into `concat_value/2`.
+  - `table_sort/2` branches on `metatable`: `sort_plain/5` reads directly
+    from `data`, sorts, re-fetches the table (so a state-mutating
+    comparator is honored), writes back with `Table.put/3` per slot, and
+    stores once with `Map.put/3`. `sort_via_metamethods/4` preserves the
+    original `Executor.table_index/3` read + `table_newindex/3`
+    write-back for metatable-backed tables.
+
+Verification: `mix test` 2092 passed / 19 skipped / 1 excluded and
+`mix test --only lua53` 17 passed / 12 skipped — both identical to `main`.
+
+No follow-up issues opened; no `## Discoveries`.
