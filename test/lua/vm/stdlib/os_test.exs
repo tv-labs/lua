@@ -7,9 +7,10 @@ defmodule Lua.VM.Stdlib.OsTest do
   # before the os library existed.
 
   describe "os library" do
-    test "os.clock returns a number" do
+    test "os.clock returns a non-negative number" do
       {[c], _} = Lua.eval!("return os.clock()")
       assert is_number(c)
+      assert c >= 0
     end
 
     test "os.time with no args returns current epoch seconds" do

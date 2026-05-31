@@ -46,9 +46,13 @@ defmodule Lua.VM.Stdlib.Os do
     State.set_global(state, "os", tref)
   end
 
-  # os.clock() — approximate CPU/elapsed time used, in seconds.
+  # os.clock() — approximate CPU/elapsed time used, in seconds. Reads the
+  # boot offset before the current time so the elapsed value is never
+  # negative on the first call (when the offset is seeded lazily).
   defp os_clock(_args, state) do
-    seconds = (:erlang.monotonic_time(:nanosecond) - boot_offset()) / 1_000_000_000
+    offset = boot_offset()
+    elapsed_ns = :erlang.monotonic_time(:nanosecond) - offset
+    seconds = max(0, elapsed_ns) / 1_000_000_000
     {[seconds], state}
   end
 
@@ -187,6 +191,9 @@ defmodule Lua.VM.Stdlib.Os do
   defp strip_utc_flag("!" <> rest), do: {rest, true}
   defp strip_utc_flag(format), do: {format, false}
 
+  # The sandbox has no timezone database, so local time and UTC are
+  # treated as identical. The utc? flag is parsed for compatibility with
+  # the leading '!' but does not change the result.
   defp to_datetime(time, _utc?) do
     DateTime.from_unix!(time, :second)
   end
