@@ -8,9 +8,10 @@ defmodule Lua.VM.ShortCircuitTest do
   # `and` returns its first operand if that operand is falsy, otherwise its
   # second; `or` returns its first operand if truthy, otherwise its second.
   # Only `nil` and `false` are falsy. The executor compiles these to
-  # `test_and` / `test_or` conditional-jump bytecode; the cases below guard
-  # against register aliasing across the conditional branch and against a
-  # `not` precedence wrinkle when the depth-4 chains nest.
+  # `test_and` / `test_or` conditional-jump bytecode. The suspected hazards
+  # were register aliasing across the conditional branch and a `not`
+  # precedence wrinkle when the depth-4 chains nest; the cases below confirm
+  # both are handled correctly.
 
   defp eval!(code) do
     {results, _state} = Lua.eval!(Lua.new(sandboxed: []), code)
@@ -79,66 +80,75 @@ defmodule Lua.VM.ShortCircuitTest do
     end
   end
 
-  describe "generative harness (constructs.lua level 3)" do
+  describe "generative harness (constructs.lua)" do
     # Faithful in-process replica of the constructs.lua short-circuit
-    # harness, built from the same `createcases` generator. Level 3 builds
-    # every `((a op b) op c)` composition (and its `not` wrapping) over the
-    # five basic cases, then asserts both the returned value and the `IX`
-    # branch side effect against a precomputed truth table. The full level-4
-    # run (204105 cases) passes identically but is too slow for the default
-    # suite; level 3 (4105 cases) pins the generative property here.
-    @harness ~S"""
-    _ENV.GLOB1 = 1
-    local basiccases = {
-      {"nil", nil},
-      {"false", false},
-      {"true", true},
-      {"10", 10},
-      {"(0==_ENV.GLOB1)", 0 == _ENV.GLOB1},
-    }
-    local binops = {
-      {" and ", function (a,b) if not a then return a else return b end end},
-      {" or ", function (a,b) if a then return a else return b end end},
-    }
-    local cases = {}
-    local function createcases (n)
-      local res = {}
-      for i = 1, n - 1 do
-        for _, v1 in ipairs(cases[i]) do
-          for _, v2 in ipairs(cases[n - i]) do
-            for _, op in ipairs(binops) do
-                local t = {
-                  "(" .. v1[1] .. op[1] .. v2[1] .. ")",
-                  op[2](v1[2], v2[2])
-                }
-                res[#res + 1] = t
-                res[#res + 1] = {"not" .. t[1], not t[2]}
+    # harness, built from the same `createcases` generator. Each level builds
+    # every nested `op` composition (and its `not` wrapping) over the five
+    # basic cases, then asserts both the returned value and the `IX` branch
+    # side effect against a precomputed truth table. Level 3 (4105 cases)
+    # pins the generative property in the default suite. Level 4 (204105
+    # cases) is the exact surface the suite default exercises but is too slow
+    # for every run; it is tagged `:slow` and excluded by default.
+    defp harness(level) do
+      ~s"""
+      _ENV.GLOB1 = 1
+      local basiccases = {
+        {"nil", nil},
+        {"false", false},
+        {"true", true},
+        {"10", 10},
+        {"(0==_ENV.GLOB1)", 0 == _ENV.GLOB1},
+      }
+      local binops = {
+        {" and ", function (a,b) if not a then return a else return b end end},
+        {" or ", function (a,b) if a then return a else return b end end},
+      }
+      local cases = {}
+      local function createcases (n)
+        local res = {}
+        for i = 1, n - 1 do
+          for _, v1 in ipairs(cases[i]) do
+            for _, v2 in ipairs(cases[n - i]) do
+              for _, op in ipairs(binops) do
+                  local t = {
+                    "(" .. v1[1] .. op[1] .. v2[1] .. ")",
+                    op[2](v1[2], v2[2])
+                  }
+                  res[#res + 1] = t
+                  res[#res + 1] = {"not" .. t[1], not t[2]}
+              end
             end
           end
         end
+        return res
       end
-      return res
-    end
-    local level = 3
-    cases[1] = basiccases
-    for i = 2, level do cases[i] = createcases(i) end
-    local prog = [[if %s then IX = true end; return %s]]
-    local count = 0
-    for n = 1, level do
-      for _, v in pairs(cases[n]) do
-        local s = v[1]
-        local p = load(string.format(prog, s, s), "")
-        IX = false
-        local r = p()
-        assert(r == v[2] and IX == not not v[2], s)
-        count = count + 1
+      local level = #{level}
+      cases[1] = basiccases
+      for i = 2, level do cases[i] = createcases(i) end
+      local prog = [[if %s then IX = true end; return %s]]
+      local count = 0
+      for n = 1, level do
+        for _, v in pairs(cases[n]) do
+          local s = v[1]
+          local p = load(string.format(prog, s, s), "")
+          IX = false
+          local r = p()
+          assert(r == v[2] and IX == not not v[2], s)
+          count = count + 1
+        end
       end
+      return count
+      """
     end
-    return count
-    """
 
     test "every level-3 composition matches its value and branch side effect" do
-      assert [4105] = eval!(@harness)
+      assert [4105] = eval!(harness(3))
+    end
+
+    @tag :slow
+    @tag timeout: :infinity
+    test "every level-4 composition matches its value and branch side effect" do
+      assert [204_105] = eval!(harness(4))
     end
   end
 end
