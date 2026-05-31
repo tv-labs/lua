@@ -2,10 +2,10 @@
 id: A47
 title: Close open upvalues at if/while/for/repeat block exit
 issue: 276
-pr: null
+pr: 303
 branch: fix/open-upvalue-block-close
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - calls.lua
@@ -217,3 +217,52 @@ shape. Capture the `mix test --only lua53` pass-count delta and confirm
 - **Over-closing could regress unrelated upvalue tests.** The full
   `upvalue_test.exs` and closure-style suites must stay green; run them
   explicitly before the broader `mix test`.
+
+## Discoveries
+
+- `lib/lua/vm/executor.ex` and `lib/lua/vm/dispatcher.ex` needed **no
+  changes**: the `:close_upvalues` handler, the at-or-above sweep, and
+  the op-52 bytecode round-trip were all already in place from PR #286.
+  The entire fix lives in scope analysis (stash the watermark) and
+  codegen (emit the close at each block's tail).
+- Extending `close_upvalues` emission to `if`/`while`/`for`/`repeat`
+  bodies surfaced a gap in
+  `test/lua/compiler/max_registers_invariant_test.exs`: its
+  `register_positions/1` raises on any opcode it does not enumerate, and
+  op 52 (`close_upvalues`) had no case because no fixture previously
+  generated one outside a `do` block. Added the case (the threshold is a
+  register *watermark*, not a register operand, so it contributes no
+  register and maps to `[]`) and a public `Bytecode.op_close_upvalues/0`
+  accessor to mirror the other opcode accessors the test relies on.
+  These two files (`test/lua/compiler/max_registers_invariant_test.exs`,
+  `lib/lua/compiler/bytecode.ex`) were not in the original scope list but
+  are pure consumer-side wiring required to keep the suite green; no
+  behaviour change.
+
+## What changed
+
+PR: #303
+
+Files touched:
+- `lib/lua/compiler/scope.ex` — stash the pre-block `next_register`
+  watermark under `{:block_close_threshold, block}` for `if`
+  (then/elseif/else), `while`, `repeat`, `for`-numeric and `for`-in
+  bodies. Added a keyed `with_block_scope/3`; the old `with_block_scope/2`
+  was inlined away.
+- `lib/lua/compiler/codegen.ex` — new `append_block_close/3` helper;
+  emits a `:close_upvalues` at the tail of each `if` branch, while/for
+  body, and (after the condition) the repeat body.
+- `lib/lua/compiler/bytecode.ex` — public `op_close_upvalues/0` accessor.
+- `test/lua/compiler/max_registers_invariant_test.exs` — handle op 52.
+- `test/lua/vm/upvalue_test.exs` — new describe block with 9 regression
+  tests (sibling do/if/then-else/while/repeat/for-num/for-in + two
+  per-iteration loop captures).
+- `test/lua53_skips.exs` — removed the `calls.lua` 65..69 skip.
+
+Suite delta: `mix test` 2101 passed / 19 skipped (no failures);
+`mix test --only lua53` 17 passed / 12 skipped (unchanged), with
+`calls.lua` now executing lines 65–69. No follow-up issues opened.
+
+The executor and dispatcher were left untouched — the close handler,
+the at-or-above sweep, and the op-52 round-trip were already present
+from PR #286, as the plan anticipated.
