@@ -2,10 +2,10 @@
 id: A21a
 title: "Implement the os standard library"
 issue: 259
-pr: null
+pr: 289
 branch: fix/runtime-type-errors
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - all.lua
@@ -86,4 +86,14 @@ mix test test/lua53_suite_test.exs --only lua53
 
 ## Discoveries
 
-(populated during implementation)
+- The high-level `Lua` API already lists `os.getenv`, `os.exit`,
+  `os.tmpname`, `os.execute`, `os.remove`, `os.rename` in its
+  `@default_sandbox`, anticipating an os library. Those remain blocked
+  by default; the unit test pins that contract.
+- `all.lua`'s harness `do ... end` block (63..209) wraps the dofile
+  redefinition, so the skip must keep the `do`/`end` balanced — hence
+  two ranges (137..208, 211..263) rather than one.
+- After os lands, `all.lua` progresses to `attempt to call a number
+  value (upvalue 'report')` inside the dofile-redefinition closure — a
+  VM upvalue concern surfacing only through the unsupported
+  loadfile/string.dump path; left for a future coroutine/load pass.
