@@ -60,8 +60,9 @@ try do
   """)
 rescue
   e in Lua.RuntimeException ->
-    e.line   # => 2
-    e.source # => "something went wrong"
+    e.line    # => 2
+    e.source  # => "<eval>" (chunk name)
+    e.message # => "Lua runtime error: ...something went wrong..."
 end
 ```
 
@@ -109,7 +110,7 @@ but cannot inspect or dereference it:
 
 ```elixir
 Lua.eval!(~S[os.execute("rm -rf /")])
-# ** (Lua.RuntimeException) os.execute(_) is sandboxed
+# ** (Lua.RuntimeException) Lua runtime error: os.execute(_) is sandboxed
 ```
 
 To allow a specific operation, exclude it from the sandbox explicitly:
