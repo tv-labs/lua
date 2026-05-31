@@ -2,10 +2,10 @@
 id: A46
 title: "Position capture () in string pattern matching"
 issue: 257
-pr: null
+pr: 288
 branch: feat/pattern-position-capture
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - pm.lua
