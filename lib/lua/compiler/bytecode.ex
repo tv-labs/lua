@@ -427,4 +427,5 @@ defmodule Lua.Compiler.Bytecode do
   def op_while_loop, do: @op_while_loop
   def op_repeat_loop, do: @op_repeat_loop
   def op_generic_for, do: @op_generic_for
+  def op_close_upvalues, do: @op_close_upvalues
 end

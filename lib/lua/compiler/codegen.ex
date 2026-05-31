@@ -459,6 +459,7 @@ defmodule Lua.Compiler.Codegen do
 
     # Generate code for the then block
     {then_instructions, ctx} = gen_block(then_block, ctx)
+    then_instructions = append_block_close(then_instructions, then_block, ctx)
 
     # Generate code for elseifs and else by building nested if-else
     {else_instructions, ctx} = gen_elseifs_and_else(elseifs, else_block, ctx)
@@ -475,6 +476,7 @@ defmodule Lua.Compiler.Codegen do
 
     # Generate code for the body
     {body_instructions, ctx} = gen_block(body, ctx)
+    body_instructions = append_block_close(body_instructions, body, ctx)
 
     # Create while loop instruction
     loop_instruction = Instruction.while_loop(condition_instructions, cond_reg, body_instructions)
@@ -488,6 +490,12 @@ defmodule Lua.Compiler.Codegen do
 
     # Generate code for the condition
     {condition_instructions, cond_reg, ctx} = gen_expr(condition, ctx)
+
+    # The repeat-until condition is part of the body's scope (Lua 5.3 §3.3.4),
+    # so it may read body locals; close the body's open-upvalue cells only
+    # after the condition has run — i.e. at the tail of the condition body,
+    # which executes on every iteration boundary and at loop exit.
+    condition_instructions = append_block_close(condition_instructions, body, ctx)
 
     # Create repeat loop instruction
     loop_instruction =
@@ -536,6 +544,7 @@ defmodule Lua.Compiler.Codegen do
 
     # Generate body
     {body_instructions, ctx} = gen_block(body, ctx)
+    body_instructions = append_block_close(body_instructions, body, ctx)
 
     # Create numeric for instruction
     # The VM will handle: copying base to loop_var_reg, incrementing, checking limit
@@ -618,6 +627,7 @@ defmodule Lua.Compiler.Codegen do
 
     # Generate body
     {body_instructions, ctx} = gen_block(body, ctx)
+    body_instructions = append_block_close(body_instructions, body, ctx)
 
     # Emit generic_for instruction with var_regs as a list of register indices
     loop_instruction = Instruction.generic_for(base, var_regs, body_instructions)
@@ -761,6 +771,25 @@ defmodule Lua.Compiler.Codegen do
   # Stub for other statements
   defp gen_statement(_stmt, ctx), do: {[], ctx}
 
+  # Append a `:close_upvalues` to a control-flow block's instruction list so
+  # any open-upvalue cell over a register the block's locals occupied is
+  # detached when the block exits (Lua 5.3 §3.4.10). The threshold is the
+  # pre-block `next_register` watermark stashed by scope analysis under
+  # `{:block_close_threshold, block}`; registers below it belong to
+  # enclosing scopes and are left intact. Emitting unconditionally is cheap —
+  # the executor's close helper short-circuits when `open_upvalues` is empty.
+  #
+  # If/elseif/else branches, while/repeat bodies, and for bodies all key on
+  # the block AST node. Loop bodies re-run this close on every iteration
+  # boundary and on loop exit; cells therefore persist within an iteration
+  # and close only at its tail, which is exactly the §3.4.10 contract.
+  defp append_block_close(instructions, block, ctx) do
+    case Map.fetch(ctx.scope.var_map, {:block_close_threshold, block}) do
+      {:ok, threshold} -> instructions ++ [Instruction.close_upvalues(threshold)]
+      :error -> instructions
+    end
+  end
+
   # Emit instructions that load the head value of a multi-name FuncDecl
   # (`function a.b.c(...)`) into a register, using the var_map entry
   # populated by scope analysis. Mirrors the four cases of `gen_expr` on
@@ -850,7 +879,8 @@ defmodule Lua.Compiler.Codegen do
 
   defp gen_elseifs_and_else([], else_block, ctx) do
     # No elseifs, just else block
-    gen_block(else_block, ctx)
+    {else_instructions, ctx} = gen_block(else_block, ctx)
+    {append_block_close(else_instructions, else_block, ctx), ctx}
   end
 
   defp gen_elseifs_and_else([{elseif_cond, elseif_block} | rest_elseifs], else_block, ctx) do
@@ -859,6 +889,7 @@ defmodule Lua.Compiler.Codegen do
 
     # Generate body for this elseif
     {then_instructions, ctx} = gen_block(elseif_block, ctx)
+    then_instructions = append_block_close(then_instructions, elseif_block, ctx)
 
     # Generate remaining elseifs and else
     {else_instructions, ctx} = gen_elseifs_and_else(rest_elseifs, else_block, ctx)

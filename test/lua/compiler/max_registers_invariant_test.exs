@@ -84,6 +84,11 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
       op == Bytecode.op_while_loop() -> :while_loop
       op == Bytecode.op_repeat_loop() -> :repeat_loop
       op == Bytecode.op_generic_for() -> :generic_for
+      # close_upvalues carries a register *watermark* (the pre-block
+      # next_register), not a register operand it reads or writes. The
+      # watermark can equal max_registers (one past the last live slot), so
+      # it must not count toward the max-register bound.
+      op == Bytecode.op_close_upvalues() -> []
       true -> raise "register_positions/1 is missing a case for opcode #{inspect(op)}"
     end
   end
