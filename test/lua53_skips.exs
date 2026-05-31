@@ -30,7 +30,19 @@
 
 %{
   "all.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "upstream harness file, pending initial triage", issue: nil}
+    %{
+      lines: 137..208,
+      category: :unimplemented,
+      reason:
+        "harness drives every other suite file via dofile/loadfile/string.dump/coroutine.wrap, none supported in the sandbox",
+      issue: 259
+    },
+    %{
+      lines: 211..263,
+      category: :unimplemented,
+      reason: "post-run summary uses io.open and timing files unavailable in the sandbox",
+      issue: 259
+    }
   ],
   "big.lua" => [
     %{
