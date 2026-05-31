@@ -80,6 +80,9 @@ jobs:
       - name: Format
         run: mix format --check-formatted
 
+      - name: Docs
+        run: mix docs --warnings-as-errors
+
   website:
     name: Website tests
     runs-on: ubuntu-latest

@@ -14,6 +14,8 @@ defmodule Lua.VM.TypeError do
 
   alias Lua.VM.ErrorFormatter
 
+  @type t :: %__MODULE__{}
+
   defexception [:value, :source, :message, :call_stack, :line, :error_kind, :value_type]
 
   @impl true
@@ -48,6 +50,7 @@ defmodule Lua.VM.TypeError do
 
   Pass `:source_code` to populate `source_context`.
   """
+  @spec to_map(t(), keyword()) :: map()
   def to_map(%__MODULE__{} = error, opts \\ []) do
     ErrorFormatter.to_map(:type_error, raw_message(error.value),
       source: error.source,

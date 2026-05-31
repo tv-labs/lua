@@ -41,6 +41,10 @@ defmodule Lua.VM.ArgumentError do
         details: "value out of range"
   """
 
+  alias Lua.VM.RuntimeError
+
+  @type t :: %__MODULE__{}
+
   defexception [
     :function_name,
     :arg_num,
@@ -116,6 +120,7 @@ defmodule Lua.VM.ArgumentError do
 
       ArgumentError.value_expected("string.lower", 1)
   """
+  @spec value_expected(String.t(), pos_integer()) :: t()
   def value_expected(function_name, arg_num) do
     exception(
       function_name: function_name,
@@ -131,6 +136,7 @@ defmodule Lua.VM.ArgumentError do
 
       ArgumentError.type_error("string.rep", 2, "number", "string")
   """
+  @spec type_error(String.t(), pos_integer(), String.t(), String.t()) :: t()
   def type_error(function_name, arg_num, expected, got) do
     exception(
       function_name: function_name,
@@ -151,7 +157,8 @@ defmodule Lua.VM.ArgumentError do
 
       raise ArgumentError.wrong_number_of_arguments("insert")
   """
+  @spec wrong_number_of_arguments(String.t()) :: RuntimeError.t()
   def wrong_number_of_arguments(function_name) do
-    Lua.VM.RuntimeError.exception(value: "wrong number of arguments to '#{function_name}'")
+    RuntimeError.exception(value: "wrong number of arguments to '#{function_name}'")
   end
 end

@@ -1,11 +1,11 @@
 ---
 id: A32
 title: Public API docstring audit — every public function carries its weight
-issue: null
-pr: null
+issue: 266
+pr: 301
 branch: docs/docstring-audit
 base: main
-status: ready
+status: review
 direction: A
 unlocks:
   - "world-class docs" promise
@@ -115,4 +115,31 @@ experience should be coherent.
 
 ## Discoveries
 
-(populated during implementation)
+- The A27 display structs ship as `Lua.VM.Display.{Closure,Userdata,NativeFunc,Table}`
+  (internal VM namespace), not the top-level `Lua.Closure` / `Lua.Userdata` /
+  `Lua.NativeFunc` names the plan anticipated. They are not on the public surface
+  and were left out of scope.
+- The named in-scope modules already carried strong prose docstrings with examples.
+  The real gap on this surface was missing `@spec`/`@type` and a CI guard, not
+  missing prose.
+- `mix.exs` docs config already renders cleanly (`mix docs --warnings-as-errors`
+  exits 0 before any changes), so no config tightening was needed.
+
+## What changed
+
+- `lib/lua.ex` — added `@spec` to every public function (`new/1`, `sandbox/2`,
+  `set_lua_paths/2`, `set!/3`, `get!/3`, `eval!`, `parse_chunk/1`, `load_chunk!/2`,
+  `call_function/3`, `call_function!/3`, `encode!/2`, `encode_list!/2`, `decode!/2`,
+  `decode_list!/2`, `load_file!/2`, `load_api/3`, `put_private/3`, `get_private/2`,
+  `get_private!/2`, `delete_private/2`).
+- `lib/lua/table.ex` — added `@spec` to `as_list/2`, `as_map/1`, `as_string/2`,
+  `deep_cast/1` plus `## Options`/`## Returns` prose where missing.
+- `lib/lua/runtime_exception.ex`, `lib/lua/vm/type_error.ex`,
+  `lib/lua/vm/runtime_error.ex`, `lib/lua/vm/assertion_error.ex`,
+  `lib/lua/vm/argument_error.ex` — added `@type t` and `@spec` on public helpers
+  (`to_map/2`, `value_expected/2`, `type_error/4`, `wrong_number_of_arguments/1`).
+- `.github/workflows/ci.yml` — added a `mix docs --warnings-as-errors` step to the
+  build job so future PRs can't regress doc warnings.
+- Verification: `mix test` 2092 passed (56 doctests), 19 skipped;
+  `mix docs --warnings-as-errors` exit 0; `mix dialyzer` 0 errors.
+- PR: #301.
