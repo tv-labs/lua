@@ -2245,9 +2245,7 @@ defmodule Lua.VM.Executor do
   defp hint_namewhat({:global, _}), do: "global"
   defp hint_namewhat({:local, _}), do: "local"
   defp hint_namewhat({:upvalue, _}), do: "upvalue"
-  defp hint_namewhat({:field, _}), do: "field"
   defp hint_namewhat({:field, _, _}), do: "field"
-  defp hint_namewhat({:method, _}), do: "method"
   defp hint_namewhat({:method, _, _}), do: "method"
   defp hint_namewhat(_), do: ""
 
