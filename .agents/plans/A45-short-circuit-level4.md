@@ -2,10 +2,10 @@
 id: A45
 title: "Bisect constructs.lua short-circuit harness at level=4; pin green, narrow skip"
 issue: 281
-pr: null
+pr: 294
 branch: fix/short-circuit-level4
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - constructs.lua
