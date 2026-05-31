@@ -314,7 +314,7 @@ defmodule Lua.VM.Stdlib.String do
 
   # string.format(formatstring, ...) - formats strings with C-style format specifiers
   defp string_format([fmt | args], state) when is_binary(fmt) do
-    result = format_string(fmt, args, "")
+    result = format_string(fmt, args, [])
     {[result], state}
   rescue
     e in Lua.VM.RuntimeError ->
@@ -330,23 +330,28 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   # Format string parser - supports full format specifiers: %[flags][width][.precision]specifier
-  defp format_string("", _args, acc), do: acc
+  #
+  # `acc` is an iolist, appended as `[acc, piece]` so each step is O(1) and
+  # the result is materialized exactly once via `IO.iodata_to_binary/1` at
+  # the base case. Avoids the per-character binary reallocation that made
+  # this O(n^2) in the format string length.
+  defp format_string("", _args, acc), do: IO.iodata_to_binary(acc)
 
   defp format_string("%" <> rest, args, acc) do
     case rest do
       "%" <> rest2 ->
-        format_string(rest2, args, acc <> "%")
+        format_string(rest2, args, [acc, "%"])
 
       _ ->
         {spec, rest2} = parse_format_spec(rest)
         [arg | remaining_args] = args
         str = apply_format_spec(spec, arg)
-        format_string(rest2, remaining_args, acc <> str)
+        format_string(rest2, remaining_args, [acc, str])
     end
   end
 
   defp format_string(<<char::utf8, rest::binary>>, args, acc) do
-    format_string(rest, args, acc <> <<char::utf8>>)
+    format_string(rest, args, [acc, <<char::utf8>>])
   end
 
   # Parse a format spec: [flags][width][.precision]specifier
@@ -815,7 +820,11 @@ defmodule Lua.VM.Stdlib.String do
   defp apply_width_flags(str, flags, width) do
     width = width || 0
 
-    if String.length(str) >= width do
+    # Width is a byte count. The numeric specifiers (%d/%f/%x/...) emit
+    # single-byte ASCII, and PUC-Lua measures `%s` by bytes too, so
+    # `byte_size/1` matches the reference without the grapheme walk that
+    # `String.length/1` would do.
+    if byte_size(str) >= width do
       str
     else
       pad_char =

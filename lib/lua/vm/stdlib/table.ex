@@ -32,6 +32,7 @@ defmodule Lua.VM.Stdlib.Table do
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
+  alias Lua.VM.Table
 
   # Upper bound on the number of values `table.unpack` may produce. Lua
   # 5.3's `ltablib.c` rejects ranges in two arms: the element count
@@ -177,7 +178,7 @@ defmodule Lua.VM.Stdlib.Table do
   end
 
   # table.concat(list [, sep [, i [, j]]])
-  defp table_concat([{:tref, _} = tref | rest], state) do
+  defp table_concat([{:tref, id} = tref | rest], state) do
     sep = Enum.at(rest, 0, "")
     i = Enum.at(rest, 1, 1)
 
@@ -215,32 +216,31 @@ defmodule Lua.VM.Stdlib.Table do
         got: Util.typeof(j)
     end
 
-    # Read each element via __index. Empty range (i > j) yields "".
+    # Read each element. Empty range (i > j) yields "". Plain tables (no
+    # metatable) read directly from `data`, skipping the __index dispatch;
+    # tables with a metatable keep the Executor path so __index is observed.
+    table = Map.fetch!(state.tables, id)
+
     {elements, state} =
-      if i > j do
-        {[], state}
-      else
-        i..j//1
-        |> Enum.reduce({[], state}, fn idx, {acc, st} ->
-          {val, st} = Executor.table_index(tref, idx, st)
+      cond do
+        i > j ->
+          {[], state}
 
-          str =
-            case val do
-              v when is_binary(v) ->
-                v
+        table.metatable == nil ->
+          elements =
+            Enum.map(i..j//1, fn idx ->
+              concat_value(Table.get_data(table.data, idx), idx)
+            end)
 
-              v when is_number(v) ->
-                to_string(v)
+          {elements, state}
 
-              _ ->
-                raise ArgumentError,
-                  function_name: "table.concat",
-                  details: "invalid value (#{Util.typeof(val)}) at index #{idx}"
-            end
-
-          {[str | acc], st}
-        end)
-        |> then(fn {acc, st} -> {Enum.reverse(acc), st} end)
+        true ->
+          i..j//1
+          |> Enum.reduce({[], state}, fn idx, {acc, st} ->
+            {val, st} = Executor.table_index(tref, idx, st)
+            {[concat_value(val, idx) | acc], st}
+          end)
+          |> then(fn {acc, st} -> {Enum.reverse(acc), st} end)
       end
 
     {[Enum.join(elements, sep)], state}
@@ -258,8 +258,19 @@ defmodule Lua.VM.Stdlib.Table do
     raise ArgumentError.value_expected("table.concat", 1)
   end
 
+  # Coerce a single element to its concatenated string form. Strings pass
+  # through; numbers stringify; anything else is an error naming the index.
+  defp concat_value(v, _idx) when is_binary(v), do: v
+  defp concat_value(v, _idx) when is_number(v), do: to_string(v)
+
+  defp concat_value(v, idx) do
+    raise ArgumentError,
+      function_name: "table.concat",
+      details: "invalid value (#{Util.typeof(v)}) at index #{idx}"
+  end
+
   # table.sort(list [, comp])
-  defp table_sort([{:tref, _} = tref | rest], state) do
+  defp table_sort([{:tref, id} = tref | rest], state) do
     comp = List.first(rest)
 
     # Resolve length via __len and materialize the slice via __index. We
@@ -268,36 +279,13 @@ defmodule Lua.VM.Stdlib.Table do
     # than mutating the raw table mid-sort.
     {len, state} = Executor.table_length(tref, state)
 
-    {values, state} =
-      if len <= 1 do
-        # Even for len 0/1 we still call __index so callers observe the
-        # access pattern matching the reference impl. For len == 1 we
-        # skip the sort entirely; the slot is already in order.
-        if len == 0 do
-          {[], state}
-        else
-          {v, state} = Executor.table_index(tref, 1, state)
-          {[v], state}
-        end
-      else
-        1..len//1
-        |> Enum.reduce({[], state}, fn i, {acc, st} ->
-          {v, st} = Executor.table_index(tref, i, st)
-          {[v | acc], st}
-        end)
-        |> then(fn {acc, st} -> {Enum.reverse(acc), st} end)
-      end
+    table = Map.fetch!(state.tables, id)
 
-    {sorted, state} = sort_values(values, comp, state)
-
-    state =
-      sorted
-      |> Enum.with_index(1)
-      |> Enum.reduce(state, fn {val, idx}, st ->
-        Executor.table_newindex(tref, idx, val, st)
-      end)
-
-    {[], state}
+    if table.metatable == nil do
+      sort_plain(id, table, len, comp, state)
+    else
+      sort_via_metamethods(tref, len, comp, state)
+    end
   end
 
   defp table_sort([tref | _], _state) do
@@ -310,6 +298,64 @@ defmodule Lua.VM.Stdlib.Table do
 
   defp table_sort([], _state) do
     raise ArgumentError.value_expected("table.sort", 1)
+  end
+
+  # Fast path for a metatable-less table: read each slot directly from
+  # `data`, sort, then write the sorted slice back with a single
+  # `Map.put/3` into `state.tables`. Skips the __index/__newindex dispatch
+  # machinery entirely, which is safe because there are no metamethods to
+  # observe.
+  defp sort_plain(_id, _table, len, _comp, state) when len <= 1 do
+    {[], state}
+  end
+
+  defp sort_plain(id, table, len, comp, state) do
+    values = Enum.map(1..len//1, fn i -> Table.get_data(table.data, i) end)
+
+    {sorted, state} = sort_values(values, comp, state)
+
+    # Re-fetch in case the comparator mutated the table; without a
+    # comparator the table is unchanged and this is the same struct.
+    table = Map.fetch!(state.tables, id)
+
+    updated =
+      sorted
+      |> Enum.with_index(1)
+      |> Enum.reduce(table, fn {val, idx}, tbl -> Table.put(tbl, idx, val) end)
+
+    {[], %{state | tables: Map.put(state.tables, id, updated)}}
+  end
+
+  # Metatable-backed path: read via __index and write back via __newindex
+  # so the metamethod observation order matches the reference impl.
+  defp sort_via_metamethods(_tref, 0, _comp, state), do: {[], state}
+
+  defp sort_via_metamethods(tref, 1, comp, state) do
+    # len == 1 is already in order; still read the slot so __index fires.
+    {v, state} = Executor.table_index(tref, 1, state)
+    {_sorted, state} = sort_values([v], comp, state)
+    {[], state}
+  end
+
+  defp sort_via_metamethods(tref, len, comp, state) do
+    {values, state} =
+      1..len//1
+      |> Enum.reduce({[], state}, fn i, {acc, st} ->
+        {v, st} = Executor.table_index(tref, i, st)
+        {[v | acc], st}
+      end)
+      |> then(fn {acc, st} -> {Enum.reverse(acc), st} end)
+
+    {sorted, state} = sort_values(values, comp, state)
+
+    state =
+      sorted
+      |> Enum.with_index(1)
+      |> Enum.reduce(state, fn {val, idx}, st ->
+        Executor.table_newindex(tref, idx, val, st)
+      end)
+
+    {[], state}
   end
 
   # Sort values, threading state through the comparator when one is
