@@ -240,11 +240,13 @@ defmodule Lua.VM.Stdlib.Debug do
 
   # Resolve the up-th (1-based) upvalue of a closure to {name, cell_ref}. Every
   # element of a closure's upvalue tuple is a cell ref keyed in
-  # `state.upvalue_cells`; the name comes from the prototype's `upvalue_names`.
+  # `state.upvalue_cells`; the name comes from the prototype's `upvalue_names`,
+  # which is built alongside the upvalue tuple and is the same length by
+  # construction.
   defp upvalue_slot({tag, proto, upvalues}, n) when tag in [:lua_closure, :compiled_closure] do
     index = trunc(n) - 1
 
-    if index >= 0 and index < tuple_size(upvalues) and index < length(proto.upvalue_names) do
+    if index >= 0 and index < tuple_size(upvalues) do
       {:ok, Enum.at(proto.upvalue_names, index), elem(upvalues, index)}
     else
       :error

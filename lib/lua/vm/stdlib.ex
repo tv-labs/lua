@@ -457,12 +457,8 @@ defmodule Lua.VM.Stdlib do
   # The optional 4th argument to `load(chunk, chunkname, mode, env)` is the
   # environment the loaded chunk sees as `_ENV`. When absent or nil it defaults
   # to the current global table `_G` (Lua 5.3 §6.1).
-  defp load_env_arg(rest, state) do
-    case Enum.at(rest, 2) do
-      nil -> State.g_ref(state)
-      env -> env
-    end
-  end
+  defp load_env_arg([_chunkname, _mode, env | _], _state) when env != nil, do: env
+  defp load_env_arg(_rest, state), do: State.g_ref(state)
 
   defp collect_reader_chunks(reader, state, acc) do
     {results, state} = Executor.call_function(reader, [], state)
