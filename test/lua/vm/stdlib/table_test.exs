@@ -149,7 +149,11 @@ defmodule Lua.VM.Stdlib.TableTest do
             "return table.unpack({}, 0, math.maxinteger)",
             "return table.unpack({}, 1, math.maxinteger)",
             "return table.unpack({}, math.mininteger, math.maxinteger)",
-            "return table.unpack({}, 0, (1 << 31) - 1)"
+            "return table.unpack({}, 0, (1 << 31) - 1)",
+            # Element count exactly INT_MAX: `j - i == INT_MAX - 1`. PUC
+            # rejects this via the `lua_checkstack` arm, not the count
+            # overflow arm.
+            "return table.unpack({}, 1, (1 << 31) - 1)"
           ] do
         assert_raise Lua.RuntimeException, ~r/too many results/, fn ->
           Lua.eval!(Lua.new(), code)
