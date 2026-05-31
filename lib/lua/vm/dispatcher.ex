@@ -98,6 +98,7 @@ defmodule Lua.VM.Dispatcher do
   @op_while_loop 49
   @op_repeat_loop 50
   @op_generic_for 51
+  @op_close_upvalues 52
 
   @doc """
   Execute a compiled prototype against `args` and `state`.
@@ -952,6 +953,10 @@ defmodule Lua.VM.Dispatcher do
               %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
           end
 
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+      {@op_close_upvalues, threshold} ->
+        state = Executor.dispatcher_close_open_upvalues_at_or_above(state, threshold)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
       # ── Vararg ────────────────────────────────────────────────────

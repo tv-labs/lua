@@ -356,12 +356,19 @@ defmodule Lua.Compiler.Scope do
     resolve_function_scope(local_func, params, body, state)
   end
 
-  defp resolve_statement(%Statement.Do{body: body}, state) do
+  defp resolve_statement(%Statement.Do{body: body} = do_stmt, state) do
     # Do blocks create a new scope - save and restore locals/next_register
     saved_locals = state.locals
     saved_next_register = state.next_register
 
     state = resolve_block(body, state)
+
+    # Stash the pre-block register watermark so codegen can emit a
+    # `:close_upvalues` at block exit. Per Lua 5.3 §3.4.10 any open-upvalue
+    # cell over a register that goes out of scope here must be detached so
+    # the next statement that reuses the slot does not read or write through
+    # the stale cell — see locals.lua:148-154 for the symptom this prevents.
+    state = %{state | var_map: Map.put(state.var_map, {:do_close_threshold, do_stmt}, saved_next_register)}
 
     # Restore outer scope (inner locals don't leak out)
     %{state | locals: saved_locals, next_register: saved_next_register}

@@ -17,6 +17,12 @@ defmodule Lua.Compiler.Instruction do
   def set_upvalue(index, source), do: {:set_upvalue, index, source}
   def get_open_upvalue(dest, reg), do: {:get_open_upvalue, dest, reg}
   def set_open_upvalue(reg, source), do: {:set_open_upvalue, reg, source}
+
+  # Close any open-upvalue cells whose source register is at or above
+  # `threshold`. Lua 5.3 §3.4.10: locals going out of scope (block exit) must
+  # have their captured cells detached from the register so subsequent
+  # re-uses of those registers don't read through the stale cell.
+  def close_upvalues(threshold), do: {:close_upvalues, threshold}
   def get_global(dest, name), do: {:get_global, dest, name}
   def set_global(name, source), do: {:set_global, name, source}
 

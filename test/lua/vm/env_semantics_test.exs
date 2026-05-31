@@ -82,4 +82,39 @@ defmodule Lua.VM.EnvSemanticsTest do
       assert {[true], _} = Lua.eval!(lua, "return _G == _ENV")
     end
   end
+
+  describe "open-upvalue cells are closed when a block scope ends" do
+    # A nested function declaration inside `do local _ENV = ... end` captures
+    # the inner `_ENV` via the open-upvalue mechanism. When the `do` block
+    # exits, the cell over that register must be detached so a subsequent
+    # `do local _ENV = ... end` that reuses the same slot is not read through
+    # the stale cell. Lua 5.3 §3.4.10.
+    test "fresh local _ENV in a sibling block is not read through a prior cell", %{lua: lua} do
+      code = """
+      do local _ENV = {}
+        function foo() end
+      end
+      do local _ENV = {assert=assert, A=20}
+        assert(A == 20)
+      end
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+
+    test "nested local _ENV redirection sees the inner table at each level", %{lua: lua} do
+      code = """
+      do local _ENV = {assert=assert, A=10}
+        do local _ENV = {assert=assert, A=20}
+          assert(A == 20)
+        end
+        assert(A == 10)
+      end
+      return true
+      """
+
+      assert {[true], _} = Lua.eval!(lua, code)
+    end
+  end
 end
