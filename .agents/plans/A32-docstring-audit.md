@@ -1,11 +1,11 @@
 ---
 id: A32
 title: Public API docstring audit — every public function carries its weight
-issue: null
+issue: 266
 pr: null
 branch: docs/docstring-audit
 base: main
-status: ready
+status: in-progress
 direction: A
 unlocks:
   - "world-class docs" promise
