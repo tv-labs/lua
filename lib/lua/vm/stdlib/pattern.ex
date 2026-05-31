@@ -13,6 +13,9 @@ defmodule Lua.VM.Stdlib.Pattern do
   - Escape: % + non-alphanumeric = literal
   """
 
+  alias Lua.VM.RuntimeError
+  alias Lua.VM.Stdlib.Util
+
   @doc """
   Find first match of pattern in subject starting at position `init` (1-based).
   Returns `{start, stop, captures}` or `:nomatch`.
@@ -231,7 +234,7 @@ defmodule Lua.VM.Stdlib.Pattern do
         result when is_number(result) -> to_string(result)
         false -> whole_match
         nil -> whole_match
-        _ -> whole_match
+        other -> raise RuntimeError, value: "invalid replacement value (a #{Util.typeof(other)})"
       end
 
     {replacement, state}
@@ -249,21 +252,32 @@ defmodule Lua.VM.Stdlib.Pattern do
         idx == 0 ->
           whole
 
-        # Lua quirk: if the pattern has no captures, %1 refers to the
-        # whole match (PUC-Lua compatibility). Beyond %1 in that case,
-        # PUC-Lua errors; we fall back to "" to keep the engine total.
-        captures == [] and idx == 1 ->
+        # When the pattern has no explicit captures, %1 refers to the
+        # whole match (PUC-Lua compatibility). Any higher index with no
+        # captures, or any index past the number of captures, is invalid.
+        idx <= length(captures) ->
+          Enum.at(captures, idx - 1)
+
+        idx == 1 ->
           whole
 
         true ->
-          Enum.at(captures, idx - 1) || ""
+          raise RuntimeError, value: "invalid capture index %#{idx} in replacement string"
       end
 
     capture_to_binary(value) <> replace_captures(rest, whole, captures)
   end
 
-  defp replace_captures("%" <> <<c, rest::binary>>, whole, captures) do
-    <<c>> <> replace_captures(rest, whole, captures)
+  defp replace_captures("%%" <> rest, whole, captures) do
+    "%" <> replace_captures(rest, whole, captures)
+  end
+
+  defp replace_captures("%" <> <<_c, _rest::binary>>, _whole, _captures) do
+    raise RuntimeError, value: "invalid use of '%' in replacement string"
+  end
+
+  defp replace_captures("%", _whole, _captures) do
+    raise RuntimeError, value: "invalid use of '%' in replacement string"
   end
 
   defp replace_captures(<<c, rest::binary>>, whole, captures) do

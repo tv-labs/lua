@@ -194,9 +194,10 @@
   ],
   "pm.lua" => [
     %{
-      lines: 233..238,
+      lines: 236..237,
       category: :unimplemented,
-      reason: "gsub capture-index/replacement-value error validation not yet implemented",
+      reason:
+        "pattern backreferences %0 and %1 inside a capture body should raise 'invalid capture index' (pattern-engine gap, not gsub replacement validation)",
       issue: 257
     },
     %{
