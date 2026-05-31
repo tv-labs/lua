@@ -66,5 +66,3 @@ mix test test/lua53_suite_test.exs --only lua53
 - Other suite files may assert the old `'n//0'` wording. Mitigated:
   the suite (`errors.lua`, `math.lua`) expects "divide by zero", and
   our own tests were the only ones pinning the old message.
-</content>
-</invoke>
