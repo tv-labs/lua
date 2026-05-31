@@ -24,6 +24,61 @@ defmodule Lua.Language.Stdlib.DebugTest do
     assert {["Lua"], _} = Lua.eval!(lua, code)
   end
 
+  test "debug.getinfo(1, 'n') matches the issue repro", %{lua: lua} do
+    code = """
+    function F(a)
+      assert(debug.getinfo(1, "n").name == 'F')
+      return a
+    end
+    return F(1)
+    """
+
+    assert {[1], _} = Lua.eval!(lua, code)
+  end
+
+  test "debug.getinfo(1, 'n') classifies namewhat by call form", %{lua: lua} do
+    code = """
+    local results = {}
+
+    function GlobalFn() return debug.getinfo(1, "n") end
+    local g = GlobalFn()
+    results[1] = g.name
+    results[2] = g.namewhat
+
+    local function LocalFn() return debug.getinfo(1, "n") end
+    local l = LocalFn()
+    results[3] = l.name
+    results[4] = l.namewhat
+
+    local t = {}
+    function t.field() return debug.getinfo(1, "n") end
+    local f = t.field()
+    results[5] = f.name
+    results[6] = f.namewhat
+
+    function t:method() return debug.getinfo(1, "n") end
+    local m = t:method()
+    results[7] = m.name
+    results[8] = m.namewhat
+
+    return results[1], results[2], results[3], results[4],
+           results[5], results[6], results[7], results[8]
+    """
+
+    assert {["GlobalFn", "global", "LocalFn", "local", "field", "field", "method", "method"], _} =
+             Lua.eval!(lua, code)
+  end
+
+  test "debug.getinfo(1, 'n') leaves name nil when the call carries no hint", %{lua: lua} do
+    code = """
+    local fns = { function() return debug.getinfo(1, "n") end }
+    local info = fns[1]()
+    return info.name, info.namewhat
+    """
+
+    assert {[nil, ""], _} = Lua.eval!(lua, code)
+  end
+
   test "debug.traceback returns a string", %{lua: lua} do
     code = """
     local tb = debug.traceback("error here")

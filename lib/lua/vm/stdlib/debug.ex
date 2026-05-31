@@ -109,13 +109,16 @@ defmodule Lua.VM.Stdlib.Debug do
   # currently-running Lua chunk from the native callback's perspective).
   # Higher levels walk the saved call frames.
   defp stack_info_for_level(level, state) do
+    {name, namewhat} = name_info_for_level(level, state)
+
     case stack_position_for_level(level, state) do
       {line, source} ->
         %{
           "source" => source || "=?",
           "currentline" => line || -1,
           "what" => "Lua",
-          "name" => nil
+          "name" => name,
+          "namewhat" => namewhat
         }
 
       nil ->
@@ -123,10 +126,26 @@ defmodule Lua.VM.Stdlib.Debug do
           "source" => "=?",
           "currentline" => -1,
           "what" => "main",
-          "name" => nil
+          "name" => name,
+          "namewhat" => namewhat
         }
     end
   end
+
+  # The `"n"` fields describe how the function at `level` was reached, recovered
+  # from the caller's call instruction (Lua 5.3 §6.10, PUC-Lua `getfuncname`).
+  # When a native callback is executing, the running Lua function's own frame is
+  # the head of `call_stack`, so level `L` maps to `call_stack[L - 1]`. A frame
+  # without a recovered name (e.g. a call through a temporary, or a function
+  # reached by a tail call) reports `name == nil` / `namewhat == ""`.
+  defp name_info_for_level(level, state) when level >= 1 do
+    case Enum.at(state.call_stack, level - 1) do
+      nil -> {nil, ""}
+      frame -> {Map.get(frame, :name), Map.get(frame, :namewhat, "")}
+    end
+  end
+
+  defp name_info_for_level(_level, _state), do: {nil, ""}
 
   defp stack_position_for_level(1, _state) do
     case Executor.current_position() do
