@@ -17,6 +17,8 @@ defmodule Lua.RuntimeException do
 
   @runtime_prefix "Lua runtime error: "
 
+  @type t :: %__MODULE__{}
+
   defexception [:message, :original, :state, :line, :source, :call_stack]
 
   @impl true

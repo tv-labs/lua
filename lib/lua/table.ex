@@ -22,7 +22,17 @@ defmodule Lua.Table do
       iex> Lua.Table.as_list([{2, "b"}, {1, "a"}, {3, "c"}], sort: true)
       ["a", "b", "c"]
 
+  ## Options
+
+    * `:sort` - (default `false`) when `true`, sorts entries by their
+      integer key before dropping keys, so the result is index-ordered
+      regardless of the input order.
+
+  ## Returns
+
+  A list of the table's values in key order.
   """
+  @spec as_list([{term(), term()}], keyword()) :: [term()]
   def as_list(values, opts \\ []) do
     opts = Keyword.validate!(opts, sort: false)
 
@@ -44,6 +54,7 @@ defmodule Lua.Table do
       iex> Lua.Table.as_map([{"a", 1}, {"b", 2}])
       %{"a" => 1, "b" => 2}
   """
+  @spec as_map([{term(), term()}]) :: map()
   def as_map(values) do
     Map.new(values)
   end
@@ -73,7 +84,12 @@ defmodule Lua.Table do
   ### Options
   * `:formatter` - A 2-arity function used to format values before serialization. The key and value
   are passed as arguments. If there is no key, it will default to `nil`.
+
+  ## Returns
+
+  A string containing the Lua table literal.
   """
+  @spec as_string(list() | map(), keyword()) :: String.t()
   def as_string(table, opts \\ []) do
     opts = Keyword.validate!(opts, formatter: &default_formatter/2)
 
@@ -157,7 +173,13 @@ defmodule Lua.Table do
 
       iex> Lua.Table.deep_cast([{"a", 1}, {"b", [{1, 3}, {2, 4}]}])
       %{"a" => 1, "b" => [3, 4]}
+
+  ## Returns
+
+  A list when the table looks like a 1-indexed array, otherwise a map.
+  Nested tables are cast recursively.
   """
+  @spec deep_cast([{term(), term()}]) :: list() | map()
   def deep_cast(value) do
     case value do
       [{1, _val} | _rest] = list ->

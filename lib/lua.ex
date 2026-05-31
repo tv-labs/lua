@@ -101,6 +101,7 @@ defmodule Lua do
       iex> message =~ "stack overflow"
       true
   """
+  @spec new(keyword()) :: t()
   def new(opts \\ []) do
     opts = Keyword.validate!(opts, sandboxed: @default_sandbox, exclude: [], debug: false, max_call_depth: :infinity)
     exclude = Keyword.fetch!(opts, :exclude)
@@ -169,6 +170,7 @@ defmodule Lua do
       iex> Lua.sandbox(lua, [:os, :exit])
 
   """
+  @spec sandbox(t(), [atom() | String.t()]) :: t()
   def sandbox(lua, path) do
     set!(lua, path, fn args ->
       raise Lua.RuntimeException,
@@ -193,6 +195,7 @@ defmodule Lua do
   >
   > By default these are sandboxed, see the `:exclude` option in `Lua.new/1` to allow them.
   """
+  @spec set_lua_paths(t(), [String.t()] | String.t()) :: t()
   def set_lua_paths(%__MODULE__{} = lua, paths) when is_list(paths) do
     set_lua_paths(lua, Enum.join(paths, ";"))
   end
@@ -233,6 +236,7 @@ defmodule Lua do
       iex> {[3], _} = Lua.eval!(lua, "set_count(1, 2, 3); return count")
 
   """
+  @spec set!(t(), atom() | String.t() | [atom() | String.t()], term()) :: t()
   def set!(%__MODULE__{}, [], _) do
     raise Lua.RuntimeException, "Lua.set!/3 cannot have empty keys"
   end
@@ -389,6 +393,7 @@ defmodule Lua do
   ### Options
   * `:decode` - (default `true`) - By default, values are decoded
   """
+  @spec get!(t(), [atom() | String.t()], keyword()) :: term()
   def get!(%__MODULE__{state: state}, keys, opts \\ []) when is_list(keys) do
     opts = Keyword.validate!(opts, decode: true)
 
@@ -465,6 +470,10 @@ defmodule Lua do
                 runtime errors as `at <source>:<line>:` and in stack traces. Pick a name that
                 identifies where this script came from (e.g. `"my_script.lua"`).
   """
+  @spec eval!(String.t() | Lua.Chunk.t()) :: {[term()], t()}
+  @spec eval!(t() | String.t() | Lua.Chunk.t(), String.t() | Lua.Chunk.t() | keyword()) ::
+          {[term()], t()}
+  @spec eval!(t(), String.t() | Lua.Chunk.t(), keyword()) :: {[term()], t()}
   def eval!(script) do
     eval!(new(), script, [])
   end
@@ -616,6 +625,7 @@ defmodule Lua do
       true
 
   """
+  @spec parse_chunk(String.t()) :: {:ok, Lua.Chunk.t()} | {:error, [String.t()]}
   def parse_chunk(code) do
     case Lua.Parser.parse(code) do
       {:ok, ast} ->
@@ -646,6 +656,7 @@ defmodule Lua do
 
       iex> {%Lua.Chunk{}, %Lua{}} = Lua.load_chunk!(Lua.new(), ~LUA[return 2 + 2]c)
   """
+  @spec load_chunk!(t(), String.t() | Lua.Chunk.t()) :: {Lua.Chunk.t(), t()}
   def load_chunk!(%__MODULE__{} = lua, code) when is_binary(code) do
     case parse_chunk(code) do
       {:ok, chunk} -> {chunk, lua}
@@ -681,6 +692,8 @@ defmodule Lua do
       42
 
   """
+  @spec call_function(t(), term(), [term()]) ::
+          {:ok, [term()], t()} | {:error, term(), t()}
   def call_function(%__MODULE__{} = lua, %Display.Closure{ref: ref}, args) do
     call_function(lua, ref, args)
   end
@@ -772,6 +785,7 @@ defmodule Lua do
   end
   ```
   """
+  @spec call_function!(t(), term(), [term()]) :: {[term()], t()}
   def call_function!(%__MODULE__{} = lua, func, args) do
     case call_function(lua, func, args) do
       {:ok, ret, lua} -> {ret, lua}
@@ -812,6 +826,7 @@ defmodule Lua do
       iex> match?({:tref, _}, encoded)
       true
   """
+  @spec encode!(t(), term()) :: {term(), t()}
   def encode!(%__MODULE__{} = lua, value) when is_atom(value) and not is_boolean(value) do
     {Atom.to_string(value), lua}
   end
@@ -840,6 +855,7 @@ defmodule Lua do
 
       iex> {[1, {:tref, _}, true], _} = Lua.encode_list!(Lua.new(), [1, %{a: 2}, true])
   """
+  @spec encode_list!(t(), [term()]) :: {[term()], t()}
   def encode_list!(%__MODULE__{} = lua, list) when is_list(list) do
     Enum.map_reduce(list, lua, &encode!(&2, &1))
   end
@@ -852,6 +868,7 @@ defmodule Lua do
       [{"a", 1}]
 
   """
+  @spec decode!(t(), term()) :: term()
   def decode!(%__MODULE__{state: state}, value) do
     value = Display.unwrap(value)
 
@@ -874,6 +891,7 @@ defmodule Lua do
       iex> Lua.decode_list!(lua, encoded)
       [1, [{"a", 2}], true]
   """
+  @spec decode_list!(t(), [term()]) :: [term()]
   def decode_list!(%__MODULE__{} = lua, list) when is_list(list) do
     Enum.map(list, &decode!(lua, &1))
   end
@@ -884,6 +902,7 @@ defmodule Lua do
 
   Mimics the functionality of Lua's [dofile](https://www.lua.org/manual/5.4/manual.html#pdf-dofile)
   """
+  @spec load_file!(t(), String.t()) :: t()
   def load_file!(%__MODULE__{} = lua, path) when is_binary(path) do
     # Add .lua extension if not present
     full_path =
@@ -916,6 +935,7 @@ defmodule Lua do
   * `:data` - (optional) - data to be passed to the Lua.API.install/3 callback
 
   """
+  @spec load_api(t(), module(), keyword()) :: t()
   def load_api(lua, module, opts \\ []) do
     opts = Keyword.validate!(opts, [:scope, :data])
     funcs = :functions |> module.__info__() |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
@@ -945,6 +965,7 @@ defmodule Lua do
 
       iex> Lua.new() |> Lua.put_private(:api_key, "1234")
   """
+  @spec put_private(t(), term(), term()) :: t()
   def put_private(%__MODULE__{state: state} = lua, key, value) do
     %{lua | state: State.put_private(state, key, value)}
   end
@@ -956,6 +977,7 @@ defmodule Lua do
       iex> Lua.get_private(lua, :api_key)
       {:ok, "1234"}
   """
+  @spec get_private(t(), term()) :: {:ok, term()} | :error
   def get_private(%__MODULE__{state: state}, key) do
     {:ok, State.get_private(state, key)}
   rescue
@@ -969,6 +991,7 @@ defmodule Lua do
       iex> Lua.get_private!(lua, :api_key)
       "1234"
   """
+  @spec get_private!(t(), term()) :: term()
   def get_private!(%__MODULE__{} = lua, key) do
     case get_private(lua, key) do
       {:ok, value} -> value
@@ -984,6 +1007,7 @@ defmodule Lua do
       iex> Lua.get_private(lua, :api_key)
       :error
   """
+  @spec delete_private(t(), term()) :: t()
   def delete_private(%__MODULE__{state: state} = lua, key) do
     %{lua | state: State.delete_private(state, key)}
   end

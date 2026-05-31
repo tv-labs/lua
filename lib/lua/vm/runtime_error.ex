@@ -15,6 +15,8 @@ defmodule Lua.VM.RuntimeError do
 
   alias Lua.VM.ErrorFormatter
 
+  @type t :: %__MODULE__{}
+
   defexception [:value, :source, :message, :call_stack, :line]
 
   @impl true
@@ -42,6 +44,7 @@ defmodule Lua.VM.RuntimeError do
 
   Pass `:source_code` to populate `source_context`.
   """
+  @spec to_map(t(), keyword()) :: map()
   def to_map(%__MODULE__{} = error, opts \\ []) do
     ErrorFormatter.to_map(:runtime_error, raw_message(error.value),
       source: error.source,
