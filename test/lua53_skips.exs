@@ -175,7 +175,13 @@
     }
   ],
   "pm.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage (pattern engine work in A9)", issue: nil}
+    %{
+      lines: 233..374,
+      category: :unimplemented,
+      reason:
+        "gsub capture-index/replacement error validation, 'pattern too complex' depth limit, %b balanced match, %f frontier, and %1-%9 backreferences not yet implemented; position capture passes through line 232",
+      issue: 257
+    }
   ],
   "sort.lua" => [
     %{
