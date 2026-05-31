@@ -2,10 +2,10 @@
 id: A26
 title: Error message quality pass — make the rendered output world-class
 issue: 263
-pr: null
+pr: 304
 branch: errors/quality-pass
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - "world-class error messages" promise of the library
@@ -249,3 +249,80 @@ Pre-implementation notes carried over from the audit:
   set path. Confirm the rendered message and whether it carries an
   `error_kind` before writing that fixture; if it has no kind, the
   fixture pins the body only (no suggestion) — do not invent a kind.
+
+### Confirmed during implementation
+
+- **A19 data IS present on this base.** `Lua.VM.Executor.current_position/0`
+  exists, all nine `error_kind`s are emitted, and the four VM exceptions
+  auto-populate `:line`/`:source`. Every type/argument/runtime/assertion
+  error reachable from `Lua.eval!` carries a location, so the gallery
+  fixtures render `at gallery.lua:<line>:` up top — except the
+  stack-overflow case (see below).
+
+- **Out-of-scope data-layer gaps (logged, not fixed):**
+  - `#5` (length operator on a number) and `#true` return `0` rather than
+    raising. The `:length_not_integer` kind is wired into the formatter as
+    a suggestion, but the executor never raises it for these inputs, so
+    "length on non-string/table" has no rendered message to pin. Data-layer
+    bug; out of scope.
+  - `t[nil] = 1` and `t[0/0] = 1` (nil / NaN table key) succeed silently
+    instead of raising "table index is nil/NaN". No rendered message to
+    pin. Data-layer bug; out of scope. These two categories are therefore
+    documented in `guides/errors.md` under "Known gaps" rather than
+    fixtured.
+  - Stack-overflow runtime errors carry no originating line, so they render
+    without an `at <source>:<line>:` header and the stack frames show line
+    `0`. The renderer is correct given the data; the missing line is a
+    data-layer gap.
+
+- **`error()` with a non-string object** previously leaked an internal
+  Elixir term (`runtime error: {:tref, 12}`). `Lua.VM.RuntimeError.stringify/1`
+  now renders PUC-Lua's `(error object is a TYPE value)` for any non-string,
+  non-number value, while strings and numbers still render verbatim. This is
+  a rendering fix on a file already in scope.
+
+- **`assert(false)` still double-texts** as `assertion failed: assertion
+  failed!` because `AssertionError.raw_message/1` prefixes
+  `"assertion failed: "` and the stdlib passes the literal default value
+  `"assertion failed!"`. Removing the prefix is a behavioral change that
+  ripples into `test/lua53_tests/errors.lua` and
+  `test/lua/compiler/integration_test.exs`; the plan scoped the assertion
+  change to its *suggestion* (now removed), not the message prefix. Left as
+  a follow-up.
+
+- **Tests updated as a direct consequence of the formatter change** (the
+  golden snapshots tested the old header + unconditional ANSI):
+  `test/lua/vm/error_to_map_test.exs` and `test/lua/error_messages_test.exs`.
+  These are not in the plan's file list but directly assert the formatter's
+  output; updating them is a necessary consequence of the in-scope change,
+  not a scope expansion.
+
+## What changed
+
+Shipped in PR #304.
+
+Files touched:
+
+- `lib/lua/vm/error_formatter.ex` — `format/3` now leads with the location
+  line, drops the standalone header (resolving the double label), gates all
+  ANSI behind a `color/2` helper keyed on `IO.ANSI.enabled?/0`, realigns the
+  dead `:arithmetic_type_error` suggestion to the emitted
+  `:arithmetic_on_non_number`, adds suggestions for
+  `:compare_incompatible_types`, `:length_not_integer`,
+  `:bitwise_on_non_integer`, `:for_loop_non_number`, and removes the filler
+  assertion suggestion.
+- `lib/lua/vm/runtime_error.ex` — non-string/number `error()` objects render
+  PUC-Lua's `(error object is a TYPE value)` instead of an internal term.
+- `test/lua/error_gallery_test.exs` (new) + `test/fixtures/error_gallery/*.txt`
+  (11 new) — fixture-locked rendering for every reachable category, with a
+  `GALLERY_REGEN=1` opt-in for intentional format changes.
+- `guides/errors.md` (new) — before/after gallery and a "Known gaps" section
+  for the data-layer holes left out of scope.
+- `test/lua/vm/error_to_map_test.exs`, `test/lua/error_messages_test.exs` —
+  golden snapshots updated to the new format.
+
+Tests: `mix test` 2104 passed / 0 failed; `mix test --only lua53` 17 passed.
+
+Follow-ups to open (out of scope here): length operator / nil-NaN table key
+not raising, stack-overflow errors carrying no line, and the
+`assert(false)` double-text prefix.
