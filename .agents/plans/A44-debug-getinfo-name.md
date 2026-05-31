@@ -2,10 +2,10 @@
 id: A44
 title: "debug.getinfo(level, 'n') populates name/namewhat from the caller's call site"
 issue: 279
-pr: null
+pr: 290
 branch: feat/debug-getinfo-name
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - constructs.lua
