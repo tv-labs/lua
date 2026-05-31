@@ -49,6 +49,7 @@ defmodule Lua.VM.Stdlib do
     |> install_library(Lua.VM.Stdlib.Math)
     |> install_library(Lua.VM.Stdlib.Table)
     |> install_library(Lua.VM.Stdlib.Utf8)
+    |> install_library(Lua.VM.Stdlib.Os)
     |> install_library(Lua.VM.Stdlib.Debug)
     |> preload_stdlib_modules()
     |> install_unpack_alias()
