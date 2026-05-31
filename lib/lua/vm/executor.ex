@@ -696,6 +696,20 @@ defmodule Lua.VM.Executor do
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
+  # ── close_upvalues ─────────────────────────────────────────────────────────
+  #
+  # Emitted at the end of a block scope (e.g. `do…end`) whose locals could
+  # have been captured by a closure created inside the block. Per Lua 5.3
+  # §3.4.10, those upvalue cells must be detached from the register as the
+  # locals go out of scope so the next statement reusing those register
+  # slots does not read or overwrite the stale cell. Loop bodies do this on
+  # each iteration boundary in the continuation handlers above; this is the
+  # same operation for non-loop block exits.
+  defp do_execute([{:close_upvalues, threshold} | rest], regs, upvalues, proto, state, cont, frames, line) do
+    state = close_open_upvalues_at_or_above(state, threshold)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+  end
+
   # ── set_open_upvalue ───────────────────────────────────────────────────────
 
   # Write a captured-local value through the upvalue cell when one exists.

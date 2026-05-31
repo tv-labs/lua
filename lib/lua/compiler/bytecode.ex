@@ -91,6 +91,7 @@ defmodule Lua.Compiler.Bytecode do
   @op_while_loop 49
   @op_repeat_loop 50
   @op_generic_for 51
+  @op_close_upvalues 52
 
   @doc """
   Compile a prototype, populating its `bytecode` field on success.
@@ -344,6 +345,8 @@ defmodule Lua.Compiler.Bytecode do
   defp encode({:get_open_upvalue, dest, reg}), do: {:ok, {@op_get_open_upvalue, dest, reg}}
 
   defp encode({:set_open_upvalue, reg, source}), do: {:ok, {@op_set_open_upvalue, reg, source}}
+
+  defp encode({:close_upvalues, threshold}), do: {:ok, {@op_close_upvalues, threshold}}
 
   defp encode({:vararg, base, count}), do: {:ok, {@op_vararg, base, count}}
 

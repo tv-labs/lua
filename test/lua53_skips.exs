@@ -164,15 +164,7 @@
       issue: nil
     }
   ],
-  "locals.lua" => [
-    %{
-      lines: 148..154,
-      category: :semantic,
-      reason:
-        "nested `local _ENV = {assert=assert, ...}` redirection leaks scope: free-name `assert` resolves to nil at line 150 (debug.getupvalue/setupvalue and _ENV introspection now pass)",
-      issue: 284
-    }
-  ],
+  "locals.lua" => [],
   "math.lua" => [
     %{
       lines: :all,

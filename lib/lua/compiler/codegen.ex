@@ -730,9 +730,17 @@ defmodule Lua.Compiler.Codegen do
   end
 
   # Do: do...end block
-  defp gen_statement(%Statement.Do{body: body}, ctx) do
-    # Simply generate code for the inner block
-    gen_block(body, ctx)
+  defp gen_statement(%Statement.Do{body: body} = do_stmt, ctx) do
+    {body_instructions, ctx} = gen_block(body, ctx)
+
+    # Close any open-upvalue cells over registers the block's locals occupied
+    # before the slots are reused by the next statement (Lua 5.3 §3.4.10).
+    # The threshold is the `next_register` watermark stashed by scope analysis
+    # at block entry; emitting unconditionally is cheap — the executor's
+    # close helper short-circuits when `open_upvalues` is empty, which is the
+    # overwhelming common case.
+    threshold = Map.fetch!(ctx.scope.var_map, {:do_close_threshold, do_stmt})
+    {body_instructions ++ [Instruction.close_upvalues(threshold)], ctx}
   end
 
   # Break statement
