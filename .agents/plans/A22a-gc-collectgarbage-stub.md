@@ -2,10 +2,10 @@
 id: A22a
 title: "Triage gc.lua — narrow skip to the collectgarbage no-op region"
 issue: 260
-pr: null
+pr: 287
 branch: fix/gc-vm-errors
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - gc.lua
