@@ -2,10 +2,10 @@
 id: A24a
 title: "table.unpack raises 'too many results' for out-of-range slices"
 issue: 262
-pr: null
+pr: 293
 branch: fix/stdlib-data-structure
 base: main
-status: in-progress
+status: review
 direction: A
 ---
 
