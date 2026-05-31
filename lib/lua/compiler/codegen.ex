@@ -43,6 +43,10 @@ defmodule Lua.Compiler.Codegen do
       # Reverse to maintain order
       prototypes: Enum.reverse(ctx.prototypes),
       upvalue_descriptors: [],
+      # The chunk's implicit `_ENV` is its sole upvalue (Lua 5.3 §3.3.1). It has
+      # no descriptor (it is bound as register 0, not captured from a parent),
+      # so name it explicitly here for `debug.getupvalue`/`setupvalue`.
+      upvalue_names: ["_ENV"],
       param_count: 0,
       is_vararg: func_scope.is_vararg,
       max_registers: Enum.max([func_scope.max_register, ctx.next_reg, Map.get(ctx, :peak_reg, 0)]),
@@ -1524,6 +1528,10 @@ defmodule Lua.Compiler.Codegen do
       instructions: body_instructions,
       prototypes: Enum.reverse(body_ctx.prototypes),
       upvalue_descriptors: func_scope.upvalue_descriptors,
+      # Each descriptor carries its source name as the third element
+      # ({:parent_local, reg, name} | {:parent_upvalue, idx, name}); surface
+      # them in declaration order for the debug library.
+      upvalue_names: Enum.map(func_scope.upvalue_descriptors, &elem(&1, 2)),
       param_count: func_scope.param_count,
       is_vararg: func_scope.is_vararg,
       max_registers: Enum.max([func_scope.max_register, body_ctx.next_reg, Map.get(body_ctx, :peak_reg, 0)]),

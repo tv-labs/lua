@@ -414,20 +414,20 @@ defmodule Lua.VM.Stdlib do
   # is called repeatedly; each call must return a string piece, and the
   # chunk ends when it returns nil, an empty string, or no value.
   # Returns the compiled function, or (nil, error message) on failure.
-  defp lua_load([chunk | _rest], state) when is_binary(chunk) do
-    compile_loaded_chunk(chunk, state)
+  defp lua_load([chunk | rest], state) when is_binary(chunk) do
+    compile_loaded_chunk(chunk, load_env_arg(rest, state), state)
   end
 
-  defp lua_load([{:lua_closure, _, _} = reader | _rest], state) do
-    load_from_reader(reader, state)
+  defp lua_load([{:lua_closure, _, _} = reader | rest], state) do
+    load_from_reader(reader, load_env_arg(rest, state), state)
   end
 
-  defp lua_load([{:compiled_closure, _, _} = reader | _rest], state) do
-    load_from_reader(reader, state)
+  defp lua_load([{:compiled_closure, _, _} = reader | rest], state) do
+    load_from_reader(reader, load_env_arg(rest, state), state)
   end
 
-  defp lua_load([{:native_func, _} = reader | _rest], state) do
-    load_from_reader(reader, state)
+  defp lua_load([{:native_func, _} = reader | rest], state) do
+    load_from_reader(reader, load_env_arg(rest, state), state)
   end
 
   defp lua_load([_other | _], state) do
@@ -444,15 +444,21 @@ defmodule Lua.VM.Stdlib do
   # it signals end-of-chunk (nil or ""). Bails out with `(nil, error_msg)`
   # if the reader ever returns a non-string non-nil value, mirroring the
   # behavior of Lua 5.3's reference implementation.
-  defp load_from_reader(reader, state) do
+  defp load_from_reader(reader, env, state) do
     case collect_reader_chunks(reader, state, []) do
       {:ok, source, state} ->
-        compile_loaded_chunk(source, state)
+        compile_loaded_chunk(source, env, state)
 
       {:error, msg, state} ->
         {[nil, msg], state}
     end
   end
+
+  # The optional 4th argument to `load(chunk, chunkname, mode, env)` is the
+  # environment the loaded chunk sees as `_ENV`. When absent or nil it defaults
+  # to the current global table `_G` (Lua 5.3 §6.1).
+  defp load_env_arg([_chunkname, _mode, env | _], _state) when env != nil, do: env
+  defp load_env_arg(_rest, state), do: State.g_ref(state)
 
   defp collect_reader_chunks(reader, state, acc) do
     {results, state} = Executor.call_function(reader, [], state)
@@ -475,20 +481,27 @@ defmodule Lua.VM.Stdlib do
     end
   end
 
-  defp compile_loaded_chunk(source, state) do
+  defp compile_loaded_chunk(source, env, state) do
     case Lua.Parser.parse(source) do
       {:ok, ast} ->
         # Compiler currently never returns errors, always succeeds — see
         # `Lua.Compiler.compile!/2` for the matching note.
         {:ok, prototype} = Lua.Compiler.compile(ast)
 
+        # A loaded chunk's sole upvalue is `_ENV`. Back it with a real cell
+        # holding `env` so `load_env` sources it (instead of `_G`), the chunk's
+        # global writes route through `env`, and `debug.getupvalue`/`setupvalue`
+        # can read and mutate it.
+        env_cell = make_ref()
+        state = %{state | upvalue_cells: Map.put(state.upvalue_cells, env_cell, env)}
+
         # When the bytecode compiler accepts the loaded chunk, surface
         # it as a `:compiled_closure` so the dispatcher takes over.
         # Otherwise fall back to the standard interpreted closure.
         closure =
           case prototype.bytecode do
-            nil -> {:lua_closure, prototype, {}}
-            _ -> {:compiled_closure, prototype, {}}
+            nil -> {:lua_closure, prototype, {env_cell}}
+            _ -> {:compiled_closure, prototype, {env_cell}}
           end
 
         {[closure], state}

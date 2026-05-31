@@ -71,7 +71,8 @@ defmodule Lua.VM.DisplayTest do
       assert %Closure{source: "<eval>", line: 1, arity: 2, vararg?: false, ref: ref} = c
       assert match?({:lua_closure, _, _}, ref) or match?({:compiled_closure, _, _}, ref)
 
-      assert inspect(c) == "#Lua.Closure<source: \"<eval>\", line: 1, arity: 2>"
+      # The closure captures `_ENV` as an upvalue, surfaced in the inspect output.
+      assert inspect(c) == "#Lua.Closure<source: \"<eval>\", line: 1, arity: 2, upvalues: [_ENV]>"
     end
 
     test "wraps Lua closures returned in decode: false mode" do

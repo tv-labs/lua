@@ -129,6 +129,7 @@ defmodule Lua.VM.Display do
       line: first_line,
       arity: proto.param_count,
       vararg?: proto.is_vararg,
+      upvalue_names: proto.upvalue_names,
       ref: ref
     }
   end
