@@ -88,8 +88,8 @@
       lines: 225..313,
       category: :unimplemented,
       reason:
-        "debug.getinfo(...).name / os.time / load()-driven short-circuit harness exercised below line 225; pending separate triage",
-      issue: nil
+        "two upstream blockers gate this block: debug.getinfo(1,\"n\").name returns nil (call-stack name introspection unimplemented) at line 226, and os.time is nil at line 237 (feeds _ENV.GLOB1, used by line 248 and the short-circuit harness leaf). The short-circuit harness itself (287-298) is verified green up to level 4 by test/lua/vm/short_circuit_test.exs",
+      issue: 281
     }
   ],
   "coroutine.lua" => [
