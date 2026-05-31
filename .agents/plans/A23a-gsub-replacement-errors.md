@@ -2,10 +2,10 @@
 id: A23a
 title: "string.gsub validates replacement string and replacement value"
 issue: 261
-pr: null
+pr: 291
 branch: fix/metamethod-control-flow
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - pm.lua
