@@ -176,10 +176,45 @@
   ],
   "pm.lua" => [
     %{
-      lines: 233..374,
+      lines: 233..238,
       category: :unimplemented,
-      reason:
-        "gsub capture-index/replacement error validation, 'pattern too complex' depth limit, %b balanced match, %f frontier, and %1-%9 backreferences not yet implemented; position capture passes through line 232",
+      reason: "gsub capture-index/replacement-value error validation not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 250..250,
+      category: :unimplemented,
+      reason: "'pattern too complex' recursion-depth limit not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 277..277,
+      category: :unimplemented,
+      reason: "gsub table replacement keyed on a multi-char capture not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 280..280,
+      category: :unimplemented,
+      reason: "gsub position-capture index into a replacement table not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 283..283,
+      category: :unimplemented,
+      reason: "gsub replacement via a table __index metamethod not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 312..339,
+      category: :unimplemented,
+      reason: "%f frontier pattern not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 341..358,
+      category: :unimplemented,
+      reason: "malformed-pattern error reporting (unfinished capture, %b, %f, trailing %) not yet implemented",
       issue: 257
     }
   ],
