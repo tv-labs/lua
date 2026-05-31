@@ -15,8 +15,13 @@ defmodule Lua.VM.Stdlib.Os do
   - `os.date([format [, time]])` - Formats a time as a string or table.
   - `os.getenv(name)` - Value of an environment variable, or nil.
   - `os.setlocale([locale [, category]])` - No-op returning "C".
-  - `os.tmpname()` - A name usable for a temporary file.
+  - `os.tmpname()` - A virtual name usable for a temporary file.
+  - `os.remove(filename)` - Removes a file from the virtual filesystem.
+  - `os.rename(from, to)` - Renames a file within the virtual filesystem.
   - `os.exit([code [, close]])` - Raises to unwind; sandbox cannot exit.
+
+  Filesystem operations run against the VM's virtual filesystem
+  (`state.vfs`), never the host disk.
   """
 
   @behaviour Lua.VM.Stdlib.Library
@@ -37,6 +42,8 @@ defmodule Lua.VM.Stdlib.Os do
       "difftime" => {:native_func, &os_difftime/2},
       "exit" => {:native_func, &os_exit/2},
       "getenv" => {:native_func, &os_getenv/2},
+      "remove" => {:native_func, &os_remove/2},
+      "rename" => {:native_func, &os_rename/2},
       "setlocale" => {:native_func, &os_setlocale/2},
       "time" => {:native_func, &os_time/2},
       "tmpname" => {:native_func, &os_tmpname/2}
@@ -152,15 +159,59 @@ defmodule Lua.VM.Stdlib.Os do
   # sandbox; report the "C" locale as active.
   defp os_setlocale(_args, state), do: {["C"], state}
 
-  # os.tmpname() — a name usable for a temporary file.
-  #
-  # FUTURE: this leans on the host filesystem via System.tmp_dir/0. Once the
-  # VFS layer lands we want tmpname to resolve against the sandboxed virtual
-  # filesystem instead of the real host, so the VM never touches host paths.
+  # os.tmpname() — a virtual name usable for a temporary file. The path lives
+  # under the sandbox's virtual /tmp root; the VM never touches host paths.
   defp os_tmpname(_args, state) do
-    name = Path.join(System.tmp_dir() || "/tmp", "lua_#{:erlang.unique_integer([:positive])}")
+    name = "/tmp/lua_#{:erlang.unique_integer([:positive])}"
     {[name], state}
   end
+
+  # os.remove(filename) — removes a file from the virtual filesystem. Returns
+  # true on success, or (nil, message) when the file cannot be removed.
+  defp os_remove([filename | _], state) when is_binary(filename) do
+    case State.vfs_rm(state, filename) do
+      {:ok, state} -> {[true], state}
+      {:error, error, state} -> {[nil, vfs_error_message(filename, error)], state}
+    end
+  end
+
+  defp os_remove([arg | _], _state) do
+    raise ArgumentError.type_error("os.remove", 1, "string", Util.typeof(arg))
+  end
+
+  defp os_remove([], _state) do
+    raise ArgumentError.value_expected("os.remove", 1)
+  end
+
+  # os.rename(from, to) — moves a file within the virtual filesystem by reading
+  # the source, writing the destination, then removing the source. Returns true
+  # on success, or (nil, message) when any step fails.
+  defp os_rename([from, to | _], state) when is_binary(from) and is_binary(to) do
+    with {:ok, contents, state} <- State.vfs_read(state, from),
+         {:ok, state} <- State.vfs_write(state, to, contents),
+         {:ok, state} <- State.vfs_rm(state, from) do
+      {[true], state}
+    else
+      {:error, error, state} -> {[nil, vfs_error_message(from, error)], state}
+    end
+  end
+
+  defp os_rename([from, to | _], _state) when is_binary(from) do
+    raise ArgumentError.type_error("os.rename", 2, "string", Util.typeof(to))
+  end
+
+  defp os_rename([from | _], _state) do
+    raise ArgumentError.type_error("os.rename", 1, "string", Util.typeof(from))
+  end
+
+  defp os_rename([], _state) do
+    raise ArgumentError.value_expected("os.rename", 1)
+  end
+
+  # Maps a %VFS.Error{} into Lua's "<path>: <reason>" error string convention.
+  defp vfs_error_message(path, %VFS.Error{kind: :enoent}), do: "#{path}: No such file or directory"
+  defp vfs_error_message(path, %VFS.Error{message: nil}), do: path
+  defp vfs_error_message(path, %VFS.Error{message: message}), do: "#{path}: #{message}"
 
   # os.exit([code [, close]]) — the sandbox cannot terminate the host, so
   # raise to unwind the current evaluation.

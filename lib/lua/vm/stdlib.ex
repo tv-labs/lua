@@ -700,11 +700,11 @@ defmodule Lua.VM.Stdlib do
   defp load_module(modname, search_path, state) do
     patterns = String.split(search_path, ";", trim: true)
 
-    case find_module_file(modname, patterns) do
-      {:ok, file_path, content} ->
+    case find_module_file(modname, patterns, state) do
+      {:ok, file_path, content, state} ->
         parse_and_execute_module(modname, file_path, content, state)
 
-      {:error, :not_found} ->
+      {:error, :not_found, _state} ->
         raise RuntimeError,
           value: "module '#{modname}' not found:\n\tno file '#{search_path}'"
     end
@@ -763,19 +763,62 @@ defmodule Lua.VM.Stdlib do
     end
   end
 
-  # Find a module file by searching the patterns
-  defp find_module_file(modname, patterns) do
+  # Find a module file by searching the `package.path` patterns. For each
+  # pattern (with `?` resolved to the module path) the searcher tries, in
+  # order:
+  #
+  #   1. the virtual filesystem at the resolved path,
+  #   2. the virtual filesystem under the dependency root `/lua/deps` (the
+  #      mechanism for seeding modules via `Lua.write_file/3` / `Lua.put_dep/3`
+  #      / `Lua.mount/3`), and
+  #   3. the host filesystem via `File.read/1`.
+  #
+  # The VFS is consulted before the host so seeded modules take precedence and
+  # the common embedded case never reaches the disk; the host fallback keeps
+  # existing `set_lua_paths/2` / `package.path` workflows that point at real
+  # files working unchanged.
+  defp find_module_file(modname, patterns, state) do
     resolved = String.replace(modname, ".", "/")
 
-    Enum.find_value(patterns, {:error, :not_found}, fn pattern ->
+    Enum.reduce_while(patterns, {:error, :not_found, state}, fn pattern, {_, _, state} ->
       file_path = String.replace(pattern, "?", resolved)
 
-      case File.read(file_path) do
-        {:ok, content} -> {:ok, file_path, content}
-        {:error, _} -> nil
+      case search_candidate(file_path, state) do
+        {:ok, content, state} -> {:halt, {:ok, file_path, content, state}}
+        {:not_found, state} -> {:cont, {:error, :not_found, state}}
       end
     end)
   end
+
+  # Try one resolved pattern against the VFS (the dep-anchored path, plus the
+  # path itself when it is already absolute) and then the host disk. Returns
+  # `{:ok, content, state}` or `{:not_found, state}`.
+  #
+  # The VFS requires absolute paths, so relative patterns (the default
+  # `?.lua` / `?/init.lua`) are only tried against the VFS after being anchored
+  # under `/lua/deps`; the host fallback handles them verbatim.
+  defp search_candidate(file_path, state) do
+    with {:error, _, state} <- vfs_read_anchored(state, file_path),
+         {:error, _, state} <- vfs_read_direct(state, file_path),
+         {:error, _} <- File.read(file_path) do
+      {:not_found, state}
+    else
+      {:ok, content, state} -> {:ok, content, state}
+      {:ok, content} -> {:ok, content, state}
+    end
+  end
+
+  defp vfs_read_anchored(state, file_path), do: State.vfs_read(state, anchor_dep_path(file_path))
+
+  # Only the VFS-legal (absolute) form is read directly; relative patterns are
+  # left to the dep-anchored read and the host fallback.
+  defp vfs_read_direct(state, "/" <> _ = file_path), do: State.vfs_read(state, file_path)
+  defp vfs_read_direct(state, _file_path), do: {:error, :relative, state}
+
+  # Anchor a resolved search pattern under the virtual dependency root
+  # (`/lua/deps`). Absolute patterns are left as-is.
+  defp anchor_dep_path("/" <> _ = path), do: path
+  defp anchor_dep_path(path), do: Path.join("/lua/deps", path)
 
   # Convert a value to string, checking for __tostring metamethod
   defp value_to_string_with_mt(value, state) do

@@ -25,7 +25,13 @@ defmodule Lua.VM.State do
             # `data` map. Allocated by `new/0`. Plan A16: `_ENV` semantics
             # require globals to be a real Lua table so `_ENV` reassignment
             # can redirect global access.
-            g_ref: nil
+            g_ref: nil,
+            # The sandbox's virtual filesystem. Filesystem-touching stdlib
+            # functions (os.remove/rename/tmpname, the require searcher)
+            # operate against this in-memory `VFS` value instead of the host
+            # disk, so the VM never reaches real files. Seeded by `new/0` and
+            # threaded forward by the `vfs_*` helpers.
+            vfs: nil
 
   @type t :: %__MODULE__{
           call_stack: list(),
@@ -39,7 +45,8 @@ defmodule Lua.VM.State do
           userdata_next_id: non_neg_integer(),
           private: map(),
           multi_return_count: non_neg_integer(),
-          g_ref: nil | {:tref, non_neg_integer()}
+          g_ref: nil | {:tref, non_neg_integer()},
+          vfs: nil | VFS.t()
         }
 
   @doc """
@@ -49,9 +56,77 @@ defmodule Lua.VM.State do
   """
   @spec new() :: t()
   def new do
-    state = %__MODULE__{}
+    state = %__MODULE__{vfs: new_vfs()}
     {g_ref, state} = alloc_table(state)
     %{state | g_ref: g_ref}
+  end
+
+  # An empty in-memory virtual filesystem with a single `/` mount backed by
+  # `VFS.Memory`. This is the default backing store for all filesystem-touching
+  # stdlib functions; embedding hosts can seed files or mount other backends.
+  defp new_vfs do
+    VFS.mount(VFS.new(), "/", VFS.Memory.new(%{}))
+  end
+
+  @doc """
+  Reads a file from the VM's virtual filesystem.
+
+  Returns `{:ok, contents, state}` with the (possibly updated) VFS threaded
+  back onto `state`, or `{:error, %VFS.Error{}, state}` on failure.
+  """
+  @spec vfs_read(t(), binary()) :: {:ok, binary(), t()} | {:error, VFS.Error.t(), t()}
+  def vfs_read(%__MODULE__{vfs: vfs} = state, path) when is_binary(path) do
+    case VFS.read_file(vfs, path) do
+      {:ok, contents, vfs} -> {:ok, contents, %{state | vfs: vfs}}
+      {:error, %VFS.Error{} = error} -> {:error, error, state}
+    end
+  end
+
+  @doc """
+  Writes a file into the VM's virtual filesystem.
+
+  Returns `{:ok, state}` with the updated VFS threaded back, or
+  `{:error, %VFS.Error{}, state}` on failure.
+  """
+  @spec vfs_write(t(), binary(), binary()) :: {:ok, t()} | {:error, VFS.Error.t(), t()}
+  def vfs_write(%__MODULE__{vfs: vfs} = state, path, contents) when is_binary(path) and is_binary(contents) do
+    case VFS.write_file(vfs, path, contents) do
+      {:ok, vfs} -> {:ok, %{state | vfs: vfs}}
+      {:error, %VFS.Error{} = error} -> {:error, error, state}
+    end
+  end
+
+  @doc """
+  Removes a file from the VM's virtual filesystem.
+
+  Returns `{:ok, state}` with the updated VFS threaded back, or
+  `{:error, %VFS.Error{}, state}` on failure.
+  """
+  @spec vfs_rm(t(), binary()) :: {:ok, t()} | {:error, VFS.Error.t(), t()}
+  def vfs_rm(%__MODULE__{vfs: vfs} = state, path) when is_binary(path) do
+    case VFS.rm(vfs, path) do
+      {:ok, vfs} -> {:ok, %{state | vfs: vfs}}
+      {:error, %VFS.Error{} = error} -> {:error, error, state}
+    end
+  end
+
+  @doc """
+  Reports whether a path exists in the VM's virtual filesystem.
+
+  Returns `{boolean, state}` with the (possibly updated) VFS threaded back.
+  """
+  @spec vfs_exists?(t(), binary()) :: {boolean(), t()}
+  def vfs_exists?(%__MODULE__{vfs: vfs} = state, path) when is_binary(path) do
+    {exists?, vfs} = VFS.exists?(vfs, path)
+    {exists?, %{state | vfs: vfs}}
+  end
+
+  @doc """
+  Mounts a `VFS.Mountable` backend at `mountpoint`, returning the updated state.
+  """
+  @spec vfs_mount(t(), binary(), struct()) :: t()
+  def vfs_mount(%__MODULE__{vfs: vfs} = state, mountpoint, backend) when is_binary(mountpoint) do
+    %{state | vfs: VFS.mount(vfs, mountpoint, backend)}
   end
 
   @doc """
