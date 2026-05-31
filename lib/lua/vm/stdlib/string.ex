@@ -335,23 +335,31 @@ defmodule Lua.VM.Stdlib.String do
   # the result is materialized exactly once via `IO.iodata_to_binary/1` at
   # the base case. Avoids the per-character binary reallocation that made
   # this O(n^2) in the format string length.
-  defp format_string("", _args, acc), do: IO.iodata_to_binary(acc)
-
-  defp format_string("%" <> rest, args, acc) do
-    case rest do
-      "%" <> rest2 ->
-        format_string(rest2, args, [acc, "%"])
-
-      _ ->
-        {spec, rest2} = parse_format_spec(rest)
-        [arg | remaining_args] = args
-        str = apply_format_spec(spec, arg)
-        format_string(rest2, remaining_args, [acc, str])
+  #
+  # Each step copies the whole run of literal bytes up to the next `%` as a
+  # single chunk via `:binary.split/2`, rather than one iolist cell per
+  # character. `%` is ASCII 0x25 and never appears as a UTF-8 continuation
+  # byte, so splitting on the raw byte is safe for multibyte literals. A
+  # per-character iolist would balloon both the list and its eventual
+  # flatten on literal-heavy format strings.
+  defp format_string(str, args, acc) do
+    case :binary.split(str, "%") do
+      [literal] -> IO.iodata_to_binary([acc, literal])
+      [literal, rest] -> format_directive(rest, args, [acc, literal])
     end
   end
 
-  defp format_string(<<char::utf8, rest::binary>>, args, acc) do
-    format_string(rest, args, [acc, <<char::utf8>>])
+  # `rest` is the format string immediately after a `%`. A second `%`
+  # escapes a literal percent; otherwise it begins a format specifier.
+  defp format_directive("%" <> rest, args, acc) do
+    format_string(rest, args, [acc, "%"])
+  end
+
+  defp format_directive(rest, args, acc) do
+    {spec, rest2} = parse_format_spec(rest)
+    [arg | remaining_args] = args
+    str = apply_format_spec(spec, arg)
+    format_string(rest2, remaining_args, [acc, str])
   end
 
   # Parse a format spec: [flags][width][.precision]specifier
