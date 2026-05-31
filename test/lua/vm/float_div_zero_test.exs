@@ -10,8 +10,10 @@ defmodule Lua.VM.FloatDivZeroTest do
     * `-1/0` → `-1.0e308`
     * `0/0`  → `:nan` sentinel atom, which compares unequal to itself
 
-  Only `//` and `%` raise on integer-zero divisors (covered elsewhere);
-  this module locks down the `/` contract.
+  `//` and `%` raise only when *both* operands are integers and the
+  divisor is zero; PUC-Lua reports `//` as "attempt to divide by zero"
+  and `%` as `'n%0'`. When either operand is a float the float path
+  applies and no error is raised.
   """
 
   use ExUnit.Case, async: true
@@ -79,8 +81,8 @@ defmodule Lua.VM.FloatDivZeroTest do
   end
 
   describe "floor div and modulo with integer-zero divisor still raise" do
-    test "1 // 0 raises" do
-      assert_raise Lua.RuntimeException, ~r/attempt to perform 'n\/\/0'/, fn ->
+    test "1 // 0 raises with PUC-Lua's 'divide by zero' message" do
+      assert_raise Lua.RuntimeException, ~r/attempt to divide by zero/, fn ->
         Lua.eval!(Lua.new(), "return 1 // 0")
       end
     end
@@ -149,20 +151,20 @@ defmodule Lua.VM.FloatDivZeroTest do
       assert run!("return 0 // 0.0 ~= 0 // 0.0") == [true]
     end
 
-    test "1.0 // 0 still raises — integer divisor" do
-      assert_raise Lua.RuntimeException, ~r/attempt to perform 'n\/\/0'/, fn ->
-        Lua.eval!(Lua.new(), "return 1.0 // 0")
-      end
+    test "1.0 // 0 follows the float path and returns +inf — a float operand never raises" do
+      assert run!("return 1.0 // 0 == math.huge") == [true]
+    end
+
+    test "-1.0 // 0 follows the float path and returns -inf" do
+      assert run!("return -1.0 // 0 == -math.huge") == [true]
     end
 
     test "1 % 0.0 follows the float path and returns NaN" do
       assert run!("return 1 % 0.0 ~= 1 % 0.0") == [true]
     end
 
-    test "1.0 % 0 still raises — integer divisor" do
-      assert_raise Lua.RuntimeException, ~r/attempt to perform 'n%0'/, fn ->
-        Lua.eval!(Lua.new(), "return 1.0 % 0")
-      end
+    test "1.0 % 0 follows the float path and returns NaN — a float operand never raises" do
+      assert run!("return 1.0 % 0 ~= 1.0 % 0") == [true]
     end
   end
 end

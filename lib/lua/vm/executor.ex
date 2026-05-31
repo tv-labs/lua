@@ -2550,28 +2550,30 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  # Lua 5.3 §3.4.1: floor division of floats is `floor(a/b)`. With a float
-  # zero divisor, `a/b` is the inf/nan stand-in produced by `safe_divide`,
-  # and the floor of that flows through to the result:
+  # Lua 5.3 §3.4.1: floor division of floats is `floor(a/b)`. With a zero
+  # divisor where either operand is a float, `a/b` is the inf/nan stand-in
+  # produced by `safe_divide`, and the floor of that flows through to the
+  # result:
   #
-  #   * ` 1.0 // 0.0` → `+math.huge`
-  #   * `-1.0 // 0.0` → `-math.huge`
-  #   * ` 0.0 // 0.0` → `:nan`
+  #   * ` 1.0 // 0` / ` 1.0 // 0.0` → `+math.huge`
+  #   * `-1.0 // 0` / `-1.0 // 0.0` → `-math.huge`
+  #   * ` 0.0 // 0` / ` 0.0 // 0.0` → `:nan`
   #
-  # An integer-zero divisor still raises — that's correct per spec, since
-  # `//` between two integers is integer floor division.
+  # Only an integer `//` integer with a zero divisor raises — that's correct
+  # per spec, since `//` between two integers is integer floor division.
+  # PUC-Lua reports this as "attempt to divide by zero".
   defp safe_floor_divide(a, b, line, source, hint_a, hint_b) do
     na = number_or_arith_raise!(a, line, source, hint_a)
     nb = number_or_arith_raise!(b, line, source, hint_b)
 
     cond do
-      is_integer(nb) and nb == 0 ->
-        raise RuntimeError, value: "attempt to perform 'n//0'", line: line, source: source
+      is_integer(na) and is_integer(nb) and nb == 0 ->
+        raise RuntimeError, value: "attempt to divide by zero", line: line, source: source
 
       is_integer(na) and is_integer(nb) ->
         Numeric.to_signed_int64(lua_idiv(na, nb))
 
-      is_float(nb) and nb == 0.0 ->
+      nb == 0 or nb == 0.0 ->
         cond do
           na == 0 or na == 0.0 -> :nan
           na > 0 -> 1.0e308
@@ -2583,21 +2585,22 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  # Lua 5.3 §3.4.1: `a % b = a - floor(a/b)*b`. With a float zero divisor,
-  # `a/0.0` is inf or nan, and `inf * 0.0 = nan`, so `a % 0.0` is always
-  # `:nan` regardless of `a`. An integer-zero divisor still raises.
+  # Lua 5.3 §3.4.1: `a % b = a - floor(a/b)*b`. With a zero divisor where
+  # either operand is a float, `a/0.0` is inf or nan and `inf * 0.0 = nan`,
+  # so the result is always `:nan` regardless of `a`. Only an integer `%`
+  # integer with a zero divisor raises; PUC-Lua reports it as `'n%0'`.
   defp safe_modulo(a, b, line, source, hint_a, hint_b) do
     na = number_or_arith_raise!(a, line, source, hint_a)
     nb = number_or_arith_raise!(b, line, source, hint_b)
 
     cond do
-      is_integer(nb) and nb == 0 ->
+      is_integer(na) and is_integer(nb) and nb == 0 ->
         raise RuntimeError, value: "attempt to perform 'n%0'", line: line, source: source
 
       is_integer(na) and is_integer(nb) ->
         Numeric.to_signed_int64(na - lua_idiv(na, nb) * nb)
 
-      is_float(nb) and nb == 0.0 ->
+      nb == 0 or nb == 0.0 ->
         :nan
 
       true ->
