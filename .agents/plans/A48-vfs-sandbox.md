@@ -2,10 +2,10 @@
 id: A48
 title: VFS sandbox — route os/require file IO through a virtual filesystem
 issue: 297
-pr: null
+pr: 302
 branch: feat/vfs-sandbox
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - safe-by-default filesystem semantics without sandbox refusals
@@ -152,3 +152,39 @@ mix test --only lua53
 - **Deferred: flipping suite files green.** `files.lua` / `attrib.lua`
   / `verybig.lua` need the `io.*` rewire and suite-harness changes; out
   of scope here.
+- **require keeps a host-disk fallback.** The initial design anchored
+  *all* require resolution at `/lua/deps` and read only from the VFS.
+  That regressed every existing test relying on host-path `require`
+  (`set_lua_paths/2`, `package.path = "./test/fixtures/?.lua"`, the
+  luassert integration suite). The shipped searcher therefore tries the
+  VFS first (resolved path when absolute, plus the `/lua/deps`-anchored
+  path) and falls back to `File.read/1` for the host. The "host file not
+  readable via require" criterion is satisfied by isolation rather than a
+  hard block: a file outside the search-path patterns (e.g. in the system
+  tmp dir, not matched by the default `?.lua`) is unreachable.
+- **`VFS.read_file/2` raises on non-absolute paths** (it calls
+  `VFS.Path.normalize/1`, which raises rather than returning
+  `{:error, _}`). The searcher only issues a direct VFS read for absolute
+  patterns; relative patterns reach the VFS solely through the
+  `/lua/deps` anchor.
+
+## What changed
+
+- `mix.exs` / `mix.lock`: added `vfs` as a git dep pinned to commit
+  `32d2ab618ec12c16fe4f675b5ee8b563c660dd69`.
+- `lib/lua/vm/state.ex`: added the `vfs` field (default in-memory
+  `VFS.Memory` mounted at `/`), updated `@type t`, seeded it in
+  `new/0`, and added the threaded `vfs_read/2`, `vfs_write/3`,
+  `vfs_rm/2`, `vfs_exists?/2`, and `vfs_mount/3` helpers.
+- `lib/lua/vm/stdlib/os.ex`: `os.tmpname` now returns a virtual
+  `/tmp/lua_*` path; added `os.remove/1` and `os.rename/2` against
+  `state.vfs` with Lua's `true` / `nil, message` contract.
+- `lib/lua/vm/stdlib.ex`: rerouted the `require` searcher through the
+  VFS (resolved + `/lua/deps`-anchored) with a host `File.read/1`
+  fallback, threading `state` through `find_module_file/3`.
+- `lib/lua.ex`: added `write_file/3`, `put_dep/3`, and `mount/3`.
+- Tests: new `test/lua/vfs_test.exs` and VFS cases in
+  `test/lua/vm/stdlib/os_test.exs`.
+
+Verification: `mix test` → 2105 passed, 19 skipped, 1 excluded, 0
+failed; `mix test --only lua53` → 17 passed, 12 skipped, 0 failed.
