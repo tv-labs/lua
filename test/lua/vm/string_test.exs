@@ -879,6 +879,51 @@ defmodule Lua.VM.StringTest do
       state = Stdlib.install(State.new())
       assert {:ok, [<<0, ?x, ?x, ?x, 0>>, 5], _state} = VM.execute(proto, state)
     end
+
+    # Lua 5.3 §6.4.1: gsub validates the replacement string and the value
+    # returned from a table/function replacement. These cases are caught
+    # by `pcall` in the official pm.lua suite.
+
+    test "string.gsub raises on out-of-range capture index in replacement string" do
+      code = ~s{return pcall(string.gsub, "alo", ".", "%2")}
+      {[ok, msg], _state} = Lua.eval!(code)
+      assert ok == false
+      assert msg =~ "invalid capture index %2"
+    end
+
+    test "string.gsub raises on a lone '%' escape in replacement string" do
+      code = ~s{return pcall(string.gsub, "alo", ".", "%x")}
+      {[ok, msg], _state} = Lua.eval!(code)
+      assert ok == false
+      assert msg =~ "invalid use of '%'"
+    end
+
+    test "string.gsub raises when a table replacement yields a table value" do
+      code = """
+      return pcall(string.gsub, "alo", ".", {a = {}})
+      """
+
+      {[ok, msg], _state} = Lua.eval!(code)
+      assert ok == false
+      assert msg =~ "invalid replacement value (a table)"
+    end
+
+    test "string.gsub raises when a function replacement returns a table" do
+      code = """
+      return pcall(string.gsub, "alo", ".", function() return {} end)
+      """
+
+      {[ok, msg], _state} = Lua.eval!(code)
+      assert ok == false
+      assert msg =~ "invalid replacement value (a table)"
+    end
+
+    test "string.gsub keeps treating %% as a literal percent" do
+      code = ~s{return string.gsub("ab", ".", "%%")}
+      {[result, count], _state} = Lua.eval!(code)
+      assert result == "%%"
+      assert count == 2
+    end
   end
 
   describe "pattern matching features" do
