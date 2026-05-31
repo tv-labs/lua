@@ -2,10 +2,10 @@
 id: A31
 title: README rewrite for 1.0 positioning, quickstart, and tour
 issue: 265
-pr: null
+pr: 298
 branch: docs/readme-rewrite
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - "first-impression" of the library on Hex/GitHub
@@ -222,3 +222,28 @@ listed above.
 - Version is `1.0.0-rc.0` and suite coverage is 6/29 (ROADMAP,
   2026-05-21). Coverage section links ROADMAP for the live count
   rather than hardcoding it.
+- The public runtime exception is `Lua.RuntimeException` (fields
+  `:line`, `:source`, `:message`, `:call_stack`, `:state`,
+  `:original`), not the internal `Lua.VM.RuntimeError`. The Tour's
+  error snippets use the public type.
+- Specific sandboxed ops are allowed via the `:exclude` option, e.g.
+  `Lua.new(exclude: [[:os, :getenv]])`.
+- `{:userdata, term}` round-trips directly through `Lua.set!/3`; no
+  explicit `Lua.encode!/2` is required for the Tour snippet.
+
+## What changed
+
+- `README.md` — full rewrite. New structure: badges + `<!-- MDOC !-->`
+  marker (preserved) + one-line pitch and positioning paragraph;
+  Installation; Quickstart (doctested); Tour (errors with source/line +
+  `pcall`, calling Elixir from Lua, userdata, sandboxing, metatables);
+  Coverage and status (supported subsystems + named non-goals, links
+  `ROADMAP.md`); Examples (six A30 paths + index, absolute `blob/main`
+  links); Documentation; Compatibility and credits (vs Luerl); License.
+  201 lines, under the ~250 target.
+- `.agents/plans/A31-readme-rewrite.md` — plan lifecycle: stub →
+  in-progress → review.
+- No suite delta (docs-only change). `mix test`: 2096 passed, 0 failed.
+  `mix docs` builds with no warnings.
+- Cross-PR link dependency: the `examples/` links resolve once sibling
+  PR A30 (`docs/examples`) merges to `main`.
