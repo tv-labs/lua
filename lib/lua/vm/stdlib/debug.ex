@@ -16,8 +16,8 @@ defmodule Lua.VM.Stdlib.Debug do
   - `debug.setlocal(level, local, value)` - Stub returning nil
   - `debug.sethook([hook, mask [, count]])` - Stub no-op
   - `debug.gethook([thread])` - Stub returning nil
-  - `debug.getupvalue(f, up)` - Stub returning nil
-  - `debug.setupvalue(f, up, value)` - Stub returning nil
+  - `debug.getupvalue(f, up)` - Returns the name and value of an upvalue
+  - `debug.setupvalue(f, up, value)` - Sets an upvalue, returning its name
   - `debug.upvalueid(f, n)` - Stub returning nil
   """
 
@@ -211,12 +211,52 @@ defmodule Lua.VM.Stdlib.Debug do
   defp debug_setmetatable([obj | _], state), do: {[obj], state}
   defp debug_setmetatable([], state), do: {[nil], state}
 
+  # debug.getupvalue(f, up) — returns the name and value of the up-th upvalue of
+  # function `f`, or nil when `up` is out of range or `f` is not a Lua closure.
+  defp debug_getupvalue([closure, n | _], state) when is_number(n) do
+    case upvalue_slot(closure, n) do
+      {:ok, name, cell} -> {[name, Map.get(state.upvalue_cells, cell)], state}
+      :error -> {[nil], state}
+    end
+  end
+
+  defp debug_getupvalue(_args, state), do: {[nil], state}
+
+  # debug.setupvalue(f, up, value) — assigns `value` to the up-th upvalue of
+  # function `f`, returning its name (or nil when out of range / not a closure).
+  defp debug_setupvalue([closure, n | rest], state) when is_number(n) do
+    value = List.first(rest)
+
+    case upvalue_slot(closure, n) do
+      {:ok, name, cell} ->
+        {[name], %{state | upvalue_cells: Map.put(state.upvalue_cells, cell, value)}}
+
+      :error ->
+        {[nil], state}
+    end
+  end
+
+  defp debug_setupvalue(_args, state), do: {[nil], state}
+
+  # Resolve the up-th (1-based) upvalue of a closure to {name, cell_ref}. Every
+  # element of a closure's upvalue tuple is a cell ref keyed in
+  # `state.upvalue_cells`; the name comes from the prototype's `upvalue_names`.
+  defp upvalue_slot({tag, proto, upvalues}, n) when tag in [:lua_closure, :compiled_closure] do
+    index = trunc(n) - 1
+
+    if index >= 0 and index < tuple_size(upvalues) and index < length(proto.upvalue_names) do
+      {:ok, Enum.at(proto.upvalue_names, index), elem(upvalues, index)}
+    else
+      :error
+    end
+  end
+
+  defp upvalue_slot(_closure, _n), do: :error
+
   # Stubs
   defp debug_getlocal(_args, state), do: {[nil], state}
   defp debug_setlocal(_args, state), do: {[nil], state}
   defp debug_sethook(_args, state), do: {[], state}
   defp debug_gethook(_args, state), do: {[nil, "", 0], state}
-  defp debug_getupvalue(_args, state), do: {[nil], state}
-  defp debug_setupvalue(_args, state), do: {[nil], state}
   defp debug_upvalueid(_args, state), do: {[nil], state}
 end

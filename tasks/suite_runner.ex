@@ -139,18 +139,31 @@ defmodule Lua.SuiteRunner do
   end
 
   defp install_load(lua) do
-    Lua.set!(lua, ["load"], fn args, state ->
+    Lua.set!(lua, ["load"], fn args, lua ->
       code = List.first(args)
       chunk_name = Enum.at(args, 1, "<load>")
+      vm = lua.state
+
+      # A loaded chunk's sole upvalue is `_ENV`. Back it with a real cell
+      # holding the requested environment (the optional 4th arg, defaulting to
+      # `_G`) so `debug.getupvalue`/`setupvalue` and custom-env writes work —
+      # mirroring `Lua.VM.Stdlib.compile_loaded_chunk/3`.
+      env =
+        case Enum.at(args, 3) do
+          nil -> Lua.VM.State.g_ref(vm)
+          env -> env
+        end
 
       case Lua.Parser.parse(code) do
         {:ok, ast} ->
           proto = Lua.Compiler.compile!(ast, source: chunk_name)
-          closure = {:lua_closure, proto, {}}
-          {[closure], state}
+          env_cell = make_ref()
+          vm = %{vm | upvalue_cells: Map.put(vm.upvalue_cells, env_cell, env)}
+          closure = {:lua_closure, proto, {env_cell}}
+          {[closure], %{lua | state: vm}}
 
         {:error, error} ->
-          {[nil, "parse error: #{inspect(error)}"], state}
+          {[nil, "parse error: #{inspect(error)}"], lua}
       end
     end)
   end

@@ -200,7 +200,14 @@ defmodule Lua.VM.Dispatcher do
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
       {@op_load_env, dest} ->
-        regs = :erlang.setelement(dest + 1, regs, State.g_ref(state))
+        env =
+          if tuple_size(upvalues) > 0 do
+            Map.get(state.upvalue_cells, :erlang.element(1, upvalues))
+          else
+            State.g_ref(state)
+          end
+
+        regs = :erlang.setelement(dest + 1, regs, env)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
       {@op_get_upvalue, dest, index} ->

@@ -17,6 +17,8 @@ defmodule Lua.VM.Display.Closure do
     have `:arity` equal to the fixed-parameter count; the variadic
     flag is reflected by appending `+...` in the inspect output.
   - `:vararg?` — true when the closure accepts varargs (`...`).
+  - `:upvalue_names` — the closure's upvalue names in declaration order
+    (for example `["_ENV"]` for a loaded chunk).
   - `:ref` — the original `{:lua_closure, proto, upvalues}` tuple
     so callers can still reach the live closure (for example via
     `Lua.call_function/3`).
@@ -31,10 +33,11 @@ defmodule Lua.VM.Display.Closure do
           line: non_neg_integer(),
           arity: non_neg_integer(),
           vararg?: boolean(),
+          upvalue_names: [String.t()],
           ref: tuple()
         }
 
-  defstruct [:source, :line, :arity, :vararg?, :ref]
+  defstruct [:source, :line, :arity, :vararg?, :ref, upvalue_names: []]
 
   defimpl Inspect do
     import Inspect.Algebra
@@ -43,6 +46,12 @@ defmodule Lua.VM.Display.Closure do
       arity = Integer.to_string(c.arity || 0)
       arity = if c.vararg?, do: arity <> "+...", else: arity
 
+      upvalues =
+        case c.upvalue_names || [] do
+          [] -> empty()
+          names -> concat([", upvalues: [", Enum.join(names, ", "), "]"])
+        end
+
       concat([
         "#Lua.Closure<source: ",
         to_doc(c.source, opts),
@@ -50,6 +59,7 @@ defmodule Lua.VM.Display.Closure do
         Integer.to_string(c.line || 0),
         ", arity: ",
         arity,
+        upvalues,
         ">"
       ])
     end

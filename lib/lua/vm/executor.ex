@@ -650,12 +650,14 @@ defmodule Lua.VM.Executor do
   end
 
   # ── load_env ───────────────────────────────────────────────────────────────
-  # Loads the runtime `_G` table reference into `dest`. Plan A16 emits this
+  # Loads the chunk's `_ENV` table reference into `dest`. Plan A16 emits this
   # at the start of every chunk so `_ENV` (a chunk-level local at register 0)
-  # is initialised before user code runs.
+  # is initialised before user code runs. A chunk loaded with a custom
+  # environment carries it in upvalue slot 0 (see `Stdlib.compile_loaded_chunk`);
+  # otherwise `_ENV` defaults to the global table `_G`.
 
   defp do_execute([{:load_env, dest} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    regs = put_elem(regs, dest, State.g_ref(state))
+    regs = put_elem(regs, dest, load_env_value(upvalues, state))
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
@@ -2837,6 +2839,15 @@ defmodule Lua.VM.Executor do
   defp close_open_upvalues_at_or_above(%{open_upvalues: ou} = state, threshold) do
     %{state | open_upvalues: Map.reject(ou, fn {reg, _} -> reg >= threshold end)}
   end
+
+  # Resolve the `_ENV` value for a chunk's `load_env` instruction: a custom
+  # environment lives in upvalue slot 0 when present (a chunk loaded via
+  # `load(..., env)`), otherwise default to the global table `_G`.
+  defp load_env_value(upvalues, state) when tuple_size(upvalues) > 0 do
+    Map.get(state.upvalue_cells, elem(upvalues, 0))
+  end
+
+  defp load_env_value(_upvalues, state), do: State.g_ref(state)
 
   # ── Call helpers: copy args without allocating an intermediate list ────────
   #

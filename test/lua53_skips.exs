@@ -166,10 +166,11 @@
   ],
   "locals.lua" => [
     %{
-      lines: :all,
-      category: :unimplemented,
-      reason: "debug.getupvalue not implemented; _ENV introspection via debug library missing",
-      issue: nil
+      lines: 148..154,
+      category: :semantic,
+      reason:
+        "nested `local _ENV = {assert=assert, ...}` redirection leaks scope: free-name `assert` resolves to nil at line 150 (debug.getupvalue/setupvalue and _ENV introspection now pass)",
+      issue: 284
     }
   ],
   "math.lua" => [
