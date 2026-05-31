@@ -2,10 +2,10 @@
 id: A30
 title: examples/ directory — runnable, linked from README
 issue: 264
-pr: null
+pr: 300
 branch: docs/examples
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - "embedding patterns are obvious" promise
@@ -137,4 +137,30 @@ for f in examples/*.exs; do mix run "$f" || echo "FAIL: $f"; done
 
 ## Discoveries
 
-(populated during implementation)
+- Userdata reaches a native function as an opaque reference
+  (`{:udref, _}`), not the wrapped `{:userdata, struct}`. Native
+  functions must use the 2-arity form and `Lua.decode!/2` the
+  reference back into the struct (and `Lua.encode!/2` a new one to
+  return). `02_userdata.exs` uses this pattern.
+- A struct literal (`%Counter{}`) cannot appear in the same `.exs`
+  file that defines the struct, because the file is compiled as a
+  single unit. `02_userdata.exs` builds/updates the struct with
+  `struct/2` and map-update syntax, and documents why.
+- Lua source containing `{`/`}` clashes with `~S{...}`. Examples use
+  heredoc strings (`"""..."""`) for multi-line Lua so braces pass
+  through.
+- README linking is left to A31 (README rewrite); this PR's scope is
+  the `examples/` directory and its smoke test only.
+
+## What changed
+
+- Added `examples/01_quickstart.exs` through `06_error_handling.exs`,
+  six self-contained runnable scripts covering eval, userdata,
+  custom Elixir functions, sandboxing, chunk reuse, and error
+  handling. Each prints its expected output inline.
+- Added `examples/README.md` indexing the examples with one-line
+  summaries.
+- Added `test/examples_test.exs`, a smoke test that runs each example
+  via `Code.eval_file/1` with IO captured and asserts it completes.
+- Tests: `mix test` → 2098 passed, 19 skipped, 0 failing.
+- PR: #300.
