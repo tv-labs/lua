@@ -116,7 +116,13 @@
     }
   ],
   "gc.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "garbage collection / weak tables not implemented", issue: nil}
+    %{
+      lines: 167..622,
+      category: :unimplemented,
+      reason:
+        "collectgarbage is a no-op stub: step/stop/restart pacing, count shrinkage, weak tables and __gc finalizers not implemented",
+      issue: 260
+    }
   ],
   "goto.lua" => [
     %{
