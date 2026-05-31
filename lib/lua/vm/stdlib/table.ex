@@ -29,8 +29,17 @@ defmodule Lua.VM.Stdlib.Table do
 
   alias Lua.VM.ArgumentError
   alias Lua.VM.Executor
+  alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
+
+  # Upper bound on the number of values `table.unpack` may produce. Lua
+  # 5.3's `ltablib.c` rejects ranges in two arms: the element count
+  # `n = (j - i) + 1` overflowing `INT_MAX`, and `lua_checkstack` failing
+  # for that count (which trips at `n == INT_MAX` after its internal
+  # `++n`). Both reduce to rejecting when `n >= INT_MAX`, i.e. when
+  # `(j - i) >= INT_MAX - 1`, before materialising any results.
+  @unpack_max_results 2_147_483_647
 
   @impl true
   def lib_name, do: "table"
@@ -394,6 +403,16 @@ defmodule Lua.VM.Stdlib.Table do
         arg_num: 3,
         expected: "number",
         got: Util.typeof(j)
+    end
+
+    # Reject ranges whose element count `(j - i) + 1` reaches INT_MAX
+    # before materialising anything. `ltablib.c` does the same check up
+    # front (count overflow plus the `lua_checkstack` arm), so
+    # `table.unpack({}, 0, math.maxinteger)` errors immediately instead of
+    # trying to build an enormous list. The subtraction stays within
+    # Elixir's arbitrary-precision integers, so it cannot overflow.
+    if i <= j and j - i >= @unpack_max_results - 1 do
+      raise RuntimeError.exception(value: "too many results to unpack")
     end
 
     # Read each element via __index. Empty range (i > j) returns no
