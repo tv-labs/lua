@@ -484,7 +484,7 @@ defmodule Lua.VM.Executor do
   @doc false
   @spec dispatcher_call_info(term(), term(), non_neg_integer()) :: map()
   def dispatcher_call_info(proto, name_hint, line) do
-    %{source: proto.source, line: line, name: hint_name(name_hint)}
+    %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
   end
 
   # ── Break ──────────────────────────────────────────────────────────────────
@@ -965,7 +965,11 @@ defmodule Lua.VM.Executor do
         # `:call_one` clause handles dispatcher → dispatcher chains
         # without going through this branch.
         args = collect_args(regs, base + 1, total_args)
+        call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
+        State.check_call_depth!(state)
+        state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
         {results, state} = Dispatcher.execute(callee_proto, args, callee_upvalues, state)
+        state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
         continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, base, result_count)
 
       {:lua_closure, callee_proto, callee_upvalues} ->
@@ -998,7 +1002,7 @@ defmodule Lua.VM.Executor do
           open_upvalues: state.open_upvalues
         }
 
-        call_info = %{source: proto.source, line: line, name: hint_name(name_hint)}
+        call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
 
         State.check_call_depth!(state)
 
@@ -2233,6 +2237,19 @@ defmodule Lua.VM.Executor do
 
   defp hint_name(nil), do: nil
   defp hint_name(hint) when is_tuple(hint), do: elem(hint, 1)
+
+  # Maps a call-site `name_hint` tag to the Lua 5.3 `namewhat` string reported
+  # by `debug.getinfo(level, "n")`. The hint is recovered at compile time from
+  # the caller's instruction, mirroring PUC-Lua's `getfuncname` classification.
+  defp hint_namewhat(nil), do: ""
+  defp hint_namewhat({:global, _}), do: "global"
+  defp hint_namewhat({:local, _}), do: "local"
+  defp hint_namewhat({:upvalue, _}), do: "upvalue"
+  defp hint_namewhat({:field, _}), do: "field"
+  defp hint_namewhat({:field, _, _}), do: "field"
+  defp hint_namewhat({:method, _}), do: "method"
+  defp hint_namewhat({:method, _, _}), do: "method"
+  defp hint_namewhat(_), do: ""
 
   @doc """
   Reads `t[key]` honoring the `__index` metamethod chain.
