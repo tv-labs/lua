@@ -2,10 +2,10 @@
 id: B12
 title: parse string.format flags once and dispatch on integer specifier
 issue: 309
-pr: null
+pr: 317
 branch: perf/string-format-flags-bitmask
 base: main
-status: in-progress
+status: review
 direction: B
 ---
 
@@ -152,3 +152,38 @@ unchanged); the full `mix test` run guards against any caller of
   improvement, the change is still a correctness-neutral simplification
   (one flag parse instead of N re-scans); ship it on those grounds and
   record the measured delta honestly in the PR.
+
+## What changed
+
+Implemented in `lib/lua/vm/stdlib/string.ex` (PR #317):
+
+- `parse_flags/2` now folds the flag characters into an integer bitmask
+  in a single pass (`@flag_minus`, `@flag_zero`, `@flag_plus`,
+  `@flag_space`, `@flag_hash`) instead of accumulating a binary;
+  `parse_format_spec/1` seeds it with `0`. `+`, space, and `#` are still
+  carried but unconsulted, preserving today's ignore-them behavior.
+- `parse_specifier/1` returns the conversion char as a raw integer code
+  point; `apply_format_spec/2` dispatches on `?d`/`?i`/.../`?q` integer
+  patterns. The invalid-option error re-renders the char with
+  `<<specifier>>` so the message text is byte-for-byte identical.
+- `apply_width_flags/3` reads `flags &&& @flag_minus` / `@flag_zero`
+  instead of `String.contains?/2`, removing the per-specifier re-scan
+  from the padding path. All padding branches are preserved one-to-one.
+- Added `import Bitwise` for `|||` / `&&&`.
+
+Verification: `mix test test/lua/vm/string_test.exs` (152 passed),
+full `mix test` (2114 passed, 19 skipped, 1 excluded),
+`mix compile --warnings-as-errors` clean. Benchmark (Apple M4, lua chunk)
+showed ~+17% / +30% / +23% ips across the three workloads; the
+width-flagged path (the one that carried the re-scan) gained the most.
+
+### Deviations from plan
+
+- The plan's verification named `test/lua/vm/stdlib/string_test.exs`,
+  which does not exist; the format coverage is in
+  `test/lua/vm/string_test.exs`. Used that file plus full `mix test`.
+- The benchmark's optional `luaport` dep needs C Lua headers (absent in
+  this environment) and its dep-compile aborts `mix run` before the
+  runtime skip fires. Numbers were captured with `luaport` temporarily
+  excluded from `mix.exs` for the bench run only; `mix.exs` is unchanged
+  in the PR.
