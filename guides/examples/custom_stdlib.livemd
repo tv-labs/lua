@@ -1,0 +1,73 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# Custom stdlib
+
+```elixir
+Mix.install([
+  {:lua, "~> 1.0.0-rc.0"}
+])
+```
+
+## Exposing a plain function
+
+`Lua.set!/3` installs a function at a path. A 1-arity function
+`fn args -> results end` is enough when you don't need the VM state.
+
+```elixir
+lua = Lua.set!(Lua.new(), [:greet], fn [name] -> ["Hello, #{name}!"] end)
+
+{[greeting], _lua} = Lua.eval!(lua, ~S[return greet("Lua")])
+greeting
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+"Hello, Lua!"
+```
+
+## Extending an existing library
+
+Nested paths like `[:math, :clamp]` build the intermediate table, so you
+can extend existing libraries — here we add `clamp` to `math`.
+
+```elixir
+lua =
+  Lua.set!(lua, [:math, :clamp], fn [value, low, high] ->
+    [value |> max(low) |> min(high)]
+  end)
+
+{[clamped], _lua} = Lua.eval!(lua, "return math.clamp(42, 0, 10)")
+clamped
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+10
+```
+
+## Reading Lua state from a function
+
+The 2-arity form `fn args, state -> {results, state} end` is for functions
+that read or modify Lua state. Here `add_base/1` reads a global with
+`Lua.get!/2`.
+
+```elixir
+lua = Lua.set!(lua, [:base], 100)
+
+lua =
+  Lua.set!(lua, [:add_base], fn [n], state ->
+    base = Lua.get!(state, [:base])
+    {[n + base], state}
+  end)
+
+{[total], _lua} = Lua.eval!(lua, "return add_base(5)")
+total
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+105
+```

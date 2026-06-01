@@ -1,0 +1,67 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# Error handling
+
+```elixir
+Mix.install([
+  {:lua, "~> 1.0.0-rc.0"}
+])
+```
+
+## In-band recovery with pcall
+
+Lua's `pcall` returns `false, message` instead of propagating an error, so
+scripts can recover from failures in-band.
+
+```elixir
+{[ok?, message], _lua} =
+  Lua.eval!(Lua.new(), ~S[return pcall(function() error("something broke") end)])
+
+{ok?, message}
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{false, "something broke"}
+```
+
+## Inspecting a structured exception
+
+When an error escapes a script, `Lua.eval!/2` raises `Lua.RuntimeException`
+with `:line`, `:source`, and `:call_stack` populated. Pass `source:` so the
+attribution names your script.
+
+```elixir
+try do
+  Lua.eval!(
+    Lua.new(),
+    """
+    local user = nil
+    return user.name
+    """,
+    source: "profile.lua"
+  )
+rescue
+  e in Lua.RuntimeException ->
+    IO.inspect(e.source, label: "source")
+    IO.inspect(e.line, label: "line")
+    IO.puts(Exception.message(e))
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+source: "profile.lua"
+line: 2
+Lua runtime error: Runtime Type Error
+
+  at profile.lua:2:
+
+  attempt to index a nil value (local 'user')
+
+
+Suggestion:
+  You can only index tables. Make sure the value you're indexing is a table, not a nil.
+```

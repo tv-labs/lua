@@ -1,0 +1,84 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# Userdata
+
+```elixir
+Mix.install([
+  {:lua, "~> 1.0.0-rc.0"}
+])
+```
+
+## Passing an Elixir struct to Lua
+
+Userdata lets you hand an Elixir term to Lua as an opaque reference. Inside
+Lua the value cannot be indexed or mutated — it can only be passed back to
+Elixir-defined functions. Structs travel through Lua as `{:userdata, term}`.
+
+Here we define a `Counter` struct and expose it as a global `counter`.
+
+```elixir
+defmodule Counter do
+  defstruct count: 0
+end
+
+{counter_ref, lua} = Lua.encode!(Lua.new(), {:userdata, struct(Counter, count: 0)})
+lua = Lua.set!(lua, [:counter], counter_ref)
+:ok
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+## Defining methods in Elixir
+
+Native functions registered with `Lua.set!/3` use the 2-arity form
+`fn args, state -> {results, state} end` so they can `Lua.decode!/2` the
+reference back into the struct and `Lua.encode!/2` a new one to return.
+
+`Counter.inc/1` returns a new userdata reference with `count + 1`, and
+`Counter.value/1` reads the count out as a plain integer.
+
+```elixir
+lua =
+  Lua.set!(lua, [:Counter, :inc], fn [ref], state ->
+    {:userdata, c} = Lua.decode!(state, ref)
+    {new_ref, state} = Lua.encode!(state, {:userdata, %{c | count: c.count + 1}})
+    {[new_ref], state}
+  end)
+
+lua =
+  Lua.set!(lua, [:Counter, :value], fn [ref], state ->
+    {:userdata, c} = Lua.decode!(state, ref)
+    {[c.count], state}
+  end)
+
+:ok
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+## Calling the methods from Lua
+
+```elixir
+{[result], _lua} =
+  Lua.eval!(lua, """
+  counter = Counter.inc(counter)
+  counter = Counter.inc(counter)
+  return Counter.value(counter)
+  """)
+
+result
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+2
+```
