@@ -144,7 +144,9 @@ guards above don't catch (for example, growing a table in a loop). These
 limits have to be enforced by the BEAM, around the call.
 
 Run untrusted scripts in a **separate, monitored process** with both a
-timeout and a heap ceiling:
+timeout and a heap ceiling. The key is to keep the wall-clock timeout and
+the memory kill on **separate `receive` arms** so the two failure modes
+stay distinguishable:
 
 ```elixir
 defmodule SafeLua do
@@ -153,8 +155,15 @@ defmodule SafeLua do
   @timeout_ms 1_000
 
   def run(lua, source) do
-    task =
-      Task.Supervisor.async_nolink(MyApp.TaskSupervisor, fn ->
+    parent = self()
+
+    # Trap exits so the worker dying — whether it finishes, is killed by
+    # the memory ceiling, or we tear it down on timeout — arrives as a
+    # message instead of crashing the caller. Restore the flag afterwards.
+    prev_trap = Process.flag(:trap_exit, true)
+
+    worker =
+      spawn_link(fn ->
         # CRITICAL: include_shared_binaries: true. Without it, max_heap_size
         # counts only the process heap, NOT off-heap reference-counted
         # binaries (>64 bytes) — so a binary bomb would slip past the limit.
@@ -166,14 +175,29 @@ defmodule SafeLua do
           include_shared_binaries: true
         })
 
-        Lua.eval!(lua, source)
+        send(parent, {:result, Lua.eval!(lua, source)})
       end)
 
-    case Task.yield(task, @timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {result, _lua}} -> {:ok, result}
-      {:exit, :killed} -> {:error, :memory_limit}
-      {:exit, reason} -> {:error, reason}
-      nil -> {:error, :timeout}
+    try do
+      receive do
+        {:result, {result, _lua}} ->
+          {:ok, result}
+
+        # Worker hit the memory ceiling: max_heap_size kills it with
+        # `:killed`, the only abnormal exit we attribute to the limit.
+        {:EXIT, ^worker, :killed} ->
+          {:error, :memory_limit}
+
+        # Any other abnormal worker exit is an unrelated crash.
+        {:EXIT, ^worker, reason} ->
+          {:error, reason}
+      after
+        @timeout_ms ->
+          Process.exit(worker, :kill)
+          {:error, :timeout}
+      end
+    after
+      Process.flag(:trap_exit, prev_trap)
     end
   end
 end
@@ -181,11 +205,17 @@ end
 
 Two details make this robust:
 
-* **`async_nolink`** (under a `Task.Supervisor` in your supervision tree)
-  monitors the task instead of linking it. When the heap ceiling kills
-  the task, `Task.yield/2` reports `{:exit, :killed}` and your caller
-  keeps running — a plain `Task.async/1` would link the kill back to the
-  caller and crash it.
+* **Separate `receive` arms for timeout and `:killed`.** A wall-clock
+  timeout fires the `after` clause and reports `:timeout`; a memory kill
+  arrives as `{:EXIT, worker, :killed}` and reports `:memory_limit`. The
+  tempting `Task.yield(task, @timeout_ms) || Task.shutdown(task,
+  :brutal_kill)` shape collapses the two: `brutal_kill` on a timeout also
+  exits the worker with `:killed`, so a CPU-bound infinite loop would be
+  mislabeled a memory limit.
+* **`trap_exit` + `spawn_link`** turns the worker's exit into a message
+  the caller can match on, instead of letting the kill propagate and
+  crash the caller. Restoring the previous `trap_exit` flag in the
+  `after` block leaves the caller's state untouched.
 * **`include_shared_binaries: true`** is what makes the memory ceiling
   actually work for the binary-allocation attacks. Large Lua strings
   become off-heap BEAM binaries; without this flag they are not counted
