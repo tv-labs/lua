@@ -210,7 +210,6 @@ defmodule Lua.VM.Stdlib.Os do
 
   # Maps a %VFS.Error{} into Lua's "<path>: <reason>" error string convention.
   defp vfs_error_message(path, %VFS.Error{kind: :enoent}), do: "#{path}: No such file or directory"
-  defp vfs_error_message(path, %VFS.Error{message: nil}), do: path
   defp vfs_error_message(path, %VFS.Error{message: message}), do: "#{path}: #{message}"
 
   # os.exit([code [, close]]) — the sandbox cannot terminate the host, so

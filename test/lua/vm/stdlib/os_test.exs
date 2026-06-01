@@ -93,6 +93,24 @@ defmodule Lua.VM.Stdlib.OsTest do
       assert message =~ "/nope.txt"
     end
 
+    test "os.remove on a relative path returns nil and a message" do
+      lua = Lua.new(sandboxed: [])
+      {[result, message], _} = Lua.eval!(lua, ~S[return os.remove("relative.txt")])
+      assert result == nil
+      assert is_binary(message)
+      assert message =~ "relative.txt"
+      assert message =~ "No such file or directory"
+    end
+
+    test "os.rename on a relative path returns nil and a message" do
+      lua = Lua.new(sandboxed: [])
+      {[result, message], _} = Lua.eval!(lua, ~S[return os.rename("a.txt", "b.txt")])
+      assert result == nil
+      assert is_binary(message)
+      assert message =~ "a.txt"
+      assert message =~ "No such file or directory"
+    end
+
     test "os.rename moves file contents within the VFS" do
       lua = [sandboxed: []] |> Lua.new() |> Lua.write_file("/from.txt", "hello")
 

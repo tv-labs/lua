@@ -82,11 +82,15 @@ defmodule Lua.VM.State do
   back onto `state`, or `{:error, %VFS.Error{}, state}` on failure.
   """
   @spec vfs_read(t(), binary()) :: {:ok, binary(), t()} | {:error, VFS.Error.t(), t()}
-  def vfs_read(%__MODULE__{vfs: vfs} = state, path) when is_binary(path) do
+  def vfs_read(%__MODULE__{vfs: vfs} = state, "/" <> _ = path) do
     case VFS.read_file(vfs, path) do
       {:ok, contents, vfs} -> {:ok, contents, %{state | vfs: vfs}}
       {:error, %VFS.Error{} = error} -> {:error, error, state}
     end
+  end
+
+  def vfs_read(%__MODULE__{} = state, path) when is_binary(path) do
+    {:error, relative_path_error(path), state}
   end
 
   @doc """
@@ -96,11 +100,15 @@ defmodule Lua.VM.State do
   `{:error, %VFS.Error{}, state}` on failure.
   """
   @spec vfs_write(t(), binary(), binary()) :: {:ok, t()} | {:error, VFS.Error.t(), t()}
-  def vfs_write(%__MODULE__{vfs: vfs} = state, path, contents) when is_binary(path) and is_binary(contents) do
+  def vfs_write(%__MODULE__{vfs: vfs} = state, "/" <> _ = path, contents) when is_binary(contents) do
     case VFS.write_file(vfs, path, contents) do
       {:ok, vfs} -> {:ok, %{state | vfs: vfs}}
       {:error, %VFS.Error{} = error} -> {:error, error, state}
     end
+  end
+
+  def vfs_write(%__MODULE__{} = state, path, contents) when is_binary(path) and is_binary(contents) do
+    {:error, relative_path_error(path), state}
   end
 
   @doc """
@@ -110,11 +118,15 @@ defmodule Lua.VM.State do
   `{:error, %VFS.Error{}, state}` on failure.
   """
   @spec vfs_rm(t(), binary()) :: {:ok, t()} | {:error, VFS.Error.t(), t()}
-  def vfs_rm(%__MODULE__{vfs: vfs} = state, path) when is_binary(path) do
+  def vfs_rm(%__MODULE__{vfs: vfs} = state, "/" <> _ = path) do
     case VFS.rm(vfs, path) do
       {:ok, vfs} -> {:ok, %{state | vfs: vfs}}
       {:error, %VFS.Error{} = error} -> {:error, error, state}
     end
+  end
+
+  def vfs_rm(%__MODULE__{} = state, path) when is_binary(path) do
+    {:error, relative_path_error(path), state}
   end
 
   @doc """
@@ -154,6 +166,14 @@ defmodule Lua.VM.State do
   """
   @spec vfs_host_fallback?(t()) :: boolean()
   def vfs_host_fallback?(%__MODULE__{vfs_host_fallback?: enabled?}), do: enabled?
+
+  # The VFS only accepts absolute paths and raises on relative ones; surface a
+  # relative path as an ordinary `:enoent` failure so callers (os.remove,
+  # os.rename, require) get the standard `{:error, %VFS.Error{}}` contract
+  # instead of crashing the evaluation.
+  defp relative_path_error(path) do
+    VFS.Error.new(:enoent, path: path, message: "No such file or directory")
+  end
 
   @doc """
   Guards against unbounded recursion.

@@ -800,9 +800,17 @@ defmodule Lua.VM.Stdlib do
   # The VFS requires absolute paths, so relative patterns (the default
   # `?.lua` / `?/init.lua`) are only tried against the VFS after being anchored
   # under `/lua/deps`; the host fallback handles them verbatim.
+  defp search_candidate("/" <> _ = file_path, state) do
+    # An absolute pattern is already VFS-legal; reading it directly is the same
+    # path `anchor_dep_path` would produce, so issue a single VFS read.
+    with {:error, _, state} <- State.vfs_read(state, file_path),
+         {:error, state} <- host_read(state, file_path) do
+      {:not_found, state}
+    end
+  end
+
   defp search_candidate(file_path, state) do
     with {:error, _, state} <- vfs_read_anchored(state, file_path),
-         {:error, _, state} <- vfs_read_direct(state, file_path),
          {:error, state} <- host_read(state, file_path) do
       {:not_found, state}
     end
@@ -823,14 +831,9 @@ defmodule Lua.VM.Stdlib do
 
   defp vfs_read_anchored(state, file_path), do: State.vfs_read(state, anchor_dep_path(file_path))
 
-  # Only the VFS-legal (absolute) form is read directly; relative patterns are
-  # left to the dep-anchored read and the host fallback.
-  defp vfs_read_direct(state, "/" <> _ = file_path), do: State.vfs_read(state, file_path)
-  defp vfs_read_direct(state, _file_path), do: {:error, :relative, state}
-
-  # Anchor a resolved search pattern under the virtual dependency root
-  # (`/lua/deps`). Absolute patterns are left as-is.
-  defp anchor_dep_path("/" <> _ = path), do: path
+  # Anchor a relative search pattern under the virtual dependency root
+  # (`/lua/deps`). Absolute patterns are handled by the dedicated
+  # `search_candidate/2` clause and never reach here.
   defp anchor_dep_path(path), do: Path.join("/lua/deps", path)
 
   # Convert a value to string, checking for __tostring metamethod
