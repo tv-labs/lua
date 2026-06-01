@@ -28,6 +28,8 @@ defmodule Lua.VM.Stdlib.String do
 
   @behaviour Lua.VM.Stdlib.Library
 
+  import Bitwise
+
   alias Lua.VM.ArgumentError
   alias Lua.VM.Executor
   alias Lua.VM.State
@@ -364,18 +366,31 @@ defmodule Lua.VM.Stdlib.String do
 
   # Parse a format spec: [flags][width][.precision]specifier
   defp parse_format_spec(str) do
-    {flags, str} = parse_flags(str, "")
+    {flags, str} = parse_flags(str, 0)
     {width, str} = parse_width(str)
     {precision, str} = parse_precision(str)
     {specifier, str} = parse_specifier(str)
     {{flags, width, precision, specifier}, str}
   end
 
-  defp parse_flags(<<c, rest::binary>>, acc) when c in ~c(-+ 0#) do
-    parse_flags(rest, acc <> <<c>>)
-  end
+  # Flags are parsed once into an integer bitmask so the apply path reads
+  # precomputed bits instead of re-scanning a binary per specifier. Only the
+  # minus and zero bits affect output today (`+`, space, `#` are accepted by
+  # PUC-Lua's parser but ignored when rendering); the mask carries all five so
+  # the parse stays a single pass without changing behavior.
+  @flag_minus 0b00001
+  @flag_zero 0b00010
+  @flag_plus 0b00100
+  @flag_space 0b01000
+  @flag_hash 0b10000
 
-  defp parse_flags(str, acc), do: {acc, str}
+  defp parse_flags(<<?-, rest::binary>>, mask), do: parse_flags(rest, mask ||| @flag_minus)
+  defp parse_flags(<<?0, rest::binary>>, mask), do: parse_flags(rest, mask ||| @flag_zero)
+  defp parse_flags(<<?+, rest::binary>>, mask), do: parse_flags(rest, mask ||| @flag_plus)
+  defp parse_flags(<<?\s, rest::binary>>, mask), do: parse_flags(rest, mask ||| @flag_space)
+  defp parse_flags(<<?#, rest::binary>>, mask), do: parse_flags(rest, mask ||| @flag_hash)
+
+  defp parse_flags(str, mask), do: {mask, str}
 
   defp parse_width(<<c, _::binary>> = str) when c in ?0..?9 do
     parse_number(str, 0)
@@ -401,7 +416,9 @@ defmodule Lua.VM.Stdlib.String do
 
   defp parse_number(str, acc), do: {acc, str}
 
-  defp parse_specifier(<<c, rest::binary>>), do: {<<c>>, rest}
+  # Keep the conversion char as a raw integer code point so apply_format_spec/2
+  # dispatches on BEAM integer patterns rather than one-byte binaries.
+  defp parse_specifier(<<c, rest::binary>>), do: {c, rest}
 
   defp parse_specifier("") do
     raise ArgumentError,
@@ -413,21 +430,21 @@ defmodule Lua.VM.Stdlib.String do
   defp apply_format_spec({flags, width, precision, specifier}, arg) do
     raw =
       case specifier do
-        "d" -> format_spec_integer(arg)
-        "i" -> format_spec_integer(arg)
-        "u" -> format_spec_unsigned(arg)
-        "f" -> format_spec_float(arg, precision || 6)
-        "e" -> format_spec_scientific(arg, precision || 6, :lower)
-        "E" -> format_spec_scientific(arg, precision || 6, :upper)
-        "g" -> format_spec_general(arg, precision || 6, :lower)
-        "G" -> format_spec_general(arg, precision || 6, :upper)
-        "x" -> format_spec_hex(arg, :lower)
-        "X" -> format_spec_hex(arg, :upper)
-        "o" -> format_spec_octal(arg)
-        "c" -> format_char(arg)
-        "s" -> format_spec_string(arg, precision)
-        "q" -> format_quoted(arg)
-        _ -> raise ArgumentError, function_name: "string.format", details: "invalid option '%#{specifier}'"
+        ?d -> format_spec_integer(arg)
+        ?i -> format_spec_integer(arg)
+        ?u -> format_spec_unsigned(arg)
+        ?f -> format_spec_float(arg, precision || 6)
+        ?e -> format_spec_scientific(arg, precision || 6, :lower)
+        ?E -> format_spec_scientific(arg, precision || 6, :upper)
+        ?g -> format_spec_general(arg, precision || 6, :lower)
+        ?G -> format_spec_general(arg, precision || 6, :upper)
+        ?x -> format_spec_hex(arg, :lower)
+        ?X -> format_spec_hex(arg, :upper)
+        ?o -> format_spec_octal(arg)
+        ?c -> format_char(arg)
+        ?s -> format_spec_string(arg, precision)
+        ?q -> format_quoted(arg)
+        _ -> raise ArgumentError, function_name: "string.format", details: "invalid option '%#{<<specifier>>}'"
       end
 
     apply_width_flags(raw, flags, width)
@@ -838,12 +855,14 @@ defmodule Lua.VM.Stdlib.String do
     if deficit <= 0 do
       str
     else
-      pad_char =
-        if String.contains?(flags, "0") and not String.contains?(flags, "-"), do: "0", else: " "
+      minus? = (flags &&& @flag_minus) != 0
+      zero? = (flags &&& @flag_zero) != 0
+
+      pad_char = if zero? and not minus?, do: "0", else: " "
 
       pad = String.duplicate(pad_char, deficit)
 
-      if String.contains?(flags, "-") do
+      if minus? do
         # Left justify
         str <> pad
       else
