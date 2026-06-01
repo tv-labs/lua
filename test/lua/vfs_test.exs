@@ -63,5 +63,38 @@ defmodule Lua.VFSTest do
         Lua.eval!(lua, ~s[return require("#{modname}")])
       end
     end
+
+    test "host disk stays unreachable when package.path points at it without set_lua_paths/2" do
+      # Un-sandboxing require alone must not unlock the host disk. Only an
+      # explicit Lua.set_lua_paths/2 opts the VM into the host fallback, so
+      # assigning package.path from inside Lua resolves against the VFS only.
+      dir = Path.join(System.tmp_dir!(), "lua_vfs_optin_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, "hostmod.lua"), "return 'host'")
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      lua = Lua.new(exclude: [[:require], [:package]])
+
+      assert_raise Lua.RuntimeException, ~r/module 'hostmod' not found/, fn ->
+        Lua.eval!(lua, ~s[package.path = "#{dir}/?.lua"; return require("hostmod")])
+      end
+    end
+
+    test "Lua.set_lua_paths/2 opts the VM into reading real host files" do
+      # The documented escape hatch: a host that points the search path at a
+      # real on-disk module tree gets the host fallback, after the VFS.
+      dir = Path.join(System.tmp_dir!(), "lua_vfs_hostpath_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, "hostmod.lua"), "return 'from host'")
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      lua =
+        [exclude: [[:require], [:package]]]
+        |> Lua.new()
+        |> Lua.set_lua_paths(Path.join(dir, "?.lua"))
+
+      {[result], _lua} = Lua.eval!(lua, ~S[return require("hostmod")])
+      assert result == "from host"
+    end
   end
 end

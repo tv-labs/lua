@@ -767,16 +767,18 @@ defmodule Lua.VM.Stdlib do
   # pattern (with `?` resolved to the module path) the searcher tries, in
   # order:
   #
-  #   1. the virtual filesystem at the resolved path,
+  #   1. the virtual filesystem at the resolved path (used when a pattern is
+  #      already absolute), and
   #   2. the virtual filesystem under the dependency root `/lua/deps` (the
   #      mechanism for seeding modules via `Lua.write_file/3` / `Lua.put_dep/3`
-  #      / `Lua.mount/3`), and
-  #   3. the host filesystem via `File.read/1`.
+  #      / `Lua.mount/3`).
   #
-  # The VFS is consulted before the host so seeded modules take precedence and
-  # the common embedded case never reaches the disk; the host fallback keeps
-  # existing `set_lua_paths/2` / `package.path` workflows that point at real
-  # files working unchanged.
+  # By default `require` never reaches the host disk: every read goes through
+  # the VFS so the VM can only load modules the embedder has explicitly seeded
+  # or mounted. An embedding host opts into a host-disk fallback by calling
+  # `Lua.set_lua_paths/2`, which points the search path at a real on-disk
+  # module tree; only then is `File.read/1` consulted, and always after the
+  # VFS so seeded modules take precedence.
   defp find_module_file(modname, patterns, state) do
     resolved = String.replace(modname, ".", "/")
 
@@ -790,8 +792,9 @@ defmodule Lua.VM.Stdlib do
     end)
   end
 
-  # Try one resolved pattern against the VFS (the dep-anchored path, plus the
-  # path itself when it is already absolute) and then the host disk. Returns
+  # Try one resolved pattern against the VFS: the dep-anchored path, plus the
+  # path itself when it is already absolute. The host disk is consulted last,
+  # and only when the embedder has opted in via `Lua.set_lua_paths/2`. Returns
   # `{:ok, content, state}` or `{:not_found, state}`.
   #
   # The VFS requires absolute paths, so relative patterns (the default
@@ -800,11 +803,21 @@ defmodule Lua.VM.Stdlib do
   defp search_candidate(file_path, state) do
     with {:error, _, state} <- vfs_read_anchored(state, file_path),
          {:error, _, state} <- vfs_read_direct(state, file_path),
-         {:error, _} <- File.read(file_path) do
+         {:error, state} <- host_read(state, file_path) do
       {:not_found, state}
+    end
+  end
+
+  # Host-disk fallback, gated on the embedder having opted in (see
+  # `State.allow_vfs_host_fallback/1`). A VFS-only VM never reaches the host.
+  defp host_read(state, file_path) do
+    if State.vfs_host_fallback?(state) do
+      case File.read(file_path) do
+        {:ok, content} -> {:ok, content, state}
+        {:error, _} -> {:error, state}
+      end
     else
-      {:ok, content, state} -> {:ok, content, state}
-      {:ok, content} -> {:ok, content, state}
+      {:error, state}
     end
   end
 

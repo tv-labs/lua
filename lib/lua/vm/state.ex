@@ -31,7 +31,13 @@ defmodule Lua.VM.State do
             # operate against this in-memory `VFS` value instead of the host
             # disk, so the VM never reaches real files. Seeded by `new/0` and
             # threaded forward by the `vfs_*` helpers.
-            vfs: nil
+            vfs: nil,
+            # Whether the `require` searcher may fall back to the host disk
+            # (`File.read/1`) when a module is not found in the VFS. Defaults to
+            # `false` so a VFS-only VM never reaches real files; an embedding
+            # host opts in explicitly via `Lua.set_lua_paths/2`, which targets
+            # real on-disk module trees.
+            vfs_host_fallback?: false
 
   @type t :: %__MODULE__{
           call_stack: list(),
@@ -46,7 +52,8 @@ defmodule Lua.VM.State do
           private: map(),
           multi_return_count: non_neg_integer(),
           g_ref: nil | {:tref, non_neg_integer()},
-          vfs: nil | VFS.t()
+          vfs: nil | VFS.t(),
+          vfs_host_fallback?: boolean()
         }
 
   @doc """
@@ -128,6 +135,25 @@ defmodule Lua.VM.State do
   def vfs_mount(%__MODULE__{vfs: vfs} = state, mountpoint, backend) when is_binary(mountpoint) do
     %{state | vfs: VFS.mount(vfs, mountpoint, backend)}
   end
+
+  @doc """
+  Allows the `require` searcher to fall back to the host disk when a module is
+  not found in the virtual filesystem.
+
+  Off by default so a VFS-only VM never reaches real files; enabled by
+  `Lua.set_lua_paths/2` when an embedding host points the search path at a real
+  on-disk module tree.
+  """
+  @spec allow_vfs_host_fallback(t()) :: t()
+  def allow_vfs_host_fallback(%__MODULE__{} = state) do
+    %{state | vfs_host_fallback?: true}
+  end
+
+  @doc """
+  Reports whether host-disk fallback is enabled for the `require` searcher.
+  """
+  @spec vfs_host_fallback?(t()) :: boolean()
+  def vfs_host_fallback?(%__MODULE__{vfs_host_fallback?: enabled?}), do: enabled?
 
   @doc """
   Guards against unbounded recursion.

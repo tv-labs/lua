@@ -186,6 +186,13 @@ defmodule Lua do
   Now you can use the [Lua require](https://www.lua.org/pil/8.1.html) function to import
   these scripts
 
+  Calling this function also opts the VM into a host-disk fallback for `require`:
+  by default modules resolve only against the virtual filesystem (see
+  `write_file/3`, `put_dep/3`, and `mount/3`), so the VM never touches real
+  files. Pointing the search path at an on-disk module tree with this function
+  is the explicit signal that the host trusts those paths; the VFS is still
+  consulted first, so seeded modules take precedence.
+
   > #### Warning {: .warning}
   > In order to use `Lua.set_lua_paths/2`, the following functions cannot be sandboxed:
   > * `[:package]`
@@ -197,7 +204,8 @@ defmodule Lua do
     set_lua_paths(lua, Enum.join(paths, ";"))
   end
 
-  def set_lua_paths(%__MODULE__{} = lua, paths) when is_binary(paths) do
+  def set_lua_paths(%__MODULE__{state: state} = lua, paths) when is_binary(paths) do
+    lua = %{lua | state: State.allow_vfs_host_fallback(state)}
     set!(lua, ["package", "path"], paths)
   end
 
