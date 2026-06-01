@@ -10,6 +10,7 @@
 #       lines: 12..58,            # a Range, or the atom :all
 #       category: :parser,        # :lexer | :parser | :codegen | :executor
 #                                 # | :stdlib | :unimplemented | :semantic
+#                                 # | :performance
 #       reason: "one-line cause", # stands alone, no plan-id references
 #       issue: 287                # optional GitHub issue number, or nil
 #     }
@@ -91,16 +92,23 @@
   "constructs.lua" => [
     %{
       lines: 284..299,
-      category: :executor,
+      category: :performance,
       reason:
-        "short-circuit harness builds combinations up to level=4 (line 281); createcases(4) plus the load()/exec loop over every case exceeds the test timeout. The harness logic itself is verified green up to level 4 by test/lua/vm/short_circuit_test.exs",
-      issue: 281
+        "createcases(4) plus the load()/exec loop over all 204105 combinations exceeds the 60s ExUnit default timeout; the VM result is correct (verified green up to level 4 by test/lua/vm/short_circuit_test.exs --include slow)",
+      issue: nil
     },
     %{
-      lines: 302..311,
+      lines: 303..304,
       category: :stdlib,
       reason:
-        "checkload asserts the load() error message contains 'expected'/'too long'; the suite-runner load() returns 'parse error: ...' for syntax errors and the compiler has no control-structure-too-long check",
+        "checkload asserts the load() error message contains 'expected'; the suite-runner load() returns 'parse error: ...' for syntax errors",
+      issue: nil
+    },
+    %{
+      lines: 306..311,
+      category: :stdlib,
+      reason:
+        "checkload asserts the load() error message contains 'too long'; the compiler has no control-structure-too-long check",
       issue: nil
     }
   ],
