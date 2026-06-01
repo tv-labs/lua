@@ -2,10 +2,10 @@
 id: B17
 title: "VM instruction budget: configurable :max_steps with catchable exhaustion"
 issue: 306
-pr: null
+pr: 320
 branch: feat/vm-max-steps
 base: main
-status: in-progress
+status: review
 direction: B
 unlocks:
   - deterministic CPU bound for library consumers calling Lua.eval!/2 without a host Task + timeout wrapper
@@ -188,3 +188,51 @@ mix test --only lua53
 - **Error not catchable.** Mitigation: reuse `Lua.VM.RuntimeError`.
 - **Plan-id leakage into source/tests.** Mitigation: id stays in the
   commit body and PR description only.
+
+## What changed
+
+PR #320.
+
+Files touched:
+
+- `lib/lua.ex` — `:max_steps` added to `new/1` defaults, validated via
+  `validate_max_steps!/1`, threaded into the seeded state; `## Options`
+  moduledoc bullet + doctest.
+- `lib/lua/vm/state.ex` — `max_steps` field on `defstruct` and `@type t`;
+  `check_steps!/2` guard raising a catchable `Lua.VM.RuntimeError`
+  (`"instruction budget exceeded"`).
+- `lib/lua/vm/executor.ex` — `steps` threaded as a 9th parameter through
+  `do_execute`, `do_frame_return`, and `continue_after_call`; increment +
+  `check_steps!/2` at the four loop back-edges and the two call boundaries.
+- `lib/lua/vm/dispatcher.ex` — `steps` threaded through `dispatch`,
+  `finish_body`, `apply_multi_call_result`, `return_one`, `return_multi`;
+  increment + `check_steps!/2` at the loop back-edges and the six call
+  boundaries.
+- `test/lua/vm/max_steps_test.exs` — new: enforcement on both paths,
+  catchability via `pcall`, no cross-eval leak, `:infinity` default,
+  validation.
+- `guides/examples/sandboxing.livemd` — "Bounding CPU work" section
+  documenting `:max_call_depth` and `:max_steps`.
+
+Test delta: `mix test` 2114 → 2126 passed (11 new cases + 1 new doctest),
+19 skipped, 1 excluded. `mix test --only lua53` unchanged (17 passed,
+12 skipped).
+
+Discoveries / deviation from the original plan:
+
+- The cross-module `Executor ↔ Dispatcher` hand-off seeds the callee with a
+  fresh budget rather than threading `steps` through `Dispatcher.execute/4`'s
+  return shape. Changing that return shape would have rippled into
+  out-of-scope stdlib modules (`stdlib.ex`, `table.ex`, `string.ex`,
+  `vm.ex`). Each compiled callee is bounded by the dispatcher's own
+  back-edge/call-boundary counting, and runaway recursion that stays in the
+  interpreter is bounded by the threaded interpreter tally — so both
+  runaway-loop and runaway-recursion criteria still hold within the named
+  in-scope files.
+- The benchmark gate could not run in the execution sandbox:
+  `MIX_ENV=benchmark` pulls in `luaport`, whose native build needs C Lua /
+  LuaJIT headers that are not installed (`fatal error: 'lua.h' file not
+  found`). The default `:infinity` path is zero-cost by construction (one
+  integer increment + one short-circuiting function-head match per back-edge
+  / call boundary, never per opcode), structurally identical to the existing
+  `check_call_depth!/1`.
