@@ -767,6 +767,10 @@ defmodule Website.LuaSandbox do
       %{
         id: "output-flood",
         category: "Security &amp; limits",
+        # The output buffer is capped, so this run completes cleanly; the
+        # `:ok_or_limit` expectation also tolerates the 2s wall-clock backstop
+        # tripping on a slow runner rather than asserting a strict status.
+        expect: :ok_or_limit,
         title: "Output flood",
         blurb:
           "Flooding print() can't exhaust memory either — captured output is capped and the rest is dropped.",

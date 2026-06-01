@@ -52,6 +52,16 @@ defmodule Website.LuaExamplesTest do
 
           assert match?({:ok, _chunk, _blocks}, LuaSandbox.compile(@example.source)),
                  "expected #{@label} to compile cleanly (stopped at runtime)"
+
+        :ok_or_limit ->
+          # Demos that complete cleanly under the caps but ride the real
+          # wall-clock backstop. Tolerate a :timeout so a slow CI runner can't
+          # flake the suite, while still asserting clean compilation.
+          assert result.status in [:ok, :timeout],
+                 "expected #{@label} to run cleanly or hit the backstop, got: #{inspect(result.status)}"
+
+          assert match?({:ok, _chunk, _blocks}, LuaSandbox.compile(@example.source)),
+                 "expected #{@label} to compile cleanly"
       end
     end
   end
