@@ -12,7 +12,7 @@ defmodule Lua.VM.ForLoopRegisterTest do
   # register file: the second loop saw `nil` where its loop counter should
   # have been, producing:
   #
-  #   Runtime Type Error — attempt to perform arithmetic on a nil value
+  #   Lua runtime error: attempt to perform arithmetic on a nil value
   #
   # The original Phase 17 fix (commit e7c50e5) ensured the for-loop's
   # internal counter/limit/step registers did not leak into the surrounding

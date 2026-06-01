@@ -4,15 +4,33 @@ defmodule Lua.VM.ErrorFormatter do
 
   Two entry points share the same underlying data:
 
-    * `format/3` renders an ANSI-colored multi-line string for terminal output
-      (headers, source context with pointer, stack trace, suggestion).
+    * `format/3` renders a multi-line string for terminal output (location,
+      message body, source context with pointer, stack trace, suggestion).
+      ANSI color is applied only when `IO.ANSI.enabled?/0` is true, so the
+      same render path is safe whether the output goes to a TTY or is piped
+      to a file.
     * `to_map/3` returns a wire-safe structured map for non-terminal consumers
       (HTML rendering, JSON payloads, structured logs). No ANSI escapes appear
       in any string field.
+
+  The rendered layout leads with the source location so the reader sees
+  *where* before *what*:
+
+      at demo.lua:3:
+
+        attempt to perform arithmetic on a nil value
+        ...
+
+  There is deliberately no separate "Runtime Type Error" header line — the
+  public `Lua.RuntimeException` already prefixes `Lua runtime error: `, and
+  the message body itself ("attempt to ...", "assertion failed: ...") names
+  the category. Stacking a second header would be redundant.
   """
 
   @doc """
-  Formats a runtime error into a multi-line ANSI-colored string.
+  Formats a runtime error into a multi-line string.
+
+  ANSI color is applied only when `IO.ANSI.enabled?/0` returns true.
 
   ## Options
 
@@ -32,16 +50,16 @@ defmodule Lua.VM.ErrorFormatter do
     error_kind = Keyword.get(opts, :error_kind)
     value_type = Keyword.get(opts, :value_type)
 
-    header = format_header(error_type)
     location = format_location(source, line)
     message_section = format_message(message)
     context = format_source_context(source_code, line)
     stack_trace = format_stack_trace(call_stack)
     suggestion = format_suggestion(error_type, error_kind, value_type)
 
-    [header, location, message_section, context, stack_trace, suggestion]
+    [location, message_section, context, stack_trace, suggestion]
     |> Enum.reject(&is_nil/1)
-    |> Enum.join("\n")
+    |> Enum.join("")
+    |> String.trim_leading()
   end
 
   @doc """
@@ -92,28 +110,23 @@ defmodule Lua.VM.ErrorFormatter do
     }
   end
 
-  defp format_header(:type_error) do
-    IO.ANSI.red() <> IO.ANSI.bright() <> "Runtime Type Error" <> IO.ANSI.reset()
+  # ANSI helpers — no-ops unless the terminal actually supports color, so
+  # piping to a file or a non-TTY never embeds raw escape codes.
+  defp color(text, ansi) do
+    if IO.ANSI.enabled?() do
+      ansi <> text <> IO.ANSI.reset()
+    else
+      text
+    end
   end
-
-  defp format_header(:runtime_error) do
-    IO.ANSI.red() <> IO.ANSI.bright() <> "Runtime Error" <> IO.ANSI.reset()
-  end
-
-  defp format_header(:assertion_error) do
-    IO.ANSI.red() <> IO.ANSI.bright() <> "Assertion Failed" <> IO.ANSI.reset()
-  end
-
-  defp format_header(_), do: IO.ANSI.red() <> IO.ANSI.bright() <> "Error" <> IO.ANSI.reset()
 
   defp format_location(nil, nil), do: nil
-  defp format_location(source, nil), do: "\n  at #{source}:"
-  defp format_location(nil, line), do: "\n  at line #{line}:"
-  defp format_location(source, line), do: "\n  at #{source}:#{line}:"
+  defp format_location(source, nil), do: color("at #{source}:", IO.ANSI.faint()) <> "\n\n"
+  defp format_location(nil, line), do: color("at line #{line}:", IO.ANSI.faint()) <> "\n\n"
 
-  defp format_message(message) do
-    "\n  #{message}"
-  end
+  defp format_location(source, line), do: color("at #{source}:#{line}:", IO.ANSI.faint()) <> "\n\n"
+
+  defp format_message(message), do: "  #{message}"
 
   defp format_source_context(source_code, line) do
     case build_source_context(source_code, line) do
@@ -131,14 +144,14 @@ defmodule Lua.VM.ErrorFormatter do
           pointer_offset = String.length(format_line_number(num)) + 3
 
           pointer =
-            String.duplicate(" ", pointer_offset) <> IO.ANSI.red() <> "^" <> IO.ANSI.reset()
+            String.duplicate(" ", pointer_offset) <> color("^", IO.ANSI.red())
 
           [
-            "\n" <> IO.ANSI.red() <> line_str <> IO.ANSI.reset(),
-            pointer
+            "\n" <> color(line_str, IO.ANSI.red()),
+            "\n" <> pointer
           ]
         else
-          ["\n" <> IO.ANSI.faint() <> line_str <> IO.ANSI.reset()]
+          ["\n" <> color(line_str, IO.ANSI.faint())]
         end
       end)
 
@@ -194,7 +207,7 @@ defmodule Lua.VM.ErrorFormatter do
       |> truncate_frames()
       |> Enum.map_join("\n", &format_frame/1)
 
-    "\n\n" <> IO.ANSI.cyan() <> "Stack trace:" <> IO.ANSI.reset() <> "\n" <> frames
+    "\n\n" <> color("Stack trace:", IO.ANSI.cyan()) <> "\n" <> frames
   end
 
   defp truncate_frames(frames) do
@@ -221,8 +234,7 @@ defmodule Lua.VM.ErrorFormatter do
   defp build_call_stack(_), do: []
 
   defp format_frame({:omitted, count}) do
-    IO.ANSI.faint() <>
-      "  ... #{count} more frames ..." <> IO.ANSI.reset()
+    color("  ... #{count} more frames ...", IO.ANSI.faint())
   end
 
   defp format_frame(%{source: source, line: line, name: name}) do
@@ -256,22 +268,34 @@ defmodule Lua.VM.ErrorFormatter do
     "You can only index tables. Make sure the value you're indexing is a table, not a #{format_type_name(value_type)}."
   end
 
-  defp build_suggestion(:type_error, :arithmetic_type_error, _value_type) do
-    "Arithmetic operations require numbers. Make sure both operands are numbers or strings that can be converted to numbers."
+  defp build_suggestion(:type_error, :arithmetic_on_non_number, _value_type) do
+    "Arithmetic requires numbers. Make sure both operands are numbers (or strings that can be coerced to numbers)."
   end
 
   defp build_suggestion(:type_error, :concatenate_type_error, _value_type) do
-    "String concatenation (..) requires strings or numbers, not other types."
+    "Concatenation (..) requires strings or numbers. Convert other values with tostring() first."
   end
 
-  defp build_suggestion(:assertion_error, _error_kind, _value_type) do
-    "The assertion condition evaluated to false or nil. Check your logic."
+  defp build_suggestion(:type_error, :compare_incompatible_types, _value_type) do
+    "Relational operators (< <= > >=) only compare two numbers or two strings. Convert one operand so both sides share a type."
+  end
+
+  defp build_suggestion(:type_error, :length_not_integer, _value_type) do
+    "The length operation returned a non-integer value. If you defined a __len metamethod, make sure it returns an integer."
+  end
+
+  defp build_suggestion(:type_error, :bitwise_on_non_integer, _value_type) do
+    "Bitwise operators require integers. Floats with no fractional part are accepted; everything else must be converted first."
+  end
+
+  defp build_suggestion(:type_error, :for_loop_non_number, _value_type) do
+    "Numeric for loops need number values for the start, limit, and step. Check the loop bounds."
   end
 
   defp build_suggestion(_, _, _), do: nil
 
   defp suggestion(text) do
-    "\n\n" <> IO.ANSI.cyan() <> "Suggestion:" <> IO.ANSI.reset() <> "\n  " <> text
+    "\n\n" <> color("Suggestion:", IO.ANSI.cyan()) <> "\n  " <> text
   end
 
   defp format_type_name(:number), do: "number"

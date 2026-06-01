@@ -14,6 +14,7 @@ defmodule Lua.VM.RuntimeError do
   """
 
   alias Lua.VM.ErrorFormatter
+  alias Lua.VM.Value
 
   @type t :: %__MODULE__{}
 
@@ -64,7 +65,13 @@ defmodule Lua.VM.RuntimeError do
 
   defp raw_message(value), do: "runtime error: #{stringify(value)}"
 
-  defp stringify(nil), do: "nil"
+  # PUC-Lua renders string and number error objects verbatim, but any other
+  # Lua value (table, function, boolean, nil, userdata) becomes the message
+  # "(error object is a TYPE value)" rather than leaking an internal term.
   defp stringify(v) when is_binary(v), do: v
-  defp stringify(v), do: inspect(v)
+  defp stringify(v) when is_integer(v) or is_float(v), do: Value.to_string(v)
+
+  defp stringify(value) do
+    "(error object is a #{Value.type_name(value)} value)"
+  end
 end
