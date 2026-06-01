@@ -91,6 +91,12 @@ defmodule Lua.ErrorGalleryTest do
 
        runtime error: (error object is a table value)\
      """},
+    {"error_number", "error(1.5)", [],
+     """
+     Lua runtime error: at gallery.lua:1:
+
+       runtime error: 1.5\
+     """},
     {"stack_overflow", "local function f(n) return 1 + f(n + 1) end\nf(1)", [max_call_depth: 30],
      """
      Lua runtime error: runtime error: stack overflow

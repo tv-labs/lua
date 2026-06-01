@@ -14,6 +14,7 @@ defmodule Lua.VM.RuntimeError do
   """
 
   alias Lua.VM.ErrorFormatter
+  alias Lua.VM.Value
 
   defexception [:value, :source, :message, :call_stack, :line]
 
@@ -65,9 +66,9 @@ defmodule Lua.VM.RuntimeError do
   # Lua value (table, function, boolean, nil, userdata) becomes the message
   # "(error object is a TYPE value)" rather than leaking an internal term.
   defp stringify(v) when is_binary(v), do: v
-  defp stringify(v) when is_integer(v) or is_float(v), do: to_string(v)
+  defp stringify(v) when is_integer(v) or is_float(v), do: Value.to_string(v)
 
   defp stringify(value) do
-    "(error object is a #{Lua.VM.Value.type_name(value)} value)"
+    "(error object is a #{Value.type_name(value)} value)"
   end
 end
