@@ -216,6 +216,74 @@ defmodule Lua.VM.Stdlib.TableTest do
     end
   end
 
+  describe "table constructor backfill" do
+    test "constructor entries iterate in insertion order via pairs" do
+      # The constructor backfill writes consecutive integer keys in one
+      # batch; `pairs` must still walk them in ascending insertion order.
+      code = """
+      local t = {10, 20, 30, 40, 50}
+      local keys, vals = {}, {}
+      for k, v in pairs(t) do
+        keys[#keys + 1] = k
+        vals[#vals + 1] = v
+      end
+      return table.concat(keys, ","), table.concat(vals, ",")
+      """
+
+      assert ["1,2,3,4,5", "10,20,30,40,50"] = run!(code)
+    end
+
+    test "ipairs over a constructor stops at the first hole" do
+      code = """
+      local t = {1, 2, 3}
+      local out = {}
+      for i, v in ipairs(t) do
+        out[#out + 1] = v
+      end
+      return #out, out[1], out[2], out[3]
+      """
+
+      assert [3, 1, 2, 3] = run!(code)
+    end
+
+    test "clearing a constructor key to nil is a hole, not a reorder" do
+      # Backfill five keys, clear one in the middle, then re-add it. The
+      # revived key counts as a fresh insertion and moves to the end of
+      # iteration order — identical to the per-`put` loop's dead-key revival.
+      code = """
+      local t = {1, 2, 3, 4, 5}
+      t[3] = nil
+      t[3] = 30
+      local keys = {}
+      for k in pairs(t) do
+        keys[#keys + 1] = k
+      end
+      return table.concat(keys, ",")
+      """
+
+      assert ["1,2,4,5,3"] = run!(code)
+    end
+
+    test "an overwritten constructor slot keeps its original position" do
+      code = """
+      local t = {1, 2, 3}
+      t[2] = 99
+      local keys, vals = {}, {}
+      for k, v in pairs(t) do
+        keys[#keys + 1] = k
+        vals[#vals + 1] = v
+      end
+      return table.concat(keys, ","), table.concat(vals, ",")
+      """
+
+      assert ["1,2,3", "1,99,3"] = run!(code)
+    end
+
+    test "empty constructor leaves no entries" do
+      assert [0] = run!("local t = {}\nlocal n = 0\nfor _ in pairs(t) do n = n + 1 end\nreturn n")
+    end
+  end
+
   describe "table.insert edge cases" do
     test "insert at position 1 shifts every existing element up" do
       code = """

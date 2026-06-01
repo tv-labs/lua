@@ -1403,15 +1403,25 @@ defmodule Lua.VM.Dispatcher do
   end
 
   # `:set_list` writes `count` consecutive register values into the table
-  # at keys `[offset + 1, offset + count]`. Inline loop so the BEAM keeps
-  # the hot path allocation-free apart from the `Table.put/3` updates
-  # themselves (which sit in the table-storage churn category the parent
-  # plan flagged as the post-B5b ceiling).
+  # at keys `[offset + 1, offset + count]`. We collect the `{key, value}`
+  # pairs from the registers in one allocation-light walk and apply them
+  # via a single `Table.put_many/2`, so the `%Table{}` struct is rebuilt
+  # once instead of once per slot.
   defp set_list_into_table(table, _regs, _start, 0, _offset, _i), do: table
 
   defp set_list_into_table(table, regs, start, count, offset, i) do
-    value = :erlang.element(start + i + 1, regs)
-    set_list_into_table(Table.put(table, offset + i + 1, value), regs, start, count - 1, offset, i + 1)
+    Table.put_many(table, set_list_pairs(regs, start, count, offset, i, count - 1, []))
+  end
+
+  # Builds the ordered `{key, value}` list for a `:set_list` run, walking the
+  # registers from the last slot back to the first so the result is in
+  # ascending-key (insertion) order with O(1) prepends. `Table.put_many/2`
+  # then applies the whole run in a single struct rebuild.
+  defp set_list_pairs(_regs, _start, _count, _offset, _i, j, acc) when j < 0, do: acc
+
+  defp set_list_pairs(regs, start, count, offset, i, j, acc) do
+    value = :erlang.element(start + i + j + 1, regs)
+    set_list_pairs(regs, start, count, offset, i, j - 1, [{offset + i + j + 1, value} | acc])
   end
 
   # ── B5c-v2 helpers ──────────────────────────────────────────────────────
