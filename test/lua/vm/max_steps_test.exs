@@ -118,6 +118,59 @@ defmodule Lua.VM.MaxStepsTest do
     end
   end
 
+  describe "cross-engine mutual recursion" do
+    test "the budget bounds recursion that alternates execution engines" do
+      # A function whose body contains a `goto` cannot be bytecode-encoded,
+      # so it stays an interpreted `:lua_closure`; a plain arithmetic body
+      # compiles to a `:compiled_closure`. Pairing them in unbounded mutual
+      # recursion with no loop on either side forces a hand-off between the
+      # interpreter and the dispatcher on every call. The budget must span
+      # those hand-offs rather than resetting at each boundary, so this
+      # raises the budget error rather than recursing until `max_call_depth`
+      # (which defaults to `:infinity`) or forever.
+      lua = Lua.new(max_steps: 1000)
+
+      code = """
+      local pong
+      -- `goto` keeps this body off the bytecode path: interpreted closure.
+      local function ping(n)
+        ::again::
+        if n < 0 then goto again end
+        return pong(n)
+      end
+      -- Plain body: compiles to a dispatcher closure.
+      pong = function(n) return ping(n) end
+      return ping(1)
+      """
+
+      assert_raise RuntimeException, ~r/instruction budget exceeded/, fn ->
+        eval!(lua, code)
+      end
+    end
+
+    test "the alternating pair is genuinely split across both engines" do
+      # Guards the regression test above: if a compiler change ever tagged
+      # both functions into the same engine, the cross-engine assertion
+      # would silently degrade into a same-engine one. Assert the split
+      # holds by inspecting the closure tags the chunk produces.
+      {:ok, ast} =
+        Parser.parse("""
+        local pong
+        local function ping(n) ::again:: if n < 0 then goto again end return pong end
+        pong = function(n) return ping end
+        return ping, pong
+        """)
+
+      {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      {:ok, [ping, pong], _state} = Lua.VM.execute(proto, state)
+
+      assert {:lua_closure, _, _} = ping
+      assert {:compiled_closure, _, _} = pong
+    end
+  end
+
   describe ":max_steps validation" do
     test "rejects non-positive integers and non-integers" do
       assert_raise ArgumentError, ~r/:max_steps/, fn -> Lua.new(max_steps: 0) end

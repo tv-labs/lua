@@ -140,7 +140,11 @@ defmodule Lua.VM.Dispatcher do
     saved_open = state.open_upvalues
     state = %{state | open_upvalues: %{}}
 
-    {results, state} = dispatch(proto.bytecode, 1, regs, upvalues, proto, state, [], [], 0)
+    # Seed the dispatcher tally from the budget carried across the boundary
+    # so an alternating-engine call chain accumulates against one budget
+    # instead of resetting here; the terminals stamp the final tally back
+    # into `state.steps`.
+    {results, state} = dispatch(proto.bytecode, 1, regs, upvalues, proto, state, [], [], state.steps)
 
     state = %{state | open_upvalues: saved_open}
     {results, state}
@@ -611,16 +615,21 @@ defmodule Lua.VM.Dispatcher do
             steps = steps + 1
             State.check_steps!(state, steps)
             State.check_call_depth!(state)
-            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
+            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
             {_results, state} = Executor.call_function(closure, args, state)
+            steps = state.steps
             state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
 
           _ ->
             args = collect_args(regs, base + 1, arg_count)
 
+            state = %{state | steps: steps}
+
             {_results, state} =
               Executor.dispatcher_call_function(func_value, args, state, proto, name_hint)
+
+            steps = state.steps
 
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
         end
@@ -669,8 +678,9 @@ defmodule Lua.VM.Dispatcher do
             steps = steps + 1
             State.check_steps!(state, steps)
             State.check_call_depth!(state)
-            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
+            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
             {results, state} = Executor.call_function(closure, args, state)
+            steps = state.steps
             state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
 
             first =
@@ -685,8 +695,12 @@ defmodule Lua.VM.Dispatcher do
           _ ->
             args = collect_args(regs, base + 1, arg_count)
 
+            state = %{state | steps: steps}
+
             {results, state} =
               Executor.dispatcher_call_function(func_value, args, state, proto, name_hint)
+
+            steps = state.steps
 
             first =
               case results do
@@ -878,8 +892,12 @@ defmodule Lua.VM.Dispatcher do
         invariant_state = :erlang.element(base + 2, regs)
         control = :erlang.element(base + 3, regs)
 
+        state = %{state | steps: steps}
+
         {results, state} =
           Executor.dispatcher_call_value(iter_func, [invariant_state, control], proto, state)
+
+        steps = state.steps
 
         case results do
           [nil | _] ->
@@ -1078,8 +1096,9 @@ defmodule Lua.VM.Dispatcher do
             steps = steps + 1
             State.check_steps!(state, steps)
             State.check_call_depth!(state)
-            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
+            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
             {results, state} = Executor.call_function(closure, args, state)
+            steps = state.steps
             state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
 
             apply_multi_call_result(
@@ -1100,8 +1119,12 @@ defmodule Lua.VM.Dispatcher do
           _ ->
             args = collect_args(regs, base + 1, total_args)
 
+            state = %{state | steps: steps}
+
             {results, state} =
               Executor.dispatcher_call_function(func_value, args, state, proto, name_hint)
+
+            steps = state.steps
 
             apply_multi_call_result(
               result_count,
@@ -1303,8 +1326,12 @@ defmodule Lua.VM.Dispatcher do
     invariant_state = :erlang.element(base + 2, regs)
     control = :erlang.element(base + 3, regs)
 
+    state = %{state | steps: steps}
+
     {results, state} =
       Executor.dispatcher_call_value(iter_func, [invariant_state, control], proto, state)
+
+    steps = state.steps
 
     case results do
       [nil | _] ->
@@ -1357,8 +1384,10 @@ defmodule Lua.VM.Dispatcher do
   #   {:multi, B, -2} → expand all into regs[B..], set multi_return_count.
   #   {:multi, B, n>1} → write n results into regs[B..], pad nil.
 
-  defp return_one(value, state, [], _steps) do
-    {[value], state}
+  defp return_one(value, state, [], steps) do
+    # Top of this dispatcher sub-evaluation: stamp the tally back into the
+    # state so a caller in the other engine can resume the same budget.
+    {[value], %{state | steps: steps}}
   end
 
   defp return_one(value, state, [frame | rest_frames], steps) do
@@ -1395,8 +1424,8 @@ defmodule Lua.VM.Dispatcher do
   # `:return_proto_varargs`, and the non-compiled-callee branch of
   # `:call_multi`. Mirrors `return_one/3`'s frame-variant handling.
 
-  defp return_multi(results, state, [], _steps) do
-    {results, state}
+  defp return_multi(results, state, [], steps) do
+    {results, %{state | steps: steps}}
   end
 
   defp return_multi(results, state, [frame | rest_frames], steps) do
