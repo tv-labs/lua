@@ -460,6 +460,88 @@ defmodule Lua.VM.StringTest do
     end
   end
 
+  describe "string.format float rounding and non-finite values" do
+    setup do
+      %{state: Stdlib.install(State.new())}
+    end
+
+    # C Lua / printf round %.0f half-to-even, not half-away-from-zero.
+    # Reference: /opt/homebrew/bin/lua string.format("%.0f", v).
+    test "%.0f rounds ties to even at the sign boundary", %{state: state} do
+      cases = [
+        {"2.5", "2"},
+        {"0.5", "0"},
+        {"1.5", "2"},
+        {"3.5", "4"},
+        {"-2.5", "-2"},
+        {"-0.5", "-0"},
+        {"2.4", "2"},
+        {"2.6", "3"}
+      ]
+
+      for {input, expected} <- cases do
+        code = ~s{return string.format("%.0f", #{input})}
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        assert {:ok, [^expected], _state} = VM.execute(proto, state)
+      end
+    end
+
+    test "%.20f emits the full requested precision", %{state: state} do
+      code = ~s{return string.format("%.20f", 1.0)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["1.00000000000000000000"], _state} = VM.execute(proto, state)
+    end
+
+    # 0/0 surfaces as :nan in the VM; C Lua prints "nan" rather than raising.
+    test "%f of 0/0 formats as nan", %{state: state} do
+      code = ~s{return string.format("%f", 0/0)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["nan"], _state} = VM.execute(proto, state)
+    end
+
+    # IEEE-754 distinguishes -0.0 from +0.0; C printf/PUC-Lua preserve the sign
+    # bit. -0.0 < 0.0 is false on the BEAM, so the sign must come from the bit.
+    # Reference: /opt/homebrew/bin/lua string.format(spec, -0.0).
+    test "float specifiers preserve the sign of negative zero", %{state: state} do
+      cases = [
+        {~s{string.format("%f", -0.0)}, "-0.000000"},
+        {~s{string.format("%.2f", -0.0)}, "-0.00"},
+        {~s{string.format("%.0f", -0.0)}, "-0"},
+        {~s{string.format("%e", -0.0)}, "-0.000000e+00"},
+        {~s{string.format("%E", -0.0)}, "-0.000000E+00"},
+        {~s{string.format("%g", -0.0)}, "-0"}
+      ]
+
+      for {expr, expected} <- cases do
+        code = "return #{expr}"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        assert {:ok, [^expected], _state} = VM.execute(proto, state), "for #{expr}"
+      end
+    end
+
+    # Positive zero must stay unsigned across every float specifier.
+    test "float specifiers leave positive zero unsigned", %{state: state} do
+      cases = [
+        {~s{string.format("%f", 0.0)}, "0.000000"},
+        {~s{string.format("%.2f", 0.0)}, "0.00"},
+        {~s{string.format("%.0f", 0.0)}, "0"},
+        {~s{string.format("%e", 0.0)}, "0.000000e+00"},
+        {~s{string.format("%g", 0.0)}, "0"}
+      ]
+
+      for {expr, expected} <- cases do
+        code = "return #{expr}"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        assert {:ok, [^expected], _state} = VM.execute(proto, state), "for #{expr}"
+      end
+    end
+  end
+
   describe "string table access" do
     test "string functions are accessible via string table" do
       code = """
