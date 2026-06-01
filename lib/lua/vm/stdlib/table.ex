@@ -302,7 +302,7 @@ defmodule Lua.VM.Stdlib.Table do
 
   # Fast path for a metatable-less table: read each slot directly from
   # `data`, sort, then write the sorted slice back with a single
-  # `Map.put/3` into `state.tables`. Skips the __index/__newindex dispatch
+  # `Table.replace_data/2` call. Skips the __index/__newindex dispatch
   # machinery entirely, which is safe because there are no metamethods to
   # observe.
   defp sort_plain(_id, _table, len, _comp, state) when len <= 1 do
@@ -318,10 +318,16 @@ defmodule Lua.VM.Stdlib.Table do
     # comparator the table is unchanged and this is the same struct.
     table = Map.fetch!(state.tables, id)
 
-    updated =
+    # Sort rewrites every integer key 1..len, so build the new data map in
+    # one pass and swap it in wholesale instead of rebuilding the struct per
+    # index. `replace_data/2` resets order/dead, which is correct because the
+    # sorted array has all keys 1..len live.
+    data =
       sorted
       |> Enum.with_index(1)
-      |> Enum.reduce(table, fn {val, idx}, tbl -> Table.put(tbl, idx, val) end)
+      |> Map.new(fn {val, idx} -> {idx, val} end)
+
+    updated = Table.replace_data(table, data)
 
     {[], %{state | tables: Map.put(state.tables, id, updated)}}
   end
