@@ -34,6 +34,7 @@ defmodule Lua.MixProject do
         extras: [
           "CHANGELOG.md",
           "guides/working-with-lua.livemd",
+          "guides/sandboxing.md",
           "guides/examples/quickstart.livemd",
           "guides/examples/userdata.livemd",
           "guides/examples/custom_stdlib.livemd",
