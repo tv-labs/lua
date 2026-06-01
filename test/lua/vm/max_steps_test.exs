@@ -81,6 +81,48 @@ defmodule Lua.VM.MaxStepsTest do
       assert {[5050], _lua} =
                eval!(lua, "local s = 0 for i = 1, 100 do s = s + i end return s")
     end
+
+    test "a budget sized for one eval survives repeating that same eval on the threaded state" do
+      # Set the budget just above a single eval's real cost, then run that
+      # SAME eval many times on the SAME %Lua{}, threading the returned
+      # state forward. If the tally leaked across evaluations (cumulative
+      # over the %Lua{} lifetime), the Nth eval would trip the budget even
+      # though no single eval comes close. A correct per-eval reset lets
+      # every iteration succeed.
+      code = "local s = 0 for i = 1, 50 do s = s + i end return s"
+
+      # Establish a budget that comfortably clears one eval but is far below
+      # the cumulative cost of running it 100 times.
+      lua = Lua.new(max_steps: 2000)
+
+      final =
+        Enum.reduce(1..100, lua, fn _i, acc ->
+          {[1275], next} = eval!(acc, code)
+          next
+        end)
+
+      # And the budget is still live afterward (not silently disabled).
+      assert {[1275], _lua} = eval!(final, code)
+    end
+
+    test "the budget does NOT reset on nested calls within a single evaluation" do
+      # The per-eval reset must bound ONE evaluation's total work across all
+      # its instructions and nested calls. A tight loop calling a helper on
+      # every iteration must still trip the budget — the reset is a
+      # top-level boundary, not a per-call one.
+      lua = Lua.new(max_steps: 1000)
+
+      code = """
+      local function step(x) return x + 1 end
+      local s = 0
+      while true do s = step(s) end
+      return s
+      """
+
+      assert_raise RuntimeException, ~r/instruction budget exceeded/, fn ->
+        eval!(lua, code)
+      end
+    end
   end
 
   describe "default behavior (:infinity)" do
