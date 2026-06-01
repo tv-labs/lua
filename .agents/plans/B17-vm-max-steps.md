@@ -133,11 +133,13 @@ Mirror `:max_call_depth` everywhere it appears.
   `:cps_generic_for` continue, all in the `do_execute([], ...)` cont
   dispatcher) and at the two `State.check_call_depth!` call boundaries.
 - The cross-module `:compiled_closure` / `Dispatcher.execute` and
-  `call_value` hand-offs seed the callee with a fresh budget rather than
-  changing the `{results, state}` return shape (changing it would ripple
-  into out-of-scope stdlib modules). Each compiled callee is bounded by
-  the dispatcher's own counting; runaway recursion that stays in the
-  interpreter is bounded by the threaded interpreter tally.
+  `call_value` hand-offs carry the tally through a `steps` field on
+  `%State{}` rather than changing the `{results, state}` return shape
+  (changing it would ripple into out-of-scope stdlib modules). The crossing
+  engine writes its threaded tally into `state.steps` at the boundary — only
+  where the struct is already rebuilt to push a call frame, never per opcode
+  — and the entered engine seeds from it and stamps the final tally back, so
+  the budget spans recursion that alternates execution engines.
 
 ### 4. Compiled dispatcher — `lib/lua/vm/dispatcher.ex`
 
@@ -200,39 +202,58 @@ Files touched:
   moduledoc bullet + doctest.
 - `lib/lua/vm/state.ex` — `max_steps` field on `defstruct` and `@type t`;
   `check_steps!/2` guard raising a catchable `Lua.VM.RuntimeError`
-  (`"instruction budget exceeded"`).
+  (`"instruction budget exceeded"`); a `steps` field that carries the tally
+  across engine boundaries (never written per opcode).
 - `lib/lua/vm/executor.ex` — `steps` threaded as a 9th parameter through
   `do_execute`, `do_frame_return`, and `continue_after_call`; increment +
-  `check_steps!/2` at the four loop back-edges and the two call boundaries.
+  `check_steps!/2` at the four loop back-edges and the two call boundaries;
+  seeds its tally from `state.steps` at the interpreter entry points and
+  stamps the final tally back via `finish_steps/2` at evaluation terminals
+  so the budget survives `Executor ↔ Dispatcher` hand-offs.
 - `lib/lua/vm/dispatcher.ex` — `steps` threaded through `dispatch`,
   `finish_body`, `apply_multi_call_result`, `return_one`, `return_multi`;
   increment + `check_steps!/2` at the loop back-edges and the six call
-  boundaries.
+  boundaries; seeds from / writes back `state.steps` at the dispatcher entry,
+  terminals, and `Executor` bridges so the budget is continuous across the
+  boundary.
 - `test/lua/vm/max_steps_test.exs` — new: enforcement on both paths,
   catchability via `pcall`, no cross-eval leak, `:infinity` default,
-  validation.
+  validation, and cross-engine mutual recursion (budget spans an
+  interpreted/compiled alternating call chain, plus a guard asserting the
+  pair is genuinely split across both engines).
 - `guides/examples/sandboxing.livemd` — "Bounding CPU work" section
   documenting `:max_call_depth` and `:max_steps`.
 
-Test delta: `mix test` 2114 → 2126 passed (11 new cases + 1 new doctest),
+Test delta: `mix test` 2114 → 2128 passed (13 new cases + 1 new doctest),
 19 skipped, 1 excluded. `mix test --only lua53` unchanged (17 passed,
 12 skipped).
 
 Discoveries / deviation from the original plan:
 
-- The cross-module `Executor ↔ Dispatcher` hand-off seeds the callee with a
-  fresh budget rather than threading `steps` through `Dispatcher.execute/4`'s
-  return shape. Changing that return shape would have rippled into
-  out-of-scope stdlib modules (`stdlib.ex`, `table.ex`, `string.ex`,
-  `vm.ex`). Each compiled callee is bounded by the dispatcher's own
-  back-edge/call-boundary counting, and runaway recursion that stays in the
-  interpreter is bounded by the threaded interpreter tally — so both
-  runaway-loop and runaway-recursion criteria still hold within the named
-  in-scope files.
-- The benchmark gate could not run in the execution sandbox:
-  `MIX_ENV=benchmark` pulls in `luaport`, whose native build needs C Lua /
-  LuaJIT headers that are not installed (`fatal error: 'lua.h' file not
-  found`). The default `:infinity` path is zero-cost by construction (one
-  integer increment + one short-circuiting function-head match per back-edge
-  / call boundary, never per opcode), structurally identical to the existing
-  `check_call_depth!/1`.
+- The cross-module `Executor ↔ Dispatcher` hand-off carries the running
+  tally through a `steps` field on `%State{}` rather than changing
+  `Dispatcher.execute/4`'s `{results, state}` return shape (which would have
+  rippled into out-of-scope stdlib modules). The crossing engine writes its
+  threaded tally into `state.steps` at the boundary — where the struct is
+  already rebuilt to push a call frame, so the default `:infinity` path adds
+  no per-opcode cost — and the entered engine seeds its own threaded tally
+  from `state.steps`, stamping the final tally back at its terminal. The
+  budget therefore spans a call chain that alternates execution engines
+  (e.g. a `goto`-bearing interpreted closure and a plain compiled closure in
+  unbounded mutual recursion) instead of resetting at each boundary, closing
+  the gap a fresh-budget reseed would have left open between
+  `max_call_depth: :infinity` and a deterministic CPU bound. Regression
+  coverage: `test/lua/vm/max_steps_test.exs` "cross-engine mutual recursion".
+- The benchmark gate could not run: the benchee harness only loads under
+  `MIX_ENV=benchmark`, which pulls in `luaport`, whose native build needs a
+  matching C Lua toolchain (the comparison baselines are PUC-Lua / Luaport,
+  not just the internal engines). The default `:infinity` path remains
+  zero-cost by construction: one integer increment + one short-circuiting
+  `check_steps!/2` head-match per back-edge / call boundary, never per
+  opcode, structurally identical to the existing `check_call_depth!/1`. The
+  cross-boundary fix adds only a `steps:` field assignment inside the
+  `%State{}` rebuild that each engine hand-off already performs to push a
+  call frame (`call_stack` / `call_depth`), so it costs nothing on
+  straight-line code and nothing extra beyond the already-present boundary
+  struct rebuild. Still owed: an actual run in CI or on a host with a
+  compatible C Lua before merge.

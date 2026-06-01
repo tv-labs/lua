@@ -23,11 +23,19 @@ defmodule Lua.VM.State do
             max_string_bytes: Limits.max_string_bytes(),
             # `max_steps` is the configured instruction ceiling; `:infinity`
             # (the default) means no limit. The running tally is NOT stored
-            # here — it is threaded as a parameter through the executor /
-            # dispatcher loops, mirroring the `line`-off-State discipline so
-            # the default `:infinity` path carries no per-instruction struct
-            # rebuild. See `check_steps!/2`.
+            # here on the per-opcode hot path — it is threaded as a parameter
+            # through the executor / dispatcher loops, mirroring the
+            # `line`-off-State discipline so the default `:infinity` path
+            # carries no per-instruction struct rebuild. See `check_steps!/2`.
             max_steps: :infinity,
+            # `steps` carries the running tally ACROSS engine boundaries
+            # only. The interpreter and dispatcher each thread their tally as
+            # a loop parameter; at an `Executor`↔`Dispatcher` hand-off (where
+            # the struct is already rebuilt to push a call frame) the crossing
+            # engine writes its tally here and the entered engine seeds from
+            # it, so the budget spans a chain that alternates engines instead
+            # of resetting at each boundary. Never written per opcode.
+            steps: 0,
             metatables: %{},
             upvalue_cells: %{},
             open_upvalues: %{},
@@ -49,6 +57,7 @@ defmodule Lua.VM.State do
           max_call_depth: pos_integer() | :infinity,
           max_string_bytes: pos_integer(),
           max_steps: pos_integer() | :infinity,
+          steps: non_neg_integer(),
           metatables: map(),
           upvalue_cells: map(),
           tables: %{optional(non_neg_integer()) => Table.t()},

@@ -91,7 +91,7 @@ defmodule Lua.VM.Executor do
       state = %{state | open_upvalues: %{}}
 
       {results, regs, state} =
-        do_execute(instructions, registers, upvalues, proto, state, [], [], 0, 0)
+        do_execute(instructions, registers, upvalues, proto, state, [], [], 0, state.steps)
 
       {results, regs, %{state | open_upvalues: saved_open_upvalues}}
     rescue
@@ -158,8 +158,12 @@ defmodule Lua.VM.Executor do
     try do
       state = %{state | open_upvalues: %{}}
 
+      # Seed the interpreter tally from the budget carried across the boundary
+      # so an alternating-engine call chain accumulates against one budget
+      # rather than resetting here. The terminal writes the final tally back
+      # into `state.steps` (see `finish_steps/2`).
       {results, _callee_regs, state} =
-        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0, 0)
+        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0, state.steps)
 
       state = %{state | open_upvalues: saved_open_upvalues}
       {results, state}
@@ -764,7 +768,9 @@ defmodule Lua.VM.Executor do
         invariant_state = elem(regs, base + 1)
         control = elem(regs, base + 2)
 
+        state = %{state | steps: steps}
         {results, state} = call_value(iter_func, [invariant_state, control], proto, state, line)
+        steps = state.steps
         first_result = List.first(results)
 
         if first_result == nil do
@@ -791,7 +797,7 @@ defmodule Lua.VM.Executor do
       [] ->
         case frames do
           [] ->
-            {[], regs, state}
+            {[], regs, finish_steps(state, steps)}
 
           [frame | rest_frames] ->
             do_frame_return([], regs, state, frame, rest_frames, line, steps)
@@ -1047,7 +1053,9 @@ defmodule Lua.VM.Executor do
     invariant_state = elem(regs, base + 1)
     control = elem(regs, base + 2)
 
+    state = %{state | steps: steps}
     {results, state} = call_value(iter_func, [invariant_state, control], proto, state, line)
+    steps = state.steps
     first_result = List.first(results)
 
     if first_result == nil do
@@ -1160,8 +1168,12 @@ defmodule Lua.VM.Executor do
         steps = steps + 1
         State.check_steps!(state, steps)
         State.check_call_depth!(state)
-        state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
+        # Carry the tally into the dispatcher so the budget spans the
+        # boundary; `Dispatcher.execute/4` seeds from `state.steps` and
+        # writes its final tally back there.
+        state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
         {results, state} = Dispatcher.execute(callee_proto, args, callee_upvalues, state)
+        steps = state.steps
         state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
         continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, steps, base, result_count)
 
@@ -1239,6 +1251,11 @@ defmodule Lua.VM.Executor do
         prev_pos = Process.get(@position_key, @unset)
         set_position(line, proto.source)
 
+        # Carry the tally into the native callback so a callback that
+        # re-enters Lua (pcall, a sort comparator, a gsub function) keeps
+        # accumulating against the same budget instead of restarting it.
+        state = %{state | steps: steps}
+
         {results, state} =
           try do
             case fun.(args, state) do
@@ -1257,6 +1274,8 @@ defmodule Lua.VM.Executor do
           after
             restore_position(prev_pos)
           end
+
+        steps = state.steps
 
         continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, steps, base, result_count)
 
@@ -1298,7 +1317,9 @@ defmodule Lua.VM.Executor do
 
               call_mm ->
                 args = collect_args(regs, base + 1, total_args)
+                state = %{state | steps: steps}
                 {results, state} = call_function(call_mm, [other | args], state)
+                steps = state.steps
 
                 continue_after_call(
                   results,
@@ -1379,7 +1400,7 @@ defmodule Lua.VM.Executor do
     results = if total > 0, do: for(i <- 0..(total - 1), do: elem(regs, base + i)), else: []
 
     case frames do
-      [] -> {results, regs, state}
+      [] -> {results, regs, finish_steps(state, steps)}
       [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, steps)
     end
   end
@@ -1393,7 +1414,7 @@ defmodule Lua.VM.Executor do
     results = [elem(regs, base)]
 
     case frames do
-      [] -> {results, regs, state}
+      [] -> {results, regs, finish_steps(state, steps)}
       [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, steps)
     end
   end
@@ -1414,7 +1435,7 @@ defmodule Lua.VM.Executor do
       end
 
     case frames do
-      [] -> {results, regs, state}
+      [] -> {results, regs, finish_steps(state, steps)}
       [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, steps)
     end
   end
@@ -2254,6 +2275,15 @@ defmodule Lua.VM.Executor do
 
   # ── do_frame_return — restore caller context after a Lua function returns ──
 
+  # Stamp the running tally into the state at a top-of-evaluation terminal
+  # so the entry wrapper (`call_function/3`, `call_value/5`, `execute/5`)
+  # can carry it back across an engine boundary. Only ever fired when the
+  # frame stack is empty — i.e. the interpreter sub-evaluation as a whole
+  # is unwinding — never per intra-evaluation return, so the default
+  # `:infinity` path pays only at boundaries, exactly like the call-frame
+  # bookkeeping it sits beside.
+  defp finish_steps(state, steps), do: %{state | steps: steps}
+
   defp do_frame_return(results, _callee_regs, state, frame, rest_frames, line, steps) do
     %{
       rest: rest,
@@ -2278,7 +2308,7 @@ defmodule Lua.VM.Executor do
         # Return-position call (return f()): pass results to the caller's caller
         case rest_frames do
           [] ->
-            {results, caller_regs, state}
+            {results, caller_regs, finish_steps(state, steps)}
 
           [outer_frame | outer_rest_frames] ->
             do_frame_return(results, caller_regs, state, outer_frame, outer_rest_frames, line, steps)
@@ -2331,7 +2361,7 @@ defmodule Lua.VM.Executor do
       -1 ->
         # Results from this native call become the return from the current function
         case frames do
-          [] -> {results, regs, state}
+          [] -> {results, regs, finish_steps(state, steps)}
           [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, steps)
         end
 
@@ -2424,8 +2454,9 @@ defmodule Lua.VM.Executor do
     try do
       state = %{state | open_upvalues: %{}}
 
+      # Seed/recover the cross-boundary budget tally (see `call_function/3`).
       {results, _callee_regs, state} =
-        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0, 0)
+        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0, state.steps)
 
       state = %{state | open_upvalues: saved_open_upvalues}
       {results, state}
