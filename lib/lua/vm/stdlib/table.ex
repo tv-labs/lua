@@ -301,10 +301,9 @@ defmodule Lua.VM.Stdlib.Table do
   end
 
   # Fast path for a metatable-less table: read each slot directly from
-  # `data`, sort, then write the sorted slice back with a single
-  # `Map.put/3` into `state.tables`. Skips the __index/__newindex dispatch
-  # machinery entirely, which is safe because there are no metamethods to
-  # observe.
+  # `data`, sort, then merge the sorted slice back over `data` in one pass.
+  # Skips the __index/__newindex dispatch machinery entirely, which is safe
+  # because there are no metamethods to observe.
   defp sort_plain(_id, _table, len, _comp, state) when len <= 1 do
     {[], state}
   end
@@ -318,10 +317,17 @@ defmodule Lua.VM.Stdlib.Table do
     # comparator the table is unchanged and this is the same struct.
     table = Map.fetch!(state.tables, id)
 
-    updated =
+    # Sort only reorders the values under keys 1..len; every other key
+    # (string fields, sparse integers > len, etc.) must survive untouched,
+    # matching Lua 5.3 table.sort. Keys 1..len already exist in `data` and
+    # in `order`, so merging the sorted slice over the existing map changes
+    # values in place without disturbing order/dead or any other key.
+    sorted_slice =
       sorted
       |> Enum.with_index(1)
-      |> Enum.reduce(table, fn {val, idx}, tbl -> Table.put(tbl, idx, val) end)
+      |> Map.new(fn {val, idx} -> {idx, val} end)
+
+    updated = %{table | data: Map.merge(table.data, sorted_slice)}
 
     {[], %{state | tables: Map.put(state.tables, id, updated)}}
   end

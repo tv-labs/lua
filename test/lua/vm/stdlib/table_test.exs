@@ -186,6 +186,22 @@ defmodule Lua.VM.Stdlib.TableTest do
       assert {:ok, [1, 1, 2, 3], _state} = VM.execute(proto, state)
     end
 
+    test "table.sort preserves non-array keys" do
+      code = """
+      local t = {30, 10, 20}
+      t.name = "hi"
+      t[100] = "sparse"
+      table.sort(t)
+      return t[1], t[2], t[3], t.name, t[100]
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      state = Stdlib.install(State.new())
+
+      assert {:ok, [10, 20, 30, "hi", "sparse"], _state} = VM.execute(proto, state)
+    end
+
     test "table.move copies elements" do
       code = """
       local t1 = {1, 2, 3, 4, 5}
