@@ -3,6 +3,7 @@ defmodule Lua.VM.State do
   Runtime state for the Lua VM.
   """
 
+  alias Lua.VM.RuntimeError
   alias Lua.VM.Table
 
   defstruct call_stack: [],
@@ -12,6 +13,13 @@ defmodule Lua.VM.State do
             # means no limit. See `check_call_depth!/1`.
             call_depth: 0,
             max_call_depth: :infinity,
+            # `max_steps` is the configured instruction ceiling; `:infinity`
+            # (the default) means no limit. The running tally is NOT stored
+            # here — it is threaded as a parameter through the executor /
+            # dispatcher loops, mirroring the `line`-off-State discipline so
+            # the default `:infinity` path carries no per-instruction struct
+            # rebuild. See `check_steps!/2`.
+            max_steps: :infinity,
             metatables: %{},
             upvalue_cells: %{},
             open_upvalues: %{},
@@ -31,6 +39,7 @@ defmodule Lua.VM.State do
           call_stack: list(),
           call_depth: non_neg_integer(),
           max_call_depth: pos_integer() | :infinity,
+          max_steps: pos_integer() | :infinity,
           metatables: map(),
           upvalue_cells: map(),
           tables: %{optional(non_neg_integer()) => Table.t()},
@@ -70,7 +79,31 @@ defmodule Lua.VM.State do
   def check_call_depth!(%__MODULE__{call_depth: depth, max_call_depth: max}) when depth < max, do: :ok
 
   def check_call_depth!(%__MODULE__{call_stack: call_stack}) do
-    raise Lua.VM.RuntimeError, value: "stack overflow", call_stack: call_stack
+    raise RuntimeError, value: "stack overflow", call_stack: call_stack
+  end
+
+  @doc """
+  Guards against unbounded CPU work within a single evaluation.
+
+  Raises a catchable Lua `"instruction budget exceeded"` runtime error when
+  the running instruction tally `steps` has reached `max_steps`. Call it at
+  loop back-edges and call boundaries — never per opcode — so the default
+  `:infinity` path stays free of per-instruction cost.
+
+  The tally is threaded as a parameter, not stored in `%State{}`. No-op when
+  the tally is under the limit or when `max_steps` is `:infinity` (the
+  default). The clauses are ordered so both common cases resolve in a single
+  function-head match with no struct rebuild.
+
+  Raises the same `Lua.VM.RuntimeError` used by `"stack overflow"`, which
+  `pcall`/`xpcall` already trap, so the error is recoverable for free.
+  """
+  @spec check_steps!(t(), non_neg_integer()) :: :ok
+  def check_steps!(%__MODULE__{max_steps: :infinity}, _steps), do: :ok
+  def check_steps!(%__MODULE__{max_steps: max}, steps) when steps < max, do: :ok
+
+  def check_steps!(%__MODULE__{call_stack: call_stack}, _steps) do
+    raise RuntimeError, value: "instruction budget exceeded", call_stack: call_stack
   end
 
   @doc """
