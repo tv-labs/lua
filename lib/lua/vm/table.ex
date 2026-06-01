@@ -165,6 +165,70 @@ defmodule Lua.VM.Table do
   end
 
   @doc """
+  Applies an ordered list of `{key, value}` writes to the table, producing
+  the same result as folding `put/3` over the list left-to-right, but
+  rebuilding the `%Table{}` struct only once at the end.
+
+  This is the batch entry point for table-constructor backfill
+  (`:set_list`), where a run of consecutive integer keys is written in one
+  go. The `order`/`order_tail`/`dead` invariants are maintained identically
+  to repeated `put/3`: new keys append (via `order_tail`), existing live
+  keys keep their position, dead keys revive to the end, and `nil` values
+  clear a live key into `dead`. The win is collapsing `count` struct
+  rebuilds into one.
+
+  `pairs` are applied in order; keys are normalized per `normalize_key/1`.
+  """
+  @spec put_many(t(), [{term(), term()}]) :: t()
+  def put_many(%__MODULE__{} = table, []), do: table
+
+  def put_many(%__MODULE__{data: data, order: order, order_tail: order_tail, dead: dead} = table, pairs)
+      when is_list(pairs) do
+    {data, order, order_tail, dead} = put_many_reduce(pairs, data, order, order_tail, dead)
+    %{table | data: data, order: order, order_tail: order_tail, dead: dead}
+  end
+
+  defp put_many_reduce([], data, order, order_tail, dead), do: {data, order, order_tail, dead}
+
+  defp put_many_reduce([{key, value} | rest], data, order, order_tail, dead) do
+    key = normalize_key(key)
+
+    {data, order, order_tail, dead} =
+      case value do
+        nil -> delete_acc(data, order, order_tail, dead, key)
+        _ -> insert_acc(data, order, order_tail, dead, key, value)
+      end
+
+    put_many_reduce(rest, data, order, order_tail, dead)
+  end
+
+  # Accumulator-threaded mirrors of `insert/3` and `delete/2`. They make the
+  # exact same `order`/`order_tail`/`dead` decisions, but operate on bare
+  # fields so `put_many/2` can rebuild the struct just once.
+  defp insert_acc(data, order, order_tail, dead, key, value) do
+    cond do
+      Map.has_key?(dead, key) ->
+        merged_order = order ++ Enum.reverse(order_tail)
+        new_order = Enum.reject(merged_order, &(&1 === key))
+        {Map.put(data, key, value), new_order, [key], Map.delete(dead, key)}
+
+      Map.has_key?(data, key) ->
+        {Map.put(data, key, value), order, order_tail, dead}
+
+      true ->
+        {Map.put(data, key, value), order, [key | order_tail], dead}
+    end
+  end
+
+  defp delete_acc(data, order, order_tail, dead, key) do
+    if Map.has_key?(data, key) do
+      {Map.delete(data, key), order, order_tail, Map.put(dead, key, true)}
+    else
+      {data, order, order_tail, dead}
+    end
+  end
+
+  @doc """
   Normalizes a table key per Lua 5.3 §3.4.11.
 
   Float keys that hold an exact integer value are coerced to integers so

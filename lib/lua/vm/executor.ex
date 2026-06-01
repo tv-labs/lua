@@ -1814,14 +1814,7 @@ defmodule Lua.VM.Executor do
 
     state =
       State.update_table(state, {:tref, id}, fn table ->
-        if total > 0 do
-          Enum.reduce(0..(total - 1), table, fn i, t ->
-            value = elem(regs, start + i)
-            Table.put(t, offset + i + 1, value)
-          end)
-        else
-          table
-        end
+        Table.put_many(table, set_list_pairs(regs, start, total, offset))
       end)
 
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
@@ -1831,26 +1824,11 @@ defmodule Lua.VM.Executor do
 
   defp do_execute([{:set_list, table_reg, start, count, offset} | rest], regs, upvalues, proto, state, cont, frames, line) do
     {:tref, id} = elem(regs, table_reg)
+    total = if count == 0, do: state.multi_return_count, else: count
 
     state =
       State.update_table(state, {:tref, id}, fn table ->
-        if count == 0 do
-          values_to_collect = state.multi_return_count
-
-          if values_to_collect > 0 do
-            Enum.reduce(0..(values_to_collect - 1), table, fn i, t ->
-              value = elem(regs, start + i)
-              Table.put(t, offset + i + 1, value)
-            end)
-          else
-            table
-          end
-        else
-          Enum.reduce(1..count, table, fn i, t ->
-            value = elem(regs, start + i - 1)
-            Table.put(t, offset + i, value)
-          end)
-        end
+        Table.put_many(table, set_list_pairs(regs, start, total, offset))
       end)
 
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
@@ -1880,6 +1858,22 @@ defmodule Lua.VM.Executor do
 
   defp do_execute([instr | _rest], _regs, _upvalues, _proto, _state, _cont, _frames, _line) do
     raise InternalError, value: "unimplemented instruction: #{inspect(instr)}"
+  end
+
+  # Builds the ordered `{key, value}` list for a `:set_list` run: value `k`
+  # (0-based) reads from register `start + k` and lands at key
+  # `offset + k + 1`. Walks back-to-front so the list is in ascending-key
+  # (insertion) order with O(1) prepends, then `Table.put_many/2` applies it
+  # in a single struct rebuild — matching the old per-slot `Table.put/3`
+  # fold exactly. A `total` of 0 yields `[]` and leaves the table untouched.
+  defp set_list_pairs(regs, start, total, offset) do
+    set_list_pairs(regs, start, offset, total - 1, [])
+  end
+
+  defp set_list_pairs(_regs, _start, _offset, k, acc) when k < 0, do: acc
+
+  defp set_list_pairs(regs, start, offset, k, acc) do
+    set_list_pairs(regs, start, offset, k - 1, [{offset + k + 1, elem(regs, start + k)} | acc])
   end
 
   # ── do_frame_return — restore caller context after a Lua function returns ──
