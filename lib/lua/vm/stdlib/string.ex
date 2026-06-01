@@ -32,6 +32,7 @@ defmodule Lua.VM.Stdlib.String do
 
   alias Lua.VM.ArgumentError
   alias Lua.VM.Executor
+  alias Lua.VM.Limits
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Pattern
   alias Lua.VM.Stdlib.String.Pack
@@ -212,6 +213,10 @@ defmodule Lua.VM.Stdlib.String do
       if n <= 0 do
         ""
       else
+        # Compute the result size from the count *before* building it, so an
+        # oversized request fails with a catchable error instead of trying to
+        # allocate (and OOM the host on) a multi-petabyte binary.
+        Limits.check_string_size!(n * byte_size(str) + (n - 1) * byte_size(sep))
         Enum.map_join(1..n, sep, fn _ -> str end)
       end
 
@@ -364,13 +369,27 @@ defmodule Lua.VM.Stdlib.String do
     format_string(rest2, remaining_args, [acc, str])
   end
 
+  # PUC-Lua copies at most two width and two precision digits into the
+  # conversion spec (`scanformat`), erroring on anything longer. We enforce
+  # the same bound so a spec like `%.2000000000f` cannot drive a giant
+  # `String.duplicate`/padding allocation.
+  @max_format_field 99
+
   # Parse a format spec: [flags][width][.precision]specifier
   defp parse_format_spec(str) do
     {flags, str} = parse_flags(str, 0)
     {width, str} = parse_width(str)
     {precision, str} = parse_precision(str)
     {specifier, str} = parse_specifier(str)
+    check_format_field!(width)
+    check_format_field!(precision)
     {{flags, width, precision, specifier}, str}
+  end
+
+  defp check_format_field!(n) when is_nil(n) or n <= @max_format_field, do: :ok
+
+  defp check_format_field!(_n) do
+    raise ArgumentError, function_name: "string.format", details: "invalid conversion"
   end
 
   # Flags are parsed once into an integer bitmask so the apply path reads

@@ -14,6 +14,7 @@ defmodule Lua.VM.Executor do
 
   alias Lua.VM.Dispatcher
   alias Lua.VM.InternalError
+  alias Lua.VM.Limits
   alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
@@ -419,7 +420,7 @@ defmodule Lua.VM.Executor do
     src = proto.source
 
     try_binary_metamethod("__concat", left, right, state, fn ->
-      concat_coerce(left, 0, src) <> concat_coerce(right, 0, src)
+      concat_checked(concat_coerce(left, 0, src), concat_coerce(right, 0, src))
     end)
   end
 
@@ -1350,12 +1351,12 @@ defmodule Lua.VM.Executor do
     # also concatenate without metamethods.
     cond do
       is_binary(left) and is_binary(right) ->
-        regs = put_elem(regs, dest, left <> right)
+        regs = put_elem(regs, dest, concat_checked(left, right))
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
       (is_binary(left) or is_number(left)) and (is_binary(right) or is_number(right)) ->
         src = proto.source
-        result = concat_coerce(left, line, src) <> concat_coerce(right, line, src)
+        result = concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src))
         regs = put_elem(regs, dest, result)
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
@@ -1364,7 +1365,7 @@ defmodule Lua.VM.Executor do
 
         {result, new_state} =
           try_binary_metamethod("__concat", left, right, state, fn ->
-            concat_coerce(left, line, src) <> concat_coerce(right, line, src)
+            concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src))
           end)
 
         regs = put_elem(regs, dest, result)
@@ -2154,6 +2155,24 @@ defmodule Lua.VM.Executor do
       source: source,
       error_kind: :concatenate_type_error,
       value_type: value_type(value)
+  end
+
+  # `..` builds a new binary on every step. A doubling loop (`s = s .. s`)
+  # reaches sizes where a single concat allocates more than the heap limit
+  # in one BIF call — faster than the GC-time `max_heap_size` check can
+  # react. Guard the size deterministically here, matching the Layer A
+  # stdlib checks, so the loop fails with a catchable error long before it
+  # threatens the host. `byte_size/1` is O(1), so this is cheap on the hot
+  # path. Compile-time constant; no per-call dispatch into `Limits`.
+  @max_string_bytes Limits.max_string_bytes()
+
+  @compile {:inline, concat_checked: 2}
+  defp concat_checked(left, right) when byte_size(left) + byte_size(right) <= @max_string_bytes do
+    left <> right
+  end
+
+  defp concat_checked(_left, _right) do
+    raise RuntimeError, value: "resulting string too large"
   end
 
   # ── Metamethod support ─────────────────────────────────────────────────────

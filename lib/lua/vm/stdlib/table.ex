@@ -29,6 +29,7 @@ defmodule Lua.VM.Stdlib.Table do
 
   alias Lua.VM.ArgumentError
   alias Lua.VM.Executor
+  alias Lua.VM.Limits
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
@@ -220,6 +221,9 @@ defmodule Lua.VM.Stdlib.Table do
     # metatable) read directly from `data`, skipping the __index dispatch;
     # tables with a metatable keep the Executor path so __index is observed.
     table = Map.fetch!(state.tables, id)
+
+    # Refuse an oversized range before allocating the result list.
+    if i <= j, do: Limits.check_range_count!(j - i + 1, "table.concat")
 
     {elements, state} =
       cond do
@@ -513,6 +517,8 @@ defmodule Lua.VM.Stdlib.Table do
       if f > e do
         state
       else
+        Limits.check_range_count!(e - f + 1, "table.move")
+
         # Read each src slot via __index on tref1, write to dst via
         # __newindex on tref2. Aliasing (tref1 == tref2 with overlapping
         # ranges) is handled by reading every value first, then writing
