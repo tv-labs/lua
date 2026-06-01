@@ -2,10 +2,10 @@
 id: B13
 title: defer string.format width padding to iolist
 issue: 310
-pr: null
+pr: 316
 branch: perf/string-format-width-iolist
 base: main
-status: in-progress
+status: review
 direction: B
 ---
 
@@ -137,3 +137,27 @@ demonstrate the improvement (target: close most of the ~2.03× luerl gap).
   base case.
 - **No expected suite-count change.** This is perf-only; `mix test`
   pass/fail counts should be identical before and after.
+
+## What changed
+
+- `lib/lua/vm/stdlib/string.ex`: `apply_width_flags/3` now returns an
+  iolist for the padded cases — `[str, pad]` (left-justify),
+  `["-", pad, binary_part(...)]` (zero-pad with leading sign), and
+  `[pad, str]` (right-justify default). The no-padding branch still
+  returns the bare `str`. The outer `<>` concatenation that copied
+  `str` + `pad` into a new binary per specifier is gone; the result
+  threads through the existing `[acc, str]` append in
+  `format_directive/3` and is materialised once at the
+  `format_string/3` base case via `IO.iodata_to_binary/1`. Single call
+  site (`apply_format_spec/2`) needed no change.
+- `.agents/plans/B13-string-format-width-iolist.md`: lifecycle commits.
+
+Verification: `mix test` 2114 passed / 19 skipped / 1 excluded (identical
+to pre-change). String coverage `test/lua/vm/string_test.exs` 152 passed.
+Output byte-identical across left/right/space/zero padding, zero-pad-with-sign
+(`%05d` of `-7` -> `-0007`), and multibyte `%s` (`%6s` of `"café"` -> `" café"`).
+Width-flagged benchmark (n=1000): ~3.88 ms/call -> ~3.39 ms/call (~13% faster).
+
+Discovery: the plan named `test/lua/vm/stdlib/string_test.exs`, which does
+not exist; string.format coverage lives in `test/lua/vm/string_test.exs`.
+No scope change.
