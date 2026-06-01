@@ -61,6 +61,22 @@ defmodule Lua.ErrorGalleryTest do
      Suggestion:
        Relational operators (< <= > >=) only compare two numbers or two strings. Convert one operand so both sides share a type.\
      """},
+    {"bitwise_on_non_integer", "print(1 & \"x\")", [],
+     """
+     Lua runtime error: at gallery.lua:1:
+
+       attempt to perform bitwise operation on a string value
+
+     Suggestion:
+       Bitwise operators require integers. Floats with no fractional part are accepted; everything else must be converted first.\
+     """},
+    {"for_loop_non_number", "for i = 1, \"x\" do end", [],
+     """
+     Lua runtime error: 'for' limit must be a number
+
+     Suggestion:
+       Numeric for loops need number values for the start, limit, and step. Check the loop bounds.\
+     """},
     {"stdlib_bad_arg", "string.upper(nil)", [],
      """
      Lua runtime error: at gallery.lua:1:

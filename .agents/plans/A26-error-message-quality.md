@@ -89,8 +89,9 @@ fixture tests, and ship a docs gallery.
       codes leak into non-TTY output — gate ANSI behind a TTY/enabled
       check (e.g. `IO.ANSI.enabled?/0`) so the same render path is safe
       either way.
-- [ ] A small "error gallery" lives in `guides/errors.md` showing
-      before/after for each category.
+- [ ] A small "error gallery" pins before/after for each category. (Shipped
+      as inline `expected` strings in `test/lua/error_gallery_test.exs`; the
+      standalone `guides/errors.md` draft was dropped during review.)
 - [ ] `mix test` passes (1585 → 1585+, no regressions).
 
 ## Implementation notes
@@ -171,7 +172,8 @@ arithmetic on non-number ->
   the stdlib bad-arg case stays correct after formatter changes.
 - `test/lua/error_gallery_test.exs` (new) — gallery tests with inline
   `expected` strings for every reachable category.
-- `guides/errors.md` (new) — before/after gallery.
+- A standalone `guides/errors.md` was drafted then dropped during review;
+  the before/after gallery is carried by the test above instead.
 
 Note: the plan's earlier draft pointed at `lib/lua/error_formatter.ex`
 and a `Lua.VM.TypeError.message/1`. The real formatter lives at
@@ -266,7 +268,7 @@ Pre-implementation notes carried over from the audit:
   - `t[nil] = 1` and `t[0/0] = 1` (nil / NaN table key) succeed silently
     instead of raising "table index is nil/NaN". No rendered message to
     pin. Data-layer bug; out of scope. These two categories are therefore
-    documented in `guides/errors.md` under "Known gaps" rather than
+    documented here under "Known gaps" (and in the PR description) rather than
     pinned in the gallery.
   - Stack-overflow runtime errors carry no originating line, so they render
     without an `at <source>:<line>:` header and the stack frames show line
@@ -315,8 +317,10 @@ Files touched:
   every reachable category with an inline `expected` string per case (no
   separate fixture files); update those strings deliberately when the format
   changes on purpose.
-- `guides/errors.md` (new) — before/after gallery and a "Known gaps" section
-  for the data-layer holes left out of scope.
+- The standalone `guides/errors.md` gallery was dropped during review: the
+  before/after renders are pinned by `test/lua/error_gallery_test.exs` and the
+  "Known gaps" data-layer holes are captured in this plan's Discoveries and the
+  PR description instead of a separate guide.
 - `test/lua/vm/error_to_map_test.exs`, `test/lua/error_messages_test.exs` —
   golden snapshots updated to the new format.
 
