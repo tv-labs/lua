@@ -489,14 +489,14 @@ defmodule DemoWeb.PlaygroundLive do
                 <div class="text-xs uppercase text-base-content/50 mb-1">
                   Output before error
                 </div>
-                <pre class="whitespace-pre-wrap text-base-content/80"><%= @result.output %></pre>
+                <pre class="whitespace-pre-wrap text-base-content/80 max-h-80 overflow-y-auto scrollbar-thin"><%= @result.output %></pre>
               </div>
             <% end %>
           <% match?(%{status: :timeout}, @result) -> %>
             <div class="text-warning">{@result.error}</div>
           <% match?(%{status: :ok}, @result) -> %>
             <%= if @result.output != "" do %>
-              <pre class="whitespace-pre-wrap text-base-content/90"><%= @result.output %></pre>
+              <pre class="whitespace-pre-wrap text-base-content/90 max-h-80 overflow-y-auto scrollbar-thin"><%= @result.output %></pre>
             <% end %>
             <%= if @result.returns != [] do %>
               <div class={["mt-1", @result.output != "" && "border-t border-base-300/50 pt-2"]}>
