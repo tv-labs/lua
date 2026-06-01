@@ -478,7 +478,11 @@ defmodule Lua.VM.Stdlib do
       [piece | _] when is_binary(piece) ->
         # A reader that never signals end-of-input would otherwise accumulate
         # chunks until the host runs out of memory. Bound the total source
-        # size with the same ceiling used for string allocations.
+        # size with the same ceiling used for string allocations. Note this
+        # raises rather than returning load's documented `(nil, message)`
+        # pair: an oversized reader is a DoS attempt, not a recoverable
+        # syntax error, so we surface it as a catchable runtime error
+        # (caught by `pcall`) instead of a quiet load failure.
         Limits.check_string_size!(size + byte_size(piece))
         collect_reader_chunks(reader, state, [piece | acc], size + byte_size(piece))
 

@@ -102,9 +102,16 @@ defmodule Website.LuaSandbox do
         {:eval_result, result} ->
           result
 
-        # Worker hit the memory ceiling (or otherwise died) before delivering.
-        {:EXIT, ^worker, _reason} ->
+        # Worker hit the memory ceiling: max_heap_size kills it with
+        # `:killed`, which is the only abnormal exit we attribute to the
+        # memory limit.
+        {:EXIT, ^worker, :killed} ->
           memory_result(started)
+
+        # Any other abnormal worker exit is an unrelated crash; surface it
+        # as a generic error rather than mislabeling it a memory limit.
+        {:EXIT, ^worker, reason} ->
+          error_result(started, reason)
 
         # This task is being cancelled by the caller (the LiveView timeout).
         # Stop the worker and let the cancellation proceed.
@@ -138,6 +145,17 @@ defmodule Website.LuaSandbox do
       output: "",
       returns: [],
       error: "Execution exceeded the memory limit and was stopped",
+      duration_us: System.monotonic_time(:microsecond) - started,
+      bytecode: []
+    }
+  end
+
+  defp error_result(started, reason) do
+    %{
+      status: :error,
+      output: "",
+      returns: [],
+      error: "Execution failed: #{inspect(reason)}",
       duration_us: System.monotonic_time(:microsecond) - started,
       bytecode: []
     }
@@ -753,14 +771,14 @@ defmodule Website.LuaSandbox do
         blurb:
           "Flooding print() can't exhaust memory either — captured output is capped and the rest is dropped.",
         source: """
-        -- Print far more than the output buffer keeps.
-        for i = 1, 100000 do
+        -- Print far more than the output buffer keeps (cap is 5,000 lines).
+        for i = 1, 20000 do
           print("line " .. i)
         end
         return "done"
         """,
         chunk: ~LUA"""
-        for i = 1, 100000 do
+        for i = 1, 20000 do
           print("line " .. i)
         end
         return "done"
