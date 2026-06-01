@@ -12,11 +12,13 @@ Embed a sandboxed Lua 5.3 scripting runtime in your Elixir application — no NI
 `Lua` is a Lua 5.3 virtual machine implemented entirely in Elixir. The lexer,
 parser, register-based VM, and standard library all run directly on the BEAM,
 so there is nothing to compile and no foreign code in your release. It exists
-to let you safely run untrusted scripts — game logic, user-defined rules,
-configuration, plugins — with a small, idiomatic Elixir API for passing data
-and functions across the boundary. Scripts are sandboxed by default, errors
-carry source and line information, and each `Lua` value is plain immutable
-Elixir state with no shared mutable globals.
+to let you safely run untrusted scripts — AI-agent–authored code, game logic,
+user-defined rules, configuration, plugins — with a small, idiomatic Elixir API
+for passing data and functions across the boundary. Giving an AI agent a
+sandboxed runtime where it can only call the Elixir functions you expose is a
+primary use case. Scripts are sandboxed by default, errors carry source and
+line information, and each `Lua` value is plain immutable Elixir state with no
+shared mutable globals.
 
 ## Installation
 
@@ -144,12 +146,14 @@ encoding/decoding, varargs, multiple returns, `_G`/`_ENV`, metatables, the
 string-pattern engine (`find`/`match`/`gmatch`/`gsub`), and the `string`,
 `table`, `math`, `os`, and `debug` standard libraries are implemented.
 
-As a sandboxed *embedded* VM, several capabilities are deliberate non-goals
-rather than missing features:
+As a sandboxed *embedded* VM, some standalone-interpreter behavior is a
+deliberate non-goal rather than a missing feature:
 
-- **Standalone interpreter / `os.execute`** — there is no shell-out.
-- **File I/O** — `io.*` is a stub by design.
-- **Filesystem `require`** — modules are not loaded from disk.
+- **Standalone interpreter / `os.execute`** — there is no shell-out to the host.
+- **Host filesystem access** — `Lua` does not read your host filesystem. The
+  `io.*` library and `require`/`dofile` do not touch disk; file-backed scripts
+  and modules are resolved through `Lua`'s own controlled layer rather than the
+  host OS.
 - **Coroutines**, **garbage collection / weak tables**, and the **full
   `debug` library**.
 
