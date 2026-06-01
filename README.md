@@ -27,7 +27,7 @@ Add `lua` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:lua, "~> 1.0"}
+    {:lua, "~> 1.0.0-rc"}
   ]
 end
 ```
@@ -64,7 +64,15 @@ rescue
   e in Lua.RuntimeException ->
     e.line    # => 2
     e.source  # => "<eval>" (chunk name)
-    e.message # => "Lua runtime error: ...something went wrong..."
+
+    # e.message is a formatted, colorized frame (ANSI codes elided here):
+    #
+    #   Lua runtime error: Runtime Error
+    #
+    #     at <eval>:2:
+    #
+    #     runtime error: something went wrong
+    e.message
 end
 ```
 
@@ -151,9 +159,8 @@ deliberate non-goal rather than a missing feature:
 
 - **Standalone interpreter / `os.execute`** — there is no shell-out to the host.
 - **Host filesystem access** — `Lua` does not read your host filesystem. The
-  `io.*` library and `require`/`dofile` do not touch disk; file-backed scripts
-  and modules are resolved through `Lua`'s own controlled layer rather than the
-  host OS.
+  `io.*` library and `require`/`dofile` are sandboxed by default and raise
+  rather than touching disk; there is no host-OS file or module resolution.
 - **Coroutines**, **garbage collection / weak tables**, and the **full
   `debug` library**.
 
