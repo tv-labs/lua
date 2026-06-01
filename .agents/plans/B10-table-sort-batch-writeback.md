@@ -2,10 +2,10 @@
 id: B10
 title: Batch write-back in table.sort plain fast path
 issue: 307
-pr: null
+pr: 318
 branch: perf/table-sort-batch-writeback
 base: main
-status: in-progress
+status: review
 direction: B
 ---
 
@@ -134,3 +134,29 @@ honors a bench mode env var, note which mode was used.
   is still a strict reduction in struct rebuilds and is safe to ship as an
   improvement; record the actual ratio and, if short of target, note a
   follow-up rather than expanding this PR's scope.
+
+## What changed
+
+PR #318. Replaced the per-index `Enum.reduce(... Table.put/3 ...)`
+write-back in `sort_plain/5` (`lib/lua/vm/stdlib/table.ex`) with a single
+`Map.new/2` build plus one `Table.replace_data/2` call, and updated the
+fast-path comment to describe the wholesale swap. No other files changed.
+
+Verification on this run:
+
+- `mix format` clean; `mix compile --warnings-as-errors` produced no
+  warnings from the `lua` app.
+- `mix test`: `2114 passed, 19 skipped, 1 excluded`.
+- `mix test test/lua/vm/stdlib/table_test.exs`: `60 passed (6 properties,
+  54 tests)`.
+- `MIX_ENV=benchmark mix run benchmarks/table_ops.exs` — Table Sort, n=100
+  (mode: quick), `lua (chunk)` vs `luerl`, same M4 machine:
+  - main: 34.03 µs vs luerl 21.76 µs = 1.56x
+  - this PR: 30.06 µs vs luerl 20.45 µs = 1.47x
+
+Outcome: a consistent ~12% speedup on the plain-sort path and a strict
+reduction in struct rebuilds. The issue's ≤1.10x target was set against a
+recorded luerl baseline of 31.9 µs; on this M4 luerl benches at ~21 µs, so
+the ratio target is not reachable by this single optimization. Per the
+Risks section, shipped as a genuine improvement with the actual ratio
+recorded; closing the remaining gap is follow-up work, not scope creep.
