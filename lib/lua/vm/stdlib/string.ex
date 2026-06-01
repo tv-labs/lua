@@ -451,52 +451,48 @@ defmodule Lua.VM.Stdlib.String do
     raise ArgumentError, function_name: "string.format", expected: "number"
   end
 
+  # 0/0 surfaces as the :nan atom in this VM; C Lua prints "nan".
+  defp format_spec_float(:nan, _precision), do: "nan"
+
   defp format_spec_float(val, precision) when is_number(val) do
     float_val = val / 1
-
-    float_val
-    |> :erlang.float_to_binary([{:decimals, precision}, :compact])
-    |> expand_float(precision)
+    fixed_float(float_val, precision)
   end
 
   defp format_spec_float(_, _) do
     raise ArgumentError, function_name: "string.format", expected: "number"
   end
 
-  # Ensure the float string has exactly `precision` decimal places
-  defp expand_float(str, precision) do
-    if precision == 0 do
-      # Remove the decimal point entirely for precision 0
-      case String.split(str, ".") do
-        [int_part, frac] ->
-          # Round: check first decimal digit
-          first_frac = String.first(frac)
+  # Format a finite float to exactly `precision` fixed decimal places,
+  # matching C printf/PUC-Lua %f (round-half-to-even, sign preserved).
+  defp fixed_float(float_val, 0) do
+    sign = if float_val < 0.0, do: "-", else: ""
+    sign <> Integer.to_string(round_half_even(abs(float_val)))
+  end
 
-          if first_frac != nil and String.to_integer(first_frac) >= 5 do
-            # Need to round up
-            {int_val, _} = Integer.parse(int_part)
+  defp fixed_float(float_val, precision) do
+    sign = if float_val < 0.0, do: "-", else: ""
 
-            if int_val >= 0 do
-              Integer.to_string(int_val + 1)
-            else
-              Integer.to_string(int_val - 1)
-            end
-          else
-            int_part
-          end
+    digits =
+      ~c"~.*f"
+      |> :io_lib.format([precision, abs(float_val)])
+      |> :erlang.iolist_to_binary()
 
-        _ ->
-          str
-      end
-    else
-      case String.split(str, ".") do
-        [int_part, frac] ->
-          padded_frac = String.pad_trailing(frac, precision, "0")
-          "#{int_part}.#{padded_frac}"
+    sign <> digits
+  end
 
-        [int_part] ->
-          "#{int_part}.#{String.duplicate("0", precision)}"
-      end
+  # Round a non-negative float to the nearest integer, ties to even,
+  # matching C printf %.0f. :erlang.round/1 rounds half away from zero,
+  # so resolve the exact-half tie explicitly.
+  defp round_half_even(abs_val) when abs_val >= 0.0 do
+    floor = :erlang.trunc(abs_val)
+    frac = abs_val - floor
+
+    cond do
+      frac < 0.5 -> floor
+      frac > 0.5 -> floor + 1
+      rem(floor, 2) == 0 -> floor
+      true -> floor + 1
     end
   end
 
@@ -518,15 +514,9 @@ defmodule Lua.VM.Stdlib.String do
       exp = float_val |> abs() |> :math.log10() |> floor()
       mantissa = float_val / :math.pow(10, exp)
 
-      # Format mantissa with the required precision
-      mantissa_str =
-        :erlang.float_to_binary(mantissa, [{:decimals, precision + 1}, :compact])
-
-      # Round to the requested precision
-      mantissa_str = round_mantissa(mantissa_str, precision)
-
-      # Check if rounding pushed mantissa to 10.0 (e.g., 9.999... -> 10.0)
-      {mantissa_str, exp} = normalize_mantissa(mantissa_str, exp)
+      # Format the mantissa to the requested precision (round-half-to-even),
+      # then carry into the exponent if rounding pushed |mantissa| to 10.
+      {mantissa_str, exp} = mantissa_with_carry(mantissa, precision, exp)
 
       exp_sign = if exp >= 0, do: "+", else: "-"
       exp_str = exp |> abs() |> Integer.to_string() |> String.pad_leading(2, "0")
@@ -534,50 +524,16 @@ defmodule Lua.VM.Stdlib.String do
     end
   end
 
-  defp round_mantissa(str, precision) do
-    if precision == 0 do
-      case String.split(str, ".") do
-        [int_part, frac] ->
-          first = String.first(frac)
-
-          if first != nil and String.to_integer(first) >= 5 do
-            {n, _} = Integer.parse(int_part)
-            # Preserve sign for rounding
-            if n >= 0, do: Integer.to_string(n + 1), else: Integer.to_string(n - 1)
-          else
-            int_part
-          end
-
-        _ ->
-          str
-      end
-    else
-      expand_float(str, precision)
-    end
-  end
-
-  defp normalize_mantissa(mantissa_str, exp) do
-    # Parse the mantissa value to check if |mantissa| >= 10 after rounding
-    {mantissa_val, _} = Float.parse(mantissa_str)
+  # Format the mantissa to `precision` decimals; if rounding lifted it to
+  # |mantissa| >= 10 (e.g. 9.999 -> 10.0), divide by ten and bump the exponent.
+  defp mantissa_with_carry(mantissa, precision, exp) do
+    str = fixed_float(mantissa, precision)
+    {mantissa_val, _} = Float.parse(str)
 
     if abs(mantissa_val) >= 10.0 do
-      new_mantissa = mantissa_val / 10.0
-      # Re-format the new mantissa - extract precision from the string
-      precision =
-        case String.split(mantissa_str, ".") do
-          [_, frac] -> String.length(frac)
-          _ -> 0
-        end
-
-      new_str =
-        expand_float(
-          :erlang.float_to_binary(new_mantissa, [{:decimals, precision + 1}, :compact]),
-          precision
-        )
-
-      {new_str, exp + 1}
+      {fixed_float(mantissa_val / 10.0, precision), exp + 1}
     else
-      {mantissa_str, exp}
+      {str, exp}
     end
   end
 
