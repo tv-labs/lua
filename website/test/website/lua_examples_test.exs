@@ -43,6 +43,15 @@ defmodule Website.LuaExamplesTest do
 
           assert match?({:ok, _chunk, _blocks}, LuaSandbox.compile(@example.source)),
                  "expected #{@label} to compile cleanly (runtime-only failure)"
+
+        :limit ->
+          # Resource-limit demos (memory ceiling / wall-clock timeout) compile
+          # and start fine, but the run is stopped and reported as a timeout.
+          assert result.status == :timeout,
+                 "expected #{@label} to hit a resource limit, got: #{inspect(result.status)}"
+
+          assert match?({:ok, _chunk, _blocks}, LuaSandbox.compile(@example.source)),
+                 "expected #{@label} to compile cleanly (stopped at runtime)"
       end
     end
   end
