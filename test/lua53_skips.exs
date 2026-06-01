@@ -10,6 +10,7 @@
 #       lines: 12..58,            # a Range, or the atom :all
 #       category: :parser,        # :lexer | :parser | :codegen | :executor
 #                                 # | :stdlib | :unimplemented | :semantic
+#                                 # | :performance
 #       reason: "one-line cause", # stands alone, no plan-id references
 #       issue: 287                # optional GitHub issue number, or nil
 #     }
@@ -90,11 +91,25 @@
   ],
   "constructs.lua" => [
     %{
-      lines: 232..313,
-      category: :unimplemented,
+      lines: 284..299,
+      category: :performance,
       reason:
-        "os.time is nil at line 237 (feeds _ENV.GLOB1, used by line 248 and the short-circuit harness leaf), so this block stays skipped until the os stdlib lands. The debug.getinfo(1,\"n\").name block above (line 226) now passes. The short-circuit harness itself (287-298) is verified green up to level 4 by test/lua/vm/short_circuit_test.exs",
-      issue: 280
+        "createcases(4) plus the load()/exec loop over all 204105 combinations exceeds the 60s ExUnit default timeout; the VM result is correct (verified green up to level 4 by test/lua/vm/short_circuit_test.exs --include slow)",
+      issue: nil
+    },
+    %{
+      lines: 303..304,
+      category: :stdlib,
+      reason:
+        "checkload asserts the load() error message contains 'expected'; the suite-runner load() returns 'parse error: ...' for syntax errors",
+      issue: nil
+    },
+    %{
+      lines: 306..311,
+      category: :stdlib,
+      reason:
+        "checkload asserts the load() error message contains 'too long'; the compiler has no control-structure-too-long check",
+      issue: nil
     }
   ],
   "coroutine.lua" => [
