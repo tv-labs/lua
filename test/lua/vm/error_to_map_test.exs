@@ -151,7 +151,7 @@ defmodule Lua.VM.ErrorToMapTest do
         )
 
       expected =
-        "at t.lua:2:\n\n  attempt to call a nil value\n\n   1 │ local x\n   2 │ x()       ^\n   3 │ return 0\n\nStack trace:\n  t.lua:2: in main chunk\n\nSuggestion:\n  The value you're trying to call as a function is nil. Check that the function exists and is defined before this point."
+        "at t.lua:2:\n\n  attempt to call a nil value\n\n   1 │ local x\n   2 │ x()\n       ^\n   3 │ return 0\n\nStack trace:\n  t.lua:2: in main chunk\n\nSuggestion:\n  The value you're trying to call as a function is nil. Check that the function exists and is defined before this point."
 
       assert output == expected
     end

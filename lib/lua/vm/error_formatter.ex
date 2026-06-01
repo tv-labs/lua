@@ -148,7 +148,7 @@ defmodule Lua.VM.ErrorFormatter do
 
           [
             "\n" <> color(line_str, IO.ANSI.red()),
-            pointer
+            "\n" <> pointer
           ]
         else
           ["\n" <> color(line_str, IO.ANSI.faint())]
