@@ -466,19 +466,25 @@ defmodule Lua.VM.Stdlib.String do
   # Format a finite float to exactly `precision` fixed decimal places,
   # matching C printf/PUC-Lua %f (round-half-to-even, sign preserved).
   defp fixed_float(float_val, 0) do
-    sign = if float_val < 0.0, do: "-", else: ""
-    sign <> Integer.to_string(round_half_even(abs(float_val)))
+    float_sign(float_val) <> Integer.to_string(round_half_even(abs(float_val)))
   end
 
   defp fixed_float(float_val, precision) do
-    sign = if float_val < 0.0, do: "-", else: ""
-
     digits =
       ~c"~.*f"
       |> :io_lib.format([precision, abs(float_val)])
       |> :erlang.iolist_to_binary()
 
-    sign <> digits
+    float_sign(float_val) <> digits
+  end
+
+  # Derive the printed sign from the IEEE-754 sign bit, not `< 0.0`. On the
+  # BEAM `-0.0 < 0.0` is false, which would drop the sign of negative zero;
+  # C printf/PUC-Lua print "-0.000000" for it. Reading the sign bit treats
+  # exact -0.0 as negative while leaving +0.0 and positive values unsigned.
+  defp float_sign(float_val) do
+    <<sign_bit::1, _::63>> = <<float_val::float>>
+    if sign_bit == 1, do: "-", else: ""
   end
 
   # Round a non-negative float to the nearest integer, ties to even,
@@ -508,7 +514,7 @@ defmodule Lua.VM.Stdlib.String do
   # Format a float in scientific notation: mantissa e+/-exp with at least 2 digit exponent
   defp format_scientific_str(float_val, precision) do
     if float_val == 0.0 do
-      mantissa = "0." <> String.duplicate("0", precision)
+      mantissa = float_sign(float_val) <> "0." <> String.duplicate("0", precision)
       "#{mantissa}e+00"
     else
       exp = float_val |> abs() |> :math.log10() |> floor()
@@ -542,7 +548,7 @@ defmodule Lua.VM.Stdlib.String do
     precision = max(1, precision)
 
     if float_val == 0.0 do
-      "0"
+      float_sign(float_val) <> "0"
     else
       abs_val = abs(float_val)
       exp = abs_val |> :math.log10() |> floor()

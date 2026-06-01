@@ -501,6 +501,45 @@ defmodule Lua.VM.StringTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       assert {:ok, ["nan"], _state} = VM.execute(proto, state)
     end
+
+    # IEEE-754 distinguishes -0.0 from +0.0; C printf/PUC-Lua preserve the sign
+    # bit. -0.0 < 0.0 is false on the BEAM, so the sign must come from the bit.
+    # Reference: /opt/homebrew/bin/lua string.format(spec, -0.0).
+    test "float specifiers preserve the sign of negative zero", %{state: state} do
+      cases = [
+        {~s{string.format("%f", -0.0)}, "-0.000000"},
+        {~s{string.format("%.2f", -0.0)}, "-0.00"},
+        {~s{string.format("%.0f", -0.0)}, "-0"},
+        {~s{string.format("%e", -0.0)}, "-0.000000e+00"},
+        {~s{string.format("%E", -0.0)}, "-0.000000E+00"},
+        {~s{string.format("%g", -0.0)}, "-0"}
+      ]
+
+      for {expr, expected} <- cases do
+        code = "return #{expr}"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        assert {:ok, [^expected], _state} = VM.execute(proto, state), "for #{expr}"
+      end
+    end
+
+    # Positive zero must stay unsigned across every float specifier.
+    test "float specifiers leave positive zero unsigned", %{state: state} do
+      cases = [
+        {~s{string.format("%f", 0.0)}, "0.000000"},
+        {~s{string.format("%.2f", 0.0)}, "0.00"},
+        {~s{string.format("%.0f", 0.0)}, "0"},
+        {~s{string.format("%e", 0.0)}, "0.000000e+00"},
+        {~s{string.format("%g", 0.0)}, "0"}
+      ]
+
+      for {expr, expected} <- cases do
+        code = "return #{expr}"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        assert {:ok, [^expected], _state} = VM.execute(proto, state), "for #{expr}"
+      end
+    end
   end
 
   describe "string table access" do
