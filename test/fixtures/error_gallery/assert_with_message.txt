@@ -1,7 +1,0 @@
-=== category: assert_with_message ===
-=== source ===
-assert(false, "boom")
-=== expected output ===
-Lua runtime error: at gallery.lua:1:
-
-  assertion failed: boom

@@ -1,7 +1,0 @@
-=== category: error_string ===
-=== source ===
-error("something broke")
-=== expected output ===
-Lua runtime error: at gallery.lua:1:
-
-  runtime error: something broke

@@ -182,23 +182,19 @@ Stack trace:
 The stack trace collapses the repetitive middle frames into a single count so
 the failure does not bury the reader under hundreds of identical lines.
 
-## Regenerating the gallery fixtures
+## Pinning the gallery output
 
-The rendered output for each category is pinned by fixtures under
-`test/fixtures/error_gallery/`. When the format changes intentionally,
-regenerate them with:
+The rendered output for each category is pinned inline in
+`test/lua/error_gallery_test.exs`: every case carries its Lua source and the
+exact expected message, so the assertion lives next to the snippet that
+produces it. When the format changes intentionally, update the `expected`
+string for the affected case; accidental format drift fails the test loudly.
 
-```bash
-GALLERY_REGEN=1 mix test test/lua/error_gallery_test.exs
-```
-
-Without that environment variable the test asserts the rendered output equals
-the committed fixture, so accidental format drift fails loudly.
-
-## Known gaps (tracked separately)
+## Known gaps
 
 A few categories do not yet render ideally because the *data* feeding the
-renderer is incomplete — these are data-layer issues, not rendering ones:
+renderer is incomplete — these are data-layer issues, not rendering ones, and
+they fall outside the rendering pass that produced this gallery:
 
 - The length operator on a non-string/table (`#5`) and assigning a `nil`/NaN
   table key (`t[nil] = 1`) do not currently raise, so they have no rendered
@@ -207,4 +203,6 @@ renderer is incomplete — these are data-layer issues, not rendering ones:
   without an `at <source>:<line>:` header and its frames show line `0`.
 
 These are noted so the gallery's "world-class" claim is honest about where the
-renderer is currently starved of input.
+renderer is currently starved of input. They are data-layer follow-ups under
+the error-quality umbrella ([#263](https://github.com/tv-labs/lua/issues/263)),
+not rendering bugs in this guide.
