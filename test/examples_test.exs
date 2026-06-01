@@ -25,8 +25,16 @@ defmodule ExamplesTest do
         |> Enum.reject(&String.contains?(&1, "Mix.install"))
         |> Enum.join("\n")
 
-      ExUnit.CaptureIO.capture_io(fn ->
-        Code.eval_string(code, [], __ENV__)
+      # Concatenating the cells turns each intermediate cell's trailing result
+      # variable (e.g. `answer`) into a non-final expression, so eval emits
+      # "variable has no effect" warnings to stderr. They are eval-time, not
+      # compile-time, so they never trip `--warnings-as-errors`; capture stdout
+      # and stderr to keep the suite output clean. A genuinely stale snippet
+      # still raises, failing the test.
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        ExUnit.CaptureIO.capture_io(fn ->
+          Code.eval_string(code, [], __ENV__)
+        end)
       end)
     end
   end
