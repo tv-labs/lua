@@ -824,16 +824,21 @@ defmodule Lua.VM.Stdlib.String do
 
       pad = String.duplicate(pad_char, deficit)
 
+      # Return an iolist rather than concatenating with `<>`: the padded
+      # result threads through the `[acc, str]` accumulator in
+      # `format_directive/3` and is materialised exactly once at the
+      # `format_string/3` base case via `IO.iodata_to_binary/1`, so each
+      # width-flagged specifier no longer allocates a fresh padded binary.
       if minus? do
         # Left justify
-        str <> pad
+        [str, pad]
       else
         # Right justify (default)
-        # Handle zero-padding with sign
+        # Handle zero-padding with sign — the sign must stay leftmost.
         if pad_char == "0" and String.starts_with?(str, "-") do
-          "-" <> pad <> binary_part(str, 1, byte_size(str) - 1)
+          ["-", pad, binary_part(str, 1, byte_size(str) - 1)]
         else
-          pad <> str
+          [pad, str]
         end
       end
     end
