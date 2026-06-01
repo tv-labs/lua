@@ -12,6 +12,17 @@ const CONV = `
 REPO: tv-labs/lua — an embedded Lua 5.3 VM written in Elixir. Working dir is a
 git worktree off 'main'. Use the gh CLI (authenticated as davydog187).
 
+WORKTREE ISOLATION (CRITICAL): you run in an ISOLATED git worktree under
+.claude/worktrees/, NOT the operator's primary checkout. Run EVERY git command
+from your current working directory. NEVER \`cd\` to the canonical checkout and
+NEVER pass \`git -C <canonical-path>\`. Before ANY state-changing git command
+(checkout/branch/reset/commit/push), run \`git rev-parse --show-toplevel\` and
+confirm it points at your worktree under .claude/worktrees/ — NOT the primary
+repo. If it points at the primary checkout, STOP. Mutating the primary checkout
+(detaching its HEAD, leaving uncommitted/broken files behind) corrupts the
+operator's working tree and must not happen. Reading files at the canonical path
+is fine; state-changing git there is forbidden.
+
 NON-NEGOTIABLE CONVENTIONS (from .agents/skills/ship-a-plan/SKILL.md and CLAUDE.md):
 - Commit subject and PR title scope = the affected SUBSYSTEM, never a plan id.
   e.g. 'feat(stdlib): ...', 'fix(vm): ...', 'feat(pattern): ...'. NEVER 'feat(A45): ...'.
