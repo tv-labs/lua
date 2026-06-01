@@ -257,7 +257,8 @@ Pre-implementation notes carried over from the audit:
   auto-populate `:line`/`:source`. Every type/argument/runtime/assertion
   error reachable from `Lua.eval!` carries a location, so the gallery
   cases render `at gallery.lua:<line>:` up top — except the
-  stack-overflow case (see below).
+  stack-overflow case and the numeric `for`-loop control coercion case
+  (see below).
 
 - **Out-of-scope data-layer gaps (logged, not fixed):**
   - `#5` (length operator on a number) and `#true` return `0` rather than
@@ -274,6 +275,11 @@ Pre-implementation notes carried over from the audit:
     without an `at <source>:<line>:` header and the stack frames show line
     `0`. The renderer is correct given the data; the missing line is a
     data-layer gap.
+  - Numeric `for`-loop control coercion errors (`for_loop_non_number`) also
+    render without an `at <source>:<line>:` header: the `raise` in
+    `coerce_for_value/2` receives no position from `current_position/0`, so
+    the location is `nil`. Identical on `main`, not a regression; the
+    gallery honestly pins the location-less output. Data-layer gap.
 
 - **`error()` with a non-string object** previously leaked an internal
   Elixir term (`runtime error: {:tref, 12}`). `Lua.VM.RuntimeError.stringify/1`
