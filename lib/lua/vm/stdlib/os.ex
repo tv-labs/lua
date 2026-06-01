@@ -167,11 +167,11 @@ defmodule Lua.VM.Stdlib.Os do
   end
 
   # os.remove(filename) — removes a file from the virtual filesystem. Returns
-  # true on success, or (nil, message) when the file cannot be removed.
+  # true on success, or (nil, message, errno) when the file cannot be removed.
   defp os_remove([filename | _], state) when is_binary(filename) do
     case State.vfs_rm(state, filename) do
       {:ok, state} -> {[true], state}
-      {:error, error, state} -> {[nil, vfs_error_message(filename, error)], state}
+      {:error, error, state} -> {vfs_failure(filename, error), state}
     end
   end
 
@@ -183,16 +183,23 @@ defmodule Lua.VM.Stdlib.Os do
     raise ArgumentError.value_expected("os.remove", 1)
   end
 
+  # os.rename(from, to) — renaming a file to itself is a successful no-op, as in
+  # POSIX rename(2); short-circuit so we don't read/write/remove the same path.
+  defp os_rename([path, path | _], state) when is_binary(path) do
+    {[true], state}
+  end
+
   # os.rename(from, to) — moves a file within the virtual filesystem by reading
   # the source, writing the destination, then removing the source. Returns true
-  # on success, or (nil, message) when any step fails.
+  # on success, or (nil, message, errno) when any step fails. Each step carries
+  # the path it operated on so the message names the path that actually failed.
   defp os_rename([from, to | _], state) when is_binary(from) and is_binary(to) do
-    with {:ok, contents, state} <- State.vfs_read(state, from),
-         {:ok, state} <- State.vfs_write(state, to, contents),
-         {:ok, state} <- State.vfs_rm(state, from) do
+    with {:ok, contents, state} <- with_path(from, State.vfs_read(state, from)),
+         {:ok, state} <- with_path(to, State.vfs_write(state, to, contents)),
+         {:ok, state} <- with_path(from, State.vfs_rm(state, from)) do
       {[true], state}
     else
-      {:error, error, state} -> {[nil, vfs_error_message(from, error)], state}
+      {:error, path, error, state} -> {vfs_failure(path, error), state}
     end
   end
 
@@ -208,9 +215,40 @@ defmodule Lua.VM.Stdlib.Os do
     raise ArgumentError.value_expected("os.rename", 1)
   end
 
+  # Tags a VFS result with the path the step operated on, so a `with` chain can
+  # attribute a failure to the path that actually failed rather than a fixed one.
+  defp with_path(_path, {:ok, _state} = ok), do: ok
+  defp with_path(_path, {:ok, _contents, _state} = ok), do: ok
+  defp with_path(path, {:error, error, state}), do: {:error, path, error, state}
+
+  # Builds Lua's failure return for os.remove/os.rename: (nil, message, errno),
+  # matching the reference contract of `nil, "<path>: <reason>", <errno>`.
+  defp vfs_failure(path, %VFS.Error{} = error) do
+    [nil, vfs_error_message(path, error), vfs_errno(error)]
+  end
+
   # Maps a %VFS.Error{} into Lua's "<path>: <reason>" error string convention.
   defp vfs_error_message(path, %VFS.Error{kind: :enoent}), do: "#{path}: No such file or directory"
   defp vfs_error_message(path, %VFS.Error{message: message}), do: "#{path}: #{message}"
+
+  # Maps a %VFS.Error{} kind onto its conventional POSIX errno integer, the
+  # third value Lua 5.3 returns from os.remove/os.rename on failure.
+  defp vfs_errno(%VFS.Error{kind: kind}) do
+    case kind do
+      :enoent -> 2
+      :eio -> 5
+      :eacces -> 13
+      :eexist -> 17
+      :enotdir -> 20
+      :eisdir -> 21
+      :einval -> 22
+      :erofs -> 30
+      :eloop -> 40
+      :enotsup -> 95
+      :exdev -> 18
+      _ -> 0
+    end
+  end
 
   # os.exit([code [, close]]) — the sandbox cannot terminate the host, so
   # raise to unwind the current evaluation.
