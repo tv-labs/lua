@@ -2,10 +2,10 @@
 id: B11
 title: batch insert for :setlist instead of per-key Table.put
 issue: 308
-pr: null
+pr: 321
 branch: perf/setlist-batch-insert
 base: main
-status: in-progress
+status: review
 direction: B
 ---
 
@@ -140,3 +140,46 @@ regressed at `n=1000`.
   vararg/multi-return call. Ensure the batch path handles `total == 0`
   (empty) and the multi-return slot offsets identically to the current
   reduce.
+
+## What changed
+
+Shipped as PR #321.
+
+- `lib/lua/vm/table.ex` — added `put_many/2` (plus accumulator-threaded
+  `insert_acc`/`delete_acc` mirrors of `insert/3`/`delete/2`). It folds an
+  ordered `{key, value}` list into the table making the same
+  `order`/`order_tail`/`dead` decisions as repeated `put/3`, but rebuilds
+  the `%Table{}` struct once. Deliberately not routed through
+  `replace_data/2` (which clears `dead` and rebuilds `order` from
+  `Map.keys/1` — not behavior-identical).
+- `lib/lua/vm/dispatcher.ex` — `set_list_into_table/6` now collects the
+  run's pairs via a new `set_list_pairs/7` register walk and applies them
+  with a single `put_many/2`.
+- `lib/lua/vm/executor.ex` — both `:set_list` arms (the `{:multi, _}` form
+  and the integer-count form, including its `count == 0` multi-return
+  branch) route through a shared `set_list_pairs/4` helper + `put_many/2`.
+  `total == 0` yields `[]` and leaves the table untouched.
+- `test/lua/vm/stdlib/table_test.exs` — added a `table constructor
+  backfill` describe block (5 tests) pinning constructor `pairs`/`ipairs`
+  order, `ipairs` stop-at-hole, dead-key revival ordering (`1,2,4,5,3`),
+  overwrite position stability, and the empty constructor.
+
+Suite: 2114 → 2119 passing (+5 new tests), 0 failing, 19 skipped.
+
+Numbers: benchee table-build n=100 ratio ~1.05× luerl (median; n=100 is
+very noisy at ±20–195% deviation), no regression at n=1000. A tight
+back-to-back A/B (200k iterations over a 100-element literal constructor)
+isolates a stable ~5% improvement on the `:set_list` path (baseline
+~43.7–44.4 µs/op → ~41.2–41.8 µs/op after).
+
+## Discoveries
+
+- The plan's cited 1.14× luerl baseline at n=100 did not reproduce on the
+  benchmarking machine; the table-build workload was already ~1.0–1.05×
+  luerl there. The benchee n=100 microbenchmark is too noisy to show the
+  change's effect (relative ordering flips run to run), so the win was
+  confirmed via a tight isolated A/B loop instead. No scope change.
+- `benchmarks/setup_luaport.sh` is required to build the optional
+  `luaport` (C Lua 5.4) dep under `MIX_ENV=benchmark`; without it the
+  whole benchmark env fails to compile (`lua.h` not found). Not changed by
+  this plan.
