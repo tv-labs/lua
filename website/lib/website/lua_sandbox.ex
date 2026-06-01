@@ -772,13 +772,13 @@ defmodule Website.LuaSandbox do
           "Flooding print() can't exhaust memory either — captured output is capped and the rest is dropped.",
         source: """
         -- Print far more than the output buffer keeps (cap is 5,000 lines).
-        for i = 1, 20000 do
+        for i = 1, 6000 do
           print("line " .. i)
         end
         return "done"
         """,
         chunk: ~LUA"""
-        for i = 1, 20000 do
+        for i = 1, 6000 do
           print("line " .. i)
         end
         return "done"
