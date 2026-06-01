@@ -21,7 +21,7 @@ defmodule Counter do
   defstruct count: 0
 end
 
-{counter_ref, lua} = Lua.encode!(Lua.new(), {:userdata, %Counter{count: 0}})
+{counter_ref, lua} = Lua.encode!(Lua.new(), {:userdata, struct(Counter, count: 0)})
 lua = Lua.set!(lua, [:counter], counter_ref)
 :ok
 ```
