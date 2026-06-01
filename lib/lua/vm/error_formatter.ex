@@ -281,7 +281,7 @@ defmodule Lua.VM.ErrorFormatter do
   end
 
   defp build_suggestion(:type_error, :length_not_integer, _value_type) do
-    "The length operator (#) works on strings and tables. Use it on a string or table value."
+    "The length operation returned a non-integer value. If you defined a __len metamethod, make sure it returns an integer."
   end
 
   defp build_suggestion(:type_error, :bitwise_on_non_integer, _value_type) do

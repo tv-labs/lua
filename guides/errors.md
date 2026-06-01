@@ -7,7 +7,9 @@ category-specific suggestion. Color is applied only when the output is going
 to a real terminal (`IO.ANSI.enabled?/0`); piping to a file or capturing the
 message in a log never embeds raw escape codes.
 
-The layout is always:
+The rendered message begins with the location and then the body. Because
+`Lua.RuntimeException` prefixes `Lua runtime error: `, the first line reads
+`Lua runtime error: at <source>:<line>:`; the remaining sections follow:
 
 ```
 at <source>:<line>:

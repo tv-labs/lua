@@ -53,8 +53,8 @@ fixture tests, and ship a docs gallery.
 
 ## Success criteria
 
-- [ ] A fixture file exists showing the rendered output for each error
-      category:
+- [ ] A gallery test pins the rendered output (as an inline `expected`
+      string) for each error category:
       - [ ] arithmetic on non-number
       - [ ] indexing nil / non-table
       - [ ] calling nil / non-function
@@ -66,9 +66,11 @@ fixture tests, and ship a docs gallery.
       - [ ] `assert(false, msg)` and `assert(false)`
       - [ ] `error("msg")` and `error({tbl})`
       - [ ] runtime stack overflow / infinite recursion
-- [ ] Each message prominently shows `at <source>:<line>:` on its own
-      line, before the message body (currently it renders *after* the
-      header line — fix the ordering in `format/3`).
+- [ ] Each message leads with `at <source>:<line>:` before the message
+      body (currently it renders *after* the header line — fix the
+      ordering in `format/3`). Note the public exception still prefixes
+      `Lua runtime error: `, so the first rendered line is
+      `Lua runtime error: at <source>:<line>:`.
 - [ ] The redundant double label is gone: today the public exception
       prefixes `Lua runtime error: ` and the formatter header also says
       `Runtime Type Error`. Pick one consistent presentation.
@@ -128,30 +130,24 @@ This single example confirms four of the things to fix:
    `:concatenate_type_error`. So arithmetic gets *no* suggestion (atom
    mismatch), and compare / length get none either.
 
-### Audit / fixture step
+### Audit / gallery step
 
-Write a fixture script (in the test) that triggers each error category
-listed in Success criteria via `Lua.eval!`, captures the rendered
-`Exception.message/1` output, and compares it to a checked-in
-`test/fixtures/error_gallery/<category>.txt`. Generate fixtures with
-ANSI disabled (`IO.ANSI.enabled? == false` path) so the committed
-files are plain text and stable across terminals. The test asserts the
-rendered output equals the fixture; regenerating is an explicit opt-in
-when output intentionally changes.
+The gallery test triggers each error category listed in Success
+criteria via `Lua.eval!`, captures the rendered `Exception.message/1`
+output, and compares it to an inline `expected` string in the test
+itself. Output is captured with ANSI disabled (`IO.ANSI.enabled? ==
+false` path) so the expectations are plain text and stable across
+terminals. The test asserts the rendered output equals the inline
+expectation; updating it is an explicit edit when output intentionally
+changes.
 
-Suggested gallery file format:
+Each table-driven case carries its source snippet and expected render
+inline, e.g.:
 
 ```
-=== category: arithmetic on non-number ===
-=== source ===
-local x = "5"
-local y = nil
-print(x + y)
-=== expected output ===
-** (Lua.RuntimeException) ...
-  at gallery.lua:3:
-  attempt to perform arithmetic on a nil value
-  ...
+arithmetic on non-number ->
+  source: print(x + y)  # x = "5", y = nil
+  expected: "at gallery.lua:3:\n\n  attempt to perform arithmetic ..."
 ```
 
 ### Files
@@ -172,9 +168,9 @@ print(x + y)
   generic suggestion.
 - `lib/lua/vm/argument_error.ex` — `message/1` routes stdlib bad-arg
   errors through `ErrorFormatter.format(:type_error, ...)`; make sure
-  the stdlib bad-arg fixture stays correct after formatter changes.
-- `test/lua/error_gallery_test.exs` (new) — fixture comparison tests.
-- `test/fixtures/error_gallery/*.txt` (new) — expected outputs.
+  the stdlib bad-arg case stays correct after formatter changes.
+- `test/lua/error_gallery_test.exs` (new) — gallery tests with inline
+  `expected` strings for every reachable category.
 - `guides/errors.md` (new) — before/after gallery.
 
 Note: the plan's earlier draft pointed at `lib/lua/error_formatter.ex`
@@ -209,9 +205,9 @@ elixir -e 'IO.puts(Lua.eval!(Lua.new(), ~S{print(nil + 1)}))' > /tmp/out 2>&1 ||
   minimum bar is "every error has line/source up top, every error has
   a category-appropriate body, no filler suggestions, no ANSI leak off
   a TTY."
-- Fixture-based tests are brittle if the format keeps changing. Lock
-  the format here and treat changes as opt-in (regenerate fixtures
-  deliberately, never auto-pass).
+- Pinned-output tests are brittle if the format keeps changing. Lock
+  the format here and treat changes as opt-in (update the inline
+  `expected` strings deliberately, never auto-pass).
 - ANSI gating must not change the `to_map/3` wire-safe path, which is
   already documented to contain no escapes — only `format/3` should be
   affected.
@@ -235,7 +231,9 @@ Pre-implementation notes carried over from the audit:
   inside a Lua execution; if not, A19 has not landed and this plan
   should wait (it remains blocked in practice even though the data is
   designed to be present). Audit what *is* present and note any
-  category still missing line info here.
+  category still missing line info here. (Resolved below: A19 data is
+  present, and the gallery pins output via inline `expected` strings
+  rather than checked-in fixture files.)
 - **Dead suggestion clause.** `build_suggestion(:type_error,
   :arithmetic_type_error, _)` is never reached — the executor emits
   `:arithmetic_on_non_number`. Confirmed by grep of `lib/`.
@@ -247,8 +245,8 @@ Pre-implementation notes carried over from the audit:
 - **Table-index-nil/NaN raise sites:** `lib/lua/vm/table.ex` documents
   the contract (§3.4.11) but the actual raise happens in the executor
   set path. Confirm the rendered message and whether it carries an
-  `error_kind` before writing that fixture; if it has no kind, the
-  fixture pins the body only (no suggestion) — do not invent a kind.
+  `error_kind` before writing that case; if it has no kind, the
+  case pins the body only (no suggestion) — do not invent a kind.
 
 ### Confirmed during implementation
 
@@ -256,7 +254,7 @@ Pre-implementation notes carried over from the audit:
   exists, all nine `error_kind`s are emitted, and the four VM exceptions
   auto-populate `:line`/`:source`. Every type/argument/runtime/assertion
   error reachable from `Lua.eval!` carries a location, so the gallery
-  fixtures render `at gallery.lua:<line>:` up top — except the
+  cases render `at gallery.lua:<line>:` up top — except the
   stack-overflow case (see below).
 
 - **Out-of-scope data-layer gaps (logged, not fixed):**
@@ -269,7 +267,7 @@ Pre-implementation notes carried over from the audit:
     instead of raising "table index is nil/NaN". No rendered message to
     pin. Data-layer bug; out of scope. These two categories are therefore
     documented in `guides/errors.md` under "Known gaps" rather than
-    fixtured.
+    pinned in the gallery.
   - Stack-overflow runtime errors carry no originating line, so they render
     without an `at <source>:<line>:` header and the stack frames show line
     `0`. The renderer is correct given the data; the missing line is a
@@ -313,9 +311,10 @@ Files touched:
   assertion suggestion.
 - `lib/lua/vm/runtime_error.ex` — non-string/number `error()` objects render
   PUC-Lua's `(error object is a TYPE value)` instead of an internal term.
-- `test/lua/error_gallery_test.exs` (new) + `test/fixtures/error_gallery/*.txt`
-  (11 new) — fixture-locked rendering for every reachable category, with a
-  `GALLERY_REGEN=1` opt-in for intentional format changes.
+- `test/lua/error_gallery_test.exs` (new) — pins the rendered output for
+  every reachable category with an inline `expected` string per case (no
+  separate fixture files); update those strings deliberately when the format
+  changes on purpose.
 - `guides/errors.md` (new) — before/after gallery and a "Known gaps" section
   for the data-layer holes left out of scope.
 - `test/lua/vm/error_to_map_test.exs`, `test/lua/error_messages_test.exs` —

@@ -95,6 +95,22 @@ defmodule Lua.VM.ErrorToMapTest do
       assert map.suggestion =~ "number"
       refute String.contains?(map.suggestion, @ansi_escape)
     end
+
+    test ":length_not_integer suggestion addresses the non-integer result" do
+      error =
+        VMTypeError.exception(
+          value: "object length is not an integer",
+          source: "t.lua",
+          line: 1,
+          error_kind: :length_not_integer,
+          value_type: :number
+        )
+
+      map = VMTypeError.to_map(error)
+
+      assert map.suggestion =~ "non-integer"
+      assert map.suggestion =~ "__len"
+    end
   end
 
   describe "Lua.VM.AssertionError.to_map/2" do
