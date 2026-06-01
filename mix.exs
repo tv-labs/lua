@@ -31,7 +31,19 @@ defmodule Lua.MixProject do
         main: "Lua",
         source_url: @url,
         source_ref: "v#{@version}",
-        extras: ["CHANGELOG.md", "guides/working-with-lua.livemd"]
+        extras: [
+          "CHANGELOG.md",
+          "guides/working-with-lua.livemd",
+          "guides/examples/quickstart.livemd",
+          "guides/examples/userdata.livemd",
+          "guides/examples/custom_stdlib.livemd",
+          "guides/examples/sandboxing.livemd",
+          "guides/examples/chunks.livemd",
+          "guides/examples/error_handling.livemd"
+        ],
+        groups_for_extras: [
+          Examples: ~r{guides/examples/}
+        ]
       ]
     ]
   end

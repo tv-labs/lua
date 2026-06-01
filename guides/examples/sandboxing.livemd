@@ -1,0 +1,68 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# Sandboxing
+
+```elixir
+Mix.install([
+  {:lua, "~> 1.0.0-rc.0"}
+])
+```
+
+## The default sandbox
+
+`Lua.new/0` sandboxes a curated list of functions (`os.execute`, `os.exit`,
+`os.getenv`, `require`, `loadfile`, ...). Calling a sandboxed function
+raises, which `pcall` turns into a `false, message` pair so the script can
+recover in-band.
+
+```elixir
+{[ok?, message], _lua} =
+  Lua.eval!(Lua.new(), ~S[return pcall(function() return os.getenv("HOME") end)])
+
+{ok?, message}
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{false, "Lua runtime error: os.getenv(_) is sandboxed"}
+```
+
+## Allowing specific operations
+
+`Lua.new(exclude: [...])` lifts the sandbox for specific paths while keeping
+everything else locked down. Here we allow `os.getenv` only.
+
+```elixir
+allowed = Lua.new(exclude: [[:os, :getenv]])
+
+{[kind], _lua} = Lua.eval!(allowed, ~S[return type(os.getenv("HOME"))])
+kind
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+"string"
+```
+
+`os.execute` is still blocked on the `allowed` VM — we only lifted `getenv`.
+
+```elixir
+{[exec_ok?, _message], _lua} =
+  Lua.eval!(allowed, ~S[return pcall(function() return os.execute("echo hi") end)])
+
+exec_ok?
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+false
+```
+
+## Replacing or disabling the sandbox
+
+`Lua.new(sandboxed: [...])` replaces the whole sandbox list, and
+`Lua.new(sandboxed: [])` disables sandboxing entirely. Reach for these only
+when you fully trust the script you are running.

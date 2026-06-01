@@ -154,13 +154,18 @@ for f in examples/*.exs; do mix run "$f" || echo "FAIL: $f"; done
 
 ## What changed
 
-- Added `examples/01_quickstart.exs` through `06_error_handling.exs`,
-  six self-contained runnable scripts covering eval, userdata,
-  custom Elixir functions, sandboxing, chunk reuse, and error
-  handling. Each prints its expected output inline.
-- Added `examples/README.md` indexing the examples with one-line
-  summaries.
-- Added `test/examples_test.exs`, a smoke test that runs each example
-  via `Code.eval_file/1` with IO captured and asserts it completes.
-- Tests: `mix test` → 2098 passed, 19 skipped, 0 failing.
+- Added six Livebook examples under `guides/examples/`
+  (`quickstart`, `userdata`, `custom_stdlib`, `sandboxing`, `chunks`,
+  `error_handling`) covering eval, userdata, custom Elixir functions,
+  sandboxing, chunk reuse, and error handling. Each follows Livebook
+  conventions (`Mix.install`, `##` section headers, persisted output
+  blocks) so the examples render in the HexDocs sidebar and run in
+  Livebook.
+- Wired the notebooks into `mix.exs` `docs` via `extras` and a
+  `groups_for_extras` "Examples" group alongside the existing
+  `working-with-lua.livemd` guide.
+- Review feedback (#300): the initial `examples/*.exs` scripts,
+  `examples/README.md`, and `test/examples_test.exs` smoke test were
+  replaced by the Livebook notebooks per reviewer request to
+  integrate the examples directly into the documentation.
 - PR: #300.

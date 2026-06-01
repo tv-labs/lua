@@ -1,0 +1,78 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# Compiling chunks
+
+```elixir
+Mix.install([
+  {:lua, "~> 1.0.0-rc.0"}
+])
+```
+
+## Compile once, run many times
+
+`Lua.load_chunk!/2` parses and compiles a string into a reusable
+`%Lua.Chunk{}`. Compilation happens once; passing the chunk to
+`Lua.eval!/2` skips parsing and compilation on every run — useful for a
+template or rule evaluated per request.
+
+The VM we compile against doesn't have to be the one we run against later.
+
+```elixir
+{chunk, _lua} = Lua.load_chunk!(Lua.new(), "return greeting .. name .. '!'")
+chunk.__struct__
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Lua.Chunk
+```
+
+Each run uses a fresh state with different globals, so the same compiled
+chunk produces different results.
+
+```elixir
+for name <- ["Ada", "Grace", "Edsger"] do
+  state =
+    Lua.new()
+    |> Lua.set!([:greeting], "Hello, ")
+    |> Lua.set!([:name], name)
+
+  {[message], _lua} = Lua.eval!(state, chunk)
+  message
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+["Hello, Ada!", "Hello, Grace!", "Hello, Edsger!"]
+```
+
+## Surfacing syntax errors early
+
+`Lua.parse_chunk/1` pre-parses a script so you can surface syntax errors
+before ever running anything. It returns `{:ok, chunk}` on success and
+`{:error, messages}` with human-readable diagnostics on failure.
+
+```elixir
+{:error, [message]} = Lua.parse_chunk("return 1 +")
+IO.puts(message)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+Parse Error
+
+  at line 1, column 11:
+
+  Expected expression
+
+
+   1 │ return 1 +
+                 ^
+
+Suggestion:
+  Reached end of file unexpectedly. Check for missing 'end' keywords or closing delimiters.
+```
