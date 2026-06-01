@@ -7,6 +7,13 @@ defmodule Lua.VM.UpvalueTest do
   alias Lua.VM.State
   alias Lua.VM.Stdlib
 
+  defp run_lua(code) do
+    assert {:ok, ast} = Parser.parse(code)
+    assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+    state = Stdlib.install(State.new())
+    VM.execute(proto, state)
+  end
+
   # Regression test for plan A15.
   #
   # Bug: when a local function L was followed by a sibling/descendant closure
@@ -167,6 +174,195 @@ defmodule Lua.VM.UpvalueTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
       assert {:ok, [42, 42], _state} = VM.execute(proto, state)
+    end
+  end
+
+  # Lua 5.3 §3.4.10: when a block ends, any open-upvalue cell over a register
+  # the block's locals occupied must be detached so a later sibling block
+  # reusing the same register slot binds a fresh cell. Without the block-exit
+  # close, the second block's captured local resolves through the first
+  # block's stale cell — e.g. an integer where a table is expected, crashing
+  # with `attempt to index a number value`.
+  describe "open upvalues close at block exit so sibling blocks do not share cells" do
+    test "two sibling do blocks reusing the same register for a captured local" do
+      code = """
+      do
+        local res = 1
+        local function fact(n)
+          if n == 0 then return res else return n * fact(n - 1) end
+        end
+        assert(fact(5) == 120)
+      end
+
+      do
+        local a = {x = 100}
+        local function read_a() return a.x end
+        assert(read_a() == 100, "expected 100, got stale-cell value")
+      end
+
+      return "ok"
+      """
+
+      assert {:ok, ["ok"], _state} = run_lua(code)
+    end
+
+    test "two sibling if blocks reusing the same register for a captured local" do
+      code = """
+      if true then
+        local res = 1
+        local function fact(n)
+          if n == 0 then return res else return n * fact(n - 1) end
+        end
+        assert(fact(5) == 120)
+      end
+
+      if true then
+        local a = {x = 100}
+        local function read_a() return a.x end
+        assert(read_a() == 100, "expected 100, got stale-cell value")
+      end
+
+      return "ok"
+      """
+
+      assert {:ok, ["ok"], _state} = run_lua(code)
+    end
+
+    test "then and else branches reusing the same register for a captured local" do
+      code = """
+      local function pick(flag)
+        if flag then
+          local a = {x = 11}
+          local function get() return a.x end
+          return get()
+        else
+          local b = {y = 22}
+          local function get() return b.y end
+          return get()
+        end
+      end
+
+      return pick(true), pick(false)
+      """
+
+      assert {:ok, [11, 22], _state} = run_lua(code)
+    end
+
+    test "two sibling while blocks reusing the same register for a captured local" do
+      code = """
+      local n = 0
+      while n < 1 do
+        n = n + 1
+        local res = 1
+        local function f() return res end
+        assert(f() == 1)
+      end
+
+      while n < 2 do
+        n = n + 1
+        local a = {x = 5}
+        local function g() return a.x end
+        assert(g() == 5, "stale cell leaked from the previous while block")
+      end
+
+      return "ok"
+      """
+
+      assert {:ok, ["ok"], _state} = run_lua(code)
+    end
+
+    test "two sibling repeat blocks reusing the same register for a captured local" do
+      code = """
+      local n = 0
+      repeat
+        n = n + 1
+        local res = 1
+        local function f() return res end
+        assert(f() == 1)
+      until n >= 1
+
+      repeat
+        n = n + 1
+        local a = {x = 7}
+        local function g() return a.x end
+        assert(g() == 7, "stale cell leaked from the previous repeat block")
+      until n >= 2
+
+      return "ok"
+      """
+
+      assert {:ok, ["ok"], _state} = run_lua(code)
+    end
+
+    test "two sibling numeric for blocks reusing the same register for a captured local" do
+      code = """
+      for _ = 1, 1 do
+        local res = 1
+        local function f() return res end
+        assert(f() == 1)
+      end
+
+      for _ = 1, 1 do
+        local a = {x = 9}
+        local function g() return a.x end
+        assert(g() == 9, "stale cell leaked from the previous for block")
+      end
+
+      return "ok"
+      """
+
+      assert {:ok, ["ok"], _state} = run_lua(code)
+    end
+
+    test "two sibling generic for blocks reusing the same register for a captured local" do
+      code = """
+      for _ in ipairs({1}) do
+        local res = 1
+        local function f() return res end
+        assert(f() == 1)
+      end
+
+      for _ in ipairs({1}) do
+        local a = {x = 13}
+        local function g() return a.x end
+        assert(g() == 13, "stale cell leaked from the previous for-in block")
+      end
+
+      return "ok"
+      """
+
+      assert {:ok, ["ok"], _state} = run_lua(code)
+    end
+
+    test "numeric for: each iteration's closure captures that iteration's value" do
+      # Cells must persist within an iteration and close on the iteration
+      # boundary — a closure created in iteration N must observe iteration N's
+      # value, not leak the next iteration's value.
+      code = """
+      local fns = {}
+      for i = 1, 3 do
+        local v = i * 10
+        fns[i] = function() return v end
+      end
+      return fns[1](), fns[2](), fns[3]()
+      """
+
+      assert {:ok, [10, 20, 30], _state} = run_lua(code)
+    end
+
+    test "loop closure created mid-iteration sees the live value later in the same iteration" do
+      code = """
+      local total = 0
+      for i = 1, 3 do
+        local v = i
+        local function add() total = total + v end
+        v = v * 100
+        add()
+      end
+      return total
+      """
+
+      assert {:ok, [600], _state} = run_lua(code)
     end
   end
 end

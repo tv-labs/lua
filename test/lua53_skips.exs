@@ -30,7 +30,19 @@
 
 %{
   "all.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "upstream harness file, pending initial triage", issue: nil}
+    %{
+      lines: 137..208,
+      category: :unimplemented,
+      reason:
+        "harness drives every other suite file via dofile/loadfile/string.dump/coroutine.wrap, none supported in the sandbox",
+      issue: 259
+    },
+    %{
+      lines: 211..263,
+      category: :unimplemented,
+      reason: "post-run summary uses io.open and timing files unavailable in the sandbox",
+      issue: 259
+    }
   ],
   "big.lua" => [
     %{
@@ -46,13 +58,6 @@
       category: :stdlib,
       reason: "print does not call user-overridden _ENV.tostring at each invocation",
       issue: nil
-    },
-    %{
-      lines: 65..69,
-      category: :executor,
-      reason:
-        "stale upvalue cell across do blocks: register reused for a new local still resolves through the previous block's open_upvalues entry",
-      issue: 276
     },
     %{
       lines: 135..137,
@@ -85,35 +90,17 @@
   ],
   "constructs.lua" => [
     %{
-      lines: 225..231,
-      category: :stdlib,
-      reason: "debug.getinfo(level, 'n') returns nil for name/namewhat",
-      issue: 279
-    },
-    %{
-      lines: 237..237,
-      category: :stdlib,
-      reason: "os.time missing; assignment to _ENV.GLOB1 fails",
-      issue: 280
-    },
-    %{
-      lines: 248..248,
-      category: :stdlib,
-      reason: "concatenates _ENV.GLOB1 (nil because os.time is missing)",
-      issue: 280
-    },
-    %{
       lines: 284..299,
       category: :executor,
       reason:
-        "short-circuit harness fails at level=4 deep composition; createcases(4) also exceeds the 60s test timeout (load() itself works)",
+        "short-circuit harness builds combinations up to level=4 (line 281); createcases(4) plus the load()/exec loop over every case exceeds the test timeout. The harness logic itself is verified green up to level 4 by test/lua/vm/short_circuit_test.exs",
       issue: 281
     },
     %{
       lines: 302..311,
       category: :stdlib,
       reason:
-        "checkload helper expects lowercase 'expected' and 'too long' in load() error messages; suite-runner load() uses title-cased parser errors and the compiler has no control-structure-too-long check",
+        "checkload asserts the load() error message contains 'expected'/'too long'; the suite-runner load() returns 'parse error: ...' for syntax errors and the compiler has no control-structure-too-long check",
       issue: nil
     }
   ],
@@ -141,7 +128,13 @@
     }
   ],
   "gc.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "garbage collection / weak tables not implemented", issue: nil}
+    %{
+      lines: 167..622,
+      category: :unimplemented,
+      reason:
+        "collectgarbage is a no-op stub: step/stop/restart pacing, count shrinkage, weak tables and __gc finalizers not implemented",
+      issue: 260
+    }
   ],
   "goto.lua" => [
     %{
@@ -189,14 +182,7 @@
       issue: nil
     }
   ],
-  "locals.lua" => [
-    %{
-      lines: :all,
-      category: :unimplemented,
-      reason: "debug.getupvalue not implemented; _ENV introspection via debug library missing",
-      issue: nil
-    }
-  ],
+  "locals.lua" => [],
   "math.lua" => [
     %{
       lines: :all,
@@ -207,14 +193,57 @@
     }
   ],
   "pm.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "pending initial triage (pattern engine work in A9)", issue: nil}
+    %{
+      lines: 236..237,
+      category: :unimplemented,
+      reason:
+        "pattern backreferences %0 and %1 inside a capture body should raise 'invalid capture index' (pattern-engine gap, not gsub replacement validation)",
+      issue: 257
+    },
+    %{
+      lines: 250..250,
+      category: :unimplemented,
+      reason: "'pattern too complex' recursion-depth limit not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 277..277,
+      category: :unimplemented,
+      reason: "gsub table replacement keyed on a multi-char capture not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 280..280,
+      category: :unimplemented,
+      reason: "gsub position-capture index into a replacement table not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 283..283,
+      category: :unimplemented,
+      reason: "gsub replacement via a table __index metamethod not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 312..339,
+      category: :unimplemented,
+      reason: "%f frontier pattern not yet implemented",
+      issue: 257
+    },
+    %{
+      lines: 341..358,
+      category: :unimplemented,
+      reason: "malformed-pattern error reporting (unfinished capture, %b, %f, trailing %) not yet implemented",
+      issue: 257
+    }
   ],
   "sort.lua" => [
     %{
       lines: :all,
       category: :stdlib,
-      reason: "times out (>30s) on the comparison-heavy section; os.clock not implemented",
-      issue: nil
+      reason:
+        "times out: the 2000-element unpack loop and O(n^2) table.sort over the perm/timesort sections run for minutes; the os.clock timing harness is also unimplemented",
+      issue: 262
     }
   ],
   "strings.lua" => [

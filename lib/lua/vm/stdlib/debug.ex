@@ -16,8 +16,8 @@ defmodule Lua.VM.Stdlib.Debug do
   - `debug.setlocal(level, local, value)` - Stub returning nil
   - `debug.sethook([hook, mask [, count]])` - Stub no-op
   - `debug.gethook([thread])` - Stub returning nil
-  - `debug.getupvalue(f, up)` - Stub returning nil
-  - `debug.setupvalue(f, up, value)` - Stub returning nil
+  - `debug.getupvalue(f, up)` - Returns the name and value of an upvalue
+  - `debug.setupvalue(f, up, value)` - Sets an upvalue, returning its name
   - `debug.upvalueid(f, n)` - Stub returning nil
   """
 
@@ -109,13 +109,16 @@ defmodule Lua.VM.Stdlib.Debug do
   # currently-running Lua chunk from the native callback's perspective).
   # Higher levels walk the saved call frames.
   defp stack_info_for_level(level, state) do
+    {name, namewhat} = name_info_for_level(level, state)
+
     case stack_position_for_level(level, state) do
       {line, source} ->
         %{
           "source" => source || "=?",
           "currentline" => line || -1,
           "what" => "Lua",
-          "name" => nil
+          "name" => name,
+          "namewhat" => namewhat
         }
 
       nil ->
@@ -123,10 +126,26 @@ defmodule Lua.VM.Stdlib.Debug do
           "source" => "=?",
           "currentline" => -1,
           "what" => "main",
-          "name" => nil
+          "name" => name,
+          "namewhat" => namewhat
         }
     end
   end
+
+  # The `"n"` fields describe how the function at `level` was reached, recovered
+  # from the caller's call instruction (Lua 5.3 §6.10, PUC-Lua `getfuncname`).
+  # When a native callback is executing, the running Lua function's own frame is
+  # the head of `call_stack`, so level `L` maps to `call_stack[L - 1]`. A frame
+  # without a recovered name (e.g. a call through a temporary, or a function
+  # reached by a tail call) reports `name == nil` / `namewhat == ""`.
+  defp name_info_for_level(level, state) when level >= 1 do
+    case Enum.at(state.call_stack, level - 1) do
+      nil -> {nil, ""}
+      frame -> {Map.get(frame, :name), Map.get(frame, :namewhat, "")}
+    end
+  end
+
+  defp name_info_for_level(_level, _state), do: {nil, ""}
 
   defp stack_position_for_level(1, _state) do
     case Executor.current_position() do
@@ -211,12 +230,54 @@ defmodule Lua.VM.Stdlib.Debug do
   defp debug_setmetatable([obj | _], state), do: {[obj], state}
   defp debug_setmetatable([], state), do: {[nil], state}
 
+  # debug.getupvalue(f, up) — returns the name and value of the up-th upvalue of
+  # function `f`, or nil when `up` is out of range or `f` is not a Lua closure.
+  defp debug_getupvalue([closure, n | _], state) when is_number(n) do
+    case upvalue_slot(closure, n) do
+      {:ok, name, cell} -> {[name, Map.get(state.upvalue_cells, cell)], state}
+      :error -> {[nil], state}
+    end
+  end
+
+  defp debug_getupvalue(_args, state), do: {[nil], state}
+
+  # debug.setupvalue(f, up, value) — assigns `value` to the up-th upvalue of
+  # function `f`, returning its name (or nil when out of range / not a closure).
+  defp debug_setupvalue([closure, n | rest], state) when is_number(n) do
+    value = List.first(rest)
+
+    case upvalue_slot(closure, n) do
+      {:ok, name, cell} ->
+        {[name], %{state | upvalue_cells: Map.put(state.upvalue_cells, cell, value)}}
+
+      :error ->
+        {[nil], state}
+    end
+  end
+
+  defp debug_setupvalue(_args, state), do: {[nil], state}
+
+  # Resolve the up-th (1-based) upvalue of a closure to {name, cell_ref}. Every
+  # element of a closure's upvalue tuple is a cell ref keyed in
+  # `state.upvalue_cells`; the name comes from the prototype's `upvalue_names`,
+  # which is built alongside the upvalue tuple and is the same length by
+  # construction.
+  defp upvalue_slot({tag, proto, upvalues}, n) when tag in [:lua_closure, :compiled_closure] do
+    index = trunc(n) - 1
+
+    if index >= 0 and index < tuple_size(upvalues) do
+      {:ok, Enum.at(proto.upvalue_names, index), elem(upvalues, index)}
+    else
+      :error
+    end
+  end
+
+  defp upvalue_slot(_closure, _n), do: :error
+
   # Stubs
   defp debug_getlocal(_args, state), do: {[nil], state}
   defp debug_setlocal(_args, state), do: {[nil], state}
   defp debug_sethook(_args, state), do: {[], state}
   defp debug_gethook(_args, state), do: {[nil, "", 0], state}
-  defp debug_getupvalue(_args, state), do: {[nil], state}
-  defp debug_setupvalue(_args, state), do: {[nil], state}
   defp debug_upvalueid(_args, state), do: {[nil], state}
 end

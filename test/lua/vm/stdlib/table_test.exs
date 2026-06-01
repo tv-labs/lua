@@ -141,6 +141,37 @@ defmodule Lua.VM.Stdlib.TableTest do
       assert {:ok, [20, 30, 40], _state} = VM.execute(proto, state)
     end
 
+    test "table.unpack rejects ranges with more than INT_MAX results" do
+      # Lua 5.3 sort.lua line 48: `checkerror("too many results", unpack,
+      # {}, 0, maxi)`. A huge `j` must raise up front rather than try to
+      # materialise the slice (which would hang the VM).
+      for code <- [
+            "return table.unpack({}, 0, math.maxinteger)",
+            "return table.unpack({}, 1, math.maxinteger)",
+            "return table.unpack({}, math.mininteger, math.maxinteger)",
+            "return table.unpack({}, 0, (1 << 31) - 1)",
+            # Element count exactly INT_MAX: `j - i == INT_MAX - 1`. PUC
+            # rejects this via the `lua_checkstack` arm, not the count
+            # overflow arm.
+            "return table.unpack({}, 1, (1 << 31) - 1)"
+          ] do
+        assert_raise Lua.RuntimeException, ~r/too many results/, fn ->
+          Lua.eval!(Lua.new(), code)
+        end
+      end
+    end
+
+    test "table.unpack with a normal range is unaffected by the size guard" do
+      assert {[20, 30, 40], _} =
+               Lua.eval!(Lua.new(), "return table.unpack({10, 20, 30, 40, 50}, 2, 4)")
+    end
+
+    test "table.unpack with a reversed huge range is an empty result, not an error" do
+      # `i > j` short-circuits to an empty range before the size guard.
+      assert {[], _} =
+               Lua.eval!(Lua.new(), "return table.unpack({}, math.maxinteger, 0)")
+    end
+
     test "table.sort sorts in place" do
       code = """
       local t = {3, 1, 4, 1, 5, 9, 2, 6}

@@ -484,7 +484,7 @@ defmodule Lua.VM.Executor do
   @doc false
   @spec dispatcher_call_info(term(), term(), non_neg_integer()) :: map()
   def dispatcher_call_info(proto, name_hint, line) do
-    %{source: proto.source, line: line, name: hint_name(name_hint)}
+    %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
   end
 
   # ── Break ──────────────────────────────────────────────────────────────────
@@ -650,12 +650,14 @@ defmodule Lua.VM.Executor do
   end
 
   # ── load_env ───────────────────────────────────────────────────────────────
-  # Loads the runtime `_G` table reference into `dest`. Plan A16 emits this
+  # Loads the chunk's `_ENV` table reference into `dest`. Plan A16 emits this
   # at the start of every chunk so `_ENV` (a chunk-level local at register 0)
-  # is initialised before user code runs.
+  # is initialised before user code runs. A chunk loaded with a custom
+  # environment carries it in upvalue slot 0 (see `Stdlib.compile_loaded_chunk`);
+  # otherwise `_ENV` defaults to the global table `_G`.
 
   defp do_execute([{:load_env, dest} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    regs = put_elem(regs, dest, State.g_ref(state))
+    regs = put_elem(regs, dest, load_env_value(upvalues, state))
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
@@ -691,6 +693,20 @@ defmodule Lua.VM.Executor do
       end
 
     regs = put_elem(regs, dest, value)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+  end
+
+  # ── close_upvalues ─────────────────────────────────────────────────────────
+  #
+  # Emitted at the end of a block scope (e.g. `do…end`) whose locals could
+  # have been captured by a closure created inside the block. Per Lua 5.3
+  # §3.4.10, those upvalue cells must be detached from the register as the
+  # locals go out of scope so the next statement reusing those register
+  # slots does not read or overwrite the stale cell. Loop bodies do this on
+  # each iteration boundary in the continuation handlers above; this is the
+  # same operation for non-loop block exits.
+  defp do_execute([{:close_upvalues, threshold} | rest], regs, upvalues, proto, state, cont, frames, line) do
+    state = close_open_upvalues_at_or_above(state, threshold)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
@@ -949,7 +965,11 @@ defmodule Lua.VM.Executor do
         # `:call_one` clause handles dispatcher → dispatcher chains
         # without going through this branch.
         args = collect_args(regs, base + 1, total_args)
+        call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
+        State.check_call_depth!(state)
+        state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
         {results, state} = Dispatcher.execute(callee_proto, args, callee_upvalues, state)
+        state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
         continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, base, result_count)
 
       {:lua_closure, callee_proto, callee_upvalues} ->
@@ -982,9 +1002,16 @@ defmodule Lua.VM.Executor do
           open_upvalues: state.open_upvalues
         }
 
-        call_info = %{source: proto.source, line: line, name: hint_name(name_hint)}
+        call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
 
-        state = %{state | call_stack: [call_info | state.call_stack], open_upvalues: %{}}
+        State.check_call_depth!(state)
+
+        state = %{
+          state
+          | call_stack: [call_info | state.call_stack],
+            call_depth: state.call_depth + 1,
+            open_upvalues: %{}
+        }
 
         # Tail call — Erlang stack does not grow
         do_execute(
@@ -1869,7 +1896,12 @@ defmodule Lua.VM.Executor do
       open_upvalues: saved_open_upvalues
     } = frame
 
-    state = %{state | call_stack: tl(state.call_stack), open_upvalues: saved_open_upvalues}
+    state = %{
+      state
+      | call_stack: tl(state.call_stack),
+        call_depth: state.call_depth - 1,
+        open_upvalues: saved_open_upvalues
+    }
 
     case result_count do
       -1 ->
@@ -2206,6 +2238,17 @@ defmodule Lua.VM.Executor do
   defp hint_name(nil), do: nil
   defp hint_name(hint) when is_tuple(hint), do: elem(hint, 1)
 
+  # Maps a call-site `name_hint` tag to the Lua 5.3 `namewhat` string reported
+  # by `debug.getinfo(level, "n")`. The hint is recovered at compile time from
+  # the caller's instruction, mirroring PUC-Lua's `getfuncname` classification.
+  defp hint_namewhat(nil), do: ""
+  defp hint_namewhat({:global, _}), do: "global"
+  defp hint_namewhat({:local, _}), do: "local"
+  defp hint_namewhat({:upvalue, _}), do: "upvalue"
+  defp hint_namewhat({:field, _, _}), do: "field"
+  defp hint_namewhat({:method, _, _}), do: "method"
+  defp hint_namewhat(_), do: ""
+
   @doc """
   Reads `t[key]` honoring the `__index` metamethod chain.
 
@@ -2522,28 +2565,30 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  # Lua 5.3 §3.4.1: floor division of floats is `floor(a/b)`. With a float
-  # zero divisor, `a/b` is the inf/nan stand-in produced by `safe_divide`,
-  # and the floor of that flows through to the result:
+  # Lua 5.3 §3.4.1: floor division of floats is `floor(a/b)`. With a zero
+  # divisor where either operand is a float, `a/b` is the inf/nan stand-in
+  # produced by `safe_divide`, and the floor of that flows through to the
+  # result:
   #
-  #   * ` 1.0 // 0.0` → `+math.huge`
-  #   * `-1.0 // 0.0` → `-math.huge`
-  #   * ` 0.0 // 0.0` → `:nan`
+  #   * ` 1.0 // 0` / ` 1.0 // 0.0` → `+math.huge`
+  #   * `-1.0 // 0` / `-1.0 // 0.0` → `-math.huge`
+  #   * ` 0.0 // 0` / ` 0.0 // 0.0` → `:nan`
   #
-  # An integer-zero divisor still raises — that's correct per spec, since
-  # `//` between two integers is integer floor division.
+  # Only an integer `//` integer with a zero divisor raises — that's correct
+  # per spec, since `//` between two integers is integer floor division.
+  # PUC-Lua reports this as "attempt to divide by zero".
   defp safe_floor_divide(a, b, line, source, hint_a, hint_b) do
     na = number_or_arith_raise!(a, line, source, hint_a)
     nb = number_or_arith_raise!(b, line, source, hint_b)
 
     cond do
-      is_integer(nb) and nb == 0 ->
-        raise RuntimeError, value: "attempt to perform 'n//0'", line: line, source: source
+      is_integer(na) and is_integer(nb) and nb == 0 ->
+        raise RuntimeError, value: "attempt to divide by zero", line: line, source: source
 
       is_integer(na) and is_integer(nb) ->
         Numeric.to_signed_int64(lua_idiv(na, nb))
 
-      is_float(nb) and nb == 0.0 ->
+      nb == 0 or nb == 0.0 ->
         cond do
           na == 0 or na == 0.0 -> :nan
           na > 0 -> 1.0e308
@@ -2555,21 +2600,22 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  # Lua 5.3 §3.4.1: `a % b = a - floor(a/b)*b`. With a float zero divisor,
-  # `a/0.0` is inf or nan, and `inf * 0.0 = nan`, so `a % 0.0` is always
-  # `:nan` regardless of `a`. An integer-zero divisor still raises.
+  # Lua 5.3 §3.4.1: `a % b = a - floor(a/b)*b`. With a zero divisor where
+  # either operand is a float, `a/0.0` is inf or nan and `inf * 0.0 = nan`,
+  # so the result is always `:nan` regardless of `a`. Only an integer `%`
+  # integer with a zero divisor raises; PUC-Lua reports it as `'n%0'`.
   defp safe_modulo(a, b, line, source, hint_a, hint_b) do
     na = number_or_arith_raise!(a, line, source, hint_a)
     nb = number_or_arith_raise!(b, line, source, hint_b)
 
     cond do
-      is_integer(nb) and nb == 0 ->
+      is_integer(na) and is_integer(nb) and nb == 0 ->
         raise RuntimeError, value: "attempt to perform 'n%0'", line: line, source: source
 
       is_integer(na) and is_integer(nb) ->
         Numeric.to_signed_int64(na - lua_idiv(na, nb) * nb)
 
-      is_float(nb) and nb == 0.0 ->
+      nb == 0 or nb == 0.0 ->
         :nan
 
       true ->
@@ -2825,6 +2871,15 @@ defmodule Lua.VM.Executor do
   defp close_open_upvalues_at_or_above(%{open_upvalues: ou} = state, threshold) do
     %{state | open_upvalues: Map.reject(ou, fn {reg, _} -> reg >= threshold end)}
   end
+
+  # Resolve the `_ENV` value for a chunk's `load_env` instruction: a custom
+  # environment lives in upvalue slot 0 when present (a chunk loaded via
+  # `load(..., env)`), otherwise default to the global table `_G`.
+  defp load_env_value(upvalues, state) when tuple_size(upvalues) > 0 do
+    Map.get(state.upvalue_cells, elem(upvalues, 0))
+  end
+
+  defp load_env_value(_upvalues, state), do: State.g_ref(state)
 
   # ── Call helpers: copy args without allocating an intermediate list ────────
   #

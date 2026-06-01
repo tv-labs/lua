@@ -16,6 +16,13 @@ defmodule Website.LuaSandbox do
 
   alias Lua.Compiler.Prototype
 
+  # Cap recursion so a runaway snippet (`local function f() return f() end`)
+  # fails with a catchable "stack overflow" instead of growing the BEAM
+  # stack until the process dies. The VM has no tail-call optimization, so
+  # this bounds tail recursion too — 200 is generous for the teaching
+  # snippets here while still stopping an accidental infinite recursion.
+  @max_call_depth 200
+
   @doc """
   Compiles a Lua snippet into a `Lua.Chunk` (without running it) and
   returns the chunk plus the disassembled prototype tree. Returns
@@ -54,7 +61,7 @@ defmodule Website.LuaSandbox do
     output_pid = start_output_collector()
 
     lua =
-      Lua.new()
+      Lua.new(max_call_depth: @max_call_depth)
       |> Lua.set!([:print], fn args ->
         line =
           args

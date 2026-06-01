@@ -58,9 +58,9 @@ defmodule Lua.VM.ErrorFormatTest do
     end
   end
 
-  describe "attempt to perform 'n//0'" do
+  describe "attempt to divide by zero" do
     test "integer floor-divide by zero" do
-      assert_raise LuaRuntimeError, ~r/attempt to perform 'n\/\/0'/, fn ->
+      assert_raise LuaRuntimeError, ~r/attempt to divide by zero/, fn ->
         run("return 1 // 0")
       end
     end

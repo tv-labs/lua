@@ -121,10 +121,18 @@ defmodule Lua.Compiler.Scope do
   # Per Lua 5.3 §3.3.4, each control-flow block (then/else, while/repeat
   # body, for body) is its own lexical scope: locals declared inside it
   # must not leak past the block's end.
-  defp with_block_scope(state, fun) do
+  # Resolve `fun` in a fresh block scope, restoring the enclosing scope's
+  # locals and register watermark afterward, and stash the pre-block register
+  # watermark under `key` so codegen can emit a `:close_upvalues` at the
+  # block's exit (Lua 5.3 §3.4.10). Any open-upvalue cell over a register the
+  # block's locals occupied must be detached when the block ends, so a later
+  # sibling block reusing the same slot does not read or write through the
+  # stale cell.
+  defp with_block_scope(state, key, fun) do
     saved_locals = state.locals
     saved_next_register = state.next_register
 
+    state = %{state | var_map: Map.put(state.var_map, key, saved_next_register)}
     state = fun.(state)
 
     %{state | locals: saved_locals, next_register: saved_next_register}
@@ -184,16 +192,16 @@ defmodule Lua.Compiler.Scope do
     # Per Lua 5.3 §3.3.4, each branch of an `if` is its own block, so locals
     # declared inside it do not leak past `end`.
     state = resolve_expr(condition, state)
-    state = with_block_scope(state, &resolve_block(then_block, &1))
+    state = with_block_scope(state, {:block_close_threshold, then_block}, &resolve_block(then_block, &1))
 
     state =
       Enum.reduce(elseifs, state, fn {elseif_cond, elseif_block}, state ->
         state = resolve_expr(elseif_cond, state)
-        with_block_scope(state, &resolve_block(elseif_block, &1))
+        with_block_scope(state, {:block_close_threshold, elseif_block}, &resolve_block(elseif_block, &1))
       end)
 
     if else_block do
-      with_block_scope(state, &resolve_block(else_block, &1))
+      with_block_scope(state, {:block_close_threshold, else_block}, &resolve_block(else_block, &1))
     else
       state
     end
@@ -201,7 +209,7 @@ defmodule Lua.Compiler.Scope do
 
   defp resolve_statement(%Statement.While{condition: condition, body: body}, state) do
     state = resolve_expr(condition, state)
-    with_block_scope(state, &resolve_block(body, &1))
+    with_block_scope(state, {:block_close_threshold, body}, &resolve_block(body, &1))
   end
 
   defp resolve_statement(%Statement.Repeat{body: body, condition: condition}, state) do
@@ -211,6 +219,7 @@ defmodule Lua.Compiler.Scope do
     saved_locals = state.locals
     saved_next_register = state.next_register
 
+    state = %{state | var_map: Map.put(state.var_map, {:block_close_threshold, body}, saved_next_register)}
     state = resolve_block(body, state)
     state = resolve_expr(condition, state)
 
@@ -233,6 +242,13 @@ defmodule Lua.Compiler.Scope do
     state = %{state | next_register: loop_var_reg + 3}
 
     state = %{state | var_map: Map.put(state.var_map, {:for_num_var_reg, for_stmt}, loop_var_reg)}
+
+    # Stash the post-loop-variable watermark so codegen can close body-local
+    # cells at the tail of each iteration. The loop variable's own cells are
+    # swept by the per-iteration close in the executor's continuation handler
+    # (keyed on `loop_var_reg`); the body-tail close handles inner-block
+    # locals declared above this watermark.
+    state = %{state | var_map: Map.put(state.var_map, {:block_close_threshold, body}, state.next_register)}
 
     func_scope = state.functions[state.current_function]
     func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
@@ -328,6 +344,11 @@ defmodule Lua.Compiler.Scope do
 
     state = %{state | var_map: Map.put(state.var_map, {:for_in_var_regs, for_stmt}, Enum.reverse(var_regs))}
 
+    # Stash the post-loop-variable watermark so codegen can close body-local
+    # cells at the tail of each iteration. The loop variables' own cells are
+    # swept by the per-iteration close in the executor's continuation handler.
+    state = %{state | var_map: Map.put(state.var_map, {:block_close_threshold, body}, state.next_register)}
+
     func_scope = state.functions[state.current_function]
     func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
     state = %{state | functions: Map.put(state.functions, state.current_function, func_scope)}
@@ -356,12 +377,19 @@ defmodule Lua.Compiler.Scope do
     resolve_function_scope(local_func, params, body, state)
   end
 
-  defp resolve_statement(%Statement.Do{body: body}, state) do
+  defp resolve_statement(%Statement.Do{body: body} = do_stmt, state) do
     # Do blocks create a new scope - save and restore locals/next_register
     saved_locals = state.locals
     saved_next_register = state.next_register
 
     state = resolve_block(body, state)
+
+    # Stash the pre-block register watermark so codegen can emit a
+    # `:close_upvalues` at block exit. Per Lua 5.3 §3.4.10 any open-upvalue
+    # cell over a register that goes out of scope here must be detached so
+    # the next statement that reuses the slot does not read or write through
+    # the stale cell — see locals.lua:148-154 for the symptom this prevents.
+    state = %{state | var_map: Map.put(state.var_map, {:do_close_threshold, do_stmt}, saved_next_register)}
 
     # Restore outer scope (inner locals don't leak out)
     %{state | locals: saved_locals, next_register: saved_next_register}

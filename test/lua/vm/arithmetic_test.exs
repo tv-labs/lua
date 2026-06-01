@@ -136,7 +136,7 @@ defmodule Lua.VM.ArithmeticTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = State.new()
 
-      assert_raise RuntimeError, ~r/attempt to perform 'n\/\/0'/, fn ->
+      assert_raise RuntimeError, ~r/attempt to divide by zero/, fn ->
         VM.execute(proto, state)
       end
     end
@@ -251,7 +251,7 @@ defmodule Lua.VM.ArithmeticTest do
       state = Stdlib.install(State.new())
       assert {:ok, [false, err], _state} = VM.execute(proto, state)
       assert is_binary(err)
-      assert err =~ "attempt to perform 'n//0'"
+      assert err =~ "attempt to divide by zero"
     end
 
     test "pcall catches comparison TypeError" do
