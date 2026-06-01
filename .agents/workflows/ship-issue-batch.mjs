@@ -120,6 +120,19 @@ const FIX_SCHEMA = {
 }
 
 const SHIP_RULES = `
+WORKTREE ISOLATION (CRITICAL — read first):
+- You run in an ISOLATED git worktree under .claude/worktrees/, NOT the operator's
+  primary checkout. Run EVERY git command from your current working directory.
+- NEVER \`cd\` to the canonical checkout path and NEVER pass \`git -C <canonical-path>\`.
+  Do not use absolute paths that resolve into the primary checkout for any git write.
+- Before ANY state-changing git command (checkout, branch, reset, commit, push), run
+  \`git rev-parse --show-toplevel\` and confirm it points at your worktree under
+  .claude/worktrees/ — NOT the primary repo. If it points at the primary checkout, STOP
+  and do not run the command. Mutating the primary checkout (detaching its HEAD, leaving
+  uncommitted/broken files behind) corrupts the operator's working tree — this has
+  happened before and must not recur. Reading files under the canonical checkout is fine;
+  state-changing git there is forbidden.
+
 SHIP-A-PLAN CONTRACT (.agents/skills/ship-a-plan/SKILL.md) — follow exactly:
 - Branch off main inside this worktree: git checkout -b <branch>.
 - First commit: create/update the plan file with status: in-progress, commit "chore(<id>): start plan" (this commit touches ONLY the plan file).
@@ -177,6 +190,15 @@ Hunt for REAL problems, default to skepticism but mark real:false for anything y
 - Missing or weak tests for the behavior changed; for fix/perf PRs, is there a regression test?
 - ship-a-plan rule violations: plan id used as a commit/PR subject scope (e.g. "fix(A47): ..."), a "Co-Authored-By" AI trailer present, red tests, or merged-without-review.
 - Doc/quality PRs: accuracy, broken links, claims that don't match the code.
+
+POST your review to the PR so it leaves a durable, visible trail (mark it clearly as an
+automated round-${round} review). GitHub blocks self-approval because the PR author is the
+gh user, so use the --comment event, NEVER --approve:
+  gh pr review ${prNumber} --repo tv-labs/lua --comment --body "<your review markdown>"
+The posted body should lead with a one-line verdict (clean / clean-with-nits /
+changes-requested) and then the findings, each tagged [blocker]/[major]/[minor]/[nit] with
+file:line and a concrete rationale. If clean, say so and note what you verified. This is a
+read-only review otherwise: do NOT check out, edit, branch, or push anything.
 
 Classify each finding severity (blocker|major|minor|nit) and real (true/false). Set clean:true ONLY if no real blocker or major findings remain (minor/nit do not block).`
 }

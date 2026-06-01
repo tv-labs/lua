@@ -43,9 +43,21 @@ NON-NEGOTIABLE CONVENTIONS:
 - NEVER push red tests to a ready PR. NEVER force-push. NEVER merge — the PR
   stays open for human review.
 
+WORKTREE ISOLATION (CRITICAL): you run in an ISOLATED git worktree under
+.claude/worktrees/, NOT the operator's primary checkout at the canonical path.
+Run EVERY git command from your current working directory. NEVER \`cd\` to the
+canonical checkout and NEVER pass \`git -C <canonical-path>\`. Before ANY
+state-changing git command (fetch is fine; checkout/detach/reset/commit/push are
+not), run \`git rev-parse --show-toplevel\` and confirm it points at your worktree
+under .claude/worktrees/ — NOT the canonical checkout. If it points at the primary
+repo, STOP. Running \`git checkout --detach\` against the primary checkout detaches
+the operator's HEAD and corrupts their working tree — this has happened and must
+not recur. Reading files at the canonical path is fine; state-changing git is not.
+
 GIT PUSH PROTOCOL (you run in a fresh worktree off 'main'; the PR's local
 branch may already be checked out in another worktree, so do NOT check it out
-by name — work in DETACHED HEAD off the remote tip):
+by name — work in DETACHED HEAD off the remote tip, FROM YOUR WORKTREE CWD):
+  git rev-parse --show-toplevel   # MUST be your .claude/worktrees/ path, not the primary repo
   git fetch origin <branch>
   git checkout --detach origin/<branch>
   mix deps.get            # only if deps/_build are missing in this worktree
