@@ -2,10 +2,10 @@
 id: B14
 title: use io_lib.format for string.format float conversion
 issue: 311
-pr: null
+pr: 319
 branch: perf/string-format-iolib-float
 base: main
-status: in-progress
+status: review
 direction: B
 ---
 
@@ -170,3 +170,46 @@ Notes:
 - **Sibling-file collision.** #309/#310 also edit `string.ex`.
   Mitigation: confine edits to the float-conversion helpers; rebase if a
   sibling merges first.
+
+## What changed
+
+- `format_spec_float/2` now delegates to a new `fixed_float/2`:
+  precision >= 1 calls `:io_lib.format(~c"~.*f", [precision, abs(val)])`
+  and reapplies the sign; precision 0 uses a dedicated
+  `round_half_even/1` helper (io_lib raises on `~.*f` with P=0 on
+  OTP 29) to match C Lua's round-half-to-even (`2.5→2`, `0.5→0`,
+  `1.5→2`, `3.5→4`, `-2.5→-2`).
+- `0/0` (the `:nan` atom this VM produces) now formats as `"nan"`
+  instead of raising `ArgumentError`.
+- `expand_float/2`, `round_mantissa/2`, and `normalize_mantissa/2` are
+  deleted. `format_scientific_str/2`'s mantissa formatting is rewritten
+  to use `fixed_float/2` with a value-based 9.99→10 carry check
+  (`mantissa_with_carry/3`); the 2-digit exponent padding is untouched,
+  preserving C-compatible `%e`/`%g` exponents.
+- Added `describe "string.format float rounding and non-finite values"`
+  in `test/lua/vm/string_test.exs`: precision-0 sign-boundary set,
+  `%.20f` large precision, and `0/0 → "nan"`.
+- Full suite green (2117 passed); `--only lua53` unchanged from the main
+  baseline (17 passed, 12 skipped).
+
+## Discoveries
+
+- **`1/0` is not IEEE infinity in this VM.** The plan/issue assume
+  `string.format("%f", 1/0)` reaches `format_spec_float` as `:infinity`
+  and should print `"inf"`. In reality this VM's division clamps `1/0`
+  to the finite float `1.0e308` (and `-1/0` to `-1.0e308`), which
+  formats fine through `:io_lib.format` and never hits a non-finite
+  guard. No `"inf"`/`"-inf"` path is needed in float conversion; the
+  divide-by-zero semantics live in the executor and are out of scope.
+  `0/0` does surface as the atom `:nan`, now mapped to `"nan"`.
+- **`benchmarks/string_format.exs` now exists** (landed after the plan
+  was authored). It requires `:luerl`, which is not available in this
+  worktree's deps, so the comparative benchmark could not run here. A
+  VM-level microbenchmark of the float-heavy loop (`item_%d=%f` x1000)
+  measured ~1.7ms, well under the 7.42ms baseline cited in #311.
+- **io_lib and the old `float_to_binary` path round identically** at
+  precision >= 1 (both round-half-up at exact binary half-points like
+  `0.25`, which C Lua resolves to half-to-even). This pre-existing
+  divergence from C Lua at exact-binary ties is unchanged by this PR.
+  The precision-0 path is the only place this PR actively switches to
+  round-half-to-even, matching C Lua.
