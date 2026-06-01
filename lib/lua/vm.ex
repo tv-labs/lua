@@ -23,6 +23,16 @@ defmodule Lua.VM do
     # unbounded varargs) grow the tuple lazily via `ensure_regs_capacity/2`.
     registers = Tuple.duplicate(nil, max(proto.max_registers, proto.param_count))
 
+    # Reset the instruction-budget tally at the top-level evaluation
+    # boundary so `:max_steps` bounds ONE evaluation's total work rather
+    # than accumulating over the whole %Lua{} lifetime. The terminals stamp
+    # the per-eval tally back into `state.steps`, so without this reset a
+    # long-lived %Lua{} running many small evals would eventually trip the
+    # budget even though no single eval came close. Nested calls within this
+    # evaluation still accumulate against the same budget — they thread the
+    # tally as a bare parameter and never re-enter here.
+    state = %{state | steps: 0}
+
     # Execute the prototype instructions
     {results, _final_regs, final_state} =
       Executor.execute(proto.instructions, registers, [], proto, state)
