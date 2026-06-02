@@ -662,7 +662,23 @@ defmodule Lua.VM.Executor do
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
-  # ── get_upvalue ────────────────────────────────────────────────────────────
+  # ── get_upvalue / set_upvalue ──────────────────────────────────────────────
+  #
+  # The closure's `upvalues` tuple holds the cell ref directly, so resolving a
+  # depth-N upvalue is already a constant-time `elem/2` read — there is no
+  # frame-list walk to short-circuit the way luerl's `get_env_var_1/4`
+  # (`luerl_emul.erl`) skips `lists:nth/2` for depth 1 and 2.
+  #
+  # The upvalue *value* cannot be inlined into the tuple. The tuple is captured
+  # by value into the (immutable) closure term, while the value is mutable
+  # shared state: a later `set_upvalue` (or `set_open_upvalue`, or
+  # `debug.setupvalue`) must be visible to the next call of this closure and to
+  # any sibling closure that captured the same parent local. That shared,
+  # call-to-call-persistent store is `state.upvalue_cells`, keyed by the cell
+  # ref and threaded through `State`; the compiled dispatcher (`Lua.VM.Dispatcher`),
+  # `_ENV` rebinding, and `debug.getupvalue`/`setupvalue` all read and write the
+  # same cell. `Map.get/2` keeps the nil-for-dangling-cell semantics the
+  # dispatcher mirrors.
 
   defp do_execute([{:get_upvalue, dest, index} | rest], regs, upvalues, proto, state, cont, frames, line) do
     cell_ref = elem(upvalues, index)
@@ -670,8 +686,6 @@ defmodule Lua.VM.Executor do
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
-
-  # ── set_upvalue ────────────────────────────────────────────────────────────
 
   defp do_execute([{:set_upvalue, index, source} | rest], regs, upvalues, proto, state, cont, frames, line) do
     cell_ref = elem(upvalues, index)
