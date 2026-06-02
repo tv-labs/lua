@@ -49,7 +49,13 @@ defmodule Lua.Compiler.Codegen do
       upvalue_names: ["_ENV"],
       param_count: 0,
       is_vararg: func_scope.is_vararg,
-      max_registers: Enum.max([func_scope.max_register, ctx.next_reg, Map.get(ctx, :peak_reg, 0)]),
+      max_registers:
+        Enum.max([
+          func_scope.max_register,
+          ctx.next_reg,
+          Map.get(ctx, :peak_reg, 0),
+          instruction_peak(instructions)
+        ]),
       source: source,
       lines: lines
     }
@@ -86,6 +92,100 @@ defmodule Lua.Compiler.Codegen do
   defp record_peak(ctx) do
     Map.put(ctx, :peak_reg, max(Map.get(ctx, :peak_reg, 0), ctx.next_reg))
   end
+
+  # Honest peak-register guarantee for `max_registers`.
+  #
+  # `peak_reg`/`next_reg` tracking can undercount in deeply nested
+  # constructs (e.g. a concat chain inside a list-field of a table
+  # constructor nested in several `for` bodies). Undercounting is benign
+  # only as long as a fixed register buffer absorbs the slack; the
+  # executor and dispatcher both run buffer-free, so `max_registers` must
+  # cover every statically-fixed destination register actually emitted.
+  #
+  # This walks the emitted instruction stream (including nested loop /
+  # short-circuit bodies) and returns the number of register slots needed
+  # — i.e. the highest fixed destination index plus one. Dynamic-range
+  # writers (`:call`, `:vararg`) are grown lazily at runtime via
+  # `ensure_regs_capacity/2`, so only their fixed `base` contributes here.
+  defp instruction_peak(instructions) do
+    Enum.reduce(instructions, 0, fn instr, acc ->
+      max(acc, instruction_size(instr))
+    end)
+  end
+
+  # Returns the register-slot count an instruction proves is needed (its
+  # highest written register index + 1), recursing into nested bodies.
+  defp instruction_size({:load_nil, dest, count}), do: dest + count
+  defp instruction_size({:vararg, base, count}) when is_integer(count) and count > 0, do: base + count
+  defp instruction_size({:vararg, base, _}), do: base + 1
+  defp instruction_size({:self, base, _obj, _name, _hint}), do: base + 2
+  defp instruction_size({:call, base, _ac, _rc, _hint}), do: base + 1
+  defp instruction_size({:source_line, _line, _src}), do: 0
+  defp instruction_size({:close_upvalues, _threshold}), do: 0
+  defp instruction_size({:label, _name}), do: 0
+  defp instruction_size({:set_list, _table, start, count, _offset}) when is_integer(count), do: start + count
+  defp instruction_size({:set_list, _table, start, {:multi, init}, _offset}), do: start + init
+  defp instruction_size({:numeric_for, base, _loop_var, body}), do: max(base + 3, instruction_peak(body))
+  defp instruction_size({:generic_for, base, _var_regs, body}), do: max(base + 3, instruction_peak(body))
+
+  defp instruction_size({:while_loop, cond_body, _reg, body}),
+    do: max(instruction_peak(cond_body), instruction_peak(body))
+
+  defp instruction_size({:repeat_loop, body, cond_body, _reg}),
+    do: max(instruction_peak(body), instruction_peak(cond_body))
+
+  defp instruction_size({:test, _reg, then_body, else_body}),
+    do: max(instruction_peak(then_body), instruction_peak(else_body))
+
+  defp instruction_size({:test_and, dest, _src, body}), do: max(dest + 1, instruction_peak(body))
+  defp instruction_size({:test_or, dest, _src, body}), do: max(dest + 1, instruction_peak(body))
+  defp instruction_size({:scope, _count, body}), do: instruction_peak(body)
+
+  # Instructions whose first integer operand is the sole written register:
+  # the destination. Reads never establish a high-water mark, so they are
+  # ignored. Anything else (set_table/set_field/set_global/set_upvalue/…
+  # writes to a table or upvalue, not a fresh register; :return/:break/…)
+  # contributes nothing.
+  defp instruction_size(instr)
+       when is_tuple(instr) and
+              elem(instr, 0) in [
+                :load_constant,
+                :load_boolean,
+                :move,
+                :get_upvalue,
+                :get_open_upvalue,
+                :get_global,
+                :load_env,
+                :new_table,
+                :get_table,
+                :get_field,
+                :add,
+                :subtract,
+                :multiply,
+                :divide,
+                :floor_divide,
+                :modulo,
+                :power,
+                :negate,
+                :concatenate,
+                :bitwise_and,
+                :bitwise_or,
+                :bitwise_xor,
+                :shift_left,
+                :shift_right,
+                :bitwise_not,
+                :equal,
+                :less_than,
+                :less_equal,
+                :not_equal,
+                :not,
+                :length,
+                :closure
+              ] do
+    elem(instr, 1) + 1
+  end
+
+  defp instruction_size(_instr), do: 0
 
   defp emit_source_line(%{meta: %{start: %{line: line}}}, ctx) when is_integer(line) do
     [Instruction.source_line(line, ctx.source)]
@@ -1573,7 +1673,13 @@ defmodule Lua.Compiler.Codegen do
       upvalue_names: Enum.map(func_scope.upvalue_descriptors, &elem(&1, 2)),
       param_count: func_scope.param_count,
       is_vararg: func_scope.is_vararg,
-      max_registers: Enum.max([func_scope.max_register, body_ctx.next_reg, Map.get(body_ctx, :peak_reg, 0)]),
+      max_registers:
+        Enum.max([
+          func_scope.max_register,
+          body_ctx.next_reg,
+          Map.get(body_ctx, :peak_reg, 0),
+          instruction_peak(body_instructions)
+        ]),
       source: ctx.source,
       lines: lines
     }
