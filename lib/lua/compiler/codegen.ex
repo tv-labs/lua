@@ -107,7 +107,12 @@ defmodule Lua.Compiler.Codegen do
   # — i.e. the highest fixed destination index plus one. Dynamic-range
   # writers (`:call`, `:vararg`) are grown lazily at runtime via
   # `ensure_regs_capacity/2`, so only their fixed `base` contributes here.
-  defp instruction_peak(instructions) do
+  #
+  # Exposed (`@doc false`) so the backstop's completeness can be pinned
+  # directly: every statically-fixed destination opcode codegen emits must
+  # be counted here, independent of whether `peak_reg` happens to cover it.
+  @doc false
+  def instruction_peak(instructions) do
     Enum.reduce(instructions, 0, fn instr, acc ->
       max(acc, instruction_size(instr))
     end)
@@ -177,6 +182,8 @@ defmodule Lua.Compiler.Codegen do
                 :equal,
                 :less_than,
                 :less_equal,
+                :greater_than,
+                :greater_equal,
                 :not_equal,
                 :not,
                 :length,
