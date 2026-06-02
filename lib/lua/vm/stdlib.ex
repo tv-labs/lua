@@ -9,6 +9,7 @@ defmodule Lua.VM.Stdlib do
   alias Lua.VM.ArgumentError
   alias Lua.VM.AssertionError
   alias Lua.VM.Executor
+  alias Lua.VM.Limits
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Table
@@ -446,7 +447,7 @@ defmodule Lua.VM.Stdlib do
   # if the reader ever returns a non-string non-nil value, mirroring the
   # behavior of Lua 5.3's reference implementation.
   defp load_from_reader(reader, env, state) do
-    case collect_reader_chunks(reader, state, []) do
+    case collect_reader_chunks(reader, state, [], 0) do
       {:ok, source, state} ->
         compile_loaded_chunk(source, env, state)
 
@@ -461,7 +462,7 @@ defmodule Lua.VM.Stdlib do
   defp load_env_arg([_chunkname, _mode, env | _], _state) when env != nil, do: env
   defp load_env_arg(_rest, state), do: State.g_ref(state)
 
-  defp collect_reader_chunks(reader, state, acc) do
+  defp collect_reader_chunks(reader, state, acc, size) do
     {results, state} = Executor.call_function(reader, [], state)
 
     case results do
@@ -475,7 +476,15 @@ defmodule Lua.VM.Stdlib do
         {:ok, IO.iodata_to_binary(Enum.reverse(acc)), state}
 
       [piece | _] when is_binary(piece) ->
-        collect_reader_chunks(reader, state, [piece | acc])
+        # A reader that never signals end-of-input would otherwise accumulate
+        # chunks until the host runs out of memory. Bound the total source
+        # size with the same ceiling used for string allocations. Note this
+        # raises rather than returning load's documented `(nil, message)`
+        # pair: an oversized reader is a DoS attempt, not a recoverable
+        # syntax error, so we surface it as a catchable runtime error
+        # (caught by `pcall`) instead of a quiet load failure.
+        Limits.check_string_size!(size + byte_size(piece))
+        collect_reader_chunks(reader, state, [piece | acc], size + byte_size(piece))
 
       [bad | _] ->
         {:error, "reader function must return a string (got #{Value.type_name(bad)})", state}

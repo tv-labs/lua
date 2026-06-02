@@ -29,18 +29,11 @@ defmodule Lua.VM.Stdlib.Table do
 
   alias Lua.VM.ArgumentError
   alias Lua.VM.Executor
+  alias Lua.VM.Limits
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
   alias Lua.VM.Table
-
-  # Upper bound on the number of values `table.unpack` may produce. Lua
-  # 5.3's `ltablib.c` rejects ranges in two arms: the element count
-  # `n = (j - i) + 1` overflowing `INT_MAX`, and `lua_checkstack` failing
-  # for that count (which trips at `n == INT_MAX` after its internal
-  # `++n`). Both reduce to rejecting when `n >= INT_MAX`, i.e. when
-  # `(j - i) >= INT_MAX - 1`, before materialising any results.
-  @unpack_max_results 2_147_483_647
 
   @impl true
   def lib_name, do: "table"
@@ -220,6 +213,9 @@ defmodule Lua.VM.Stdlib.Table do
     # metatable) read directly from `data`, skipping the __index dispatch;
     # tables with a metatable keep the Executor path so __index is observed.
     table = Map.fetch!(state.tables, id)
+
+    # Refuse an oversized range before allocating the result list.
+    if i <= j, do: Limits.check_range_count!(j - i + 1, "table.concat")
 
     {elements, state} =
       cond do
@@ -457,13 +453,15 @@ defmodule Lua.VM.Stdlib.Table do
         got: Util.typeof(j)
     end
 
-    # Reject ranges whose element count `(j - i) + 1` reaches INT_MAX
-    # before materialising anything. `ltablib.c` does the same check up
-    # front (count overflow plus the `lua_checkstack` arm), so
-    # `table.unpack({}, 0, math.maxinteger)` errors immediately instead of
-    # trying to build an enormous list. The subtraction stays within
-    # Elixir's arbitrary-precision integers, so it cannot overflow.
-    if i <= j and j - i >= @unpack_max_results - 1 do
+    # Reject an oversized result count before materialising anything.
+    # `ltablib.c` rejects only at INT_MAX (count overflow plus the
+    # `lua_checkstack` arm), but on the BEAM even a sub-INT_MAX count like
+    # `table.unpack({}, 1, 5e8)` would build hundreds of millions of nils
+    # and exhaust the host. We share `Limits.max_element_count` with
+    # `concat`/`move` so the deterministic ceiling is uniform, well below
+    # INT_MAX yet far above any legitimate unpack. The subtraction stays
+    # within Elixir's arbitrary-precision integers, so it cannot overflow.
+    if i <= j and j - i >= Limits.max_element_count() do
       raise RuntimeError.exception(value: "too many results to unpack")
     end
 
@@ -513,6 +511,8 @@ defmodule Lua.VM.Stdlib.Table do
       if f > e do
         state
       else
+        Limits.check_range_count!(e - f + 1, "table.move")
+
         # Read each src slot via __index on tref1, write to dst via
         # __newindex on tref2. Aliasing (tref1 == tref2 with overlapping
         # ranges) is handled by reading every value first, then writing

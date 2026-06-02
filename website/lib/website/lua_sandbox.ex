@@ -7,8 +7,13 @@ defmodule Website.LuaSandbox do
   the library's default deny-list (no `io.*`, `os.*`, `require`,
   `package`, `load`, etc.).
 
-  This module is intentionally process-free: timeout enforcement and
-  task lifecycle are the caller's responsibility (the LiveView wraps
+  Evaluation runs in an isolated, memory-capped worker process. A snippet
+  that grows the heap past the ceiling (e.g. an unbounded table) is killed
+  by the BEAM's `max_heap_size` and surfaced as a normal "memory limit"
+  result rather than crashing the caller. `include_shared_binaries: true`
+  is required so off-heap binaries count toward that ceiling. `run/1` also
+  applies a safety wall-clock timeout so a non-terminating snippet always
+  returns; the LiveView layers a shorter UI timeout on top (it wraps
   `run/1` in `start_async/3` and cancels it on a timer).
   """
 
@@ -56,10 +61,107 @@ defmodule Website.LuaSandbox do
   @spec run(String.t()) :: result()
   def run(source) when is_binary(source), do: do_run(source)
 
+  # ~64 MB per-run memory ceiling, in heap words (8 bytes/word on 64-bit).
+  # include_shared_binaries makes off-heap binaries count — without it a
+  # binary bomb would not trip the limit.
+  @lua_heap_words 8_000_000
+
+  # Standalone safety timeout so `run/1` always returns even for a
+  # non-terminating snippet (`while true do end`). The LiveView sets a
+  # shorter UI timeout (1.5s) and cancels first; this is the backstop for
+  # any other caller.
+  @run_timeout_ms 2_000
+
   defp do_run(source) do
     started = System.monotonic_time(:microsecond)
-    output_pid = start_output_collector()
+    parent = self()
 
+    # Trap exits so the worker dying — whether it finishes, is killed by the
+    # memory ceiling, or is torn down when this task is cancelled — arrives
+    # as a message instead of propagating and crashing the caller. Restore
+    # the caller's flag afterwards so `run/1` leaves no trace.
+    prev_trap = Process.flag(:trap_exit, true)
+
+    worker =
+      spawn_link(fn ->
+        Process.flag(:max_heap_size, %{
+          size: @lua_heap_words,
+          kill: true,
+          error_logger: false,
+          include_shared_binaries: true
+        })
+
+        # Collector is linked to the worker (not us), so its normal exit
+        # never lands in our mailbox to be mistaken for a cancellation.
+        output_pid = start_output_collector()
+        send(parent, {:eval_result, eval(source, output_pid, started)})
+      end)
+
+    try do
+      receive do
+        {:eval_result, result} ->
+          result
+
+        # Worker hit the memory ceiling: max_heap_size kills it with
+        # `:killed`, which is the only abnormal exit we attribute to the
+        # memory limit.
+        {:EXIT, ^worker, :killed} ->
+          memory_result(started)
+
+        # Any other abnormal worker exit is an unrelated crash; surface it
+        # as a generic error rather than mislabeling it a memory limit.
+        {:EXIT, ^worker, reason} ->
+          error_result(started, reason)
+
+        # This task is being cancelled by the caller (the LiveView timeout).
+        # Stop the worker and let the cancellation proceed.
+        {:EXIT, _other, reason} ->
+          Process.exit(worker, :kill)
+          exit(reason)
+      after
+        @run_timeout_ms ->
+          Process.exit(worker, :kill)
+          timeout_result(started)
+      end
+    after
+      Process.flag(:trap_exit, prev_trap)
+    end
+  end
+
+  defp timeout_result(started) do
+    %{
+      status: :timeout,
+      output: "",
+      returns: [],
+      error: "Execution timed out after #{@run_timeout_ms}ms",
+      duration_us: System.monotonic_time(:microsecond) - started,
+      bytecode: []
+    }
+  end
+
+  defp memory_result(started) do
+    %{
+      status: :timeout,
+      output: "",
+      returns: [],
+      error: "Execution exceeded the memory limit and was stopped",
+      duration_us: System.monotonic_time(:microsecond) - started,
+      bytecode: []
+    }
+  end
+
+  defp error_result(started, reason) do
+    %{
+      status: :error,
+      output: "",
+      returns: [],
+      error: "Execution failed: #{inspect(reason)}",
+      duration_us: System.monotonic_time(:microsecond) - started,
+      bytecode: []
+    }
+  end
+
+  defp eval(source, output_pid, started) do
     lua =
       Lua.new(max_call_depth: @max_call_depth)
       |> Lua.set!([:print], fn args ->
@@ -116,17 +218,50 @@ defmodule Website.LuaSandbox do
     String.replace(s, ~r/\e\[[\d;]*[\x40-\x7E]/, "")
   end
 
+  # A runaway `for i=1,1e9 do print(i) end` would otherwise grow this
+  # collector's buffer (and mailbox) without bound. Cap both the retained
+  # output and the collector's own memory so a print-flood degrades to
+  # truncated output instead of exhausting the node.
+  @max_output_lines 5_000
+  @max_output_bytes 1_000_000
+  # ~32 MB, in words — bounds the mailbox if prints arrive faster than we
+  # drain them. include_shared_binaries so large printed binaries count.
+  @collector_heap_words 4_000_000
+
   defp start_output_collector do
-    spawn_link(fn -> collect_loop([]) end)
+    spawn_link(fn ->
+      Process.flag(:max_heap_size, %{
+        size: @collector_heap_words,
+        kill: true,
+        error_logger: false,
+        include_shared_binaries: true
+      })
+
+      collect_loop([], 0, 0, false)
+    end)
   end
 
-  defp collect_loop(acc) do
+  defp collect_loop(acc, lines, bytes, truncated) do
     receive do
+      {:line, _line} when truncated ->
+        # Already over the cap — drain and discard so the producer's sends
+        # don't pile up, but keep the buffer fixed.
+        collect_loop(acc, lines, bytes, true)
+
       {:line, line} ->
-        collect_loop([line | acc])
+        lines = lines + 1
+        bytes = bytes + byte_size(line)
+
+        if lines > @max_output_lines or bytes > @max_output_bytes do
+          collect_loop(acc, lines, bytes, true)
+        else
+          collect_loop([line | acc], lines, bytes, false)
+        end
 
       {:dump, from} ->
-        send(from, {:lines, Enum.reverse(acc)})
+        out = Enum.reverse(acc)
+        out = if truncated, do: out ++ ["… output truncated"], else: out
+        send(from, {:lines, out})
     end
   end
 
@@ -334,6 +469,7 @@ defmodule Website.LuaSandbox do
     [
       %{
         id: "hello",
+        category: "Language",
         title: "Hello, Lua",
         blurb: "Your first Lua program on the BEAM.",
         source: ~s|print("Hello, Lua on the BEAM!")\nreturn 42\n|,
@@ -344,6 +480,7 @@ defmodule Website.LuaSandbox do
       },
       %{
         id: "fib",
+        category: "Language",
         title: "Recursive Fibonacci",
         blurb: "Classic recursion. Watch the closure prototype and tail-calls in the bytecode.",
         source: """
@@ -373,6 +510,7 @@ defmodule Website.LuaSandbox do
       },
       %{
         id: "tables",
+        category: "Language",
         title: "Tables &amp; iteration",
         blurb: "Lua's one true data structure. Mix array and hash parts freely.",
         source: """
@@ -408,6 +546,7 @@ defmodule Website.LuaSandbox do
       },
       %{
         id: "closures",
+        category: "Language",
         title: "Closures &amp; upvalues",
         blurb: "Counter factory. See how upvalues are captured in the bytecode.",
         source: """
@@ -439,6 +578,7 @@ defmodule Website.LuaSandbox do
       },
       %{
         id: "patterns",
+        category: "Language",
         title: "String patterns",
         blurb: "Lua's tiny but mighty pattern engine. No regex needed.",
         source: """
@@ -464,6 +604,7 @@ defmodule Website.LuaSandbox do
       },
       %{
         id: "metatables",
+        category: "Language",
         title: "Metatables",
         blurb: "Operator overloading via __add. Lua's secret weapon for DSLs.",
         source: """
@@ -507,6 +648,7 @@ defmodule Website.LuaSandbox do
       },
       %{
         id: "sandbox",
+        category: "Security &amp; limits",
         title: "Sandbox escape",
         blurb:
           "Watch the VM refuse to run dangerous stdlib calls. This is the reason it's agent-ready.",
@@ -538,7 +680,117 @@ defmodule Website.LuaSandbox do
         """c
       },
       %{
+        id: "string-bomb",
+        category: "Security &amp; limits",
+        title: "String allocation bomb",
+        blurb:
+          "The classic &quot;allocate until the host dies&quot; attack. The VM computes the size first and refuses — before a byte is allocated.",
+        source: """
+        -- string.rep with a huge count would build a petabyte string.
+        local ok, err = pcall(string.rep, "x", 1e15)
+        print("string.rep ok?", ok)
+        print("err:", err)
+
+        -- Doubling in a loop is guarded the same way.
+        local ok2, err2 = pcall(function()
+          local s = "x"
+          for _ = 1, 80 do s = s .. s end
+          return #s
+        end)
+        print("doubling ok?", ok2)
+        print("err:", err2)
+
+        return ok, ok2
+        """,
+        chunk: ~LUA"""
+        local ok, err = pcall(string.rep, "x", 1e15)
+        print("string.rep ok?", ok)
+        print("err:", err)
+
+        local ok2, err2 = pcall(function()
+          local s = "x"
+          for _ = 1, 80 do s = s .. s end
+          return #s
+        end)
+        print("doubling ok?", ok2)
+        print("err:", err2)
+
+        return ok, ok2
+        """c
+      },
+      %{
+        id: "memory-bomb",
+        category: "Security &amp; limits",
+        title: "Memory limit",
+        expect: :limit,
+        blurb:
+          "Growing a table without bound can't OOM the node — each run has a memory ceiling, and exceeding it stops the run while the server stays up.",
+        source: """
+        -- Allocate millions of tables until memory is exhausted.
+        local t = {}
+        for i = 1, 1e9 do
+          t[i] = { i, i, i }
+        end
+        return #t
+        """,
+        chunk: ~LUA"""
+        local t = {}
+        for i = 1, 1e9 do
+          t[i] = { i, i, i }
+        end
+        return #t
+        """c
+      },
+      %{
+        id: "timeout",
+        category: "Security &amp; limits",
+        title: "Infinite loop",
+        expect: :limit,
+        blurb:
+          "A loop that never ends can't hang the server: a wall-clock timeout stops the run after 1.5 seconds.",
+        source: """
+        -- Spin forever. The runtime cancels the run on a timer.
+        local n = 0
+        while true do
+          n = n + 1
+        end
+        return n
+        """,
+        chunk: ~LUA"""
+        local n = 0
+        while true do
+          n = n + 1
+        end
+        return n
+        """c
+      },
+      %{
+        id: "output-flood",
+        category: "Security &amp; limits",
+        # The output buffer is capped, so this run completes cleanly; the
+        # `:ok_or_limit` expectation also tolerates the 2s wall-clock backstop
+        # tripping on a slow runner rather than asserting a strict status.
+        expect: :ok_or_limit,
+        title: "Output flood",
+        blurb:
+          "Flooding print() can't exhaust memory either — captured output is capped and the rest is dropped.",
+        source: """
+        -- Print far more than the output buffer keeps (cap is 5,000 lines).
+        for i = 1, 6000 do
+          print("line " .. i)
+        end
+        return "done"
+        """,
+        chunk: ~LUA"""
+        for i = 1, 6000 do
+          print("line " .. i)
+        end
+        return "done"
+        """c
+      },
+      %{
         id: "error",
+        category: "Errors",
         title: "Compile error",
         blurb: "See the friendly compiler error path.",
         expect: :compile_error,
@@ -550,6 +802,7 @@ defmodule Website.LuaSandbox do
       },
       %{
         id: "runtime-error",
+        category: "Errors",
         title: "Runtime error",
         blurb: "Watch the VM blame the offending local by name, with a real stack trace.",
         expect: :runtime_error,
@@ -585,6 +838,22 @@ defmodule Website.LuaSandbox do
         """c
       }
     ]
+  end
+
+  # Display order for the playground's example categories.
+  @category_order ["Language", "Security &amp; limits", "Errors"]
+
+  @doc """
+  Returns examples grouped by category, in display order. Each group is a
+  map with `:category` and `:examples`, preserving `examples/0` order
+  within the group. Categories with no examples are omitted.
+  """
+  def examples_by_category do
+    by_category = Enum.group_by(examples(), & &1.category)
+
+    for category <- @category_order, examples = by_category[category], examples != nil do
+      %{category: category, examples: examples}
+    end
   end
 
   @doc """

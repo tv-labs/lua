@@ -141,19 +141,21 @@ defmodule Lua.VM.Stdlib.TableTest do
       assert {:ok, [20, 30, 40], _state} = VM.execute(proto, state)
     end
 
-    test "table.unpack rejects ranges with more than INT_MAX results" do
+    test "table.unpack rejects oversized result ranges before materialising" do
       # Lua 5.3 sort.lua line 48: `checkerror("too many results", unpack,
       # {}, 0, maxi)`. A huge `j` must raise up front rather than try to
-      # materialise the slice (which would hang the VM).
+      # materialise the slice (which would hang the VM). On the BEAM we
+      # share the `concat`/`move` element ceiling, so even a sub-INT_MAX
+      # range (which PUC would accept) is rejected before allocating.
       for code <- [
             "return table.unpack({}, 0, math.maxinteger)",
             "return table.unpack({}, 1, math.maxinteger)",
             "return table.unpack({}, math.mininteger, math.maxinteger)",
             "return table.unpack({}, 0, (1 << 31) - 1)",
-            # Element count exactly INT_MAX: `j - i == INT_MAX - 1`. PUC
-            # rejects this via the `lua_checkstack` arm, not the count
-            # overflow arm.
-            "return table.unpack({}, 1, (1 << 31) - 1)"
+            "return table.unpack({}, 1, (1 << 31) - 1)",
+            # A sub-INT_MAX count that PUC accepts but would still allocate
+            # hundreds of millions of nils on the BEAM and OOM the host.
+            "return table.unpack({}, 1, 500000000)"
           ] do
         assert_raise Lua.RuntimeException, ~r/too many results/, fn ->
           Lua.eval!(Lua.new(), code)

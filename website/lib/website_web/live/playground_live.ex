@@ -13,6 +13,7 @@ defmodule DemoWeb.PlaygroundLive do
       socket
       |> assign(:page_title, "Playground")
       |> assign(:examples, LuaSandbox.examples())
+      |> assign(:example_groups, LuaSandbox.examples_by_category())
       |> assign(:active_example, "hello")
       |> assign(:source, default_source("hello"))
       |> assign(:blocks, LuaSandbox.example_blocks("hello"))
@@ -171,6 +172,8 @@ defmodule DemoWeb.PlaygroundLive do
   end
 
   def handle_async(:lua_run, {:exit, _reason}, socket) do
+    # Only the wall-clock cancel reaches here now — a memory kill is
+    # contained inside `LuaSandbox.run/1` and returns a normal result.
     {:noreply,
      socket
      |> finish_lua_run()
@@ -287,19 +290,28 @@ defmodule DemoWeb.PlaygroundLive do
           </div>
         </div>
 
-        <div class="flex gap-2 overflow-x-auto pb-3 -mx-1 px-1 mb-3 scrollbar-thin">
-          <%= for ex <- @examples do %>
-            <button
-              phx-click="load-example"
-              phx-value-id={ex.id}
-              class={[
-                "btn btn-sm whitespace-nowrap",
-                @active_example == ex.id && "btn-primary",
-                @active_example != ex.id && "btn-outline"
-              ]}
-            >
-              {raw(ex.title)}
-            </button>
+        <div class="flex flex-col gap-2.5 mb-4">
+          <%= for group <- @example_groups do %>
+            <div class="flex flex-col sm:flex-row sm:items-center gap-x-3 gap-y-1.5">
+              <span class="text-[0.65rem] uppercase tracking-wider font-semibold text-base-content/40 sm:w-28 shrink-0">
+                {raw(group.category)}
+              </span>
+              <div class="flex flex-wrap gap-2">
+                <%= for ex <- group.examples do %>
+                  <button
+                    phx-click="load-example"
+                    phx-value-id={ex.id}
+                    class={[
+                      "btn btn-sm whitespace-nowrap",
+                      @active_example == ex.id && "btn-primary",
+                      @active_example != ex.id && "btn-outline"
+                    ]}
+                  >
+                    {raw(ex.title)}
+                  </button>
+                <% end %>
+              </div>
+            </div>
           <% end %>
         </div>
 
@@ -477,14 +489,14 @@ defmodule DemoWeb.PlaygroundLive do
                 <div class="text-xs uppercase text-base-content/50 mb-1">
                   Output before error
                 </div>
-                <pre class="whitespace-pre-wrap text-base-content/80"><%= @result.output %></pre>
+                <pre class="whitespace-pre-wrap text-base-content/80 max-h-80 overflow-y-auto scrollbar-thin"><%= @result.output %></pre>
               </div>
             <% end %>
           <% match?(%{status: :timeout}, @result) -> %>
             <div class="text-warning">{@result.error}</div>
           <% match?(%{status: :ok}, @result) -> %>
             <%= if @result.output != "" do %>
-              <pre class="whitespace-pre-wrap text-base-content/90"><%= @result.output %></pre>
+              <pre class="whitespace-pre-wrap text-base-content/90 max-h-80 overflow-y-auto scrollbar-thin"><%= @result.output %></pre>
             <% end %>
             <%= if @result.returns != [] do %>
               <div class={["mt-1", @result.output != "" && "border-t border-base-300/50 pt-2"]}>

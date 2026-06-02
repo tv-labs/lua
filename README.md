@@ -189,10 +189,33 @@ any of them with `mix run examples/<name>.exs`:
   walkthrough of the embedding patterns.
 - The [`~LUA` sigil and Mix tasks](https://github.com/tv-labs/lua/blob/main/guides/mix_tasks.md)
   guide covers compile-time validation and tooling.
+- The [Security and sandboxing](guides/sandboxing.md) guide covers the sandbox,
+  allocation guards, recursion limits, and bounding CPU and memory.
 
 > #### Lua the Elixir library vs Lua the language {: .info}
 > When referring to this library, `Lua` is stylized as a link. References to
 > Lua the language are in plaintext and not linked.
+
+## Security and sandboxing
+
+`Lua` is built to run untrusted scripts. By default, `Lua.new/1` installs
+a sandbox that blocks the dangerous standard-library paths (`io`, `file`,
+`os.execute`/`exit`/`getenv`, `package`, `require`, `load`, …), and the VM
+guards against allocation-bomb denial-of-service by refusing oversized
+`string.rep`, `table.unpack`/`concat`/`move`, and string concatenations
+before they allocate.
+
+```elixir
+# os.exit is sandboxed by default — calling it raises (catchable)
+iex> {[false, message], _} = Lua.eval!(Lua.new(), "return pcall(os.exit)")
+iex> message =~ "sandboxed"
+true
+```
+
+Capability sandboxing (`:sandboxed`, `:exclude`, `Lua.sandbox/2`),
+recursion limits (`:max_call_depth`), the built-in allocation guards, and
+the host-level pattern for bounding CPU time and total memory are all
+covered in the [Security and sandboxing](guides/sandboxing.md) guide.
 
 ## Compatibility and credits
 
