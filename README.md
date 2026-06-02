@@ -130,6 +130,26 @@ To allow a specific operation, exclude it from the sandbox explicitly:
     iex> is_binary(value)
     true
 
+### Resource limits
+
+Sandboxing controls *which* functions a script may call, but it does not stop
+a script from spinning forever or recursing without bound. Two options on
+`Lua.new/1` give you deterministic limits without wrapping each evaluation in a
+host `Task` plus a wall-clock timeout. Both default to `:infinity` (no limit)
+and raise catchable runtime errors, so `pcall` recovers from them in-band:
+
+- `:max_call_depth` caps nested function-call depth; exceeding it raises
+  `"stack overflow"`.
+- `:max_steps` caps the number of VM instructions a single evaluation may
+  execute; exceeding it raises `"instruction budget exceeded"`.
+
+    iex> lua = Lua.new(max_steps: 1000)
+    iex> {[false, message], _lua} = Lua.eval!(lua, ~S[return pcall(function() while true do end end)])
+    iex> message =~ "instruction budget exceeded"
+    true
+
+See the [Sandboxing guide](guides/examples/sandboxing.livemd) for details.
+
 ### Metatables and metamethods
 
 Full metamethod dispatch is supported (`__index`, `__newindex`, `__call`,
