@@ -7,7 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v1.0.0-rc.1] - 2026-06-02
+
+The second release candidate for `1.0.0`. It builds on rc.0 with a new
+`os` and `utf8` standard library, richer `debug` and error introspection,
+a sizeable `string.format` and `table` performance pass, and a batch of
+correctness fixes around upvalue lifetimes and Lua 5.3 semantics. The
+public API is unchanged from rc.0.
+
+### Performance
+
+A focused pass on the two hottest stdlib areas and the VM dispatcher.
+Numbers are pre-compiled-chunk throughput vs. rc.0, full Benchee runs on
+the same machine (Luerl and PUC-Lua used as drift controls, ±3%):
+
+- **`string.format` rewritten around iolist accumulation** — literal runs
+  and padding are appended to an iolist instead of repeatedly concatenating
+  binaries, format flags are parsed once and dispatched on the integer
+  specifier, and float conversion goes through `io_lib.format` (#299, #317,
+  #319, #316). The literal-heavy path is **+143%** (now ~2.7× faster than
+  Luerl); width-flagged specifiers **+83%**; many-specifier strings **+26%**.
+- **Plain-table `table.sort` / `table.concat` fast paths** for the common
+  array-like case, with batched write-back in the sort path (#299, #318).
+  `table.sort` is **+35%** at n=1000; `table.concat`-based string building
+  is **+66%**.
+- **Expanded VM dispatcher coverage** to closures, varargs, multiple
+  returns, numeric/generic loops, `self` method calls, concat, and table
+  opcodes (#275, #277). Object-oriented method dispatch is **+41%** (now
+  faster than Luerl).
+- **Batched table-literal construction** through `Table.put_many/2` in a
+  single pass instead of element-by-element (#321).
+
+### Added
+- `os` standard library, sandboxed: `time`, `clock`, `date`, `difftime`,
+  `getenv` (no-op), and friends, with host-affecting calls neutered (#289).
+- `utf8` standard library, plus aligned integer-arithmetic error wording
+  (#258).
+- `debug` introspection: upvalue name tracking with `debug.getupvalue` /
+  `debug.setupvalue` (#285), and `debug.getinfo` now populates `name` /
+  `namewhat` from the call site (#290).
+- Position captures `()` in patterns across `find` / `match` / `gmatch` /
+  `gsub` (#288).
+- Configurable maximum call depth to bound recursion (#283).
+- Allocation-bomb DoS hardening with documented sandboxing limits (#305).
+- Structured error data on runtime errors (#246); arithmetic and bitwise
+  type errors now thread operand hints into the message (#270).
+
+### Changed
+- Rendered errors now lead with the source location, and ANSI colour is
+  gated on whether output is a TTY (#304).
+- Broader Lua 5.3 official test suite coverage: triaged and promoted
+  `literals` / `goto` / `events` / `nextvar`, and narrowed the remaining
+  skips (`pm`, `gc`, `constructs`) to precise sub-ranges (#251, #282, #287,
+  #294, #295).
+- README rewritten for 1.0 positioning with a quickstart and tour (#298),
+  runnable embedding examples under `examples/` (#300), and `@spec` / type
+  definitions across the public API (#301).
+
 ### Fixed
+- Open upvalues are now closed at the exit of `do`, `if`, `while`, `for`,
+  and `repeat` blocks (#286, #303), and the caller's `open_upvalues` are
+  restored after a nested execution returns (#245).
 - `require` no longer leaks the loaded module's `open_upvalues` map back
   to the calling chunk. Loading a module whose body created closures over
   its own top-level locals could alias the caller's locals to stale inner
@@ -16,6 +76,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `local x = require(...)` → many `local function` defs → `x:method(...)`.
   As a side effect, `Lua.call_function/3` (public API) now preserves the
   caller's `open_upvalues` across calls (#244).
+- Integer divide and modulo by zero now match PUC-Lua semantics (#292).
+- `table.unpack` rejects oversized ranges instead of attempting a huge
+  allocation (#293).
+- `gsub` validates its replacement string and value (#291).
+- A parenthesised call or vararg now adjusts to a single value (#278).
+- Function-declaration head names resolve during scope analysis (#274).
+- `obj:method(...)` calls expand multiple values in the argument list
+  (#248).
+- `require()` converts dotted module names to path separators (#242).
+
+### Known issues
+- **Deep recursion is ~25% slower than rc.0.** The configurable call-depth
+  limit (#283) adds per-call bookkeeping that recursion-dense workloads
+  (e.g. naive `fib(30)`) pay in full. Workloads that do real work per call
+  are unaffected or faster. This is a deliberate safety/speed tradeoff for
+  the RC and will be addressed before `1.0.0` final.
 
 ## [v1.0.0-rc.0] - 2026-05-26
 
@@ -182,7 +258,8 @@ API is intended to be stable. Please report any regressions before final.
 - Upgrade to Luerl 1.4.1
 - Tables must now be explicitly decoded when receiving as arguments `deflua` and other Elixir callbacks
 
-[unreleased]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.0...HEAD
+[unreleased]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.1...HEAD
+[1.0.0-rc.1]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.0...v1.0.0-rc.1
 [1.0.0-rc.0]: https://github.com/tv-labs/lua/compare/v0.4.0...v1.0.0-rc.0
 [0.4.0]: https://github.com/tv-labs/lua/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/tv-labs/lua/compare/v0.2.1...v0.3.0
