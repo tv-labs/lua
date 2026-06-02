@@ -9,7 +9,7 @@ defmodule Lua.VM.State do
             # Call depth tracked as an O(1) counter that moves in lockstep
             # with `call_stack` — `length(call_stack)` would be O(depth) per
             # call. `max_call_depth` bounds it; `:infinity` (the default)
-            # means no limit. See `check_call_depth!/1`.
+            # means no limit. See `next_call_depth!/1`.
             call_depth: 0,
             max_call_depth: :infinity,
             metatables: %{},
@@ -55,21 +55,28 @@ defmodule Lua.VM.State do
   end
 
   @doc """
-  Guards against unbounded recursion.
+  Returns the next call depth, guarding against unbounded recursion.
+
+  Call it immediately before pushing a frame onto `call_stack`: it both
+  enforces the limit and computes the incremented `call_depth` in a
+  single pass, so callers never read `call_depth` a second time to bump
+  it.
 
   Raises a Lua `"stack overflow"` runtime error when the call depth has
-  reached `max_call_depth`. Call it immediately before pushing a frame
-  onto `call_stack`.
+  already reached `max_call_depth`. When `max_call_depth` is `:infinity`
+  (the default) the limit comparison is skipped — the only work is the
+  integer increment.
 
-  No-op when depth is under the limit or when `max_call_depth` is
-  `:infinity` (the default). The clauses are ordered so both common cases
-  resolve in a single function-head match with no struct rebuild.
+  The hot call/return paths in `Lua.VM.Dispatcher` and `Lua.VM.Executor`
+  inline this same comparison directly rather than pay a cross-module
+  call on every Lua call. This function is the authoritative definition
+  they mirror, and the entry point for any other caller.
   """
-  @spec check_call_depth!(t()) :: :ok
-  def check_call_depth!(%__MODULE__{max_call_depth: :infinity}), do: :ok
-  def check_call_depth!(%__MODULE__{call_depth: depth, max_call_depth: max}) when depth < max, do: :ok
+  @spec next_call_depth!(t()) :: pos_integer()
+  def next_call_depth!(%__MODULE__{call_depth: depth, max_call_depth: :infinity}), do: depth + 1
+  def next_call_depth!(%__MODULE__{call_depth: depth, max_call_depth: max}) when depth < max, do: depth + 1
 
-  def check_call_depth!(%__MODULE__{call_stack: call_stack}) do
+  def next_call_depth!(%__MODULE__{call_stack: call_stack}) do
     raise Lua.VM.RuntimeError, value: "stack overflow", call_stack: call_stack
   end
 
