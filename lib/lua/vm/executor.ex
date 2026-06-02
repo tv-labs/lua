@@ -132,7 +132,7 @@ defmodule Lua.VM.Executor do
   @spec call_function(term(), list(), State.t()) :: {list(), State.t()}
   def call_function({:lua_closure, callee_proto, callee_upvalues}, args, state) do
     callee_regs =
-      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 16)
+      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count))
 
     callee_regs =
       args
@@ -1111,8 +1111,13 @@ defmodule Lua.VM.Executor do
       {:lua_closure, callee_proto, callee_upvalues} ->
         param_count = callee_proto.param_count
 
+        # No +N buffer: codegen reports the honest peak register, and the
+        # only opcodes that can write past it (multi-return result write-back
+        # in `do_frame_return`/`continue_after_call`, unbounded `:vararg`)
+        # grow the tuple lazily via `ensure_regs_capacity/2`. This mirrors
+        # the dispatcher's `init_regs/2`, which has always run with no buffer.
         callee_regs =
-          Tuple.duplicate(nil, max(callee_proto.max_registers, param_count) + 16)
+          Tuple.duplicate(nil, max(callee_proto.max_registers, param_count))
 
         # Copy directly from caller regs[base+1..] into callee regs[0..param_count-1].
         # Fast path for the common 0/1/2-arg cases avoids the loop overhead.
@@ -1247,12 +1252,19 @@ defmodule Lua.VM.Executor do
 
     {regs, state} =
       if count == 0 do
+        # Unbounded vararg expansion: `length(varargs)` is runtime-dynamic and
+        # can exceed the statically reserved register window, so grow lazily
+        # before writing — the same contract the dispatcher's `write_varargs/4`
+        # honors now that no fixed register buffer absorbs the overflow.
+        n = length(varargs)
+        regs = ensure_regs_capacity(regs, base + n)
+
         regs =
           Enum.reduce(Enum.with_index(varargs), regs, fn {val, i}, r ->
             put_elem(r, base + i, val)
           end)
 
-        {regs, %{state | multi_return_count: length(varargs)}}
+        {regs, %{state | multi_return_count: n}}
       else
         regs =
           Enum.reduce(0..(count - 1), regs, fn i, r ->
@@ -2213,7 +2225,7 @@ defmodule Lua.VM.Executor do
 
   defp call_value({:lua_closure, callee_proto, callee_upvalues}, args, _proto, state, _line) do
     callee_regs =
-      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count) + 16)
+      Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count))
 
     callee_regs =
       args
