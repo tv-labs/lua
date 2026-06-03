@@ -28,7 +28,6 @@ defmodule Lua.VM.Dispatcher do
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Table
-  alias Lua.VM.Value
 
   # Mirror of the interpreter's concat ceiling, inlined as a compile-time
   # constant so the binary-binary fast path stays a single comparison. See
@@ -812,7 +811,7 @@ defmodule Lua.VM.Dispatcher do
               nil ->
                 # No __len possible — Lua 5.3 §3.4.7: # on a table
                 # without __len is the border length of the data map.
-                len = Lua.VM.Table.length(table)
+                len = Table.length(table)
                 regs = :erlang.setelement(dest + 1, regs, len)
                 dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 

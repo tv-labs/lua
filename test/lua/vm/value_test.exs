@@ -2,6 +2,7 @@ defmodule Lua.VM.ValueTest do
   use ExUnit.Case, async: true
 
   alias Lua.VM.State
+  alias Lua.VM.Table
   alias Lua.VM.Value
 
   defp new_state, do: State.new()
@@ -101,9 +102,9 @@ defmodule Lua.VM.ValueTest do
       {{:tref, id}, state} = Value.encode(["a", "b", "c"], new_state())
 
       table = Map.fetch!(state.tables, id)
-      assert table.data[1] == "a"
-      assert table.data[2] == "b"
-      assert table.data[3] == "c"
+      assert Table.get(table, 1) == "a"
+      assert Table.get(table, 2) == "b"
+      assert Table.get(table, 3) == "c"
     end
 
     test "encodes empty list" do
@@ -125,7 +126,7 @@ defmodule Lua.VM.ValueTest do
       {{:tref, id}, state} = Value.encode([%{x: 1}], new_state())
 
       table = Map.fetch!(state.tables, id)
-      {:tref, inner_id} = table.data[1]
+      {:tref, inner_id} = Table.get(table, 1)
       inner_table = Map.fetch!(state.tables, inner_id)
       assert inner_table.data["x"] == 1
     end

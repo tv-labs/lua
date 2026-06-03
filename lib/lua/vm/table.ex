@@ -153,17 +153,20 @@ defmodule Lua.VM.Table do
   end
 
   defp delete(%__MODULE__{arr_n: n} = table, key) when is_integer(key) and key >= 1 and key <= n do
-    cond do
-      key == n ->
-        # Clearing the border tail — shrink the contiguous run, stepping
-        # back over any already-nil slots.
-        %{table | arr: :array.set(key - 1, nil, table.arr)} |> shrink_border()
-
-      true ->
-        # Clearing inside the run punches a hole; keep it as a nil slot so
-        # length still reports the run up to the first hole on next probe.
-        %{table | arr: :array.set(key - 1, nil, table.arr)}
-    end
+    # Clear the slot but keep `arr_n` as the high-water bound of the
+    # allocated array region. Leaving the nil hole (rather than shrinking
+    # the border) preserves two invariants that iteration relies on:
+    #
+    #   * `next_entry/2` can still tell a former array key (`key <= arr_n`,
+    #     resume in-array) from a key that was never present (`key > arr_n`,
+    #     raise "invalid key to next") — even after the tail is cleared
+    #     mid-iteration, as Lua 5.3 §6.1 requires.
+    #   * Re-inserting the same key (`t[k] = nil; t[k] = v`) lands back in
+    #     the same array slot, so the dense ordering is stable.
+    #
+    # `length/1` derives the Lua border by scanning to the first hole, so a
+    # cleared tail still reports the correct `#t`.
+    %{table | arr: :array.set(key - 1, nil, table.arr)}
   end
 
   defp delete(%__MODULE__{data: data, dead: dead} = table, key) do
@@ -171,15 +174,6 @@ defmodule Lua.VM.Table do
       %{table | data: Map.delete(data, key), dead: Map.put(dead, key, true)}
     else
       table
-    end
-  end
-
-  defp shrink_border(%__MODULE__{arr_n: 0} = table), do: table
-
-  defp shrink_border(%__MODULE__{arr: arr, arr_n: n} = table) do
-    case :array.get(n - 1, arr) do
-      nil -> shrink_border(%{table | arr_n: n - 1})
-      _ -> table
     end
   end
 
@@ -257,8 +251,17 @@ defmodule Lua.VM.Table do
     :array.get(key - 1, arr)
   end
 
+  def get(%__MODULE__{arr: arr, arr_n: n, data: data}, key) when is_float(key) do
+    # An integer-valued float (`t[1.0]`) collapses to its integer slot and
+    # may live in the dense array; everything else stays in the hash.
+    case normalize_key(key) do
+      k when is_integer(k) and k >= 1 and k <= n -> :array.get(k - 1, arr)
+      k -> Map.get(data, k)
+    end
+  end
+
   def get(%__MODULE__{data: data}, key) do
-    Map.get(data, normalize_key(key))
+    Map.get(data, key)
   end
 
   @doc """
@@ -278,8 +281,15 @@ defmodule Lua.VM.Table do
     :array.get(key - 1, arr) != nil
   end
 
+  def has_key?(%__MODULE__{arr: arr, arr_n: n, data: data}, key) when is_float(key) do
+    case normalize_key(key) do
+      k when is_integer(k) and k >= 1 and k <= n -> :array.get(k - 1, arr) != nil
+      k -> Map.has_key?(data, k)
+    end
+  end
+
   def has_key?(%__MODULE__{data: data}, key) do
-    Map.has_key?(data, normalize_key(key))
+    Map.has_key?(data, key)
   end
 
   @doc """
@@ -295,11 +305,35 @@ defmodule Lua.VM.Table do
   probing the hash for sparse integers parked beyond the border.
   """
   @spec length(t()) :: non_neg_integer()
-  def length(%__MODULE__{arr_n: n, data: data}) when map_size(data) == 0, do: n
+  def length(%__MODULE__{arr_n: 0, data: data}), do: probe_hash_length(data, 1, 0)
 
-  def length(%__MODULE__{arr_n: n, data: data}) do
-    probe_hash_length(data, n + 1, n)
+  def length(%__MODULE__{arr: arr, arr_n: n, data: data}) do
+    case array_border(arr, n) do
+      # No hole inside the array region — the border may extend into sparse
+      # integer keys parked in the hash, so keep probing from arr_n + 1.
+      ^n -> probe_hash_length(data, n + 1, n)
+      # A nil hole inside the array region caps the border early.
+      border -> border
+    end
   end
+
+  # Returns the largest `b <= n` such that array slots `1..b` are all
+  # non-nil (i.e. the Lua sequence border within the dense region). A
+  # full region returns `n`; a leading hole at slot 1 returns 0.
+  defp array_border(_arr, 0), do: 0
+
+  defp array_border(arr, n) do
+    array_border(arr, 1, n)
+  end
+
+  defp array_border(arr, i, n) when i <= n do
+    case :array.get(i - 1, arr) do
+      nil -> i - 1
+      _ -> array_border(arr, i + 1, n)
+    end
+  end
+
+  defp array_border(_arr, _i, n), do: n
 
   defp probe_hash_length(data, probe, last) do
     if Map.has_key?(data, probe) do
@@ -345,24 +379,22 @@ defmodule Lua.VM.Table do
   def next_entry(%__MODULE__{arr_n: n} = table, key) do
     key = normalize_key(key)
 
-    cond do
-      is_integer(key) and key >= 1 and key <= n ->
-        case first_array_live(table, key + 1) do
-          nil -> first_live(merged_order(table), table.data)
-          pair -> pair
-        end
-
-      true ->
-        case advance_past(merged_order(table), key) do
-          :not_found -> :invalid_key
-          remaining -> first_live(remaining, table.data)
-        end
+    if is_integer(key) and key >= 1 and key <= n do
+      case first_array_live(table, key + 1) do
+        nil -> first_live(merged_order(table), table.data)
+        pair -> pair
+      end
+    else
+      case advance_past(merged_order(table), key) do
+        :not_found -> :invalid_key
+        remaining -> first_live(remaining, table.data)
+      end
     end
   end
 
   defp first_array_live(%__MODULE__{arr_n: n}, i) when i > n, do: nil
 
-  defp first_array_live(%__MODULE__{arr: arr, arr_n: n} = table, i) do
+  defp first_array_live(%__MODULE__{arr: arr} = table, i) do
     case :array.get(i - 1, arr) do
       nil -> first_array_live(table, i + 1)
       v -> {i, v}
