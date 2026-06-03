@@ -100,15 +100,43 @@ defmodule Lua do
       iex> {[false, message], _lua} = Lua.eval!(lua, "local function f() return f() end return pcall(f)")
       iex> message =~ "stack overflow"
       true
+
+  * `:max_string_bytes` - (default 256 MiB) ceiling for any single string the VM will build,
+    whether via `..`, `string.rep`, or a `load` reader. An oversized result raises a catchable
+    `"resulting string too large"` error — the size is computed *before* allocating, so the
+    bomb is refused rather than detected after the fact. Accepts a positive integer.
+
+    When running the VM inside a process capped with `:max_heap_size`, set this comfortably
+    below the heap cap: the default ceiling permits strings large enough to trip a smaller
+    heap cap mid-allocation, where the kill depends on garbage-collection timing rather than
+    a deterministic refusal.
+
+      iex> lua = Lua.new(max_string_bytes: 1024)
+      iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(string.rep, \\"x\\", 2048)")
+      iex> message =~ "resulting string too large"
+      true
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
-    opts = Keyword.validate!(opts, sandboxed: @default_sandbox, exclude: [], debug: false, max_call_depth: :infinity)
+    opts =
+      Keyword.validate!(opts,
+        sandboxed: @default_sandbox,
+        exclude: [],
+        debug: false,
+        max_call_depth: :infinity,
+        max_string_bytes: Lua.VM.Limits.max_string_bytes()
+      )
+
     exclude = Keyword.fetch!(opts, :exclude)
     debug = Keyword.fetch!(opts, :debug)
     max_call_depth = validate_max_call_depth!(Keyword.fetch!(opts, :max_call_depth))
+    max_string_bytes = validate_max_string_bytes!(Keyword.fetch!(opts, :max_string_bytes))
 
-    state = %{Lua.VM.Stdlib.install(State.new()) | max_call_depth: max_call_depth}
+    state = %{
+      Lua.VM.Stdlib.install(State.new())
+      | max_call_depth: max_call_depth,
+        max_string_bytes: max_string_bytes
+    }
 
     opts
     |> Keyword.fetch!(:sandboxed)
@@ -122,6 +150,13 @@ defmodule Lua do
   defp validate_max_call_depth!(other) do
     raise ArgumentError,
           ":max_call_depth must be a positive integer or :infinity, got: #{inspect(other)}"
+  end
+
+  defp validate_max_string_bytes!(bytes) when is_integer(bytes) and bytes > 0, do: bytes
+
+  defp validate_max_string_bytes!(other) do
+    raise ArgumentError,
+          ":max_string_bytes must be a positive integer, got: #{inspect(other)}"
   end
 
   @doc """

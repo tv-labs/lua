@@ -216,7 +216,7 @@ defmodule Lua.VM.Stdlib.String do
         # Compute the result size from the count *before* building it, so an
         # oversized request fails with a catchable error instead of trying to
         # allocate (and OOM the host on) a multi-petabyte binary.
-        Limits.check_string_size!(n * byte_size(str) + (n - 1) * byte_size(sep))
+        Limits.check_string_size!(n * byte_size(str) + (n - 1) * byte_size(sep), state.max_string_bytes)
         Enum.map_join(1..n, sep, fn _ -> str end)
       end
 
@@ -794,7 +794,7 @@ defmodule Lua.VM.Stdlib.String do
           # reads don't mutate state, so we pass it through unchanged.
           fn [match | _], st ->
             table = State.get_table(st, repl)
-            value = Map.get(table.data, match, match)
+            value = Lua.VM.Table.get(table, match) || match
             {value, st}
           end
 

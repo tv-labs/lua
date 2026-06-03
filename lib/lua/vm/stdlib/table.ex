@@ -225,7 +225,7 @@ defmodule Lua.VM.Stdlib.Table do
         table.metatable == nil ->
           elements =
             Enum.map(i..j//1, fn idx ->
-              concat_value(Table.get_data(table.data, idx), idx)
+              concat_value(Table.get(table, idx), idx)
             end)
 
           {elements, state}
@@ -305,7 +305,7 @@ defmodule Lua.VM.Stdlib.Table do
   end
 
   defp sort_plain(id, table, len, comp, state) do
-    values = Enum.map(1..len//1, fn i -> Table.get_data(table.data, i) end)
+    values = Enum.map(1..len//1, fn i -> Table.get(table, i) end)
 
     {sorted, state} = sort_values(values, comp, state)
 
@@ -315,15 +315,13 @@ defmodule Lua.VM.Stdlib.Table do
 
     # Sort only reorders the values under keys 1..len; every other key
     # (string fields, sparse integers > len, etc.) must survive untouched,
-    # matching Lua 5.3 table.sort. Keys 1..len already exist in `data` and
-    # in `order`, so merging the sorted slice over the existing map changes
-    # values in place without disturbing order/dead or any other key.
-    sorted_slice =
-      sorted
-      |> Enum.with_index(1)
-      |> Map.new(fn {val, idx} -> {idx, val} end)
+    # matching Lua 5.3 table.sort. Keys 1..len occupy the dense array
+    # border, so writing the sorted slice back through the split-aware
+    # `put_many/2` rewrites those array slots in place without disturbing
+    # the hash portion or any other key.
+    pairs = Enum.with_index(sorted, fn val, idx -> {idx + 1, val} end)
 
-    updated = %{table | data: Map.merge(table.data, sorted_slice)}
+    updated = Table.put_many(table, pairs)
 
     {[], %{state | tables: Map.put(state.tables, id, updated)}}
   end

@@ -42,13 +42,16 @@ defmodule Lua.VM.Limits do
 
   @doc """
   Asserts that an as-yet-unallocated string of `bytes` bytes is within the
-  ceiling. Raises a catchable "resulting string too large" runtime error
-  otherwise.
+  given ceiling (a state's `max_string_bytes`, defaulting to the practical
+  bound here). Raises a catchable "resulting string too large" runtime
+  error otherwise.
   """
-  @spec check_string_size!(integer()) :: :ok
-  def check_string_size!(bytes) when is_integer(bytes) and bytes <= @max_string_bytes, do: :ok
+  @spec check_string_size!(integer(), pos_integer()) :: :ok
+  def check_string_size!(bytes, max \\ @max_string_bytes)
 
-  def check_string_size!(_bytes) do
+  def check_string_size!(bytes, max) when is_integer(bytes) and bytes <= max, do: :ok
+
+  def check_string_size!(_bytes, _max) do
     raise RuntimeError, value: "resulting string too large"
   end
 

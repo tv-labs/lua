@@ -23,17 +23,14 @@ defmodule Lua.VM.Dispatcher do
   alias Lua.Compiler.Prototype
   alias Lua.VM.Executor
   alias Lua.VM.InternalError
-  alias Lua.VM.Limits
   alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Table
-  alias Lua.VM.Value
 
   # Mirror of the interpreter's concat ceiling, inlined as a compile-time
   # constant so the binary-binary fast path stays a single comparison. See
   # `Lua.VM.Executor.concat_checked/2` for the rationale.
-  @max_string_bytes Limits.max_string_bytes()
 
   # Opcode tags. These must stay in lockstep with `Lua.Compiler.Bytecode`.
   # The module-attribute form lets each case branch match a constant
@@ -720,6 +717,29 @@ defmodule Lua.VM.Dispatcher do
         key = :erlang.element(key_reg + 1, regs)
 
         case table_val do
+          {:tref, id} when is_integer(key) and key >= 1 ->
+            table = :erlang.map_get(id, state.tables)
+
+            case Table.get(table, key) do
+              nil ->
+                case :erlang.map_get(:metatable, table) do
+                  nil ->
+                    regs = :erlang.setelement(dest + 1, regs, nil)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+                  _ ->
+                    {value, state} =
+                      Executor.dispatcher_get_table(table_val, key, state, proto, name_hint)
+
+                    regs = :erlang.setelement(dest + 1, regs, value)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+                end
+
+              value ->
+                regs = :erlang.setelement(dest + 1, regs, value)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+            end
+
           {:tref, id} when is_integer(key) or is_binary(key) ->
             table = :erlang.map_get(id, state.tables)
             data = :erlang.map_get(:data, table)
@@ -789,7 +809,7 @@ defmodule Lua.VM.Dispatcher do
               nil ->
                 # No __len possible — Lua 5.3 §3.4.7: # on a table
                 # without __len is the border length of the data map.
-                len = Value.sequence_length(:erlang.map_get(:data, table))
+                len = Table.length(table)
                 regs = :erlang.setelement(dest + 1, regs, len)
                 dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
@@ -1103,7 +1123,7 @@ defmodule Lua.VM.Dispatcher do
         right = :erlang.element(b + 1, regs)
 
         if is_binary(left) and is_binary(right) do
-          if byte_size(left) + byte_size(right) > @max_string_bytes do
+          if byte_size(left) + byte_size(right) > state.max_string_bytes do
             raise RuntimeError, value: "resulting string too large"
           end
 

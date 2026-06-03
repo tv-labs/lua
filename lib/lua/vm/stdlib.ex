@@ -260,7 +260,7 @@ defmodule Lua.VM.Stdlib do
   # rawget(table, key) — get without metamethods
   defp lua_rawget([{:tref, id}, key | _], state) do
     table = Map.fetch!(state.tables, id)
-    {[Table.get_data(table.data, key)], state}
+    {[Table.get(table, key)], state}
   end
 
   # rawset(table, key, value) — set without metamethods
@@ -277,7 +277,7 @@ defmodule Lua.VM.Stdlib do
   # values, which broke `pcall(rawlen, ...)` patterns in events.lua.
   defp lua_rawlen([{:tref, id} | _], state) do
     table = Map.fetch!(state.tables, id)
-    {[Value.sequence_length(table.data)], state}
+    {[Table.length(table)], state}
   end
 
   defp lua_rawlen([v | _], state) when is_binary(v) do
@@ -483,7 +483,7 @@ defmodule Lua.VM.Stdlib do
         # pair: an oversized reader is a DoS attempt, not a recoverable
         # syntax error, so we surface it as a catchable runtime error
         # (caught by `pcall`) instead of a quiet load failure.
-        Limits.check_string_size!(size + byte_size(piece))
+        Limits.check_string_size!(size + byte_size(piece), state.max_string_bytes)
         collect_reader_chunks(reader, state, [piece | acc], size + byte_size(piece))
 
       [bad | _] ->

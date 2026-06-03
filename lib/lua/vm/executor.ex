@@ -14,7 +14,6 @@ defmodule Lua.VM.Executor do
 
   alias Lua.VM.Dispatcher
   alias Lua.VM.InternalError
-  alias Lua.VM.Limits
   alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
@@ -356,7 +355,7 @@ defmodule Lua.VM.Executor do
       case value do
         {:tref, id} ->
           table = Map.fetch!(state.tables, id)
-          Value.sequence_length(table.data)
+          Table.length(table)
 
         v when is_binary(v) ->
           byte_size(v)
@@ -420,7 +419,7 @@ defmodule Lua.VM.Executor do
     src = proto.source
 
     try_binary_metamethod("__concat", left, right, state, fn ->
-      concat_checked(concat_coerce(left, 0, src), concat_coerce(right, 0, src))
+      concat_checked(concat_coerce(left, 0, src), concat_coerce(right, 0, src), state.max_string_bytes)
     end)
   end
 
@@ -1365,12 +1364,12 @@ defmodule Lua.VM.Executor do
     # also concatenate without metamethods.
     cond do
       is_binary(left) and is_binary(right) ->
-        regs = put_elem(regs, dest, concat_checked(left, right))
+        regs = put_elem(regs, dest, concat_checked(left, right, state.max_string_bytes))
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
       (is_binary(left) or is_number(left)) and (is_binary(right) or is_number(right)) ->
         src = proto.source
-        result = concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src))
+        result = concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src), state.max_string_bytes)
         regs = put_elem(regs, dest, result)
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
@@ -1379,7 +1378,7 @@ defmodule Lua.VM.Executor do
 
         {result, new_state} =
           try_binary_metamethod("__concat", left, right, state, fn ->
-            concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src))
+            concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src), state.max_string_bytes)
           end)
 
         regs = put_elem(regs, dest, result)
@@ -1641,7 +1640,7 @@ defmodule Lua.VM.Executor do
         case value do
           {:tref, id} ->
             table = Map.fetch!(state.tables, id)
-            Value.sequence_length(table.data)
+            Table.length(table)
 
           v when is_binary(v) ->
             byte_size(v)
@@ -1682,10 +1681,30 @@ defmodule Lua.VM.Executor do
     key = elem(regs, key_reg)
 
     case table_val do
+      {:tref, id} when is_integer(key) and key >= 1 ->
+        # Split-storage fast path: dense positive integers live in the array.
+        table = :erlang.map_get(id, state.tables)
+
+        case Table.get(table, key) do
+          nil ->
+            case :erlang.map_get(:metatable, table) do
+              nil ->
+                regs = put_elem(regs, dest, nil)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+              _ ->
+                {value, state} = index_value(table_val, key, state, line, proto.source, name_hint)
+                regs = put_elem(regs, dest, value)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+            end
+
+          value ->
+            regs = put_elem(regs, dest, value)
+            do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+        end
+
       {:tref, id} when is_integer(key) or is_binary(key) ->
-        # Fast path mirroring get_field: integer/string key on a tref. Skip
-        # normalize_key (no-op for these) and the full index_value pipeline
-        # when the entry is present or no metatable is set.
+        # Non-positive integer / string key: read straight from the hash map.
         table = :erlang.map_get(id, state.tables)
 
         case :erlang.map_get(:data, table) do
@@ -2176,16 +2195,15 @@ defmodule Lua.VM.Executor do
   # in one BIF call — faster than the GC-time `max_heap_size` check can
   # react. Guard the size deterministically here, matching the Layer A
   # stdlib checks, so the loop fails with a catchable error long before it
-  # threatens the host. `byte_size/1` is O(1), so this is cheap on the hot
-  # path. Compile-time constant; no per-call dispatch into `Limits`.
-  @max_string_bytes Limits.max_string_bytes()
-
-  @compile {:inline, concat_checked: 2}
-  defp concat_checked(left, right) when byte_size(left) + byte_size(right) <= @max_string_bytes do
+  # threatens the host. `byte_size/1` is O(1) and the ceiling is a struct
+  # field read (`state.max_string_bytes`, settable via `Lua.new/1`), so
+  # this stays cheap on the hot path.
+  @compile {:inline, concat_checked: 3}
+  defp concat_checked(left, right, max) when byte_size(left) + byte_size(right) <= max do
     left <> right
   end
 
-  defp concat_checked(_left, _right) do
+  defp concat_checked(_left, _right, _max) do
     raise RuntimeError, value: "resulting string too large"
   end
 
@@ -2297,7 +2315,7 @@ defmodule Lua.VM.Executor do
 
     table = Map.fetch!(state.tables, id)
 
-    case Table.get_data(table.data, key) do
+    case Table.get(table, key) do
       nil ->
         case table.metatable do
           nil ->
@@ -2356,7 +2374,7 @@ defmodule Lua.VM.Executor do
         %{state | tables: Map.put(state.tables, id, updated)}
 
       {:tref, mt_id} ->
-        if Table.has_data?(table.data, key) do
+        if Table.has_key?(table, key) do
           updated = Table.put(table, key, value)
           %{state | tables: Map.put(state.tables, id, updated)}
         else
@@ -2395,7 +2413,7 @@ defmodule Lua.VM.Executor do
       try_unary_metamethod("__len", tref, state, fn ->
         {:tref, id} = tref
         table = Map.fetch!(state.tables, id)
-        Value.sequence_length(table.data)
+        Table.length(table)
       end)
 
     case raw do

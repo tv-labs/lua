@@ -264,10 +264,12 @@ defmodule Lua.VM.Stdlib.TableTest do
       assert [3, 1, 2, 3] = run!(code)
     end
 
-    test "clearing a constructor key to nil is a hole, not a reorder" do
-      # Backfill five keys, clear one in the middle, then re-add it. The
-      # revived key counts as a fresh insertion and moves to the end of
-      # iteration order — identical to the per-`put` loop's dead-key revival.
+    test "clearing a dense integer key to nil and re-adding keeps its array slot" do
+      # Backfill five dense integer keys, clear one in the middle, then
+      # re-add it. Dense positive integers live in the array, so clearing a
+      # slot leaves a hole and re-adding fills the same slot — iteration
+      # stays in index order. This matches reference Lua 5.3, where these
+      # keys all live in the array part and a revived key keeps its index.
       code = """
       local t = {1, 2, 3, 4, 5}
       t[3] = nil
@@ -279,7 +281,7 @@ defmodule Lua.VM.Stdlib.TableTest do
       return table.concat(keys, ",")
       """
 
-      assert ["1,2,4,5,3"] = run!(code)
+      assert ["1,2,3,4,5"] = run!(code)
     end
 
     test "an overwritten constructor slot keeps its original position" do
