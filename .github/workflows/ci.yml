@@ -26,8 +26,8 @@ jobs:
             bootstrap_beam: false
           # OTP 29 RC's :httpc can't reach builds.hex.pm, so we tell setup-beam
           # to skip Hex/Rebar autoinstall and curl them ourselves below.
-          - elixir: "1.20.0-rc.4"
-            otp: "29.0-rc3"
+          - elixir: "1.20.0"
+            otp: "29.0"
             bootstrap_beam: true
 
     steps:
