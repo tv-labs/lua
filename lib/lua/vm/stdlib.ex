@@ -483,7 +483,7 @@ defmodule Lua.VM.Stdlib do
         # pair: an oversized reader is a DoS attempt, not a recoverable
         # syntax error, so we surface it as a catchable runtime error
         # (caught by `pcall`) instead of a quiet load failure.
-        Limits.check_string_size!(size + byte_size(piece))
+        Limits.check_string_size!(size + byte_size(piece), state.max_string_bytes)
         collect_reader_chunks(reader, state, [piece | acc], size + byte_size(piece))
 
       [bad | _] ->

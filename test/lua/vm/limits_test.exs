@@ -40,6 +40,74 @@ defmodule Lua.VM.LimitsTest do
     end
   end
 
+  describe ":max_string_bytes option" do
+    # A 1 KB ceiling keeps these tests allocation-free while exercising
+    # every guard site at a size far below the default 256 MiB bound —
+    # the behavior an embedder relies on when running the VM under a
+    # process heap cap.
+    setup do
+      %{small: Lua.new(sandboxed: [], max_string_bytes: 1024)}
+    end
+
+    test "string.rep honors a lowered ceiling", %{small: small} do
+      assert pcall_error(small, ~s|return string.rep("x", 2048)|) =~
+               "resulting string too large"
+
+      assert {["xxxx"], _} = Lua.eval!(small, ~s|return string.rep("x", 4)|)
+    end
+
+    test "concatenation honors a lowered ceiling on both execution paths", %{small: small} do
+      # Doubling from inside a function body exercises the compiled
+      # dispatcher; the top-level loop exercises the interpreter.
+      doubling = "local s = 'x' for _ = 1, 11 do s = s .. s end return s"
+      assert pcall_error(small, doubling) =~ "resulting string too large"
+
+      in_function = """
+      local function grow()
+        local s = "x"
+        for _ = 1, 11 do s = s .. s end
+        return s
+      end
+      local ok, err = pcall(grow)
+      return ok, tostring(err)
+      """
+
+      assert {[false, message], _} = Lua.eval!(small, in_function)
+      assert message =~ "resulting string too large"
+
+      assert {["ab"], _} = Lua.eval!(small, ~s|return "a" .. "b"|)
+    end
+
+    test "load reader chunks honor a lowered ceiling", %{small: small} do
+      code = """
+      local piece = string.rep("-", 512)
+      local n = 0
+      local ok, err = pcall(load, function()
+        n = n + 1
+        if n > 8 then return "" end
+        return piece
+      end)
+      return ok, tostring(err)
+      """
+
+      assert {[false, message], _} = Lua.eval!(small, code)
+      assert message =~ "resulting string too large"
+    end
+
+    test "the default ceiling is unchanged", %{lua: lua} do
+      # 1 MB is far under the 256 MiB default; must build fine.
+      assert {[1_048_576], _} = Lua.eval!(lua, ~s|return #string.rep("x", 2^20)|)
+    end
+
+    test "rejects non-positive and non-integer values" do
+      for bad <- [0, -1, :infinity, "16m", 1.5] do
+        assert_raise ArgumentError, ~r/:max_string_bytes must be a positive integer/, fn ->
+          Lua.new(max_string_bytes: bad)
+        end
+      end
+    end
+  end
+
   describe "string.format" do
     test "refuses an oversized precision field", %{lua: lua} do
       assert pcall_error(lua, ~s|return string.format("%.2000000000f", 1.0)|) =~

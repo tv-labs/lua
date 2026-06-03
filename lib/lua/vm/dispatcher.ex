@@ -23,7 +23,6 @@ defmodule Lua.VM.Dispatcher do
   alias Lua.Compiler.Prototype
   alias Lua.VM.Executor
   alias Lua.VM.InternalError
-  alias Lua.VM.Limits
   alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
@@ -32,7 +31,6 @@ defmodule Lua.VM.Dispatcher do
   # Mirror of the interpreter's concat ceiling, inlined as a compile-time
   # constant so the binary-binary fast path stays a single comparison. See
   # `Lua.VM.Executor.concat_checked/2` for the rationale.
-  @max_string_bytes Limits.max_string_bytes()
 
   # Opcode tags. These must stay in lockstep with `Lua.Compiler.Bytecode`.
   # The module-attribute form lets each case branch match a constant
@@ -1125,7 +1123,7 @@ defmodule Lua.VM.Dispatcher do
         right = :erlang.element(b + 1, regs)
 
         if is_binary(left) and is_binary(right) do
-          if byte_size(left) + byte_size(right) > @max_string_bytes do
+          if byte_size(left) + byte_size(right) > state.max_string_bytes do
             raise RuntimeError, value: "resulting string too large"
           end
 

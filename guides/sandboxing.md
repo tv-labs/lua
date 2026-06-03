@@ -94,11 +94,11 @@ These guards are always on and need no configuration. They cover:
 
 | Operation | Guard | Error (catchable with `pcall`) |
 | :-------- | :---- | :----------------------------- |
-| `string.rep`, the `..` operator | result larger than ~256 MiB | `resulting string too large` |
+| `string.rep`, the `..` operator | result larger than the string ceiling (default ~256 MiB) | `resulting string too large` |
 | `string.format` width/precision | field wider than 99 | `invalid conversion` |
 | `table.unpack` | more than 10M results | `too many results to unpack` |
 | `table.concat`, `table.move` | range wider than 10M | `range too large` |
-| `load` (when enabled) | reader returns > ~256 MiB total | `resulting string too large` |
+| `load` (when enabled) | reader returns more than the string ceiling in total | `resulting string too large` |
 
 ```elixir
 {[false, message], _} =
@@ -110,6 +110,22 @@ message =~ "resulting string too large"
 
 Because these surface as ordinary Lua errors, a script can even recover
 from them with `pcall`.
+
+The string ceiling is configurable via `:max_string_bytes`:
+
+```elixir
+lua = Lua.new(max_string_bytes: 16 * 1024 * 1024)
+```
+
+> #### Pair the ceiling with your heap cap {: .warning}
+> If you run the VM inside a process capped with `:max_heap_size` (see
+> below), set `:max_string_bytes` comfortably *below* that cap. The
+> default ceiling permits strings large enough that a smaller heap cap
+> would have to catch them instead — and `max_heap_size` only kills when
+> a garbage collection happens to observe the oversized live set, which
+> makes the outcome timing-dependent. With the ceiling under the cap,
+> string bombs are always refused deterministically and the heap cap
+> stays what it should be: a backstop for what the VM cannot pre-compute.
 
 ## Call depth
 

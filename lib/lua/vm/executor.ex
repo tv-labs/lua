@@ -14,7 +14,6 @@ defmodule Lua.VM.Executor do
 
   alias Lua.VM.Dispatcher
   alias Lua.VM.InternalError
-  alias Lua.VM.Limits
   alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
@@ -420,7 +419,7 @@ defmodule Lua.VM.Executor do
     src = proto.source
 
     try_binary_metamethod("__concat", left, right, state, fn ->
-      concat_checked(concat_coerce(left, 0, src), concat_coerce(right, 0, src))
+      concat_checked(concat_coerce(left, 0, src), concat_coerce(right, 0, src), state.max_string_bytes)
     end)
   end
 
@@ -1351,12 +1350,12 @@ defmodule Lua.VM.Executor do
     # also concatenate without metamethods.
     cond do
       is_binary(left) and is_binary(right) ->
-        regs = put_elem(regs, dest, concat_checked(left, right))
+        regs = put_elem(regs, dest, concat_checked(left, right, state.max_string_bytes))
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
       (is_binary(left) or is_number(left)) and (is_binary(right) or is_number(right)) ->
         src = proto.source
-        result = concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src))
+        result = concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src), state.max_string_bytes)
         regs = put_elem(regs, dest, result)
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
@@ -1365,7 +1364,7 @@ defmodule Lua.VM.Executor do
 
         {result, new_state} =
           try_binary_metamethod("__concat", left, right, state, fn ->
-            concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src))
+            concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src), state.max_string_bytes)
           end)
 
         regs = put_elem(regs, dest, result)
@@ -2182,16 +2181,15 @@ defmodule Lua.VM.Executor do
   # in one BIF call — faster than the GC-time `max_heap_size` check can
   # react. Guard the size deterministically here, matching the Layer A
   # stdlib checks, so the loop fails with a catchable error long before it
-  # threatens the host. `byte_size/1` is O(1), so this is cheap on the hot
-  # path. Compile-time constant; no per-call dispatch into `Limits`.
-  @max_string_bytes Limits.max_string_bytes()
-
-  @compile {:inline, concat_checked: 2}
-  defp concat_checked(left, right) when byte_size(left) + byte_size(right) <= @max_string_bytes do
+  # threatens the host. `byte_size/1` is O(1) and the ceiling is a struct
+  # field read (`state.max_string_bytes`, settable via `Lua.new/1`), so
+  # this stays cheap on the hot path.
+  @compile {:inline, concat_checked: 3}
+  defp concat_checked(left, right, max) when byte_size(left) + byte_size(right) <= max do
     left <> right
   end
 
-  defp concat_checked(_left, _right) do
+  defp concat_checked(_left, _right, _max) do
     raise RuntimeError, value: "resulting string too large"
   end
 

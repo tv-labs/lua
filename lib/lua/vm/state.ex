@@ -3,6 +3,7 @@ defmodule Lua.VM.State do
   Runtime state for the Lua VM.
   """
 
+  alias Lua.VM.Limits
   alias Lua.VM.Table
 
   defstruct call_stack: [],
@@ -12,6 +13,13 @@ defmodule Lua.VM.State do
             # means no limit. See `check_call_depth!/1`.
             call_depth: 0,
             max_call_depth: :infinity,
+            # Ceiling for any single string the VM will build (`..`,
+            # `string.rep`, `load` reader chunks). Defaults to the practical
+            # bound in `Lua.VM.Limits`. Embedders running the VM under a
+            # process heap cap (`:max_heap_size`) should set this below that
+            # cap so an allocation bomb is refused deterministically instead
+            # of racing the GC-time heap check.
+            max_string_bytes: Limits.max_string_bytes(),
             metatables: %{},
             upvalue_cells: %{},
             open_upvalues: %{},
@@ -31,6 +39,7 @@ defmodule Lua.VM.State do
           call_stack: list(),
           call_depth: non_neg_integer(),
           max_call_depth: pos_integer() | :infinity,
+          max_string_bytes: pos_integer(),
           metatables: map(),
           upvalue_cells: map(),
           tables: %{optional(non_neg_integer()) => Table.t()},
