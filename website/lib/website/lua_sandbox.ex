@@ -15,6 +15,14 @@ defmodule Website.LuaSandbox do
   applies a safety wall-clock timeout so a non-terminating snippet always
   returns; the LiveView layers a shorter UI timeout on top (it wraps
   `run/1` in `start_async/3` and cancels it on a timer).
+
+  The VM's own string ceiling (`:max_string_bytes`) is set well below the
+  worker's heap cap. Order matters: the VM refuses an oversized string
+  *deterministically* (the size is computed before allocating), while
+  `max_heap_size` only kills when a garbage collection happens to observe
+  the oversized live set. With the VM ceiling under the heap cap, string
+  bombs always fail with a catchable Lua error; the heap cap remains the
+  backstop for what the VM cannot pre-compute (e.g. unbounded tables).
   """
 
   import Lua, only: [sigil_LUA: 2]
@@ -27,6 +35,12 @@ defmodule Website.LuaSandbox do
   # this bounds tail recursion too — 200 is generous for the teaching
   # snippets here while still stopping an accidental infinite recursion.
   @max_call_depth 200
+
+  # VM string ceiling, deliberately far below @lua_heap_words (64 MB):
+  # a doubling loop peaks at ~1.5x the ceiling in live binaries, so 16 MB
+  # keeps the worst case (~24 MB) comfortably inside the heap cap and the
+  # refusal deterministic. See the moduledoc for why the order matters.
+  @lua_max_string_bytes 16 * 1024 * 1024
 
   @doc """
   Compiles a Lua snippet into a `Lua.Chunk` (without running it) and
@@ -100,6 +114,19 @@ defmodule Website.LuaSandbox do
     try do
       receive do
         {:eval_result, result} ->
+          # The worker has delivered its result but its exit-time GC can
+          # still trip the heap kill (include_shared_binaries counts the
+          # big binaries it is about to drop). Unlink — and flush an exit
+          # signal that may already be queued — so a late `:killed` can't
+          # propagate to us once we stop trapping.
+          Process.unlink(worker)
+
+          receive do
+            {:EXIT, ^worker, _} -> :ok
+          after
+            0 -> :ok
+          end
+
           result
 
         # Worker hit the memory ceiling: max_heap_size kills it with
@@ -163,7 +190,7 @@ defmodule Website.LuaSandbox do
 
   defp eval(source, output_pid, started) do
     lua =
-      Lua.new(max_call_depth: @max_call_depth)
+      Lua.new(max_call_depth: @max_call_depth, max_string_bytes: @lua_max_string_bytes)
       |> Lua.set!([:print], fn args ->
         line =
           args
