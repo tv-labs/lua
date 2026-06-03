@@ -356,7 +356,7 @@ defmodule Lua.VM.Executor do
       case value do
         {:tref, id} ->
           table = Map.fetch!(state.tables, id)
-          Value.sequence_length(table.data)
+          Table.length(table)
 
         v when is_binary(v) ->
           byte_size(v)
@@ -1627,7 +1627,7 @@ defmodule Lua.VM.Executor do
         case value do
           {:tref, id} ->
             table = Map.fetch!(state.tables, id)
-            Value.sequence_length(table.data)
+            Table.length(table)
 
           v when is_binary(v) ->
             byte_size(v)
@@ -1668,10 +1668,30 @@ defmodule Lua.VM.Executor do
     key = elem(regs, key_reg)
 
     case table_val do
+      {:tref, id} when is_integer(key) and key >= 1 ->
+        # Split-storage fast path: dense positive integers live in the array.
+        table = :erlang.map_get(id, state.tables)
+
+        case Table.get(table, key) do
+          nil ->
+            case :erlang.map_get(:metatable, table) do
+              nil ->
+                regs = put_elem(regs, dest, nil)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+
+              _ ->
+                {value, state} = index_value(table_val, key, state, line, proto.source, name_hint)
+                regs = put_elem(regs, dest, value)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+            end
+
+          value ->
+            regs = put_elem(regs, dest, value)
+            do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
+        end
+
       {:tref, id} when is_integer(key) or is_binary(key) ->
-        # Fast path mirroring get_field: integer/string key on a tref. Skip
-        # normalize_key (no-op for these) and the full index_value pipeline
-        # when the entry is present or no metatable is set.
+        # Non-positive integer / string key: read straight from the hash map.
         table = :erlang.map_get(id, state.tables)
 
         case :erlang.map_get(:data, table) do
@@ -2283,7 +2303,7 @@ defmodule Lua.VM.Executor do
 
     table = Map.fetch!(state.tables, id)
 
-    case Table.get_data(table.data, key) do
+    case Table.get(table, key) do
       nil ->
         case table.metatable do
           nil ->
@@ -2342,7 +2362,7 @@ defmodule Lua.VM.Executor do
         %{state | tables: Map.put(state.tables, id, updated)}
 
       {:tref, mt_id} ->
-        if Table.has_data?(table.data, key) do
+        if Table.has_key?(table, key) do
           updated = Table.put(table, key, value)
           %{state | tables: Map.put(state.tables, id, updated)}
         else
@@ -2381,7 +2401,7 @@ defmodule Lua.VM.Executor do
       try_unary_metamethod("__len", tref, state, fn ->
         {:tref, id} = tref
         table = Map.fetch!(state.tables, id)
-        Value.sequence_length(table.data)
+        Table.length(table)
       end)
 
     case raw do

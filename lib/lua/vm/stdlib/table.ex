@@ -225,7 +225,7 @@ defmodule Lua.VM.Stdlib.Table do
         table.metatable == nil ->
           elements =
             Enum.map(i..j//1, fn idx ->
-              concat_value(Table.get_data(table.data, idx), idx)
+              concat_value(Table.get(table, idx), idx)
             end)
 
           {elements, state}

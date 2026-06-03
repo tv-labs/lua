@@ -260,7 +260,7 @@ defmodule Lua.VM.Stdlib do
   # rawget(table, key) — get without metamethods
   defp lua_rawget([{:tref, id}, key | _], state) do
     table = Map.fetch!(state.tables, id)
-    {[Table.get_data(table.data, key)], state}
+    {[Table.get(table, key)], state}
   end
 
   # rawset(table, key, value) — set without metamethods
@@ -277,7 +277,7 @@ defmodule Lua.VM.Stdlib do
   # values, which broke `pcall(rawlen, ...)` patterns in events.lua.
   defp lua_rawlen([{:tref, id} | _], state) do
     table = Map.fetch!(state.tables, id)
-    {[Value.sequence_length(table.data)], state}
+    {[Table.length(table)], state}
   end
 
   defp lua_rawlen([v | _], state) when is_binary(v) do

@@ -720,6 +720,29 @@ defmodule Lua.VM.Dispatcher do
         key = :erlang.element(key_reg + 1, regs)
 
         case table_val do
+          {:tref, id} when is_integer(key) and key >= 1 ->
+            table = :erlang.map_get(id, state.tables)
+
+            case Table.get(table, key) do
+              nil ->
+                case :erlang.map_get(:metatable, table) do
+                  nil ->
+                    regs = :erlang.setelement(dest + 1, regs, nil)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+                  _ ->
+                    {value, state} =
+                      Executor.dispatcher_get_table(table_val, key, state, proto, name_hint)
+
+                    regs = :erlang.setelement(dest + 1, regs, value)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+                end
+
+              value ->
+                regs = :erlang.setelement(dest + 1, regs, value)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+            end
+
           {:tref, id} when is_integer(key) or is_binary(key) ->
             table = :erlang.map_get(id, state.tables)
             data = :erlang.map_get(:data, table)
@@ -789,7 +812,7 @@ defmodule Lua.VM.Dispatcher do
               nil ->
                 # No __len possible — Lua 5.3 §3.4.7: # on a table
                 # without __len is the border length of the data map.
-                len = Value.sequence_length(:erlang.map_get(:data, table))
+                len = Lua.VM.Table.length(table)
                 regs = :erlang.setelement(dest + 1, regs, len)
                 dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 

@@ -1,46 +1,44 @@
 defmodule Lua.VM.Table do
   @moduledoc """
-  Lua table data structure.
+  Lua table data structure with split array/hash storage.
 
-  A single Elixir map backing both array and hash portions, plus a list of
-  keys in insertion order and a key-set of "dead" keys whose values were
-  cleared during iteration.
+  Dense positive-integer keys (`1..n`) live in an Erlang `:array` (the
+  `arr` field), giving O(1) functional read/write and a free sequence
+  length. Every other key — strings, non-positive integers, sparse
+  integers beyond the contiguous array border, float/boolean/table keys —
+  lives in the `data` hash map alongside the iteration-order bookkeeping.
 
-  Keys and values are VM values (numbers, strings, booleans, `{:tref, id}`,
-  etc.). Integer keys use 1-based indexing per Lua convention.
+  Keeping string keys in `data` means the executor's field/global fast
+  paths (`%{^name => value}`) and metatable lookups read the hash map
+  directly with no change. Integer-keyed reads/writes route through the
+  split-aware helpers in this module.
+
+  ## Array border
+
+  `arr_n` is the count of contiguous integer keys `1..arr_n` currently
+  stored in `arr`. Writing key `arr_n + 1` extends the border; clearing a
+  key inside the border splits it (the tail beyond the hole migrates to
+  `data` lazily on read). A write to a sparse integer key beyond the
+  border goes to `data` until a later contiguous fill promotes it.
 
   ## Dead-key tracking
 
-  Lua 5.3 §6.1 says iteration with `pairs` is well-defined when the body
-  clears existing fields (`t[k] = nil`). The reference implementation
-  preserves the iteration sequence by leaving cleared keys reachable in
-  the hash chain (marked `TDEADKEY`) so the next call to `next(t, k)` can
-  still find the entry that follows `k`.
-
-  We mirror that behavior with two pieces of state:
-
-    * `order` — keys in the order they were first assigned a value. Live
-      and dead keys both appear; assigning a fresh value to a previously
-      dead key moves it to the end (it counts as a new insertion).
-    * `dead` — a `key => true` map of keys that have been assigned `nil`.
-      Their slot in `order` is preserved so `next(t, k)` can locate the
-      slot, but `data` no longer contains the key, so the key is reported
-      as absent to readers. (We use a plain map rather than `MapSet` here
-      so dialyzer can treat the empty default opaquely; the API surface
-      is the same — `Map.has_key?/2`, `Map.put/3`, `Map.delete/2`.)
-
-  All mutations should flow through `put/3` (or `put_data/3` for code that
-  only has access to the underlying data map and doesn't care about the
-  iteration ordering).
+  Lua 5.3 §6.1 dead-key iteration semantics are preserved for the hash
+  portion via `order`/`order_tail`/`dead` exactly as before. Array-portion
+  keys iterate first, in index order, then hash keys in insertion order.
   """
 
-  defstruct data: %{},
+  defstruct arr: :undefined,
+            arr_n: 0,
+            data: %{},
             order: [],
             order_tail: [],
             dead: %{},
             metatable: nil
 
   @type t :: %__MODULE__{
+          arr: :array.array() | :undefined,
+          arr_n: non_neg_integer(),
           data: %{optional(term()) => term()},
           order: list(term()),
           order_tail: list(term()),
@@ -48,69 +46,93 @@ defmodule Lua.VM.Table do
           metatable: {:tref, non_neg_integer()} | nil
         }
 
-  # `order` is the "stable" iteration list (insertion order, oldest first).
-  # `order_tail` accumulates **newly inserted** keys in reverse-insertion
-  # order (newest first). Writes prepend onto `order_tail` in O(1); reads
-  # via `next_entry/2` flush the tail into `order` lazily so the iteration
-  # protocol still sees a single ordered list. This avoids the O(n) per
-  # write that `order ++ [key]` was costing the table_build microbenchmark
-  # (~25% of its runtime according to tprof).
+  @compile {:inline, positive_int?: 1}
+
+  defp positive_int?(k) when is_integer(k) and k >= 1, do: true
+  defp positive_int?(_), do: false
+
+  defp ensure_arr(:undefined), do: :array.new({:default, nil})
+  defp ensure_arr(arr), do: arr
 
   @doc """
   Builds a table struct from a plain data map.
 
-  `order` is derived from the data map's key list — Erlang maps surface
-  their keys in a deterministic order, so callers that pass us a literal
-  data map (e.g. stdlib initialization) get a sensible iteration order
-  with no extra effort.
+  Splits dense positive-integer keys into the array and leaves the rest in
+  `data`, so callers that pass a literal map (stdlib init, `table.pack`,
+  encode) get split storage with no extra effort.
   """
   @spec from_data(map()) :: t()
   def from_data(data) when is_map(data) do
-    %__MODULE__{data: data, order: Map.keys(data)}
+    split_from_map(%__MODULE__{}, data)
   end
 
   @doc """
-  Replaces the data map wholesale, rebuilding `order` and clearing `dead`.
-
-  Used by stdlib operations that rewrite the entire table contents (e.g.
-  `table.sort` shuffles every integer key). After this call, iteration
-  order reflects the new map layout.
+  Replaces the table contents wholesale from a plain data map, rebuilding
+  the array/hash split and clearing `dead`.
   """
   @spec replace_data(t(), map()) :: t()
   def replace_data(%__MODULE__{} = table, data) when is_map(data) do
-    %{table | data: data, order: Map.keys(data), dead: %{}}
+    split_from_map(%{table | arr: :undefined, arr_n: 0, data: %{}, order: [], order_tail: [], dead: %{}}, data)
+  end
+
+  defp split_from_map(table, data) do
+    Enum.reduce(data, table, fn {k, v}, acc -> put(acc, k, v) end)
   end
 
   @doc """
   Writes `value` into the table under `key`, honoring Lua semantics:
 
-    * Assigning `nil` removes the key from `data` and marks it dead in
-      `order` if it was previously live (Lua 5.3 §3.4.11 / §6.1).
-    * Any other value is stored normally; if the key was previously
-      dead, it is revived and re-appended to `order` so the new
-      assignment counts as a fresh insertion.
-
-  Used by every code path that mutates table contents (`set_table`,
-  `set_field`, `set_list`, `rawset`, `table.insert`, etc.) so the
-  insertion-order invariant stays consistent.
+    * Assigning `nil` removes the key.
+    * Dense positive integers route to the array; other keys to the hash.
   """
   @spec put(t(), term(), term()) :: t()
   def put(%__MODULE__{} = table, key, value) do
     key = normalize_key(key)
 
-    case value do
-      nil -> delete(table, key)
-      _ -> insert(table, key, value)
+    cond do
+      value == nil -> delete(table, key)
+      positive_int?(key) -> put_array(table, key, value)
+      true -> insert_hash(table, key, value)
     end
   end
 
-  defp insert(%__MODULE__{data: data, order: order, order_tail: order_tail, dead: dead} = table, key, value) do
+  # Array write. A contiguous append (key == arr_n + 1) extends the border;
+  # an in-border overwrite is a plain :array.set; a write beyond the border
+  # goes to the hash until a later contiguous fill could promote it.
+  defp put_array(%__MODULE__{arr: arr, arr_n: n} = table, key, value) when key == n + 1 do
+    arr = :array.set(key - 1, value, ensure_arr(arr))
+    # Pull any contiguous successors that were parked in the hash into arr.
+    absorb_from_hash(%{table | arr: arr, arr_n: key})
+  end
+
+  defp put_array(%__MODULE__{arr_n: n} = table, key, value) when key <= n do
+    %{table | arr: :array.set(key - 1, value, table.arr)}
+  end
+
+  defp put_array(%__MODULE__{} = table, key, value) do
+    # Sparse integer beyond the border — store in hash for now.
+    insert_hash(table, key, value)
+  end
+
+  # After extending the border, migrate any hash-resident keys arr_n+1,
+  # arr_n+2, ... into the array so the contiguous run stays in arr.
+  defp absorb_from_hash(%__MODULE__{arr_n: n, data: data} = table) do
+    next = n + 1
+
+    case data do
+      %{^next => v} ->
+        arr = :array.set(next - 1, v, table.arr)
+        table = drop_hash_key(%{table | arr: arr, arr_n: next}, next)
+        absorb_from_hash(table)
+
+      _ ->
+        table
+    end
+  end
+
+  defp insert_hash(%__MODULE__{data: data, order: order, order_tail: order_tail, dead: dead} = table, key, value) do
     cond do
       Map.has_key?(dead, key) ->
-        # Reviving a dead key — drop it from the existing order/tail and
-        # re-append so the observable insertion order matches a fresh
-        # assignment. We have to flush the tail because the dead key could
-        # live in either list.
         merged_order = order ++ Enum.reverse(order_tail)
         new_order = Enum.reject(merged_order, &(&1 === key))
 
@@ -123,36 +145,58 @@ defmodule Lua.VM.Table do
         }
 
       Map.has_key?(data, key) ->
-        # Update of an existing live key — value changes, position stable.
         %{table | data: Map.put(data, key, value)}
 
       true ->
-        # Brand-new key. Prepend onto `order_tail` (O(1)) instead of
-        # appending to `order` (O(n)). Lazy flush on iteration.
         %{table | data: Map.put(data, key, value), order_tail: [key | order_tail]}
+    end
+  end
+
+  defp delete(%__MODULE__{arr_n: n} = table, key) when is_integer(key) and key >= 1 and key <= n do
+    cond do
+      key == n ->
+        # Clearing the border tail — shrink the contiguous run, stepping
+        # back over any already-nil slots.
+        %{table | arr: :array.set(key - 1, nil, table.arr)} |> shrink_border()
+
+      true ->
+        # Clearing inside the run punches a hole; keep it as a nil slot so
+        # length still reports the run up to the first hole on next probe.
+        %{table | arr: :array.set(key - 1, nil, table.arr)}
     end
   end
 
   defp delete(%__MODULE__{data: data, dead: dead} = table, key) do
     if Map.has_key?(data, key) do
-      # Live key being cleared — move to dead set, leave `order` slot
-      # in place so any in-flight iteration can still walk past it.
       %{table | data: Map.delete(data, key), dead: Map.put(dead, key, true)}
     else
-      # Already absent (never present, or already cleared) — no-op.
-      # Per Lua 5.3 §3.4.11, fields with nil values are absent from the
-      # table, so storing nil over an absent key is a no-op.
       table
     end
   end
 
-  @doc """
-  Writes `value` into a raw data map under `key`.
+  defp shrink_border(%__MODULE__{arr_n: 0} = table), do: table
 
-  Lower-level than `put/3`: operates only on the underlying map, with no
-  awareness of `order`/`dead`. Use this when you have a data map but no
-  surrounding `Table` struct (e.g. while folding through `set_list`
-  intermediate state). Prefer `put/3` whenever you have the full struct.
+  defp shrink_border(%__MODULE__{arr: arr, arr_n: n} = table) do
+    case :array.get(n - 1, arr) do
+      nil -> shrink_border(%{table | arr_n: n - 1})
+      _ -> table
+    end
+  end
+
+  defp drop_hash_key(%__MODULE__{data: data, order: order, order_tail: tail} = table, key) do
+    %{
+      table
+      | data: Map.delete(data, key),
+        order: Enum.reject(order, &(&1 === key)),
+        order_tail: Enum.reject(tail, &(&1 === key))
+    }
+  end
+
+  @doc """
+  Writes `value` into a raw data map under `key` (hash-only, no array).
+
+  Retained for callers that operate on a bare hash map with no surrounding
+  struct. Integer keys still land in the map here.
   """
   @spec put_data(map(), term(), term()) :: map()
   def put_data(data, key, value) do
@@ -165,85 +209,25 @@ defmodule Lua.VM.Table do
   end
 
   @doc """
-  Applies an ordered list of `{key, value}` writes to the table, producing
-  the same result as folding `put/3` over the list left-to-right, but
-  rebuilding the `%Table{}` struct only once at the end.
-
-  This is the batch entry point for table-constructor backfill
-  (`:set_list`), where a run of consecutive integer keys is written in one
-  go. The `order`/`order_tail`/`dead` invariants are maintained identically
-  to repeated `put/3`: new keys append (via `order_tail`), existing live
-  keys keep their position, dead keys revive to the end, and `nil` values
-  clear a live key into `dead`. The win is collapsing `count` struct
-  rebuilds into one.
-
-  `pairs` are applied in order; keys are normalized per `normalize_key/1`.
+  Applies an ordered list of `{key, value}` writes, equivalent to folding
+  `put/3` left-to-right but rebuilding the struct once.
   """
   @spec put_many(t(), [{term(), term()}]) :: t()
   def put_many(%__MODULE__{} = table, []), do: table
 
-  def put_many(%__MODULE__{data: data, order: order, order_tail: order_tail, dead: dead} = table, pairs)
-      when is_list(pairs) do
-    {data, order, order_tail, dead} = put_many_reduce(pairs, data, order, order_tail, dead)
-    %{table | data: data, order: order, order_tail: order_tail, dead: dead}
-  end
-
-  defp put_many_reduce([], data, order, order_tail, dead), do: {data, order, order_tail, dead}
-
-  defp put_many_reduce([{key, value} | rest], data, order, order_tail, dead) do
-    key = normalize_key(key)
-
-    {data, order, order_tail, dead} =
-      case value do
-        nil -> delete_acc(data, order, order_tail, dead, key)
-        _ -> insert_acc(data, order, order_tail, dead, key, value)
-      end
-
-    put_many_reduce(rest, data, order, order_tail, dead)
-  end
-
-  # Accumulator-threaded mirrors of `insert/3` and `delete/2`. They make the
-  # exact same `order`/`order_tail`/`dead` decisions, but operate on bare
-  # fields so `put_many/2` can rebuild the struct just once.
-  defp insert_acc(data, order, order_tail, dead, key, value) do
-    cond do
-      Map.has_key?(dead, key) ->
-        merged_order = order ++ Enum.reverse(order_tail)
-        new_order = Enum.reject(merged_order, &(&1 === key))
-        {Map.put(data, key, value), new_order, [key], Map.delete(dead, key)}
-
-      Map.has_key?(data, key) ->
-        {Map.put(data, key, value), order, order_tail, dead}
-
-      true ->
-        {Map.put(data, key, value), order, [key | order_tail], dead}
-    end
-  end
-
-  defp delete_acc(data, order, order_tail, dead, key) do
-    if Map.has_key?(data, key) do
-      {Map.delete(data, key), order, order_tail, Map.put(dead, key, true)}
-    else
-      {data, order, order_tail, dead}
-    end
+  def put_many(%__MODULE__{} = table, pairs) when is_list(pairs) do
+    Enum.reduce(pairs, table, fn {k, v}, acc -> put(acc, k, v) end)
   end
 
   @doc """
   Normalizes a table key per Lua 5.3 §3.4.11.
-
-  Float keys that hold an exact integer value are coerced to integers so
-  that `t[1.0]` and `t[1]` refer to the same slot. NaN keys are left as
-  floats; callers that disallow NaN keys (`set_table`, `rawset`) detect
-  the NaN and raise before reaching the data map.
   """
   @spec normalize_key(term()) :: term()
   def normalize_key(key) when is_float(key) do
     cond do
-      # NaN is not equal to itself; leave as-is so the caller can detect it.
       key != key ->
         key
 
-      # Integer-valued floats convert to integers.
       key == trunc(key) and key >= -9_223_372_036_854_775_808.0 and key <= 9_223_372_036_854_775_807.0 ->
         trunc(key)
 
@@ -256,10 +240,6 @@ defmodule Lua.VM.Table do
 
   @doc """
   Returns true if a key is invalid for use in a table assignment.
-
-  Per Lua 5.3 §3.4.11 / §6.1, table keys cannot be `nil` or `NaN`.
-  Callers should `raise` with the appropriate "table index is nil" /
-  "table index is NaN" error message before mutating table data.
   """
   @spec invalid_key?(term()) :: boolean()
   def invalid_key?(nil), do: true
@@ -267,58 +247,130 @@ defmodule Lua.VM.Table do
   def invalid_key?(_), do: false
 
   @doc """
-  Reads a value from a table data map, applying Lua key normalization
-  (integer-valued floats collapse to integers per §3.4.11).
+  Reads a value from a table by key, split-aware (array then hash).
+
+  This is the struct-level read. Prefer it over the bare-map `get_data/2`
+  for any code that has the full `%Table{}`.
+  """
+  @spec get(t(), term()) :: term()
+  def get(%__MODULE__{arr: arr, arr_n: n}, key) when is_integer(key) and key >= 1 and key <= n do
+    :array.get(key - 1, arr)
+  end
+
+  def get(%__MODULE__{data: data}, key) do
+    Map.get(data, normalize_key(key))
+  end
+
+  @doc """
+  Reads a value from a bare hash data map, applying key normalization.
+
+  Hash-only: does not consult the array. Callers with a full struct should
+  use `get/2`.
   """
   @spec get_data(map(), term()) :: term()
   def get_data(data, key), do: Map.get(data, normalize_key(key))
 
   @doc """
-  Returns true when the table data map has an entry for the given key
-  after normalization.
+  Returns true when the table (array or hash) has a live entry for `key`.
+  """
+  @spec has_key?(t(), term()) :: boolean()
+  def has_key?(%__MODULE__{arr: arr, arr_n: n}, key) when is_integer(key) and key >= 1 and key <= n do
+    :array.get(key - 1, arr) != nil
+  end
+
+  def has_key?(%__MODULE__{data: data}, key) do
+    Map.has_key?(data, normalize_key(key))
+  end
+
+  @doc """
+  Returns true when the bare hash data map has an entry for `key`.
   """
   @spec has_data?(map(), term()) :: boolean()
   def has_data?(data, key), do: Map.has_key?(data, normalize_key(key))
 
   @doc """
-  Returns the next key/value pair in iteration order after `key`.
+  Returns the Lua sequence length: the largest `n` with keys `1..n` present.
 
-  Walks the table's `order` list to find `key`, then advances through any
-  dead-key slots until a live entry is found. Returns `{k, v}` for the
-  next live entry, or `nil` when iteration is complete.
-
-  When `key` is `nil`, returns the first live entry (or `nil` if the
-  table is empty/all-dead).
-
-  When `key` is non-nil and is not present in `order` at all, returns the
-  sentinel `:invalid_key` so the caller can raise the user-facing
-  "invalid key to 'next'" error per Lua 5.3 §6.1.
+  The contiguous array border gives this for free; we only fall back to
+  probing the hash for sparse integers parked beyond the border.
   """
-  @spec next_entry(t(), term()) :: {term(), term()} | nil | :invalid_key
-  def next_entry(%__MODULE__{} = table, nil) do
-    first_live(merged_order(table), table.data)
+  @spec length(t()) :: non_neg_integer()
+  def length(%__MODULE__{arr_n: n, data: data}) when map_size(data) == 0, do: n
+
+  def length(%__MODULE__{arr_n: n, data: data}) do
+    probe_hash_length(data, n + 1, n)
   end
 
-  def next_entry(%__MODULE__{} = table, key) do
-    key = normalize_key(key)
-
-    case advance_past(merged_order(table), key) do
-      :not_found ->
-        # The key was never in this table, even as a dead slot. Lua spec
-        # §6.1 requires raising for this — caller does the raising.
-        :invalid_key
-
-      remaining ->
-        first_live(remaining, table.data)
+  defp probe_hash_length(data, probe, last) do
+    if Map.has_key?(data, probe) do
+      probe_hash_length(data, probe + 1, probe)
+    else
+      last
     end
   end
 
   @doc """
-  Flushes any pending appends in `order_tail` into `order`.
+  Materializes the full table contents (array + hash) as a single flat map.
 
-  Idempotent: a table with an empty tail is returned unchanged. Used by
-  callers that want to amortize the cost of repeated `next_entry` calls
-  (e.g. `lua_next` in the stdlib, which iterates via repeated calls).
+  Used by code paths that genuinely need the whole table as a map (decode,
+  display, `string.gsub` replacement lookups). Walks the array once.
+  """
+  @spec to_map(t()) :: map()
+  def to_map(%__MODULE__{arr: :undefined, data: data}), do: data
+
+  def to_map(%__MODULE__{arr: arr, arr_n: n, data: data}) do
+    Enum.reduce(1..n//1, data, fn i, acc ->
+      case :array.get(i - 1, arr) do
+        nil -> acc
+        v -> Map.put(acc, i, v)
+      end
+    end)
+  end
+
+  @doc """
+  Returns the next key/value pair in iteration order after `key`.
+
+  Array keys (`1..arr_n`) iterate first in index order, then hash keys in
+  insertion order. Mirrors the old `next_entry/2` contract: returns `{k, v}`,
+  `nil` at the end, or `:invalid_key` when `key` is absent everywhere.
+  """
+  @spec next_entry(t(), term()) :: {term(), term()} | nil | :invalid_key
+  def next_entry(%__MODULE__{} = table, nil) do
+    case first_array_live(table, 1) do
+      nil -> first_live(merged_order(table), table.data)
+      pair -> pair
+    end
+  end
+
+  def next_entry(%__MODULE__{arr_n: n} = table, key) do
+    key = normalize_key(key)
+
+    cond do
+      is_integer(key) and key >= 1 and key <= n ->
+        case first_array_live(table, key + 1) do
+          nil -> first_live(merged_order(table), table.data)
+          pair -> pair
+        end
+
+      true ->
+        case advance_past(merged_order(table), key) do
+          :not_found -> :invalid_key
+          remaining -> first_live(remaining, table.data)
+        end
+    end
+  end
+
+  defp first_array_live(%__MODULE__{arr_n: n}, i) when i > n, do: nil
+
+  defp first_array_live(%__MODULE__{arr: arr, arr_n: n} = table, i) do
+    case :array.get(i - 1, arr) do
+      nil -> first_array_live(table, i + 1)
+      v -> {i, v}
+    end
+  end
+
+  @doc """
+  Flushes any pending `order_tail` appends into `order`. Idempotent.
   """
   @spec flush_order(t()) :: t()
   def flush_order(%__MODULE__{order_tail: []} = table), do: table
@@ -327,9 +379,6 @@ defmodule Lua.VM.Table do
     %{table | order: order ++ Enum.reverse(tail), order_tail: []}
   end
 
-  # Internal: produces the conceptual full insertion order without
-  # mutating the struct. Used by read paths that don't (or can't) write
-  # back a flushed version.
   defp merged_order(%__MODULE__{order: order, order_tail: []}), do: order
   defp merged_order(%__MODULE__{order: order, order_tail: tail}), do: order ++ Enum.reverse(tail)
 

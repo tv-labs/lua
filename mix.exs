@@ -82,8 +82,7 @@ defmodule Lua.MixProject do
       {:stream_data, "~> 1.1", only: [:test]},
       {:styler, "~> 1.10", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: :benchmark},
-      {:luerl, "~> 1.5", only: :benchmark},
-      {:luaport, "~> 1.6", only: :benchmark}
+      {:luerl, "~> 1.5", only: :benchmark}
     ]
   end
 end

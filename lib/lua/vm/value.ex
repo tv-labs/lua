@@ -272,7 +272,7 @@ defmodule Lua.VM.Value do
   def decode({:tref, id}, state) do
     table = Map.fetch!(state.tables, id)
 
-    Enum.map(table.data, fn {k, v} -> {k, decode(v, state)} end)
+    Enum.map(Lua.VM.Table.to_map(table), fn {k, v} -> {k, decode(v, state)} end)
   end
 
   def decode(value, _state), do: value

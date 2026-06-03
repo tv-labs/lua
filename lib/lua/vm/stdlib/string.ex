@@ -794,7 +794,7 @@ defmodule Lua.VM.Stdlib.String do
           # reads don't mutate state, so we pass it through unchanged.
           fn [match | _], st ->
             table = State.get_table(st, repl)
-            value = Map.get(table.data, match, match)
+            value = Lua.VM.Table.get(table, match) || match
             {value, st}
           end
 
