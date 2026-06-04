@@ -19,6 +19,9 @@ config :website, DemoWeb.Endpoint,
     ]
   ]
 
+# Render the PostHog analytics snippet (root.html.heex) in production only
+config :website, :posthog_enabled, true
+
 # Configure Swoosh API Client
 config :swoosh, api_client: Swoosh.ApiClient.Req
 
