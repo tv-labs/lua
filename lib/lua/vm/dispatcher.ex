@@ -842,7 +842,8 @@ defmodule Lua.VM.Dispatcher do
           Executor.dispatcher_coerce_numeric_for_controls(
             :erlang.element(base + 1, regs),
             :erlang.element(base + 2, regs),
-            :erlang.element(base + 3, regs)
+            :erlang.element(base + 3, regs),
+            state
           )
 
         regs = :erlang.setelement(base + 1, regs, counter)
@@ -1124,7 +1125,7 @@ defmodule Lua.VM.Dispatcher do
 
         if is_binary(left) and is_binary(right) do
           if byte_size(left) + byte_size(right) > state.max_string_bytes do
-            raise RuntimeError, value: "resulting string too large"
+            raise RuntimeError, value: "resulting string too large", state: state
           end
 
           regs = :erlang.setelement(dest + 1, regs, left <> right)
