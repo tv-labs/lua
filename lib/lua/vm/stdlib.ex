@@ -335,7 +335,8 @@ defmodule Lua.VM.Stdlib do
         raise ArgumentError,
           function_name: "next",
           arg_num: 2,
-          details: "invalid key to 'next'"
+          details: "invalid key to 'next'",
+          state: state
 
       nil ->
         {[nil, nil], state}

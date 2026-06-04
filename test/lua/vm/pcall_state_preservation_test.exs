@@ -246,6 +246,43 @@ defmodule Lua.VM.PcallStatePreservationTest do
         assert [1, false] = results
       end
 
+      test "mutation before a native iterator raise (utf8.codes) is kept" do
+        {results, _state} =
+          run(
+            """
+            x = 1
+            local ok = pcall(function()
+              x = 42
+              for _p, _c in utf8.codes("\\xff\\xfe") do
+                x = 100
+              end
+            end)
+            return x, ok
+            """,
+            @engine
+          )
+
+        assert [42, false] = results
+      end
+
+      test "mutation before a next() invalid-key raise is kept" do
+        {results, _state} =
+          run(
+            """
+            x = 1
+            local t = {a = 1}
+            local ok = pcall(function()
+              x = 7
+              return next(t, "not-a-key")
+            end)
+            return x, ok
+            """,
+            @engine
+          )
+
+        assert [7, false] = results
+      end
+
       test "mutation before error() with a table error object is kept" do
         {results, _state} =
           run(

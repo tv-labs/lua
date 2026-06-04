@@ -2184,6 +2184,13 @@ defmodule Lua.VM.Executor do
         {results, %State{} = new_state} ->
           {List.wrap(results), new_state}
       end
+    rescue
+      # Same native-call backstop as the `:call` opcode dispatch: ferry the
+      # iterator-call's entry state out on the exception so a native iterator
+      # raise (e.g. `utf8.codes`, `next`) keeps the current frame's pre-loop
+      # heap mutations. Innermost annotation wins — a state-bearing inner
+      # raise still takes precedence.
+      e -> reraise annotate_frame_state(e, state), __STACKTRACE__
     after
       restore_position(prev_pos)
     end
