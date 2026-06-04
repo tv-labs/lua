@@ -9,6 +9,7 @@
 #   * pcall loop     — protected-call overhead incl. the new try wrappers
 
 defmodule PcallStateBench do
+  @moduledoc false
   def chunk(lua, code) do
     {chunk, _} = Lua.load_chunk!(lua, code)
     chunk
