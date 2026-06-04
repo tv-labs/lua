@@ -309,8 +309,8 @@ defmodule Lua do
          {function_name, scope} = List.pop_at(keys, -1)
 
          case func.(args, wrap(state)) do
-           {:error, reason, %__MODULE__{}} ->
-             raise RuntimeError, value: reason
+           {:error, reason, %__MODULE__{} = returned_lua} ->
+             raise RuntimeError, value: reason, state: returned_lua.state
 
            {value, %__MODULE__{} = lua} ->
              value = List.wrap(value)
@@ -1117,8 +1117,8 @@ defmodule Lua do
       {:error, reason} ->
         raise RuntimeError, value: reason
 
-      {:error, reason, %Lua{}} ->
-        raise RuntimeError, value: reason
+      {:error, reason, %Lua{} = returned_lua} ->
+        raise RuntimeError, value: reason, state: returned_lua.state
 
       {data, %Lua{} = returned_lua} ->
         data = List.wrap(data)

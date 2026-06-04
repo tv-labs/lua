@@ -493,5 +493,48 @@ defmodule Lua.VM.PcallStatePreservationTest do
       assert reason =~ "boom"
       assert Lua.get!(lua, [:x]) == 2
     end
+
+    test "set!/3 user function keeps heap mutations when it returns {:error, reason, lua}" do
+      lua =
+        Lua.set!(Lua.new(), [:mutate_then_fail], fn _args, lua ->
+          lua = Lua.set!(lua, [:y], 99)
+          {:error, "boom", lua}
+        end)
+
+      assert {[false, msg, 99], lua} =
+               Lua.eval!(lua, """
+               y = 1
+               local ok, err = pcall(mutate_then_fail)
+               return ok, err, y
+               """)
+
+      assert msg =~ "boom"
+      assert Lua.get!(lua, [:y]) == 99
+    end
+
+    test "deflua user function keeps heap mutations when it returns {:error, reason, lua}" do
+      assert [{module, _}] =
+               Code.compile_string("""
+               defmodule MutateThenFail do
+                 use Lua.API
+
+                 deflua boom(), state do
+                   lua = Lua.set!(state, [:y], 99)
+                   {:error, "boom", lua}
+                 end
+               end
+               """)
+
+      lua = Lua.load_api(Lua.new(), module)
+
+      assert {[false, msg, 99], _lua} =
+               Lua.eval!(lua, """
+               y = 1
+               local ok, err = pcall(boom)
+               return ok, err, y
+               """)
+
+      assert msg =~ "boom"
+    end
   end
 end
