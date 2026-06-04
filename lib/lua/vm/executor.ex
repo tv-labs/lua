@@ -980,8 +980,8 @@ defmodule Lua.VM.Executor do
         # without going through this branch.
         args = collect_args(regs, base + 1, total_args)
         call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
-        State.check_call_depth!(state)
-        state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
+        depth = next_call_depth!(state)
+        state = %{state | call_stack: [call_info | state.call_stack], call_depth: depth}
         {results, state} = Dispatcher.execute(callee_proto, args, callee_upvalues, state)
         state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
         continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, base, result_count)
@@ -1018,12 +1018,12 @@ defmodule Lua.VM.Executor do
 
         call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
 
-        State.check_call_depth!(state)
+        depth = next_call_depth!(state)
 
         state = %{
           state
           | call_stack: [call_info | state.call_stack],
-            call_depth: state.call_depth + 1,
+            call_depth: depth,
             open_upvalues: %{}
         }
 
@@ -2205,6 +2205,25 @@ defmodule Lua.VM.Executor do
 
   defp concat_checked(_left, _right, _max) do
     raise RuntimeError, value: "resulting string too large"
+  end
+
+  # Per-call depth check, inlined to a plain integer comparison so the
+  # call-dense recursive path does not pay a cross-module call on every
+  # Lua call/return. Returns the bumped depth, or raises a catchable
+  # "stack overflow" once the limit is hit. The `:infinity` head (the
+  # default) skips the comparison.
+  #
+  # This is one of three copies of the same logic: the authoritative
+  # `Lua.VM.State.next_call_depth!/1` and an identical private copy in
+  # `Lua.VM.Dispatcher`. They are not compiler-checked against each other,
+  # so any change here must be mirrored in the other two. The shared
+  # semantics are pinned by `test/lua/vm/state_test.exs`.
+  @compile {:inline, next_call_depth!: 1}
+  defp next_call_depth!(%State{call_depth: depth, max_call_depth: :infinity}), do: depth + 1
+  defp next_call_depth!(%State{call_depth: depth, max_call_depth: max}) when depth < max, do: depth + 1
+
+  defp next_call_depth!(%State{call_stack: call_stack}) do
+    raise RuntimeError, value: "stack overflow", call_stack: call_stack
   end
 
   # ── Metamethod support ─────────────────────────────────────────────────────

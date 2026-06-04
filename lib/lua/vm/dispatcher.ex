@@ -28,6 +28,26 @@ defmodule Lua.VM.Dispatcher do
   alias Lua.VM.State
   alias Lua.VM.Table
 
+  # Per-call depth check, inlined to a plain integer comparison so the
+  # call-dense recursive path does not pay a cross-module call on every
+  # Lua call/return. Returns the bumped depth, or raises a catchable
+  # "stack overflow" once the limit is hit. The `:infinity` head (the
+  # default) skips the comparison.
+  #
+  # This is one of three copies of the same logic: the authoritative
+  # `Lua.VM.State.next_call_depth!/1` and an identical private copy in
+  # `Lua.VM.Executor`. They are not compiler-checked against each other,
+  # so any change here must be mirrored in the other two. The shared
+  # semantics are pinned by `test/lua/vm/state_test.exs`.
+  @compile {:inline, next_call_depth!: 1}
+
+  defp next_call_depth!(%State{call_depth: depth, max_call_depth: :infinity}), do: depth + 1
+  defp next_call_depth!(%State{call_depth: depth, max_call_depth: max}) when depth < max, do: depth + 1
+
+  defp next_call_depth!(%State{call_stack: call_stack}) do
+    raise RuntimeError, value: "stack overflow", call_stack: call_stack
+  end
+
   # Mirror of the interpreter's concat ceiling, inlined as a compile-time
   # constant so the binary-binary fast path stays a single comparison. See
   # `Lua.VM.Executor.concat_checked/2` for the rationale.
@@ -579,12 +599,12 @@ defmodule Lua.VM.Dispatcher do
               {code, pc + 1, regs, upvalues, proto, cont, :discard, state.open_upvalues}
 
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            State.check_call_depth!(state)
+            depth = next_call_depth!(state)
 
             state = %{
               state
               | call_stack: [call_info | state.call_stack],
-                call_depth: state.call_depth + 1,
+                call_depth: depth,
                 open_upvalues: %{}
             }
 
@@ -602,8 +622,8 @@ defmodule Lua.VM.Dispatcher do
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, arg_count)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            State.check_call_depth!(state)
-            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
+            depth = next_call_depth!(state)
+            state = %{state | call_stack: [call_info | state.call_stack], call_depth: depth}
             {_results, state} = Executor.call_function(closure, args, state)
             state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
@@ -632,12 +652,12 @@ defmodule Lua.VM.Dispatcher do
               {code, pc + 1, regs, upvalues, proto, cont, base, state.open_upvalues}
 
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            State.check_call_depth!(state)
+            depth = next_call_depth!(state)
 
             state = %{
               state
               | call_stack: [call_info | state.call_stack],
-                call_depth: state.call_depth + 1,
+                call_depth: depth,
                 open_upvalues: %{}
             }
 
@@ -655,8 +675,8 @@ defmodule Lua.VM.Dispatcher do
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, arg_count)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            State.check_call_depth!(state)
-            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
+            depth = next_call_depth!(state)
+            state = %{state | call_stack: [call_info | state.call_stack], call_depth: depth}
             {results, state} = Executor.call_function(closure, args, state)
             state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
 
@@ -1059,12 +1079,12 @@ defmodule Lua.VM.Dispatcher do
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, dest, state.open_upvalues}
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            State.check_call_depth!(state)
+            depth = next_call_depth!(state)
 
             state = %{
               state
               | call_stack: [call_info | state.call_stack],
-                call_depth: state.call_depth + 1,
+                call_depth: depth,
                 open_upvalues: %{}
             }
 
@@ -1082,8 +1102,8 @@ defmodule Lua.VM.Dispatcher do
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, total_args)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            State.check_call_depth!(state)
-            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
+            depth = next_call_depth!(state)
+            state = %{state | call_stack: [call_info | state.call_stack], call_depth: depth}
             {results, state} = Executor.call_function(closure, args, state)
             state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
             apply_multi_call_result(result_count, base, results, code, pc + 1, regs, upvalues, proto, state, cont, frames)
