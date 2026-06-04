@@ -135,12 +135,21 @@ defmodule Lua.VM.Dispatcher do
       end
 
     saved_open = state.open_upvalues
-    state = %{state | open_upvalues: %{}}
 
-    {results, state} = dispatch(proto.bytecode, 1, regs, upvalues, proto, state, [], [])
+    try do
+      state = %{state | open_upvalues: %{}}
 
-    state = %{state | open_upvalues: saved_open}
-    {results, state}
+      {results, state} = dispatch(proto.bytecode, 1, regs, upvalues, proto, state, [], [])
+
+      state = %{state | open_upvalues: saved_open}
+      {results, state}
+    rescue
+      # Backstop net: any raise site missed by the per-site state
+      # annotations still ferries out at least this frame's entry state,
+      # so protected calls keep heap effects from enclosing frames —
+      # see `Lua.VM.Executor.annotate_state/2`.
+      e -> reraise Executor.annotate_frame_state(e, state), __STACKTRACE__
+    end
   end
 
   defp init_regs(proto, args) do

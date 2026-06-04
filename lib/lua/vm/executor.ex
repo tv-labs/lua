@@ -89,6 +89,11 @@ defmodule Lua.VM.Executor do
         do_execute(instructions, registers, upvalues, proto, state, [], [], 0)
 
       {results, regs, %{state | open_upvalues: saved_open_upvalues}}
+    rescue
+      # Backstop net: any raise site missed by the per-site annotations
+      # still ferries out at least this frame's entry state, bounding the
+      # loss to in-frame mutations of the innermost unannotated frame.
+      e -> reraise annotate_state(e, state), __STACKTRACE__
     after
       restore_position(prev)
     end
@@ -103,6 +108,7 @@ defmodule Lua.VM.Executor do
   defp restore_position(@unset), do: Process.delete(@position_key)
   defp restore_position(pos), do: Process.put(@position_key, pos)
 
+  @doc false
   # Ferries the freshest state at an execution boundary out on VM
   # exceptions, so protected calls (pcall/xpcall) can keep heap effects
   # made before the error — see `Lua.VM.State.unwind_to/2`.
@@ -111,8 +117,13 @@ defmodule Lua.VM.Executor do
   # deeper in the call tree already carries a fresher snapshot than any
   # enclosing boundary's. Non-VM exceptions (no `:state` key) pass through
   # untouched. Runs only on the error path — the happy path never pays.
-  defp annotate_state(%{state: nil} = e, %State{} = state), do: %{e | state: state}
-  defp annotate_state(e, _state), do: e
+  # Public (but undocumented) so `Lua.VM.Dispatcher`'s frame boundary can
+  # use the same net.
+  @spec annotate_frame_state(Exception.t(), State.t()) :: Exception.t()
+  def annotate_frame_state(%{state: nil} = e, %State{} = state), do: %{e | state: state}
+  def annotate_frame_state(e, _state), do: e
+
+  defp annotate_state(e, state), do: annotate_frame_state(e, state)
 
   @doc """
   Calls a Lua function value with the given arguments.
@@ -140,13 +151,21 @@ defmodule Lua.VM.Executor do
       end
 
     saved_open_upvalues = state.open_upvalues
-    state = %{state | open_upvalues: %{}}
 
-    {results, _callee_regs, state} =
-      do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0)
+    try do
+      state = %{state | open_upvalues: %{}}
 
-    state = %{state | open_upvalues: saved_open_upvalues}
-    {results, state}
+      {results, _callee_regs, state} =
+        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0)
+
+      state = %{state | open_upvalues: saved_open_upvalues}
+      {results, state}
+    rescue
+      # Backstop net: a raise site missed by the per-site annotations still
+      # ferries out at least this frame's entry state, bounding the loss to
+      # in-frame mutations of the innermost unannotated frame.
+      e -> reraise annotate_state(e, state), __STACKTRACE__
+    end
   end
 
   def call_function({:compiled_closure, callee_proto, callee_upvalues}, args, state) do
@@ -2132,13 +2151,19 @@ defmodule Lua.VM.Executor do
       end
 
     saved_open_upvalues = state.open_upvalues
-    state = %{state | open_upvalues: %{}}
 
-    {results, _callee_regs, state} =
-      do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0)
+    try do
+      state = %{state | open_upvalues: %{}}
 
-    state = %{state | open_upvalues: saved_open_upvalues}
-    {results, state}
+      {results, _callee_regs, state} =
+        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0)
+
+      state = %{state | open_upvalues: saved_open_upvalues}
+      {results, state}
+    rescue
+      # Backstop net — same rationale as the `call_function/3` closure path.
+      e -> reraise annotate_state(e, state), __STACKTRACE__
+    end
   end
 
   defp call_value({:compiled_closure, _, _} = closure, args, _proto, state, _line) do
