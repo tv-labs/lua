@@ -70,7 +70,10 @@ defmodule Lua.VM.State do
   The hot call/return paths in `Lua.VM.Dispatcher` and `Lua.VM.Executor`
   inline this same comparison directly rather than pay a cross-module
   call on every Lua call. This function is the authoritative definition
-  they mirror, and the entry point for any other caller.
+  those two private copies mirror, and the entry point for any other
+  caller. The copies are not compiler-checked against this one, so any
+  change to the limit logic here must be applied to all three; the direct
+  unit test in `test/lua/vm/state_test.exs` pins the shared semantics.
   """
   @spec next_call_depth!(t()) :: pos_integer()
   def next_call_depth!(%__MODULE__{call_depth: depth, max_call_depth: :infinity}), do: depth + 1

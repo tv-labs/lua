@@ -2177,9 +2177,15 @@ defmodule Lua.VM.Executor do
 
   # Per-call depth check, inlined to a plain integer comparison so the
   # call-dense recursive path does not pay a cross-module call on every
-  # Lua call/return. Mirrors `State.next_call_depth!/1`: returns the
-  # bumped depth, or raises a catchable "stack overflow" once the limit
-  # is hit. The `:infinity` head (the default) skips the comparison.
+  # Lua call/return. Returns the bumped depth, or raises a catchable
+  # "stack overflow" once the limit is hit. The `:infinity` head (the
+  # default) skips the comparison.
+  #
+  # This is one of three copies of the same logic: the authoritative
+  # `Lua.VM.State.next_call_depth!/1` and an identical private copy in
+  # `Lua.VM.Dispatcher`. They are not compiler-checked against each other,
+  # so any change here must be mirrored in the other two. The shared
+  # semantics are pinned by `test/lua/vm/state_test.exs`.
   @compile {:inline, next_call_depth!: 1}
   defp next_call_depth!(%State{call_depth: depth, max_call_depth: :infinity}), do: depth + 1
   defp next_call_depth!(%State{call_depth: depth, max_call_depth: max}) when depth < max, do: depth + 1
