@@ -103,6 +103,17 @@ defmodule Lua.VM.Executor do
   defp restore_position(@unset), do: Process.delete(@position_key)
   defp restore_position(pos), do: Process.put(@position_key, pos)
 
+  # Ferries the freshest state at an execution boundary out on VM
+  # exceptions, so protected calls (pcall/xpcall) can keep heap effects
+  # made before the error — see `Lua.VM.State.unwind_to/2`.
+  #
+  # Only fills the `:state` field when it's empty: an exception annotated
+  # deeper in the call tree already carries a fresher snapshot than any
+  # enclosing boundary's. Non-VM exceptions (no `:state` key) pass through
+  # untouched. Runs only on the error path — the happy path never pays.
+  defp annotate_state(%{state: nil} = e, %State{} = state), do: %{e | state: state}
+  defp annotate_state(e, _state), do: e
+
   @doc """
   Calls a Lua function value with the given arguments.
 
@@ -146,6 +157,11 @@ defmodule Lua.VM.Executor do
     Dispatcher.execute(callee_proto, args, callee_upvalues, state)
   end
 
+  # The rescue annotates escaping VM exceptions with this call's entry
+  # state (the freshest state any stdlib raise site could have seen), so
+  # protected calls can keep heap effects made before the error without
+  # every bad-argument check threading state into its raise. Innermost
+  # annotation wins — see `annotate_state/2`.
   def call_function({:native_func, fun}, args, state) do
     case fun.(args, state) do
       {results, %State{} = new_state} when is_list(results) ->
@@ -154,6 +170,8 @@ defmodule Lua.VM.Executor do
       {results, %State{} = new_state} ->
         {List.wrap(results), new_state}
     end
+  rescue
+    e -> reraise annotate_state(e, state), __STACKTRACE__
   end
 
   def call_function(nil, _args, state) do
@@ -1071,6 +1089,8 @@ defmodule Lua.VM.Executor do
                 raise InternalError,
                   value: "native function returned invalid result: #{inspect(other)}, expected {results, state}"
             end
+          rescue
+            e -> reraise annotate_state(e, state), __STACKTRACE__
           after
             restore_position(prev_pos)
           end
