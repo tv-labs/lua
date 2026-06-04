@@ -187,6 +187,65 @@ defmodule Lua.VM.PcallStatePreservationTest do
         assert [2, false] = results
       end
 
+      test "gsub callback heap mutation before an invalid-return error is kept" do
+        {results, _state} =
+          run(
+            """
+            x = 1
+            local ok = pcall(function()
+              return string.gsub("ab", ".", function(c)
+                x = 2
+                return {}
+              end)
+            end)
+            return x, ok
+            """,
+            @engine
+          )
+
+        assert [2, false] = results
+      end
+
+      test "table.sort comparator mutation before its error is kept" do
+        {results, _state} =
+          run(
+            """
+            x = 1
+            local t = {3, 1, 2}
+            local ok = pcall(function()
+              table.sort(t, function(a, b)
+                x = 2
+                error("bad comparator")
+              end)
+            end)
+            return x, ok
+            """,
+            @engine
+          )
+
+        assert [2, false] = results
+      end
+
+      test "pairs loop-body mutation before its error is kept" do
+        {results, _state} =
+          run(
+            """
+            x = 0
+            local t = {a = 1, b = 2}
+            local ok = pcall(function()
+              for _k, _v in pairs(t) do
+                x = x + 1
+                error("loop")
+              end
+            end)
+            return x, ok
+            """,
+            @engine
+          )
+
+        assert [1, false] = results
+      end
+
       test "mutation before error() with a table error object is kept" do
         {results, _state} =
           run(
