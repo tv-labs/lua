@@ -18,7 +18,11 @@ defmodule Lua.VM.RuntimeError do
 
   @type t :: %__MODULE__{}
 
-  defexception [:value, :source, :message, :call_stack, :line]
+  # `:state` carries the `Lua.VM.State` as of the raise, so protected calls
+  # (pcall/xpcall) can keep heap effects made before the error instead of
+  # rolling back to their entry snapshot. It is out-of-band metadata: it never
+  # participates in `message` and stays `nil` when no state was in scope.
+  defexception [:value, :source, :message, :call_stack, :line, :state]
 
   @impl true
   def exception(opts) do
@@ -35,7 +39,8 @@ defmodule Lua.VM.RuntimeError do
       source: source,
       message: message,
       call_stack: call_stack,
-      line: line
+      line: line,
+      state: Keyword.get(opts, :state)
     }
   end
 

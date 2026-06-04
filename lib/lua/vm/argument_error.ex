@@ -45,6 +45,10 @@ defmodule Lua.VM.ArgumentError do
 
   @type t :: %__MODULE__{}
 
+  # `:state` carries the `Lua.VM.State` as of the raise, so protected calls
+  # (pcall/xpcall) can keep heap effects made before the error instead of
+  # rolling back to their entry snapshot. It is out-of-band metadata: it never
+  # participates in `message` and stays `nil` when no state was in scope.
   defexception [
     :function_name,
     :arg_num,
@@ -53,7 +57,8 @@ defmodule Lua.VM.ArgumentError do
     :details,
     :line,
     :source,
-    :call_stack
+    :call_stack,
+    :state
   ]
 
   @impl true
@@ -70,7 +75,8 @@ defmodule Lua.VM.ArgumentError do
       details: Keyword.get(opts, :details),
       line: Keyword.get(opts, :line) || auto_line,
       source: Keyword.get(opts, :source) || auto_source,
-      call_stack: Keyword.get(opts, :call_stack, [])
+      call_stack: Keyword.get(opts, :call_stack, []),
+      state: Keyword.get(opts, :state)
     }
   end
 

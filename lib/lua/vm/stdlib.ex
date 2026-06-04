@@ -170,14 +170,14 @@ defmodule Lua.VM.Stdlib do
   # is called outside a Lua execution (or from a context where no line was
   # set), `current_position/0` returns `{nil, nil}` and the message just
   # omits the location.
-  defp lua_error([message | _], _state) do
+  defp lua_error([message | _], state) do
     {line, source} = Executor.current_position()
-    raise RuntimeError, value: message, line: line, source: source
+    raise RuntimeError, value: message, line: line, source: source, state: state
   end
 
-  defp lua_error([], _state) do
+  defp lua_error([], state) do
     {line, source} = Executor.current_position()
-    raise RuntimeError, value: nil, line: line, source: source
+    raise RuntimeError, value: nil, line: line, source: source, state: state
   end
 
   # assert(v [, message]) — raises if v is falsy
@@ -190,72 +190,76 @@ defmodule Lua.VM.Stdlib do
         end
 
       {line, source} = Executor.current_position()
-      raise AssertionError, value: message, line: line, source: source
+      raise AssertionError, value: message, line: line, source: source, state: state
     else
       {[value | rest], state}
     end
   end
 
-  defp lua_assert([], _state) do
+  defp lua_assert([], state) do
     {line, source} = Executor.current_position()
-    raise AssertionError, value: "assertion failed!", line: line, source: source
+    raise AssertionError, value: "assertion failed!", line: line, source: source, state: state
   end
 
   # pcall(f [, arg1, ...]) — calls function in protected mode
-  # Returns true, result(s) on success or false, error_message on error
+  # Returns true, result(s) on success or false, error_message on error.
+  # The trapped error unwinds control state only: heap effects the callee
+  # made before raising are kept via the exception's `:state` snapshot
+  # (Lua 5.3 §2.3) — see `State.unwind_to/2`.
   defp lua_pcall([func | args], state) do
     {results, state} = Executor.call_function(func, args, state)
     {[true | results], state}
   rescue
-    e in [RuntimeError, AssertionError, TypeError] ->
+    e in [RuntimeError, AssertionError, TypeError, ArgumentError] ->
       error_msg = extract_error_message(e)
-      {[false, error_msg], state}
+      {[false, error_msg], State.unwind_to(state, e.state)}
 
     e ->
       # Catch any other error
-      {[false, Exception.message(e)], state}
+      {[false, Exception.message(e)], State.unwind_to(state, raised_state(e))}
   end
 
   defp lua_pcall([], state), do: {[false, "bad argument #1 to 'pcall' (value expected)"], state}
 
   # xpcall(f, msgh [, arg1, ...]) — calls function with message handler
-  # Returns true, result(s) on success or false, handler_result on error
+  # Returns true, result(s) on success or false, handler_result on error.
+  # Like pcall, heap effects made before the error are kept; the message
+  # handler runs against that recovered state so it observes them
+  # (reference Lua invokes the handler before the stack unwinds, with the
+  # heap intact).
   defp lua_xpcall([func, handler | args], state) do
     {results, state} = Executor.call_function(func, args, state)
     {[true | results], state}
   rescue
-    e in [RuntimeError, AssertionError, TypeError] ->
-      error_msg = extract_error_message(e)
-
-      # Call the error handler
-      try do
-        {handler_results, state} = Executor.call_function(handler, [error_msg], state)
-        {[false | handler_results], state}
-      rescue
-        _ ->
-          # If handler fails, return original error
-          {[false, error_msg], state}
-      end
+    e in [RuntimeError, AssertionError, TypeError, ArgumentError] ->
+      run_xpcall_handler(handler, extract_error_message(e), State.unwind_to(state, e.state))
 
     e ->
       # Catch any other error
-      error_msg = Exception.message(e)
-
-      try do
-        {handler_results, state} = Executor.call_function(handler, [error_msg], state)
-        {[false | handler_results], state}
-      rescue
-        _ ->
-          {[false, error_msg], state}
-      end
+      run_xpcall_handler(handler, Exception.message(e), State.unwind_to(state, raised_state(e)))
   end
 
   defp lua_xpcall(_, state), do: {[false, "bad argument to 'xpcall'"], state}
+
+  # If the handler itself fails, return the original error — keeping any
+  # heap effects the handler made before its own error.
+  defp run_xpcall_handler(handler, error_msg, state) do
+    {handler_results, state} = Executor.call_function(handler, [error_msg], state)
+    {[false | handler_results], state}
+  rescue
+    e ->
+      {[false, error_msg], State.unwind_to(state, raised_state(e))}
+  end
 
   # Extract error message from exception
   defp extract_error_message(%{value: value}) when is_binary(value), do: value
   defp extract_error_message(%{value: value}) when not is_nil(value), do: Value.to_string(value)
   defp extract_error_message(e), do: Exception.message(e)
+
+  # Raise-time state ferried out on VM exceptions; `nil` for anything else
+  # (plain Elixir exceptions carry no Lua state).
+  defp raised_state(%{state: %State{} = state}), do: state
+  defp raised_state(_), do: nil
 
   # rawget(table, key) — get without metamethods
   defp lua_rawget([{:tref, id}, key | _], state) do

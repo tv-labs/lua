@@ -16,7 +16,11 @@ defmodule Lua.VM.TypeError do
 
   @type t :: %__MODULE__{}
 
-  defexception [:value, :source, :message, :call_stack, :line, :error_kind, :value_type]
+  # `:state` carries the `Lua.VM.State` as of the raise, so protected calls
+  # (pcall/xpcall) can keep heap effects made before the error instead of
+  # rolling back to their entry snapshot. It is out-of-band metadata: it never
+  # participates in `message` and stays `nil` when no state was in scope.
+  defexception [:value, :source, :message, :call_stack, :line, :error_kind, :value_type, :state]
 
   @impl true
   def exception(opts) do
@@ -40,7 +44,8 @@ defmodule Lua.VM.TypeError do
       call_stack: call_stack,
       line: line,
       error_kind: error_kind,
-      value_type: value_type
+      value_type: value_type,
+      state: Keyword.get(opts, :state)
     }
   end
 

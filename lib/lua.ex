@@ -771,7 +771,7 @@ defmodule Lua do
     {results, new_state} = fun.(args, state)
     {:ok, List.wrap(results), new_state}
   rescue
-    e -> {:error, Exception.message(e), state}
+    e -> {:error, Exception.message(e), recover_state(e, state)}
   end
 
   defp do_call_function({:lua_closure, proto, upvalues}, args, state) do
@@ -789,7 +789,7 @@ defmodule Lua do
 
     {:ok, results, new_state}
   rescue
-    e -> {:error, Exception.message(e), state}
+    e -> {:error, Exception.message(e), recover_state(e, state)}
   end
 
   defp do_call_function({:compiled_closure, _, _} = closure, args, state) do
@@ -798,12 +798,19 @@ defmodule Lua do
     {results, new_state} = Executor.call_function(closure, args, state)
     {:ok, results, new_state}
   rescue
-    e -> {:error, Exception.message(e), state}
+    e -> {:error, Exception.message(e), recover_state(e, state)}
   end
 
   defp do_call_function(other, _args, state) do
     {:error, "undefined function '#{inspect(other)}'", state}
   end
+
+  # This is a protected-call boundary like pcall: trapping the error
+  # unwinds control state, but heap effects the callee made before raising
+  # are kept (Lua 5.3 §2.3). VM exceptions ferry the raise-time state out
+  # on their `:state` field; anything else falls back to the entry state.
+  defp recover_state(%{state: %State{} = raised}, entry), do: State.unwind_to(entry, raised)
+  defp recover_state(_e, entry), do: entry
 
   @doc """
   The raising variant of `call_function/3`

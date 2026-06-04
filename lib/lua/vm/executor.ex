@@ -156,11 +156,12 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  def call_function(nil, _args, _state) do
+  def call_function(nil, _args, state) do
     raise TypeError,
       value: "attempt to call a nil value",
       error_kind: :call_nil,
-      value_type: nil
+      value_type: nil,
+      state: state
   end
 
   def call_function(other, args, state) do
@@ -170,7 +171,8 @@ defmodule Lua.VM.Executor do
         raise TypeError,
           value: "attempt to call a #{Value.type_name(other)} value",
           error_kind: :call_non_function,
-          value_type: value_type(other)
+          value_type: value_type(other),
+          state: state
 
       {:tref, mt_id} ->
         mt = Map.fetch!(state.tables, mt_id)
@@ -180,7 +182,8 @@ defmodule Lua.VM.Executor do
             raise TypeError,
               value: "attempt to call a #{Value.type_name(other)} value",
               error_kind: :call_non_function,
-              value_type: value_type(other)
+              value_type: value_type(other),
+              state: state
 
           call_mm ->
             call_function(call_mm, [other | args], state)
@@ -439,7 +442,8 @@ defmodule Lua.VM.Executor do
       call_stack: state.call_stack,
       line: 0,
       error_kind: :call_nil,
-      value_type: nil
+      value_type: nil,
+      state: state
   end
 
   def dispatcher_call_function({:lua_closure, _, _} = closure, args, state, _proto, _name_hint),
@@ -460,7 +464,8 @@ defmodule Lua.VM.Executor do
           call_stack: state.call_stack,
           line: 0,
           error_kind: :call_non_function,
-          value_type: value_type(other)
+          value_type: value_type(other),
+          state: state
 
       {:tref, mt_id} ->
         mt = Map.fetch!(state.tables, mt_id)
@@ -473,7 +478,8 @@ defmodule Lua.VM.Executor do
               call_stack: state.call_stack,
               line: 0,
               error_kind: :call_non_function,
-              value_type: value_type(other)
+              value_type: value_type(other),
+              state: state
 
           call_mm ->
             call_function(call_mm, [other | args], state)
@@ -1078,7 +1084,8 @@ defmodule Lua.VM.Executor do
           call_stack: state.call_stack,
           line: line,
           error_kind: :call_nil,
-          value_type: nil
+          value_type: nil,
+          state: state
 
       other ->
         case get_metatable(other, state) do
@@ -1089,7 +1096,8 @@ defmodule Lua.VM.Executor do
               call_stack: state.call_stack,
               line: line,
               error_kind: :call_non_function,
-              value_type: value_type(other)
+              value_type: value_type(other),
+              state: state
 
           {:tref, mt_id} ->
             mt = Map.fetch!(state.tables, mt_id)
@@ -1102,7 +1110,8 @@ defmodule Lua.VM.Executor do
                   call_stack: state.call_stack,
                   line: line,
                   error_kind: :call_non_function,
-                  value_type: value_type(other)
+                  value_type: value_type(other),
+                  state: state
 
               call_mm ->
                 args = collect_args(regs, base + 1, total_args)
@@ -2142,7 +2151,8 @@ defmodule Lua.VM.Executor do
       call_stack: state.call_stack,
       line: line,
       error_kind: :call_nil,
-      value_type: nil
+      value_type: nil,
+      state: state
   end
 
   defp call_value(other, args, proto, state, line) do
@@ -2154,7 +2164,8 @@ defmodule Lua.VM.Executor do
           call_stack: state.call_stack,
           line: line,
           error_kind: :call_non_function,
-          value_type: value_type(other)
+          value_type: value_type(other),
+          state: state
 
       {:tref, mt_id} ->
         mt = Map.fetch!(state.tables, mt_id)
@@ -2167,7 +2178,8 @@ defmodule Lua.VM.Executor do
               call_stack: state.call_stack,
               line: line,
               error_kind: :call_non_function,
-              value_type: value_type(other)
+              value_type: value_type(other),
+              state: state
 
           call_mm ->
             call_value(call_mm, [other | args], proto, state, line)
