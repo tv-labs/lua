@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`pcall` passes the raised error value through as-is** (#334). Per Lua 5.3
+  §6.1, `error(value)` raises an arbitrary Lua value and `pcall` returns it
+  verbatim as its second result — previously non-string values were
+  stringified (`error({code = 1})` came back as `"table: 0x..."`). Structured
+  error objects, numbers, booleans, and `nil` now survive `pcall`/`xpcall`,
+  and the `xpcall` message handler receives the untouched value. String
+  messages gain the reference `source:line:` position prefix (suppressed by
+  `error(msg, 0)`); note `pcall`'s second result may therefore now be a
+  non-string Lua value. Host-facing `Lua.VM.RuntimeError` rendering is
+  unchanged.
 - **Protected calls no longer roll back heap effects** (#331). When a function
   called via `pcall`/`xpcall` (or `Lua.call_function/3` from Elixir) raised an
   error, mutations made before the error — global writes, table field updates,
