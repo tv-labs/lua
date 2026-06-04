@@ -163,22 +163,50 @@ defmodule Lua.VM.Stdlib do
     {[], state}
   end
 
-  # error(message) — raises a Lua runtime error.
+  # error(message [, level]) — raises a Lua runtime error.
   # The executor stashes the calling source position in the process dict
   # before invoking native callbacks (see `Lua.VM.Executor.execute/5`), so
   # this raise picks up `at <source>:<line>:` automatically. If the function
   # is called outside a Lua execution (or from a context where no line was
   # set), `current_position/0` returns `{nil, nil}` and the message just
   # omits the location.
-  defp lua_error([message | _], state) do
+  #
+  # Per Lua 5.3 §6.1 the raised value passes through pcall/xpcall verbatim,
+  # and string messages gain a `source:line:` prefix unless `level == 0`.
+  # The prefixed view lives in `:lua_value` (Lua-facing only); `:value`
+  # stays raw so host rendering is untouched. Levels >= 2 (attribute to the
+  # caller's caller) need per-frame lines the call stack does not carry and
+  # are treated as level 1 for now.
+  defp lua_error([message | rest], state) do
     {line, source} = Executor.current_position()
-    raise RuntimeError, value: message, line: line, source: source, state: state
+    level = error_level(rest)
+
+    raise RuntimeError,
+      value: message,
+      lua_value: position_prefixed(message, level, line, source),
+      line: line,
+      source: source,
+      state: state
   end
 
   defp lua_error([], state) do
     {line, source} = Executor.current_position()
     raise RuntimeError, value: nil, line: line, source: source, state: state
   end
+
+  defp error_level([level | _]) when is_number(level), do: level
+  defp error_level(_), do: 1
+
+  # §6.1 position prefix: only string messages, only when `level ~= 0`, and
+  # only when the executor recorded a usable position. A `{nil, _}` position
+  # (native call inside a compiled closure — the dispatcher does not plumb
+  # per-call lines yet) omits the prefix rather than emit a wrong line.
+  defp position_prefixed(message, level, line, source)
+       when is_binary(message) and level != 0 and is_integer(line) and is_binary(source) do
+    "#{source}:#{line}: #{message}"
+  end
+
+  defp position_prefixed(message, _level, _line, _source), do: message
 
   # assert(v [, message]) — raises if v is falsy
   defp lua_assert([value | rest], state) do
@@ -211,8 +239,7 @@ defmodule Lua.VM.Stdlib do
     {[true | results], state}
   rescue
     e in [RuntimeError, AssertionError, TypeError, ArgumentError] ->
-      error_msg = extract_error_message(e)
-      {[false, error_msg], State.unwind_to(state, e.state)}
+      {[false, error_value(e)], State.unwind_to(state, e.state)}
 
     e ->
       # Catch any other error
@@ -232,7 +259,7 @@ defmodule Lua.VM.Stdlib do
     {[true | results], state}
   rescue
     e in [RuntimeError, AssertionError, TypeError, ArgumentError] ->
-      run_xpcall_handler(handler, extract_error_message(e), State.unwind_to(state, e.state))
+      run_xpcall_handler(handler, error_value(e), State.unwind_to(state, e.state))
 
     e ->
       # Catch any other error
@@ -251,10 +278,19 @@ defmodule Lua.VM.Stdlib do
       {[false, error_msg], State.unwind_to(state, raised_state(e))}
   end
 
-  # Extract error message from exception
-  defp extract_error_message(%{value: value}) when is_binary(value), do: value
-  defp extract_error_message(%{value: value}) when not is_nil(value), do: Value.to_string(value)
-  defp extract_error_message(e), do: Exception.message(e)
+  # The Lua-facing error value handed back by pcall (and to xpcall's
+  # handler), per §6.1: the raised value passes through verbatim.
+  #
+  # Clause ordering is load-bearing:
+  # 1. `error()`'s §6.1-prefixed string view (`RuntimeError.lua_value`).
+  # 2. Raw passthrough on KEY PRESENCE — `value: nil` (from `error()`) and
+  #    `value: false` must match here so pcall returns nil/false like
+  #    PUC-Lua, never an `is_nil`-guarded fallthrough to clause 3.
+  # 3. `ArgumentError` (no `:value` field) and plain Elixir exceptions
+  #    keep their message string.
+  defp error_value(%{lua_value: lv}) when not is_nil(lv), do: lv
+  defp error_value(%{value: value}), do: value
+  defp error_value(e), do: Exception.message(e)
 
   # Raise-time state ferried out on VM exceptions; `nil` for anything else
   # (plain Elixir exceptions carry no Lua state).

@@ -64,7 +64,14 @@ defmodule Lua.VM.PcallStatePreservationTest do
           )
 
         assert [2, false, err] = results
-        assert err =~ "boom"
+
+        # §6.1 position prefix on string errors: correct source:line under
+        # the interpreter; suppressed (not mis-attributed) under the
+        # dispatcher, which lacks per-call line info.
+        case @engine do
+          :interpreted -> assert err =~ ~r/^test\.lua:\d+: boom$/
+          :compiled -> assert err == "boom"
+        end
       end
 
       test "table field write before error() is kept" do
@@ -292,12 +299,15 @@ defmodule Lua.VM.PcallStatePreservationTest do
               x = 2
               error({code = 1})
             end)
-            return x, ok, err ~= nil
+            return x, ok, type(err), err.code
             """,
             @engine
           )
 
-        assert [2, false, true] = results
+        # `err.code` reads a field on the raised table — proving the tref
+        # passes through pcall AS-IS (§6.1) and its heap entry survived the
+        # protected unwind.
+        assert [2, false, "table", 1] = results
       end
 
       test "nested pcall keeps mutations at every level" do

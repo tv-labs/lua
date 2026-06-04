@@ -487,8 +487,22 @@ defmodule Lua.VM.Executor do
   def dispatcher_call_function({:compiled_closure, _, _} = closure, args, state, _proto, _name_hint),
     do: call_function(closure, args, state)
 
-  def dispatcher_call_function({:native_func, _} = nf, args, state, _proto, _name_hint),
-    do: call_function(nf, args, state)
+  def dispatcher_call_function({:native_func, _} = nf, args, state, proto, _name_hint) do
+    # The dispatcher strips per-instruction line info at encode time, so any
+    # position visible here is a stale snapshot from an outer executor frame.
+    # Publish `{nil, source}` for the duration of the native call: raise
+    # sites that read `current_position/0` (e.g. `error()`'s §6.1 position
+    # prefix) then omit the line rather than attribute a wrong one. Restored
+    # after the call so nested invocations don't leak.
+    prev_pos = Process.get(@position_key, @unset)
+    set_position(nil, proto.source)
+
+    try do
+      call_function(nf, args, state)
+    after
+      restore_position(prev_pos)
+    end
+  end
 
   def dispatcher_call_function(other, args, state, proto, name_hint) do
     case get_metatable(other, state) do
