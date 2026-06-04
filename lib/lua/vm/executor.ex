@@ -93,7 +93,7 @@ defmodule Lua.VM.Executor do
       # Backstop net: any raise site missed by the per-site annotations
       # still ferries out at least this frame's entry state, bounding the
       # loss to in-frame mutations of the innermost unannotated frame.
-      e -> reraise annotate_state(e, state), __STACKTRACE__
+      e -> reraise annotate_frame_state(e, state), __STACKTRACE__
     after
       restore_position(prev)
     end
@@ -122,8 +122,6 @@ defmodule Lua.VM.Executor do
   @spec annotate_frame_state(Exception.t(), State.t()) :: Exception.t()
   def annotate_frame_state(%{state: nil} = e, %State{} = state), do: %{e | state: state}
   def annotate_frame_state(e, _state), do: e
-
-  defp annotate_state(e, state), do: annotate_frame_state(e, state)
 
   @doc """
   Calls a Lua function value with the given arguments.
@@ -164,7 +162,7 @@ defmodule Lua.VM.Executor do
       # Backstop net: a raise site missed by the per-site annotations still
       # ferries out at least this frame's entry state, bounding the loss to
       # in-frame mutations of the innermost unannotated frame.
-      e -> reraise annotate_state(e, state), __STACKTRACE__
+      e -> reraise annotate_frame_state(e, state), __STACKTRACE__
     end
   end
 
@@ -180,7 +178,7 @@ defmodule Lua.VM.Executor do
   # state (the freshest state any stdlib raise site could have seen), so
   # protected calls can keep heap effects made before the error without
   # every bad-argument check threading state into its raise. Innermost
-  # annotation wins — see `annotate_state/2`.
+  # annotation wins — see `annotate_frame_state/2`.
   def call_function({:native_func, fun}, args, state) do
     case fun.(args, state) do
       {results, %State{} = new_state} when is_list(results) ->
@@ -190,7 +188,7 @@ defmodule Lua.VM.Executor do
         {List.wrap(results), new_state}
     end
   rescue
-    e -> reraise annotate_state(e, state), __STACKTRACE__
+    e -> reraise annotate_frame_state(e, state), __STACKTRACE__
   end
 
   def call_function(nil, _args, state) do
@@ -1109,7 +1107,7 @@ defmodule Lua.VM.Executor do
                   value: "native function returned invalid result: #{inspect(other)}, expected {results, state}"
             end
           rescue
-            e -> reraise annotate_state(e, state), __STACKTRACE__
+            e -> reraise annotate_frame_state(e, state), __STACKTRACE__
           after
             restore_position(prev_pos)
           end
@@ -2162,7 +2160,7 @@ defmodule Lua.VM.Executor do
       {results, state}
     rescue
       # Backstop net — same rationale as the `call_function/3` closure path.
-      e -> reraise annotate_state(e, state), __STACKTRACE__
+      e -> reraise annotate_frame_state(e, state), __STACKTRACE__
     end
   end
 

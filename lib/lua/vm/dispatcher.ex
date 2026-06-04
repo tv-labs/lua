@@ -147,7 +147,7 @@ defmodule Lua.VM.Dispatcher do
       # Backstop net: any raise site missed by the per-site state
       # annotations still ferries out at least this frame's entry state,
       # so protected calls keep heap effects from enclosing frames —
-      # see `Lua.VM.Executor.annotate_state/2`.
+      # see `Lua.VM.Executor.annotate_frame_state/2`.
       e -> reraise Executor.annotate_frame_state(e, state), __STACKTRACE__
     end
   end
