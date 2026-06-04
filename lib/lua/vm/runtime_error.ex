@@ -22,6 +22,7 @@ defmodule Lua.VM.RuntimeError do
   # (pcall/xpcall) can keep heap effects made before the error instead of
   # rolling back to their entry snapshot. It is out-of-band metadata: it never
   # participates in `message` and stays `nil` when no state was in scope.
+  @derive {Inspect, except: [:state]}
   defexception [:value, :source, :message, :call_stack, :line, :state]
 
   @impl true

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- **Protected calls no longer roll back heap effects** (#331). When a function
+  called via `pcall`/`xpcall` (or `Lua.call_function/3` from Elixir) raised an
+  error, mutations made before the error — global writes, table field updates,
+  upvalue assignments, metatable changes — were silently discarded, diverging
+  from reference Lua. VM exceptions now carry the raise-time state, and
+  protected-call boundaries recover it: heap state is kept, control state
+  (call stack, open upvalues) unwinds. The `xpcall` message handler now also
+  observes those mutations, matching PUC-Lua's handler semantics.
+
 ## [v1.0.0-rc.1] - 2026-06-02
 
 The second release candidate for `1.0.0`. It builds on rc.0 with a new
