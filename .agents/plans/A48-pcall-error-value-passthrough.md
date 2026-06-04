@@ -2,10 +2,10 @@
 id: A48
 title: pcall/xpcall pass the raw Lua error value through; error() adds the §6.1 position prefix
 issue: 334
-pr: null
+pr: 335
 branch: fix/pcall-error-value-passthrough
 base: main
-status: in-progress
+status: review
 direction: A
 unlocks:
   - structured error objects (error({code = ...})) survive pcall
@@ -370,3 +370,40 @@ may now be a non-string Lua value.
 - `TypeError` — `type_error.ex:24`.
 - `ArgumentError` — NO `:value` (`argument_error.ex:53-63`); hits the
   `Exception.message/1` fallback.
+
+## Discoveries
+
+- `mix credo` is listed in Verification but credo is not a dependency of
+  this repo; skipped. `mix compile --warnings-as-errors` + `mix format`
+  + full suite stand in.
+- The `executor.ex` `dispatcher_call_function/5` `:native_func`
+  suppression changes nested-compiled-closure host messages from NO
+  location header (`{nil, nil}` position) to a source-only header
+  (`at <eval>:`). Before/after canary confirmed: strictly added
+  information, no wrong-line attribution, no existing test pinned the
+  old bytes (`ErrorFormatter.format_location(source, nil)` is an
+  explicit supported clause). The plan's fallback (error()-scoped
+  suppression) was not needed.
+- The dispatcher line-bridge follow-up issue could not be filed from
+  the shipping session (permission); its full text is drafted in PR
+  #335's Discoveries section pending a human-approved `gh issue create`.
+
+## What changed
+
+- `lib/lua/vm/stdlib.ex` — `lua_error` gains level handling + §6.1
+  prefixer into `:lua_value`; `extract_error_message/1` replaced by
+  `error_value/1` (lua_value -> raw value by key presence ->
+  `Exception.message`), wired into the two live-exception rescues only.
+- `lib/lua/vm/runtime_error.ex` — new Lua-facing-only `:lua_value`
+  field; host rendering paths untouched.
+- `lib/lua/vm/executor.ex` — `dispatcher_call_function/5` `:native_func`
+  clause publishes `{nil, proto.source}` (save/restore) so dispatcher
+  raises omit the line instead of reading a stale one.
+- `test/lua/vm/pcall_error_value_test.exs` — new 26-case dual-engine
+  matrix (red-first).
+- `test/lua/vm/pcall_state_preservation_test.exs` — tightened the
+  string-error assertion to prefix shape and the table-error-object test
+  to read `err.code == 1`; the gsub callback test untouched.
+- `CHANGELOG.md` — Unreleased/Fixed entry for #334.
+- Suite: 2234 passed / 0 failures; lua53 17 passed / 12 skipped
+  (identical to main baseline).
