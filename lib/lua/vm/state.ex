@@ -78,8 +78,49 @@ defmodule Lua.VM.State do
   def check_call_depth!(%__MODULE__{max_call_depth: :infinity}), do: :ok
   def check_call_depth!(%__MODULE__{call_depth: depth, max_call_depth: max}) when depth < max, do: :ok
 
-  def check_call_depth!(%__MODULE__{call_stack: call_stack}) do
-    raise Lua.VM.RuntimeError, value: "stack overflow", call_stack: call_stack
+  def check_call_depth!(%__MODULE__{call_stack: call_stack} = state) do
+    raise Lua.VM.RuntimeError, value: "stack overflow", call_stack: call_stack, state: state
+  end
+
+  @doc """
+  Recovers the state a protected call should continue with after trapping
+  an error.
+
+  Lua 5.3 §2.3: an error aborts the protected call, but heap effects made
+  before it — global writes, table mutations, upvalue-cell assignments,
+  metatable changes — are kept. Only control state unwinds. Accordingly,
+  heap fields come from `raised` (the state captured at the raise site,
+  ferried out on the exception's `:state` field) while control fields are
+  restored from `entry` (the state at protected-call entry):
+
+  | kept from `raised` (heap)              | restored from `entry` (control) |
+  |----------------------------------------|---------------------------------|
+  | `tables`, `table_next_id`              | `call_stack`, `call_depth`      |
+  | `userdata`, `userdata_next_id`         | `open_upvalues`                 |
+  | `metatables`, `upvalue_cells`, `private` | `multi_return_count`          |
+
+  Keeping `upvalue_cells` while restoring `open_upvalues` matches reference
+  upvalue semantics: cells captured before the protected call keep their
+  mutated values, while cells opened by the unwound frames become
+  unreachable garbage.
+
+  When no raise-time state was captured (`raised` is `nil`, e.g. the error
+  came from outside Lua execution), falls back to `entry` unchanged.
+  """
+  @spec unwind_to(t(), t() | nil) :: t()
+  def unwind_to(%__MODULE__{} = entry, nil), do: entry
+
+  def unwind_to(%__MODULE__{} = entry, %__MODULE__{} = raised) do
+    %{
+      entry
+      | tables: raised.tables,
+        table_next_id: raised.table_next_id,
+        userdata: raised.userdata,
+        userdata_next_id: raised.userdata_next_id,
+        metatables: raised.metatables,
+        upvalue_cells: raised.upvalue_cells,
+        private: raised.private
+    }
   end
 
   @doc """

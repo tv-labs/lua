@@ -234,13 +234,26 @@ defmodule Lua.VM.Stdlib.Pattern do
         result when is_number(result) -> to_string(result)
         false -> whole_match
         nil -> whole_match
-        other -> raise RuntimeError, value: "invalid replacement value (a #{Util.typeof(other)})"
+        other -> raise_invalid_replacement(other, state)
       end
 
     {replacement, state}
   end
 
   defp apply_replacement(_repl, whole_match, _captures, state), do: {whole_match, state}
+
+  # The callback may have made heap mutations (global/table/upvalue/metatable
+  # writes) that thread back through `state` before returning an invalid value.
+  # Ferry the freshest `state` out on the raise so a protected unwind keeps
+  # those effects (Lua 5.3 §2.3). The non-stateful `gsub/4` entry calls with
+  # `state == nil`, so only attach when a real `%State{}` is in scope.
+  defp raise_invalid_replacement(other, %Lua.VM.State{} = state) do
+    raise RuntimeError, value: "invalid replacement value (a #{Util.typeof(other)})", state: state
+  end
+
+  defp raise_invalid_replacement(other, _state) do
+    raise RuntimeError, value: "invalid replacement value (a #{Util.typeof(other)})"
+  end
 
   defp replace_captures("", _whole, _captures), do: ""
 

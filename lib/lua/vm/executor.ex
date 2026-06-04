@@ -89,6 +89,11 @@ defmodule Lua.VM.Executor do
         do_execute(instructions, registers, upvalues, proto, state, [], [], 0)
 
       {results, regs, %{state | open_upvalues: saved_open_upvalues}}
+    rescue
+      # Backstop net: any raise site missed by the per-site annotations
+      # still ferries out at least this frame's entry state, bounding the
+      # loss to in-frame mutations of the innermost unannotated frame.
+      e -> reraise annotate_frame_state(e, state), __STACKTRACE__
     after
       restore_position(prev)
     end
@@ -102,6 +107,21 @@ defmodule Lua.VM.Executor do
 
   defp restore_position(@unset), do: Process.delete(@position_key)
   defp restore_position(pos), do: Process.put(@position_key, pos)
+
+  @doc false
+  # Ferries the freshest state at an execution boundary out on VM
+  # exceptions, so protected calls (pcall/xpcall) can keep heap effects
+  # made before the error — see `Lua.VM.State.unwind_to/2`.
+  #
+  # Only fills the `:state` field when it's empty: an exception annotated
+  # deeper in the call tree already carries a fresher snapshot than any
+  # enclosing boundary's. Non-VM exceptions (no `:state` key) pass through
+  # untouched. Runs only on the error path — the happy path never pays.
+  # Public (but undocumented) so `Lua.VM.Dispatcher`'s frame boundary can
+  # use the same net.
+  @spec annotate_frame_state(Exception.t(), State.t()) :: Exception.t()
+  def annotate_frame_state(%{state: nil} = e, %State{} = state), do: %{e | state: state}
+  def annotate_frame_state(e, _state), do: e
 
   @doc """
   Calls a Lua function value with the given arguments.
@@ -129,13 +149,21 @@ defmodule Lua.VM.Executor do
       end
 
     saved_open_upvalues = state.open_upvalues
-    state = %{state | open_upvalues: %{}}
 
-    {results, _callee_regs, state} =
-      do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0)
+    try do
+      state = %{state | open_upvalues: %{}}
 
-    state = %{state | open_upvalues: saved_open_upvalues}
-    {results, state}
+      {results, _callee_regs, state} =
+        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0)
+
+      state = %{state | open_upvalues: saved_open_upvalues}
+      {results, state}
+    rescue
+      # Backstop net: a raise site missed by the per-site annotations still
+      # ferries out at least this frame's entry state, bounding the loss to
+      # in-frame mutations of the innermost unannotated frame.
+      e -> reraise annotate_frame_state(e, state), __STACKTRACE__
+    end
   end
 
   def call_function({:compiled_closure, callee_proto, callee_upvalues}, args, state) do
@@ -146,6 +174,11 @@ defmodule Lua.VM.Executor do
     Dispatcher.execute(callee_proto, args, callee_upvalues, state)
   end
 
+  # The rescue annotates escaping VM exceptions with this call's entry
+  # state (the freshest state any stdlib raise site could have seen), so
+  # protected calls can keep heap effects made before the error without
+  # every bad-argument check threading state into its raise. Innermost
+  # annotation wins — see `annotate_frame_state/2`.
   def call_function({:native_func, fun}, args, state) do
     case fun.(args, state) do
       {results, %State{} = new_state} when is_list(results) ->
@@ -154,13 +187,16 @@ defmodule Lua.VM.Executor do
       {results, %State{} = new_state} ->
         {List.wrap(results), new_state}
     end
+  rescue
+    e -> reraise annotate_frame_state(e, state), __STACKTRACE__
   end
 
-  def call_function(nil, _args, _state) do
+  def call_function(nil, _args, state) do
     raise TypeError,
       value: "attempt to call a nil value",
       error_kind: :call_nil,
-      value_type: nil
+      value_type: nil,
+      state: state
   end
 
   def call_function(other, args, state) do
@@ -170,7 +206,8 @@ defmodule Lua.VM.Executor do
         raise TypeError,
           value: "attempt to call a #{Value.type_name(other)} value",
           error_kind: :call_non_function,
-          value_type: value_type(other)
+          value_type: value_type(other),
+          state: state
 
       {:tref, mt_id} ->
         mt = Map.fetch!(state.tables, mt_id)
@@ -180,7 +217,8 @@ defmodule Lua.VM.Executor do
             raise TypeError,
               value: "attempt to call a #{Value.type_name(other)} value",
               error_kind: :call_non_function,
-              value_type: value_type(other)
+              value_type: value_type(other),
+              state: state
 
           call_mm ->
             call_function(call_mm, [other | args], state)
@@ -206,56 +244,56 @@ defmodule Lua.VM.Executor do
           {term(), State.t()}
   def dispatcher_binop(:add, a, b, state, proto, hint_a, hint_b) do
     try_binary_metamethod("__add", a, b, state, fn ->
-      safe_add(a, b, 0, proto.source, hint_a, hint_b)
+      safe_add(a, b, 0, proto.source, hint_a, hint_b, state)
     end)
   end
 
   def dispatcher_binop(:subtract, a, b, state, proto, hint_a, hint_b) do
     try_binary_metamethod("__sub", a, b, state, fn ->
-      safe_subtract(a, b, 0, proto.source, hint_a, hint_b)
+      safe_subtract(a, b, 0, proto.source, hint_a, hint_b, state)
     end)
   end
 
   def dispatcher_binop(:multiply, a, b, state, proto, hint_a, hint_b) do
     try_binary_metamethod("__mul", a, b, state, fn ->
-      safe_multiply(a, b, 0, proto.source, hint_a, hint_b)
+      safe_multiply(a, b, 0, proto.source, hint_a, hint_b, state)
     end)
   end
 
   def dispatcher_binop(:divide, a, b, state, proto, hint_a, hint_b) do
     try_binary_metamethod("__div", a, b, state, fn ->
-      safe_divide(a, b, 0, proto.source, hint_a, hint_b)
+      safe_divide(a, b, 0, proto.source, hint_a, hint_b, state)
     end)
   end
 
   def dispatcher_binop(:floor_divide, a, b, state, proto, hint_a, hint_b) do
     try_binary_metamethod("__idiv", a, b, state, fn ->
-      safe_floor_divide(a, b, 0, proto.source, hint_a, hint_b)
+      safe_floor_divide(a, b, 0, proto.source, hint_a, hint_b, state)
     end)
   end
 
   def dispatcher_binop(:modulo, a, b, state, proto, hint_a, hint_b) do
     try_binary_metamethod("__mod", a, b, state, fn ->
-      safe_modulo(a, b, 0, proto.source, hint_a, hint_b)
+      safe_modulo(a, b, 0, proto.source, hint_a, hint_b, state)
     end)
   end
 
   def dispatcher_binop(:power, a, b, state, proto, hint_a, hint_b) do
     try_binary_metamethod("__pow", a, b, state, fn ->
-      safe_power(a, b, 0, proto.source, hint_a, hint_b)
+      safe_power(a, b, 0, proto.source, hint_a, hint_b, state)
     end)
   end
 
   @doc false
   @spec dispatcher_unop(atom(), term(), State.t(), term(), term()) :: {term(), State.t()}
   def dispatcher_unop(:negate, val, state, proto, hint) do
-    try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, 0, proto.source, hint) end)
+    try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, 0, proto.source, hint, state) end)
   end
 
   @doc false
   @spec dispatcher_cmp(atom(), term(), term(), State.t(), term()) :: {term(), State.t()}
   def dispatcher_cmp(:less_than, a, b, state, proto) do
-    try_binary_metamethod("__lt", a, b, state, fn -> safe_compare_lt(a, b, 0, proto.source) end)
+    try_binary_metamethod("__lt", a, b, state, fn -> safe_compare_lt(a, b, 0, proto.source, state) end)
   end
 
   def dispatcher_cmp(:less_equal, a, b, state, proto) do
@@ -264,7 +302,7 @@ defmodule Lua.VM.Executor do
 
   def dispatcher_cmp(:greater_than, a, b, state, proto) do
     # Lua 5.3 §3.4.4: a > b dispatches __lt with swapped operands.
-    try_binary_metamethod("__lt", b, a, state, fn -> safe_compare_lt(b, a, 0, proto.source) end)
+    try_binary_metamethod("__lt", b, a, state, fn -> safe_compare_lt(b, a, 0, proto.source, state) end)
   end
 
   def dispatcher_cmp(:greater_equal, a, b, state, proto) do
@@ -329,8 +367,8 @@ defmodule Lua.VM.Executor do
     table_newindex(tref, key, value, state)
   end
 
-  def dispatcher_set_table(value, _key, _value, _state, proto, name_hint) do
-    raise_index_type_error(value, 0, proto.source, name_hint)
+  def dispatcher_set_table(value, _key, _value, state, proto, name_hint) do
+    raise_index_type_error(value, 0, proto.source, name_hint, state)
   end
 
   @doc false
@@ -340,8 +378,8 @@ defmodule Lua.VM.Executor do
     table_newindex(tref, name, value, state)
   end
 
-  def dispatcher_set_field(value, _name, _value, _state, proto, name_hint) do
-    raise_index_type_error(value, 0, proto.source, name_hint)
+  def dispatcher_set_field(value, _name, _value, state, proto, name_hint) do
+    raise_index_type_error(value, 0, proto.source, name_hint, state)
   end
 
   # The `_proto` parameter is unused today because `try_unary_metamethod`
@@ -370,10 +408,10 @@ defmodule Lua.VM.Executor do
   end
 
   @doc false
-  @spec dispatcher_coerce_numeric_for_controls(term(), term(), term()) ::
+  @spec dispatcher_coerce_numeric_for_controls(term(), term(), term(), State.t()) ::
           {number(), number(), number()}
-  def dispatcher_coerce_numeric_for_controls(init, limit, step) do
-    coerce_numeric_for_controls(init, limit, step)
+  def dispatcher_coerce_numeric_for_controls(init, limit, step, state) do
+    coerce_numeric_for_controls(init, limit, step, state)
   end
 
   @doc false
@@ -407,7 +445,7 @@ defmodule Lua.VM.Executor do
   end
 
   # `:concatenate` slow path. Mirrors the interpreter's three-way fallback:
-  # both-binary → `<>`, both binary-or-number → `concat_coerce/3 . <>`,
+  # both-binary → `<>`, both binary-or-number → `concat_coerce/4 . <>`,
   # otherwise `__concat` metamethod via `try_binary_metamethod/5`.
   # The dispatcher inlines the binary-binary fast path itself, but defers
   # the metatable case and the coerce path here so the type-error wording
@@ -419,7 +457,7 @@ defmodule Lua.VM.Executor do
     src = proto.source
 
     try_binary_metamethod("__concat", left, right, state, fn ->
-      concat_checked(concat_coerce(left, 0, src), concat_coerce(right, 0, src), state.max_string_bytes)
+      concat_checked(concat_coerce(left, 0, src, state), concat_coerce(right, 0, src, state), state)
     end)
   end
 
@@ -439,7 +477,8 @@ defmodule Lua.VM.Executor do
       call_stack: state.call_stack,
       line: 0,
       error_kind: :call_nil,
-      value_type: nil
+      value_type: nil,
+      state: state
   end
 
   def dispatcher_call_function({:lua_closure, _, _} = closure, args, state, _proto, _name_hint),
@@ -460,7 +499,8 @@ defmodule Lua.VM.Executor do
           call_stack: state.call_stack,
           line: 0,
           error_kind: :call_non_function,
-          value_type: value_type(other)
+          value_type: value_type(other),
+          state: state
 
       {:tref, mt_id} ->
         mt = Map.fetch!(state.tables, mt_id)
@@ -473,7 +513,8 @@ defmodule Lua.VM.Executor do
               call_stack: state.call_stack,
               line: 0,
               error_kind: :call_non_function,
-              value_type: value_type(other)
+              value_type: value_type(other),
+              state: state
 
           call_mm ->
             call_function(call_mm, [other | args], state)
@@ -836,7 +877,7 @@ defmodule Lua.VM.Executor do
     # loop start and write the canonical numbers back into the control
     # registers so subsequent iterations work on numbers.
     {counter, limit, step} =
-      coerce_numeric_for_controls(elem(regs, base), elem(regs, base + 1), elem(regs, base + 2))
+      coerce_numeric_for_controls(elem(regs, base), elem(regs, base + 1), elem(regs, base + 2), state)
 
     regs =
       regs
@@ -1065,6 +1106,8 @@ defmodule Lua.VM.Executor do
                 raise InternalError,
                   value: "native function returned invalid result: #{inspect(other)}, expected {results, state}"
             end
+          rescue
+            e -> reraise annotate_frame_state(e, state), __STACKTRACE__
           after
             restore_position(prev_pos)
           end
@@ -1078,7 +1121,8 @@ defmodule Lua.VM.Executor do
           call_stack: state.call_stack,
           line: line,
           error_kind: :call_nil,
-          value_type: nil
+          value_type: nil,
+          state: state
 
       other ->
         case get_metatable(other, state) do
@@ -1089,7 +1133,8 @@ defmodule Lua.VM.Executor do
               call_stack: state.call_stack,
               line: line,
               error_kind: :call_non_function,
-              value_type: value_type(other)
+              value_type: value_type(other),
+              state: state
 
           {:tref, mt_id} ->
             mt = Map.fetch!(state.tables, mt_id)
@@ -1102,7 +1147,8 @@ defmodule Lua.VM.Executor do
                   call_stack: state.call_stack,
                   line: line,
                   error_kind: :call_non_function,
-                  value_type: value_type(other)
+                  value_type: value_type(other),
+                  state: state
 
               call_mm ->
                 args = collect_args(regs, base + 1, total_args)
@@ -1233,7 +1279,7 @@ defmodule Lua.VM.Executor do
 
       {result, new_state} =
         try_binary_metamethod("__add", val_a, val_b, state, fn ->
-          safe_add(val_a, val_b, line, src, hint_a, hint_b)
+          safe_add(val_a, val_b, line, src, hint_a, hint_b, state)
         end)
 
       regs = put_elem(regs, dest, result)
@@ -1260,7 +1306,7 @@ defmodule Lua.VM.Executor do
 
       {result, new_state} =
         try_binary_metamethod("__sub", val_a, val_b, state, fn ->
-          safe_subtract(val_a, val_b, line, src, hint_a, hint_b)
+          safe_subtract(val_a, val_b, line, src, hint_a, hint_b, state)
         end)
 
       regs = put_elem(regs, dest, result)
@@ -1287,7 +1333,7 @@ defmodule Lua.VM.Executor do
 
       {result, new_state} =
         try_binary_metamethod("__mul", val_a, val_b, state, fn ->
-          safe_multiply(val_a, val_b, line, src, hint_a, hint_b)
+          safe_multiply(val_a, val_b, line, src, hint_a, hint_b, state)
         end)
 
       regs = put_elem(regs, dest, result)
@@ -1302,7 +1348,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__div", val_a, val_b, state, fn ->
-        safe_divide(val_a, val_b, line, src, hint_a, hint_b)
+        safe_divide(val_a, val_b, line, src, hint_a, hint_b, state)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1316,7 +1362,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__idiv", val_a, val_b, state, fn ->
-        safe_floor_divide(val_a, val_b, line, src, hint_a, hint_b)
+        safe_floor_divide(val_a, val_b, line, src, hint_a, hint_b, state)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1330,7 +1376,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__mod", val_a, val_b, state, fn ->
-        safe_modulo(val_a, val_b, line, src, hint_a, hint_b)
+        safe_modulo(val_a, val_b, line, src, hint_a, hint_b, state)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1344,7 +1390,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__pow", val_a, val_b, state, fn ->
-        safe_power(val_a, val_b, line, src, hint_a, hint_b)
+        safe_power(val_a, val_b, line, src, hint_a, hint_b, state)
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1364,12 +1410,12 @@ defmodule Lua.VM.Executor do
     # also concatenate without metamethods.
     cond do
       is_binary(left) and is_binary(right) ->
-        regs = put_elem(regs, dest, concat_checked(left, right, state.max_string_bytes))
+        regs = put_elem(regs, dest, concat_checked(left, right, state))
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
       (is_binary(left) or is_number(left)) and (is_binary(right) or is_number(right)) ->
         src = proto.source
-        result = concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src), state.max_string_bytes)
+        result = concat_checked(concat_coerce(left, line, src, state), concat_coerce(right, line, src, state), state)
         regs = put_elem(regs, dest, result)
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
@@ -1378,7 +1424,7 @@ defmodule Lua.VM.Executor do
 
         {result, new_state} =
           try_binary_metamethod("__concat", left, right, state, fn ->
-            concat_checked(concat_coerce(left, line, src), concat_coerce(right, line, src), state.max_string_bytes)
+            concat_checked(concat_coerce(left, line, src, state), concat_coerce(right, line, src, state), state)
           end)
 
         regs = put_elem(regs, dest, result)
@@ -1396,7 +1442,7 @@ defmodule Lua.VM.Executor do
     {result, new_state} =
       try_binary_metamethod("__band", val_a, val_b, state, fn ->
         Numeric.to_signed_int64(
-          Bitwise.band(to_integer!(val_a, line, src, hint_a), to_integer!(val_b, line, src, hint_b))
+          Bitwise.band(to_integer!(val_a, line, src, hint_a, state), to_integer!(val_b, line, src, hint_b, state))
         )
       end)
 
@@ -1411,7 +1457,9 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__bor", val_a, val_b, state, fn ->
-        Numeric.to_signed_int64(Bitwise.bor(to_integer!(val_a, line, src, hint_a), to_integer!(val_b, line, src, hint_b)))
+        Numeric.to_signed_int64(
+          Bitwise.bor(to_integer!(val_a, line, src, hint_a, state), to_integer!(val_b, line, src, hint_b, state))
+        )
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1426,7 +1474,7 @@ defmodule Lua.VM.Executor do
     {result, new_state} =
       try_binary_metamethod("__bxor", val_a, val_b, state, fn ->
         Numeric.to_signed_int64(
-          Bitwise.bxor(to_integer!(val_a, line, src, hint_a), to_integer!(val_b, line, src, hint_b))
+          Bitwise.bxor(to_integer!(val_a, line, src, hint_a, state), to_integer!(val_b, line, src, hint_b, state))
         )
       end)
 
@@ -1441,7 +1489,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__shl", val_a, val_b, state, fn ->
-        lua_shift_left(to_integer!(val_a, line, src, hint_a), to_integer!(val_b, line, src, hint_b))
+        lua_shift_left(to_integer!(val_a, line, src, hint_a, state), to_integer!(val_b, line, src, hint_b, state))
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1455,7 +1503,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_binary_metamethod("__shr", val_a, val_b, state, fn ->
-        lua_shift_right(to_integer!(val_a, line, src, hint_a), to_integer!(val_b, line, src, hint_b))
+        lua_shift_right(to_integer!(val_a, line, src, hint_a, state), to_integer!(val_b, line, src, hint_b, state))
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1468,7 +1516,7 @@ defmodule Lua.VM.Executor do
 
     {result, new_state} =
       try_unary_metamethod("__bnot", val, state, fn ->
-        Numeric.to_signed_int64(Bitwise.bnot(to_integer!(val, line, src, hint)))
+        Numeric.to_signed_int64(Bitwise.bnot(to_integer!(val, line, src, hint, state)))
       end)
 
     regs = put_elem(regs, dest, result)
@@ -1519,7 +1567,7 @@ defmodule Lua.VM.Executor do
         src = proto.source
 
         {result, new_state} =
-          try_binary_metamethod("__lt", val_a, val_b, state, fn -> safe_compare_lt(val_a, val_b, line, src) end)
+          try_binary_metamethod("__lt", val_a, val_b, state, fn -> safe_compare_lt(val_a, val_b, line, src, state) end)
 
         regs = put_elem(regs, dest, result)
         do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -1565,7 +1613,7 @@ defmodule Lua.VM.Executor do
 
         # Lua 5.3 §3.4.4: a > b is translated to b < a, which dispatches __lt.
         {result, new_state} =
-          try_binary_metamethod("__lt", val_b, val_a, state, fn -> safe_compare_lt(val_b, val_a, line, src) end)
+          try_binary_metamethod("__lt", val_b, val_a, state, fn -> safe_compare_lt(val_b, val_a, line, src, state) end)
 
         regs = put_elem(regs, dest, result)
         do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
@@ -1621,7 +1669,7 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:negate, dest, source, hint} | rest], regs, upvalues, proto, state, cont, frames, line) do
     val = elem(regs, source)
     src = proto.source
-    {result, new_state} = try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, line, src, hint) end)
+    {result, new_state} = try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, line, src, hint, state) end)
     regs = put_elem(regs, dest, result)
     do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line)
   end
@@ -1754,7 +1802,7 @@ defmodule Lua.VM.Executor do
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
       _ ->
-        raise_index_type_error(table_val, line, proto.source, name_hint)
+        raise_index_type_error(table_val, line, proto.source, name_hint, state)
     end
   end
 
@@ -1827,7 +1875,7 @@ defmodule Lua.VM.Executor do
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
 
       _ ->
-        raise_index_type_error(table_val, line, proto.source, name_hint)
+        raise_index_type_error(table_val, line, proto.source, name_hint, state)
     end
   end
 
@@ -2101,13 +2149,19 @@ defmodule Lua.VM.Executor do
       end
 
     saved_open_upvalues = state.open_upvalues
-    state = %{state | open_upvalues: %{}}
 
-    {results, _callee_regs, state} =
-      do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0)
+    try do
+      state = %{state | open_upvalues: %{}}
 
-    state = %{state | open_upvalues: saved_open_upvalues}
-    {results, state}
+      {results, _callee_regs, state} =
+        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0)
+
+      state = %{state | open_upvalues: saved_open_upvalues}
+      {results, state}
+    rescue
+      # Backstop net — same rationale as the `call_function/3` closure path.
+      e -> reraise annotate_frame_state(e, state), __STACKTRACE__
+    end
   end
 
   defp call_value({:compiled_closure, _, _} = closure, args, _proto, state, _line) do
@@ -2130,6 +2184,13 @@ defmodule Lua.VM.Executor do
         {results, %State{} = new_state} ->
           {List.wrap(results), new_state}
       end
+    rescue
+      # Same native-call backstop as the `:call` opcode dispatch: ferry the
+      # iterator-call's entry state out on the exception so a native iterator
+      # raise (e.g. `utf8.codes`, `next`) keeps the current frame's pre-loop
+      # heap mutations. Innermost annotation wins — a state-bearing inner
+      # raise still takes precedence.
+      e -> reraise annotate_frame_state(e, state), __STACKTRACE__
     after
       restore_position(prev_pos)
     end
@@ -2142,7 +2203,8 @@ defmodule Lua.VM.Executor do
       call_stack: state.call_stack,
       line: line,
       error_kind: :call_nil,
-      value_type: nil
+      value_type: nil,
+      state: state
   end
 
   defp call_value(other, args, proto, state, line) do
@@ -2154,7 +2216,8 @@ defmodule Lua.VM.Executor do
           call_stack: state.call_stack,
           line: line,
           error_kind: :call_non_function,
-          value_type: value_type(other)
+          value_type: value_type(other),
+          state: state
 
       {:tref, mt_id} ->
         mt = Map.fetch!(state.tables, mt_id)
@@ -2167,7 +2230,8 @@ defmodule Lua.VM.Executor do
               call_stack: state.call_stack,
               line: line,
               error_kind: :call_non_function,
-              value_type: value_type(other)
+              value_type: value_type(other),
+              state: state
 
           call_mm ->
             call_value(call_mm, [other | args], proto, state, line)
@@ -2177,17 +2241,18 @@ defmodule Lua.VM.Executor do
 
   # ── Coerce a value to string for concatenation ─────────────────────────────
 
-  defp concat_coerce(value, _line, _source) when is_binary(value), do: value
-  defp concat_coerce(value, _line, _source) when is_integer(value), do: Integer.to_string(value)
-  defp concat_coerce(value, _line, _source) when is_float(value), do: Value.to_string(value)
+  defp concat_coerce(value, _line, _source, _state) when is_binary(value), do: value
+  defp concat_coerce(value, _line, _source, _state) when is_integer(value), do: Integer.to_string(value)
+  defp concat_coerce(value, _line, _source, _state) when is_float(value), do: Value.to_string(value)
 
-  defp concat_coerce(value, line, source) do
+  defp concat_coerce(value, line, source, state) do
     raise TypeError,
       value: "attempt to concatenate a #{Value.type_name(value)} value",
       line: line,
       source: source,
       error_kind: :concatenate_type_error,
-      value_type: value_type(value)
+      value_type: value_type(value),
+      state: state
   end
 
   # `..` builds a new binary on every step. A doubling loop (`s = s .. s`)
@@ -2197,14 +2262,15 @@ defmodule Lua.VM.Executor do
   # stdlib checks, so the loop fails with a catchable error long before it
   # threatens the host. `byte_size/1` is O(1) and the ceiling is a struct
   # field read (`state.max_string_bytes`, settable via `Lua.new/1`), so
-  # this stays cheap on the hot path.
+  # this stays cheap on the hot path. The state is threaded through so the
+  # over-limit raise carries the raise-time snapshot for protected unwinds.
   @compile {:inline, concat_checked: 3}
-  defp concat_checked(left, right, max) when byte_size(left) + byte_size(right) <= max do
+  defp concat_checked(left, right, %{max_string_bytes: max}) when byte_size(left) + byte_size(right) <= max do
     left <> right
   end
 
-  defp concat_checked(_left, _right, _max) do
-    raise RuntimeError, value: "resulting string too large"
+  defp concat_checked(_left, _right, state) do
+    raise RuntimeError, value: "resulting string too large", state: state
   end
 
   # ── Metamethod support ─────────────────────────────────────────────────────
@@ -2229,14 +2295,14 @@ defmodule Lua.VM.Executor do
   defp index_value(value, key, state, line, source, name_hint) do
     case get_metatable(value, state) do
       nil ->
-        raise_index_type_error(value, line, source, name_hint)
+        raise_index_type_error(value, line, source, name_hint, state)
 
       {:tref, mt_id} ->
         mt = Map.fetch!(state.tables, mt_id)
 
         case Map.get(mt.data, "__index") do
           nil ->
-            raise_index_type_error(value, line, source, name_hint)
+            raise_index_type_error(value, line, source, name_hint, state)
 
           {:tref, _} = idx_tbl ->
             table_index(idx_tbl, key, state)
@@ -2248,13 +2314,14 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  defp raise_index_type_error(value, line, source, name_hint) do
+  defp raise_index_type_error(value, line, source, name_hint, state) do
     raise TypeError,
       value: "attempt to index a #{Value.type_name(value)} value" <> format_target_hint(name_hint),
       line: line,
       source: source,
       error_kind: :index_non_table,
-      value_type: value_type(value)
+      value_type: value_type(value),
+      state: state
   end
 
   # Formats a `name_hint` tagged-tuple (or `nil`) as the
@@ -2310,7 +2377,7 @@ defmodule Lua.VM.Executor do
 
   defp table_index({:tref, id}, key, state, depth) do
     if depth >= @metamethod_chain_limit do
-      raise RuntimeError, value: "'__index' chain too long; possible loop"
+      raise RuntimeError, value: "'__index' chain too long; possible loop", state: state
     end
 
     table = Map.fetch!(state.tables, id)
@@ -2358,7 +2425,7 @@ defmodule Lua.VM.Executor do
 
   defp table_newindex({:tref, id}, key, value, state, depth) do
     if depth >= @metamethod_chain_limit do
-      raise RuntimeError, value: "'__newindex' chain too long; possible loop"
+      raise RuntimeError, value: "'__newindex' chain too long; possible loop", state: state
     end
 
     table = Map.fetch!(state.tables, id)
@@ -2427,14 +2494,16 @@ defmodule Lua.VM.Executor do
           raise TypeError,
             value: "object length is not an integer",
             error_kind: :length_not_integer,
-            value_type: :number
+            value_type: :number,
+            state: state
         end
 
       _ ->
         raise TypeError,
           value: "object length is not an integer",
           error_kind: :length_not_integer,
-          value_type: value_type(raw)
+          value_type: value_type(raw),
+          state: state
     end
   end
 
@@ -2457,17 +2526,17 @@ defmodule Lua.VM.Executor do
       nil ->
         case lookup_metamethod(b, "__lt", state) || lookup_metamethod(a, "__lt", state) do
           nil ->
-            {safe_compare_le(a, b, line, source), state}
+            {safe_compare_le(a, b, line, source, state), state}
 
           lt ->
             {lt_result, new_state} =
-              invoke_metamethod(lt, [b, a], state, fn -> safe_compare_lt(b, a, line, source) end)
+              invoke_metamethod(lt, [b, a], state, fn -> safe_compare_lt(b, a, line, source, state) end)
 
             {not Value.truthy?(lt_result), new_state}
         end
 
       le ->
-        invoke_metamethod(le, [a, b], state, fn -> safe_compare_le(a, b, line, source) end)
+        invoke_metamethod(le, [a, b], state, fn -> safe_compare_le(a, b, line, source, state) end)
     end
   end
 
@@ -2540,21 +2609,21 @@ defmodule Lua.VM.Executor do
   # passed verbatim from the executor's threaded `line` and `proto.source`,
   # so they cost nothing on the success path beyond two register reads.
 
-  defp safe_add(a, b, line, source, hint_a, hint_b) do
-    na = number_or_arith_raise!(a, line, source, hint_a)
-    nb = number_or_arith_raise!(b, line, source, hint_b)
+  defp safe_add(a, b, line, source, hint_a, hint_b, state) do
+    na = number_or_arith_raise!(a, line, source, hint_a, state)
+    nb = number_or_arith_raise!(b, line, source, hint_b, state)
     narrow_if_integer(na + nb)
   end
 
-  defp safe_subtract(a, b, line, source, hint_a, hint_b) do
-    na = number_or_arith_raise!(a, line, source, hint_a)
-    nb = number_or_arith_raise!(b, line, source, hint_b)
+  defp safe_subtract(a, b, line, source, hint_a, hint_b, state) do
+    na = number_or_arith_raise!(a, line, source, hint_a, state)
+    nb = number_or_arith_raise!(b, line, source, hint_b, state)
     narrow_if_integer(na - nb)
   end
 
-  defp safe_multiply(a, b, line, source, hint_a, hint_b) do
-    na = number_or_arith_raise!(a, line, source, hint_a)
-    nb = number_or_arith_raise!(b, line, source, hint_b)
+  defp safe_multiply(a, b, line, source, hint_a, hint_b, state) do
+    na = number_or_arith_raise!(a, line, source, hint_a, state)
+    nb = number_or_arith_raise!(b, line, source, hint_b, state)
     narrow_if_integer(na * nb)
   end
 
@@ -2563,14 +2632,14 @@ defmodule Lua.VM.Executor do
   # to the originating variable / field (PUC-Lua mirrors this via debug
   # info; we resolve at compile time and thread the hint through the
   # instruction tuple).
-  defp number_or_arith_raise!(v, line, source, hint) do
+  defp number_or_arith_raise!(v, line, source, hint, state) do
     case to_number(v) do
       {:ok, n} -> n
-      {:error, val} -> raise_arith_type_error(val, line, source, hint)
+      {:error, val} -> raise_arith_type_error(val, line, source, hint, state)
     end
   end
 
-  defp raise_arith_type_error(val, line, source, hint) do
+  defp raise_arith_type_error(val, line, source, hint, state) do
     raise TypeError,
       value:
         "attempt to perform arithmetic on a #{Value.type_name(val)} value" <>
@@ -2578,7 +2647,8 @@ defmodule Lua.VM.Executor do
       line: line,
       source: source,
       error_kind: :arithmetic_on_non_number,
-      value_type: value_type(val)
+      value_type: value_type(val),
+      state: state
   end
 
   # Lua 5.3 §3.4.1: `/` is always float division and never raises. Division
@@ -2595,9 +2665,9 @@ defmodule Lua.VM.Executor do
   # Arithmetic on `:nan` will surface a TypeError via `to_number/1`; that's
   # an accepted divergence from real IEEE 754, since the suite tests we
   # care about don't propagate NaN through further arithmetic.
-  defp safe_divide(a, b, line, source, hint_a, hint_b) do
-    na = number_or_arith_raise!(a, line, source, hint_a)
-    nb = number_or_arith_raise!(b, line, source, hint_b)
+  defp safe_divide(a, b, line, source, hint_a, hint_b, state) do
+    na = number_or_arith_raise!(a, line, source, hint_a, state)
+    nb = number_or_arith_raise!(b, line, source, hint_b, state)
 
     if nb == 0 or nb == 0.0 do
       cond do
@@ -2622,13 +2692,13 @@ defmodule Lua.VM.Executor do
   # Only an integer `//` integer with a zero divisor raises — that's correct
   # per spec, since `//` between two integers is integer floor division.
   # PUC-Lua reports this as "attempt to divide by zero".
-  defp safe_floor_divide(a, b, line, source, hint_a, hint_b) do
-    na = number_or_arith_raise!(a, line, source, hint_a)
-    nb = number_or_arith_raise!(b, line, source, hint_b)
+  defp safe_floor_divide(a, b, line, source, hint_a, hint_b, state) do
+    na = number_or_arith_raise!(a, line, source, hint_a, state)
+    nb = number_or_arith_raise!(b, line, source, hint_b, state)
 
     cond do
       is_integer(na) and is_integer(nb) and nb == 0 ->
-        raise RuntimeError, value: "attempt to divide by zero", line: line, source: source
+        raise RuntimeError, value: "attempt to divide by zero", line: line, source: source, state: state
 
       is_integer(na) and is_integer(nb) ->
         Numeric.to_signed_int64(lua_idiv(na, nb))
@@ -2649,13 +2719,13 @@ defmodule Lua.VM.Executor do
   # either operand is a float, `a/0.0` is inf or nan and `inf * 0.0 = nan`,
   # so the result is always `:nan` regardless of `a`. Only an integer `%`
   # integer with a zero divisor raises; PUC-Lua reports it as `'n%0'`.
-  defp safe_modulo(a, b, line, source, hint_a, hint_b) do
-    na = number_or_arith_raise!(a, line, source, hint_a)
-    nb = number_or_arith_raise!(b, line, source, hint_b)
+  defp safe_modulo(a, b, line, source, hint_a, hint_b, state) do
+    na = number_or_arith_raise!(a, line, source, hint_a, state)
+    nb = number_or_arith_raise!(b, line, source, hint_b, state)
 
     cond do
       is_integer(na) and is_integer(nb) and nb == 0 ->
-        raise RuntimeError, value: "attempt to perform 'n%0'", line: line, source: source
+        raise RuntimeError, value: "attempt to perform 'n%0'", line: line, source: source, state: state
 
       is_integer(na) and is_integer(nb) ->
         Numeric.to_signed_int64(na - lua_idiv(na, nb) * nb)
@@ -2674,9 +2744,9 @@ defmodule Lua.VM.Executor do
     if r != 0 and Bitwise.bxor(r, b) < 0, do: q - 1, else: q
   end
 
-  defp safe_power(a, b, line, source, hint_a, hint_b) do
-    na = number_or_arith_raise!(a, line, source, hint_a)
-    nb = number_or_arith_raise!(b, line, source, hint_b)
+  defp safe_power(a, b, line, source, hint_a, hint_b, state) do
+    na = number_or_arith_raise!(a, line, source, hint_a, state)
+    nb = number_or_arith_raise!(b, line, source, hint_b, state)
     pow_ieee(na, nb)
   end
 
@@ -2691,13 +2761,13 @@ defmodule Lua.VM.Executor do
     ArithmeticError -> :nan
   end
 
-  defp safe_negate(a, line, source, hint) do
+  defp safe_negate(a, line, source, hint, state) do
     case to_number(a) do
       {:ok, na} ->
         narrow_if_integer(-na)
 
       {:error, val} ->
-        raise_arith_type_error(val, line, source, hint)
+        raise_arith_type_error(val, line, source, hint, state)
     end
   end
 
@@ -2719,10 +2789,10 @@ defmodule Lua.VM.Executor do
   # ── Type-safe comparison ───────────────────────────────────────────────────
 
   # IEEE 754 §5.11: any ordered comparison involving NaN is false.
-  defp safe_compare_lt(:nan, _, _, _), do: false
-  defp safe_compare_lt(_, :nan, _, _), do: false
+  defp safe_compare_lt(:nan, _, _, _, _state), do: false
+  defp safe_compare_lt(_, :nan, _, _, _state), do: false
 
-  defp safe_compare_lt(a, b, line, source) do
+  defp safe_compare_lt(a, b, line, source, state) do
     cond do
       is_number(a) and is_number(b) ->
         a < b
@@ -2731,14 +2801,14 @@ defmodule Lua.VM.Executor do
         a < b
 
       true ->
-        raise_compare_type_error(a, b, line, source)
+        raise_compare_type_error(a, b, line, source, state)
     end
   end
 
-  defp safe_compare_le(:nan, _, _, _), do: false
-  defp safe_compare_le(_, :nan, _, _), do: false
+  defp safe_compare_le(:nan, _, _, _, _state), do: false
+  defp safe_compare_le(_, :nan, _, _, _state), do: false
 
-  defp safe_compare_le(a, b, line, source) do
+  defp safe_compare_le(a, b, line, source, state) do
     cond do
       is_number(a) and is_number(b) ->
         a <= b
@@ -2747,17 +2817,18 @@ defmodule Lua.VM.Executor do
         a <= b
 
       true ->
-        raise_compare_type_error(a, b, line, source)
+        raise_compare_type_error(a, b, line, source, state)
     end
   end
 
-  defp raise_compare_type_error(a, b, line, source) do
+  defp raise_compare_type_error(a, b, line, source, state) do
     raise TypeError,
       value: "attempt to compare #{Value.type_name(a)} with #{Value.type_name(b)}",
       line: line,
       source: source,
       error_kind: :compare_incompatible_types,
-      value_type: value_type(a)
+      value_type: value_type(a),
+      state: state
   end
 
   # ── Number coercion ────────────────────────────────────────────────────────
@@ -2780,10 +2851,10 @@ defmodule Lua.VM.Executor do
   # init and step are integers, the loop runs with integers; otherwise,
   # init is promoted to float (limit stays as whatever number it parsed
   # to — counter/limit comparison works numerically across int/float).
-  defp coerce_numeric_for_controls(init, limit, step) do
-    init_n = coerce_for_value(init, "'for' initial value must be a number")
-    limit_n = coerce_for_value(limit, "'for' limit must be a number")
-    step_n = coerce_for_value(step, "'for' step must be a number")
+  defp coerce_numeric_for_controls(init, limit, step, state) do
+    init_n = coerce_for_value(init, "'for' initial value must be a number", state)
+    limit_n = coerce_for_value(limit, "'for' limit must be a number", state)
+    step_n = coerce_for_value(step, "'for' step must be a number", state)
 
     if is_float(init_n) or is_float(step_n) do
       {init_n * 1.0, limit_n, step_n * 1.0}
@@ -2792,32 +2863,35 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  defp coerce_for_value(v, _msg) when is_number(v), do: v
+  defp coerce_for_value(v, _msg, _state) when is_number(v), do: v
 
-  defp coerce_for_value(v, msg) when is_binary(v) do
+  defp coerce_for_value(v, msg, state) when is_binary(v) do
     case Value.parse_number(v) do
       nil ->
         raise TypeError,
           value: msg,
           error_kind: :for_loop_non_number,
-          value_type: :string
+          value_type: :string,
+          state: state
 
       n ->
         n
     end
   end
 
-  defp coerce_for_value(v, msg) do
+  defp coerce_for_value(v, msg, state) do
     raise TypeError,
       value: msg,
       error_kind: :for_loop_non_number,
-      value_type: value_type(v)
+      value_type: value_type(v),
+      state: state
   end
 
-  defp to_integer!(v, _line, _source, _hint) when is_integer(v), do: v
-  defp to_integer!(v, line, source, hint) when is_float(v), do: float_to_integer!(v, line, source, hint)
+  defp to_integer!(v, _line, _source, _hint, _state) when is_integer(v), do: v
 
-  defp to_integer!(v, line, source, hint) when is_binary(v) do
+  defp to_integer!(v, line, source, hint, state) when is_float(v), do: float_to_integer!(v, line, source, hint, state)
+
+  defp to_integer!(v, line, source, hint, state) when is_binary(v) do
     case Value.parse_number(v) do
       nil ->
         raise TypeError,
@@ -2827,17 +2901,18 @@ defmodule Lua.VM.Executor do
           line: line,
           source: source,
           error_kind: :bitwise_on_non_integer,
-          value_type: :string
+          value_type: :string,
+          state: state
 
       n when is_integer(n) ->
         n
 
       n when is_float(n) ->
-        float_to_integer!(n, line, source, hint)
+        float_to_integer!(n, line, source, hint, state)
     end
   end
 
-  defp to_integer!(v, line, source, hint) do
+  defp to_integer!(v, line, source, hint, state) do
     raise TypeError,
       value:
         "attempt to perform bitwise operation on a #{Value.type_name(v)} value" <>
@@ -2845,12 +2920,13 @@ defmodule Lua.VM.Executor do
       line: line,
       source: source,
       error_kind: :bitwise_on_non_integer,
-      value_type: value_type(v)
+      value_type: value_type(v),
+      state: state
   end
 
   # Per Lua 5.3 §3.4.3: a float converts to integer for bitwise ops only if
   # it represents an integer exactly and fits in the signed 64-bit range.
-  defp float_to_integer!(f, line, source, hint) when is_float(f) do
+  defp float_to_integer!(f, line, source, hint, state) when is_float(f) do
     truncated = trunc(f)
 
     if f == truncated * 1.0 and Numeric.signed?(truncated) do
@@ -2861,7 +2937,8 @@ defmodule Lua.VM.Executor do
         line: line,
         source: source,
         error_kind: :bitwise_on_non_integer,
-        value_type: :number
+        value_type: :number,
+        state: state
     end
   end
 

@@ -135,12 +135,21 @@ defmodule Lua.VM.Dispatcher do
       end
 
     saved_open = state.open_upvalues
-    state = %{state | open_upvalues: %{}}
 
-    {results, state} = dispatch(proto.bytecode, 1, regs, upvalues, proto, state, [], [])
+    try do
+      state = %{state | open_upvalues: %{}}
 
-    state = %{state | open_upvalues: saved_open}
-    {results, state}
+      {results, state} = dispatch(proto.bytecode, 1, regs, upvalues, proto, state, [], [])
+
+      state = %{state | open_upvalues: saved_open}
+      {results, state}
+    rescue
+      # Backstop net: any raise site missed by the per-site state
+      # annotations still ferries out at least this frame's entry state,
+      # so protected calls keep heap effects from enclosing frames —
+      # see `Lua.VM.Executor.annotate_frame_state/2`.
+      e -> reraise Executor.annotate_frame_state(e, state), __STACKTRACE__
+    end
   end
 
   defp init_regs(proto, args) do
@@ -842,7 +851,8 @@ defmodule Lua.VM.Dispatcher do
           Executor.dispatcher_coerce_numeric_for_controls(
             :erlang.element(base + 1, regs),
             :erlang.element(base + 2, regs),
-            :erlang.element(base + 3, regs)
+            :erlang.element(base + 3, regs),
+            state
           )
 
         regs = :erlang.setelement(base + 1, regs, counter)
@@ -1124,7 +1134,7 @@ defmodule Lua.VM.Dispatcher do
 
         if is_binary(left) and is_binary(right) do
           if byte_size(left) + byte_size(right) > state.max_string_bytes do
-            raise RuntimeError, value: "resulting string too large"
+            raise RuntimeError, value: "resulting string too large", state: state
           end
 
           regs = :erlang.setelement(dest + 1, regs, left <> right)
