@@ -48,16 +48,11 @@
   </text>
 
   <!-- Subtitle -->
-  <text x="74" y="430" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="24" font-weight="500" fill="#a1a1aa" letter-spacing="-0.2">
+  <text x="72" y="446" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="24" font-weight="500" fill="#a1a1aa" letter-spacing="-0.2">
     A pure-Elixir Lua 5.3 VM.
   </text>
-  <text x="74" y="464" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="24" font-weight="500" fill="#a1a1aa" letter-spacing="-0.2">
+  <text x="72" y="482" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="24" font-weight="500" fill="#a1a1aa" letter-spacing="-0.2">
     Sandboxed, scriptable, agent-ready.
-  </text>
-
-  <!-- Feature line (one quiet row, no pills) -->
-  <text x="74" y="516" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#71717a" letter-spacing="1.6">
-    PURE ELIXIR VM<tspan fill="#3f3f46" dx="14">·</tspan><tspan dx="14" fill="#71717a">SANDBOXED</tspan><tspan fill="#3f3f46" dx="14">·</tspan><tspan dx="14" fill="#71717a">DEFLUA MACRO</tspan>
   </text>
 
   <!-- Bottom row: github URL on left, TV Labs attribution on right -->
@@ -65,7 +60,7 @@
     github.com/tv-labs/lua
   </text>
 
-  <g transform="translate(926 576) scale(0.062)">
+  <g transform="translate(1038 573) scale(0.09)">
     <!-- TV Labs wordmark, fill currentColor approximation -->
     <path d="M197.549 58.9141C175.821 59.0587 154.963 60.2734 134.744 62.298L144.346 2.86329L133.526 0L110.289 65.1902C98.6855 66.7809 87.3429 68.6897 76.2034 70.8589L36.6929 36.9623L28.2513 42.6599L52.909 75.8913C34.8073 80.1718 17.2278 85.1174 0.228433 90.844C-1.71518 166.562 8.90215 217.117 26.0466 254.6C93.899 263.624 159.344 254.716 222.294 227.5C221.191 137.958 212.227 85.1464 197.549 58.9141ZM195.547 195.975C159.46 215.989 118.934 223.885 74.3758 220.848C64.5707 195.339 59.4651 160.604 60.0453 114.878C98.0763 100.301 138.515 94.0832 181.884 98.0166C192.443 130.438 196.91 163.091 195.547 195.975Z" fill="#a1a1aa" />
     <path d="M156.907 111.147C151.743 111.986 147.769 118.031 145.854 126.649C145.796 126.649 145.767 126.649 145.738 126.649C143.185 135.037 138.486 140.908 132.568 141.862C127.404 142.672 122.299 139.606 118.209 133.967C117.715 133.186 109.912 119.911 98.9755 122.224C86.7917 124.827 78.6691 142.412 81.0189 162.918C83.3686 183.452 95.1463 197.971 107.446 196.525C123.604 194.645 121.197 164.248 137.558 161.211C142.924 160.228 148.233 163.67 152.439 169.627C155.92 175.036 160.214 178.044 164.478 177.35C173.123 175.961 178.461 160.025 176.372 141.747C174.254 123.468 165.552 109.759 156.907 111.147Z" fill="#a1a1aa" />
@@ -75,13 +70,13 @@
     <path d="M960.142 163.872C945.927 162.975 942.272 160.98 942.272 156.323C942.272 149.903 948.016 146.577 959.677 146.577C973.66 146.577 984.654 150.134 991.761 157.018H992.893V129.281C984.422 125.059 972.035 122.629 958.981 122.629C931.713 122.629 914.075 136.165 914.075 157.249C914.075 177.87 924.837 185.882 952.106 188.311C967.22 189.642 971.803 191.869 971.803 197.422C971.803 204.074 966.088 207.4 954.398 207.4C937.659 207.4 924.837 202.946 916.367 194.096H915.003V222.063C924.17 228.281 937.92 231.376 955.79 231.376C983.523 231.376 1000 218.737 1000 197.422C1000 175.412 988.774 165.636 960.142 163.872Z" fill="#a1a1aa" />
     <path d="M443.923 195.368H443.488L395.362 81.7625H395.159H250.694L260.934 106.954H310.742V229.091H341.84V106.954H373.402L426.315 229.091H461.097L523.409 81.7625H490.222L443.923 195.368Z" fill="#a1a1aa" />
   </g>
-  <text x="855" y="592" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#52525b" letter-spacing="1.4">
+  <text x="1020" y="592" text-anchor="end" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#52525b" letter-spacing="1.4">
     BUILT AT
   </text>
 
   <!-- Code card on right -->
-  <g transform="translate(686 124)">
-    <rect x="0" y="0" width="442" height="378" rx="14" fill="#15121f" stroke="#27243a" stroke-width="1" />
+  <g transform="translate(686 108)">
+    <rect x="0" y="0" width="442" height="422" rx="14" fill="#15121f" stroke="#27243a" stroke-width="1" />
 
     <!-- title bar -->
     <line x1="0" y1="44" x2="442" y2="44" stroke="#27243a" stroke-width="1" />
@@ -105,7 +100,9 @@
       <text x="24" y="302"><tspan fill="#a1a1aa">lua = </tspan><tspan fill="#fcd34d">Lua</tspan><tspan fill="#a1a1aa">.new()</tspan></text>
       <text x="24" y="326"><tspan fill="#a1a1aa">  |&gt; </tspan><tspan fill="#fcd34d">Lua</tspan><tspan fill="#a1a1aa">.load_api(</tspan><tspan fill="#fcd34d">MyAgent.Tools</tspan><tspan fill="#a1a1aa">)</tspan></text>
 
-      <text x="24" y="354"><tspan fill="#fcd34d">Lua</tspan><tspan fill="#a1a1aa">.</tspan><tspan fill="#a78bfa">eval!</tspan><tspan fill="#a1a1aa">(lua, llm_script)</tspan></text>
+      <text x="24" y="354"><tspan fill="#fcd34d">Lua</tspan><tspan fill="#a1a1aa">.</tspan><tspan fill="#a78bfa">eval!</tspan><tspan fill="#a1a1aa">(lua, </tspan><tspan fill="#86efac">"""</tspan></text>
+      <text x="24" y="378"><tspan fill="#c4b5fd">  return</tspan><tspan fill="#a1a1aa"> tools.</tspan><tspan fill="#a78bfa">search</tspan><tspan fill="#a1a1aa">(</tspan><tspan fill="#86efac">"lua on the beam"</tspan><tspan fill="#a1a1aa">)</tspan></text>
+      <text x="24" y="402"><tspan fill="#86efac">"""</tspan><tspan fill="#a1a1aa">)</tspan></text>
     </g>
   </g>
 </svg>
