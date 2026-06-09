@@ -35,7 +35,7 @@ defmodule Lua.VM.Stdlib.Os do
   def install(state) do
     # Seed the monotonic origin at install time so os.clock() measures from a
     # stable startup point rather than from whenever it is first called.
-    _ = boot_offset()
+    boot_offset()
 
     os_table = %{
       "clock" => {:native_func, &os_clock/2},
