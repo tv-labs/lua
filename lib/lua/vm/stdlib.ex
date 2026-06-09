@@ -10,6 +10,7 @@ defmodule Lua.VM.Stdlib do
   alias Lua.VM.AssertionError
   alias Lua.VM.Executor
   alias Lua.VM.Limits
+  alias Lua.VM.ProtectedCall
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Table
@@ -239,7 +240,7 @@ defmodule Lua.VM.Stdlib do
     {[true | results], state}
   rescue
     e in [RuntimeError, AssertionError, TypeError, ArgumentError] ->
-      {[false, error_value(e)], State.unwind_to(state, e.state)}
+      {[false, ProtectedCall.error_value(e)], State.unwind_to(state, e.state)}
 
     e ->
       # Catch any other error
@@ -259,7 +260,7 @@ defmodule Lua.VM.Stdlib do
     {[true | results], state}
   rescue
     e in [RuntimeError, AssertionError, TypeError, ArgumentError] ->
-      run_xpcall_handler(handler, error_value(e), State.unwind_to(state, e.state))
+      run_xpcall_handler(handler, ProtectedCall.error_value(e), State.unwind_to(state, e.state))
 
     e ->
       # Catch any other error
@@ -277,20 +278,6 @@ defmodule Lua.VM.Stdlib do
     e ->
       {[false, error_msg], State.unwind_to(state, raised_state(e))}
   end
-
-  # The Lua-facing error value handed back by pcall (and to xpcall's
-  # handler), per §6.1: the raised value passes through verbatim.
-  #
-  # Clause ordering is load-bearing:
-  # 1. `error()`'s §6.1-prefixed string view (`RuntimeError.lua_value`).
-  # 2. Raw passthrough on KEY PRESENCE — `value: nil` (from `error()`) and
-  #    `value: false` must match here so pcall returns nil/false like
-  #    PUC-Lua, never an `is_nil`-guarded fallthrough to clause 3.
-  # 3. `ArgumentError` (no `:value` field) and plain Elixir exceptions
-  #    keep their message string.
-  defp error_value(%{lua_value: lv}) when not is_nil(lv), do: lv
-  defp error_value(%{value: value}), do: value
-  defp error_value(e), do: Exception.message(e)
 
   # Raise-time state ferried out on VM exceptions; `nil` for anything else
   # (plain Elixir exceptions carry no Lua state).
