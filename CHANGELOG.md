@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Lua.call_function/3` returns the terse Lua error value, not the terminal
+  render** (#336). Its `{:error, reason, _}` previously surfaced the
+  terminal-formatted error string — ANSI escape codes, the `at <source>:<line>:`
+  header, the `Suggestion:` block, stack-trace frames, and a doubled
+  `Lua runtime error: … runtime error:` prefix — where a programmatic value was
+  expected. `reason` is now exactly what `pcall` hands back (§6.1): the
+  `source:line:`-prefixed message for string errors, and the raw value
+  (table/number/`nil`/`false`) passed through verbatim for non-string error
+  objects. Note `reason` may therefore now be a non-string Lua value. The
+  raising variant `Lua.call_function!/3` is unchanged — it still raises a
+  `Lua.RuntimeException` carrying the rich formatted render.
 - **`pcall` passes the raised error value through as-is** (#334). Per Lua 5.3
   §6.1, `error(value)` raises an arbitrary Lua value and `pcall` returns it
   verbatim as its second result — previously non-string values were

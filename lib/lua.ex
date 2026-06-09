@@ -11,6 +11,7 @@ defmodule Lua do
   alias Lua.VM.Display
   alias Lua.VM.Executor
   alias Lua.VM.InternalError
+  alias Lua.VM.ProtectedCall
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Table
@@ -729,41 +730,57 @@ defmodule Lua do
   """
   @spec call_function(t(), term(), [term()]) ::
           {:ok, [term()], t()} | {:error, term(), t()}
-  def call_function(%__MODULE__{} = lua, %Display.Closure{ref: ref}, args) do
-    call_function(lua, ref, args)
-  end
-
-  def call_function(%__MODULE__{} = lua, %Display.NativeFunc{ref: ref}, args) do
-    call_function(lua, ref, args)
-  end
-
-  def call_function(%__MODULE__{state: state} = lua, func, args) when is_tuple(func) do
-    case do_call_function(func, args, state) do
-      {:ok, results, new_state} -> {:ok, results, %{lua | state: new_state}}
-      {:error, reason, new_state} -> {:error, reason, %{lua | state: new_state}}
-    end
-  end
-
-  def call_function(%__MODULE__{} = lua, name, args) when is_function(name) do
-    {ref, lua} = encode!(lua, name)
-
-    case do_call_function(ref, args, lua.state) do
-      {:ok, results, new_state} -> {:ok, results, %{lua | state: new_state}}
-      {:error, reason, new_state} -> {:error, reason, %{lua | state: new_state}}
-    end
-  end
-
   def call_function(%__MODULE__{} = lua, name, args) do
+    finish_call(lua, resolve_and_call(lua, name, args))
+  end
+
+  # `call_function/3` is a programmatic protected-call boundary. Its `:error`
+  # reason is the Lua-facing error value — exactly what `pcall` hands back via
+  # `ProtectedCall.error_value/1` (§6.1) — NOT the terminal-formatted render.
+  # The raising variant `call_function!/3` keeps the rich `ErrorFormatter`
+  # output by re-raising the original exception through `Lua.RuntimeException`.
+  defp finish_call(%__MODULE__{} = lua, {:ok, results, new_state}) do
+    {:ok, results, %{lua | state: new_state}}
+  end
+
+  defp finish_call(%__MODULE__{} = lua, {:error, e, new_state}) when is_exception(e) do
+    {:error, ProtectedCall.error_value(e), %{lua | state: new_state}}
+  end
+
+  defp finish_call(%__MODULE__{} = lua, {:error, reason, new_state}) do
+    {:error, reason, %{lua | state: new_state}}
+  end
+
+  # Resolves `name`/`func` to a callable and invokes it under protection.
+  # Returns the raw `{:ok, results, new_state} | {:error, exception | reason,
+  # new_state}` (bare `Lua.VM.State`s); callers reattach the state to `lua`.
+  # On error the exception struct is carried out verbatim so each caller can
+  # project it differently (terse value vs. rich raise).
+  defp resolve_and_call(%__MODULE__{} = lua, %Display.Closure{ref: ref}, args) do
+    resolve_and_call(lua, ref, args)
+  end
+
+  defp resolve_and_call(%__MODULE__{} = lua, %Display.NativeFunc{ref: ref}, args) do
+    resolve_and_call(lua, ref, args)
+  end
+
+  defp resolve_and_call(%__MODULE__{state: state}, func, args) when is_tuple(func) do
+    do_call_function(func, args, state)
+  end
+
+  defp resolve_and_call(%__MODULE__{} = lua, name, args) when is_function(name) do
+    {ref, lua} = encode!(lua, name)
+    do_call_function(ref, args, lua.state)
+  end
+
+  defp resolve_and_call(%__MODULE__{} = lua, name, args) do
     keys = name |> List.wrap() |> Enum.map(&to_lua_key/1)
     func = do_get_nested(lua.state, keys)
 
     if func == nil or not is_tuple(func) do
-      {:error, "undefined function '#{inspect(func)}'", lua}
+      {:error, "undefined function '#{inspect(func)}'", lua.state}
     else
-      case do_call_function(func, args, lua.state) do
-        {:ok, results, new_state} -> {:ok, results, %{lua | state: new_state}}
-        {:error, reason, new_state} -> {:error, reason, %{lua | state: new_state}}
-      end
+      do_call_function(func, args, lua.state)
     end
   end
 
@@ -771,7 +788,7 @@ defmodule Lua do
     {results, new_state} = fun.(args, state)
     {:ok, List.wrap(results), new_state}
   rescue
-    e -> {:error, Exception.message(e), recover_state(e, state)}
+    e -> {:error, e, recover_state(e, state)}
   end
 
   defp do_call_function({:lua_closure, proto, upvalues}, args, state) do
@@ -789,7 +806,7 @@ defmodule Lua do
 
     {:ok, results, new_state}
   rescue
-    e -> {:error, Exception.message(e), recover_state(e, state)}
+    e -> {:error, e, recover_state(e, state)}
   end
 
   defp do_call_function({:compiled_closure, _, _} = closure, args, state) do
@@ -798,7 +815,7 @@ defmodule Lua do
     {results, new_state} = Executor.call_function(closure, args, state)
     {:ok, results, new_state}
   rescue
-    e -> {:error, Exception.message(e), recover_state(e, state)}
+    e -> {:error, e, recover_state(e, state)}
   end
 
   defp do_call_function(other, _args, state) do
@@ -829,9 +846,14 @@ defmodule Lua do
   """
   @spec call_function!(t(), term(), [term()]) :: {[term()], t()}
   def call_function!(%__MODULE__{} = lua, func, args) do
-    case call_function(lua, func, args) do
-      {:ok, ret, lua} -> {ret, lua}
-      {:error, reason, lua} -> raise Lua.RuntimeException, {:lua_error, reason, lua.state}
+    # Unlike `call_function/3`, the raising variant keeps the rich
+    # `ErrorFormatter` render: re-raising the original VM exception through
+    # `Lua.RuntimeException` runs `Exception.message/1` (the terminal renderer)
+    # and copies its `:line` / `:source` / `:call_stack` onto the wrapper.
+    case resolve_and_call(lua, func, args) do
+      {:ok, ret, new_state} -> {ret, %{lua | state: new_state}}
+      {:error, e, _new_state} when is_exception(e) -> raise Lua.RuntimeException, e
+      {:error, reason, new_state} -> raise Lua.RuntimeException, {:lua_error, reason, new_state}
     end
   end
 
