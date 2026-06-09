@@ -10,6 +10,8 @@ defmodule Lua.VM.Stdlib.Os do
   ## Functions
 
   - `os.time([table])` - Epoch seconds, optionally from a date table.
+  - `os.time_ms()` - Current epoch in milliseconds (extension; not in PUC-Lua).
+  - `os.time_us()` - Current epoch in microseconds (extension; not in PUC-Lua).
   - `os.clock()` - Approximate CPU time used, in seconds.
   - `os.difftime(t2, t1)` - Difference in seconds between two times.
   - `os.date([format [, time]])` - Formats a time as a string or table.
@@ -31,6 +33,10 @@ defmodule Lua.VM.Stdlib.Os do
 
   @impl true
   def install(state) do
+    # Seed the monotonic origin at install time so os.clock() measures from a
+    # stable startup point rather than from whenever it is first called.
+    _ = boot_offset()
+
     os_table = %{
       "clock" => {:native_func, &os_clock/2},
       "date" => {:native_func, &os_date/2},
@@ -39,6 +45,8 @@ defmodule Lua.VM.Stdlib.Os do
       "getenv" => {:native_func, &os_getenv/2},
       "setlocale" => {:native_func, &os_setlocale/2},
       "time" => {:native_func, &os_time/2},
+      "time_ms" => {:native_func, &os_time_ms/2},
+      "time_us" => {:native_func, &os_time_us/2},
       "tmpname" => {:native_func, &os_tmpname/2}
     }
 
@@ -108,6 +116,18 @@ defmodule Lua.VM.Stdlib.Os do
 
   defp os_time([arg | _], _state) do
     raise ArgumentError.type_error("os.time", 1, "table", Util.typeof(arg))
+  end
+
+  # os.time_ms() — current epoch in milliseconds. Non-standard extension (not
+  # present in PUC-Lua); use os.time() for portable, whole-second time.
+  defp os_time_ms(_args, state) do
+    {[System.os_time(:millisecond)], state}
+  end
+
+  # os.time_us() — current epoch in microseconds. Non-standard extension (not
+  # present in PUC-Lua); use os.time() for portable, whole-second time.
+  defp os_time_us(_args, state) do
+    {[System.os_time(:microsecond)], state}
   end
 
   # os.date([format [, time]]) — formats a time.
@@ -266,8 +286,10 @@ defmodule Lua.VM.Stdlib.Os do
   defp pad2(n), do: n |> Integer.to_string() |> String.pad_leading(2, "0")
   defp pad3(n), do: n |> Integer.to_string() |> String.pad_leading(3, "0")
 
-  # Monotonic clock origin captured at module load so os.clock() reports
-  # elapsed seconds from a stable reference.
+  # Monotonic clock origin so os.clock() reports elapsed seconds from a stable
+  # reference. Seeded at library install (see install/1); the value lives in
+  # :persistent_term, which is BEAM-global, so the first VM to install wins and
+  # all later installs reuse that origin.
   defp boot_offset do
     case :persistent_term.get({__MODULE__, :boot}, nil) do
       nil ->

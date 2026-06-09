@@ -25,6 +25,24 @@ defmodule Lua.VM.Stdlib.OsTest do
       assert t == 946_684_800
     end
 
+    test "os.time_ms returns the current epoch in milliseconds" do
+      {[t], _} = Lua.eval!("return os.time_ms()")
+      assert is_integer(t)
+      assert t > 1_500_000_000_000
+    end
+
+    test "os.time_us returns the current epoch in microseconds" do
+      {[t], _} = Lua.eval!("return os.time_us()")
+      assert is_integer(t)
+      assert t > 1_500_000_000_000_000
+    end
+
+    test "os.time_ms and os.time_us share the same magnitude as os.time" do
+      {[secs, ms, us], _} = Lua.eval!("return os.time(), os.time_ms(), os.time_us()")
+      assert div(ms, 1000) in (secs - 2)..(secs + 2)
+      assert div(us, 1_000_000) in (secs - 2)..(secs + 2)
+    end
+
     test "os.difftime returns the difference in seconds" do
       {[d], _} = Lua.eval!("return os.difftime(10, 3)")
       assert d == 7.0
