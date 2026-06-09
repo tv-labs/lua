@@ -278,7 +278,7 @@ defmodule Lua.VM.PcallErrorValueTest do
             @engine
           )
 
-        assert [false, "string", err] = results
+        assert [false, "string", _err] = results
       end
     end
   end
