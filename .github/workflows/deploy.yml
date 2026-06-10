@@ -1,0 +1,41 @@
+# Deploys deflua.com to Fly.io on every merge to main.
+#
+# The site builds from the repo root (Dockerfile + fly.toml here) because
+# website/mix.exs has a `{:lua, path: ".."}` dependency, so changes to either
+# the website or the lua library can affect what's deployed. Hence: deploy on
+# any push to main.
+#
+# Requires a FLY_API_TOKEN secret. Create one with:
+#   fly tokens create deploy -x 999999h
+# then add it under Settings → Secrets and variables → Actions.
+
+name: Deploy
+
+on:
+  push:
+    branches: ["main"]
+
+# Never run two deploys at once; if a newer commit lands mid-deploy, let the
+# in-flight one finish (don't cancel) so we don't leave a half-rolled release.
+concurrency:
+  group: deploy-fly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
