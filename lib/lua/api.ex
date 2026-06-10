@@ -262,7 +262,11 @@ defmodule Lua.API do
   See `deflua/3`
   """
   defmacro deflua(fa, rest) do
-    {name, _, _} = fa
+    name =
+      case fa do
+        {:when, _, [{name, _, _} | _]} -> name
+        {name, _, _} -> name
+      end
 
     quote do
       @lua_function validate_func!(
