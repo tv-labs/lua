@@ -333,6 +333,38 @@ defmodule Lua.APITest do
       assert {1, _} = module.with_state(1, Lua.new())
       assert {"not a int", _} = module.with_state(true, Lua.new())
     end
+
+    test "guarded deflua heads register under their real name, not :when" do
+      assert [{module, _}] =
+               Code.compile_string("""
+               defmodule GuardedRegistration do
+                 use Lua.API
+
+                 deflua has_a_guard(a) when is_integer(a) do
+                   a
+                 end
+
+                 deflua has_a_guard(_) do
+                   "not a int"
+                 end
+
+                 deflua with_state(a) when is_integer(a), state do
+                   {a, state}
+                 end
+               end
+               """)
+
+      names = Enum.map(module.__lua_functions__(), &elem(&1, 0))
+
+      assert :has_a_guard in names
+      assert :with_state in names
+      refute :when in names
+
+      lua = Lua.load_api(Lua.new(), module)
+
+      assert {[1], _} = Lua.eval!(lua, "return has_a_guard(1)")
+      assert {["not a int"], _} = Lua.eval!(lua, "return has_a_guard('foo')")
+    end
   end
 
   describe "guards" do
