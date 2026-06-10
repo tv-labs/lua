@@ -104,6 +104,17 @@ defmodule Lua.VM.Dispatcher do
   @op_generic_for 51
   @op_close_upvalues 52
 
+  # Bitwise family plus the `:set_list` multi-return tail. Mirrors the
+  # `@op_*` block in `Lua.Compiler.Bytecode`; the integers must stay
+  # identical in both files.
+  @op_bitwise_and 53
+  @op_bitwise_or 54
+  @op_bitwise_xor 55
+  @op_shift_left 56
+  @op_shift_right 57
+  @op_bitwise_not 58
+  @op_set_list_multi 59
+
   @doc """
   Execute a compiled prototype against `args` and `state`.
   """
@@ -152,13 +163,17 @@ defmodule Lua.VM.Dispatcher do
     end
   end
 
+  # The interpreter sizes register tuples with a +16 slack buffer
+  # (executor.ex:135) because codegen's `max_registers` undercounts the
+  # transient scratch slots a few constructs use — notably table
+  # constructors whose last element is a multi-return call (`{x, f()}`),
+  # which write through registers past the syntactic peak. The dispatcher
+  # mirrors that buffer so the same prototypes run safely once they
+  # compile; multi-return expansion still grows on demand beyond it.
+  @reg_slack 16
+
   defp init_regs(proto, args) do
-    # The interpreter sizes register tuples with a +16 buffer for
-    # multi-return expansion (`ensure_regs_capacity/2`). The
-    # dispatcher's `:call_one` always wants exactly one result and
-    # the codegen now honestly reports the peak register, so no
-    # buffer is needed at all here.
-    size = max(proto.max_registers, proto.param_count)
+    size = max(proto.max_registers, proto.param_count) + @reg_slack
     regs = Tuple.duplicate(nil, size)
     copy_args(regs, 0, args, proto.param_count)
   end
@@ -413,6 +428,77 @@ defmodule Lua.VM.Dispatcher do
         {value, state} =
           Executor.dispatcher_unop(:negate, :erlang.element(src + 1, regs), state, proto, hint)
 
+        regs = :erlang.setelement(dest + 1, regs, value)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+      # ── Bitwise ─────────────────────────────────────────────────────
+      #
+      # band/bor/bxor of two integers stay within int64 (a bitwise combo
+      # of two in-range int64s cannot overflow), so the fast path skips the
+      # `to_signed_int64` narrow that the executor applies. Any non-integer
+      # operand (incl. float-with-fraction, string-coercible, tref with
+      # `__band` etc.) bridges to `Executor.dispatcher_bitwise/7` so
+      # coercion, metamethod dispatch, and hint-suffixed error attribution
+      # all match the interpreter. Shifts and bnot have no profitable
+      # number-only fast path (shift amounts and pre-truncation values need
+      # `lua_shift_*` masking), so they always bridge.
+
+      {@op_bitwise_and, dest, a, b, hint_a, hint_b} ->
+        va = :erlang.element(a + 1, regs)
+        vb = :erlang.element(b + 1, regs)
+
+        if is_integer(va) and is_integer(vb) do
+          regs = :erlang.setelement(dest + 1, regs, Bitwise.band(va, vb))
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        else
+          {value, state} = Executor.dispatcher_bitwise(:band, va, vb, state, proto, hint_a, hint_b)
+          regs = :erlang.setelement(dest + 1, regs, value)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        end
+
+      {@op_bitwise_or, dest, a, b, hint_a, hint_b} ->
+        va = :erlang.element(a + 1, regs)
+        vb = :erlang.element(b + 1, regs)
+
+        if is_integer(va) and is_integer(vb) do
+          regs = :erlang.setelement(dest + 1, regs, Bitwise.bor(va, vb))
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        else
+          {value, state} = Executor.dispatcher_bitwise(:bor, va, vb, state, proto, hint_a, hint_b)
+          regs = :erlang.setelement(dest + 1, regs, value)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        end
+
+      {@op_bitwise_xor, dest, a, b, hint_a, hint_b} ->
+        va = :erlang.element(a + 1, regs)
+        vb = :erlang.element(b + 1, regs)
+
+        if is_integer(va) and is_integer(vb) do
+          regs = :erlang.setelement(dest + 1, regs, Bitwise.bxor(va, vb))
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        else
+          {value, state} = Executor.dispatcher_bitwise(:bxor, va, vb, state, proto, hint_a, hint_b)
+          regs = :erlang.setelement(dest + 1, regs, value)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        end
+
+      {@op_shift_left, dest, a, b, hint_a, hint_b} ->
+        va = :erlang.element(a + 1, regs)
+        vb = :erlang.element(b + 1, regs)
+        {value, state} = Executor.dispatcher_bitwise(:shl, va, vb, state, proto, hint_a, hint_b)
+        regs = :erlang.setelement(dest + 1, regs, value)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+      {@op_shift_right, dest, a, b, hint_a, hint_b} ->
+        va = :erlang.element(a + 1, regs)
+        vb = :erlang.element(b + 1, regs)
+        {value, state} = Executor.dispatcher_bitwise(:shr, va, vb, state, proto, hint_a, hint_b)
+        regs = :erlang.setelement(dest + 1, regs, value)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+      {@op_bitwise_not, dest, src, hint} ->
+        val = :erlang.element(src + 1, regs)
+        {value, state} = Executor.dispatcher_bnot(val, state, proto, hint)
         regs = :erlang.setelement(dest + 1, regs, value)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
@@ -794,8 +880,8 @@ defmodule Lua.VM.Dispatcher do
         state = Executor.dispatcher_set_field(table_val, name, value, state, proto, name_hint)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
 
-      # `:set_list` runs only the integer-count form (see encoder). The
-      # multi-return form (`{:multi, _}`) was filtered upstream and never
+      # `:set_list` with a positive integer count is the table-constructor
+      # form. The `count == 0` sentinel was filtered upstream and never
       # reaches the dispatcher.
       {@op_set_list, table_reg, start, count, offset} ->
         {:tref, id} = :erlang.element(table_reg + 1, regs)
@@ -803,6 +889,21 @@ defmodule Lua.VM.Dispatcher do
         state =
           State.update_table(state, {:tref, id}, fn table ->
             set_list_into_table(table, regs, start, count, offset, 0)
+          end)
+
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+      # `:set_list` multi-return tail (`{f(), 1}`): fold the static prefix
+      # `init_count` with the trailing values count the last multi-return
+      # call recorded in `state.multi_return_count`. Mirrors the
+      # interpreter's `{:multi, _}` clause exactly.
+      {@op_set_list_multi, table_reg, start, init_count, offset} ->
+        {:tref, id} = :erlang.element(table_reg + 1, regs)
+        total = init_count + state.multi_return_count
+
+        state =
+          State.update_table(state, {:tref, id}, fn table ->
+            set_list_into_table(table, regs, start, total, offset, 0)
           end)
 
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
@@ -1354,11 +1455,17 @@ defmodule Lua.VM.Dispatcher do
         return_one(value, state, rest_frames)
 
       {:multi, base, -2} ->
+        # The expansion dest may sit past the statically reserved register
+        # range (a constructor tail like `{x, f()}` where the body never
+        # named that many locals). Grow first, mirroring the interpreter's
+        # `ensure_regs_capacity/2` at the post-call site.
+        regs = grow_regs(regs, base + 1)
         regs = :erlang.setelement(base + 1, regs, value)
         state = %{state | multi_return_count: 1}
         dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames)
 
       {:multi, base, n} when is_integer(n) and n > 1 ->
+        regs = grow_regs(regs, base + n)
         regs = :erlang.setelement(base + 1, regs, value)
         regs = pad_nils(regs, base + 1, n - 1)
         dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames)
@@ -1414,11 +1521,10 @@ defmodule Lua.VM.Dispatcher do
   end
 
   defp init_callee_regs(callee_proto, src_regs, src_off, arg_count) do
-    # Same as `init_regs/2`: no buffer needed because the bytecode
-    # encoder rejects multi-return calls (which are the only thing
-    # the interpreter's +16 buffer absorbs) and codegen reports the
-    # honest peak register.
-    size = max(callee_proto.max_registers, callee_proto.param_count)
+    # Same +16 slack buffer as `init_regs/2` (executor.ex:1113): the callee
+    # body may use scratch registers past its reported `max_registers` for
+    # multi-return constructor tails.
+    size = max(callee_proto.max_registers, callee_proto.param_count) + @reg_slack
     regs = Tuple.duplicate(nil, size)
     copy_n = min(arg_count, callee_proto.param_count)
     copy_regs(src_regs, src_off, regs, 0, copy_n)

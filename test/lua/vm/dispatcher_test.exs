@@ -143,6 +143,148 @@ defmodule Lua.VM.DispatcherTest do
     end
   end
 
+  describe "bitwise opcodes (dispatcher-compiled body)" do
+    test ":bitwise_and — integer fast path" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a & b end
+        return f(6, 3)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [2]
+    end
+
+    test ":bitwise_or — integer fast path" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a | b end
+        return f(6, 3)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [7]
+    end
+
+    test ":bitwise_xor — integer fast path" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a ~ b end
+        return f(6, 3)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [5]
+    end
+
+    test ":bitwise_not" do
+      {proto, results} =
+        run!("""
+        function f(a) return ~a end
+        return f(0)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [-1]
+    end
+
+    test ":shift_left" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a << b end
+        return f(1, 4)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [16]
+    end
+
+    test ":shift_right" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a >> b end
+        return f(256, 4)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [16]
+    end
+
+    test "negative shift count flips direction (a << -n == a >> n)" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a << b end
+        return f(256, -4)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [16]
+    end
+
+    test "shift by >= 64 yields 0" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a << b end
+        return f(1, 64)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [0]
+    end
+
+    test "float with integer value coerces (slow path)" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a & b end
+        return f(6.0, 3.0)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [2]
+    end
+
+    test "__band metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, n) return t & n end
+        local mt = {__band = function(_, n) return n + 100 end}
+        local t = setmetatable({}, mt)
+        return f(t, 5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [105]
+    end
+
+    test "matches the interpreter for an int64-boundary AND" do
+      code = """
+      function f(a, b) return a & b end
+      return f(-1, 9223372036854775807)
+      """
+
+      {proto, results} = run!(code)
+      assert first_sub(proto).bytecode
+      assert results == [9_223_372_036_854_775_807]
+    end
+  end
+
+  describe "set_list multi-return tail (dispatcher-compiled body)" do
+    test "constructor absorbing a multi-return call matches the interpreter" do
+      {proto, results} =
+        run!("""
+        function pair() return 10, 20 end
+        function build()
+          local t = {1, pair()}
+          return t[1], t[2], t[3]
+        end
+        return build()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [1, 10, 20]
+    end
+  end
+
   describe "comparison opcodes" do
     test ":less_than with numbers" do
       {proto, results} =
