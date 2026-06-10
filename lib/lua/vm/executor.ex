@@ -1234,7 +1234,19 @@ defmodule Lua.VM.Executor do
 
               call_mm ->
                 args = collect_args(regs, base + 1, total_args)
+
+                # The `__call` metamethod is dispatched via `call_function/3`,
+                # which may recurse into a Lua closure or run a native callback
+                # that reads `state.call_stack` for `debug.*`/tracebacks. Like
+                # the native-dispatch and dispatcher hand-off boundaries above,
+                # the executor's in-flight Lua `frames` are tracked lazily and
+                # are NOT in `state.call_stack`, so materialize them for the
+                # duration of the call and restore the inherited stack on return
+                # to keep the lazy bookkeeping balanced.
+                inherited_call_stack = state.call_stack
+                state = %{state | call_stack: rebuild_call_stack(frames) ++ inherited_call_stack}
                 {results, state} = call_function(call_mm, [other | args], state)
+                state = %{state | call_stack: inherited_call_stack}
                 continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, base, result_count)
             end
         end

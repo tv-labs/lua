@@ -5,9 +5,10 @@ defmodule Lua.VM.LazyCallInfoTest do
   The executor tracks in-flight Lua frames in its `frames` argument and only
   materializes `state.call_stack` at the boundaries that read it: native-call
   dispatch (where `debug.getinfo`/`debug.traceback` read the stack LIVE during
-  successful execution), the dispatcher hand-off, and error raise sites. These
-  golden values were captured from the previous eager-`call_info` executor and
-  must remain byte-identical.
+  successful execution), the dispatcher hand-off, the `generic_for` iterator
+  call, the `__call` metamethod dispatch, and error raise sites. These golden
+  values were captured from the previous eager-`call_info` executor and must
+  remain byte-identical.
   """
   use ExUnit.Case, async: true
 
@@ -83,6 +84,55 @@ defmodule Lua.VM.LazyCallInfoTest do
       """
 
       assert run!(code) == ["stack traceback:\n\ttest.lua:0: in ?\n\ttest.lua:3: in ?"]
+    end
+  end
+
+  describe "__call metamethod dispatch materializes the executor stack" do
+    # The `:call` opcode's `__call` branch dispatches through `call_function/3`.
+    # The enclosing executor frames are tracked lazily, so they must be
+    # materialized into `state.call_stack` for the duration of the metamethod
+    # call exactly like the native-dispatch and dispatcher hand-off boundaries.
+    # Without it, a callback reading the stack sees a truncated traceback and a
+    # `currentline` of -1 instead of the live call-site line.
+
+    test "debug.traceback inside a __call callback sees the calling frame" do
+      code = """
+      local t = setmetatable({}, {__call = function(self)
+        return debug.traceback("cm")
+      end})
+      function p()
+        return t()
+      end
+      return p()
+      """
+
+      assert run!(code) == ["cm\nstack traceback:\n\ttest.lua:7: in ?"]
+    end
+
+    test "debug.getinfo currentline inside a __call callback is the call site" do
+      code = """
+      local t = setmetatable({}, {__call = function(self)
+        return debug.getinfo(2, "nl").currentline
+      end})
+      function p()
+        return t()
+      end
+      return p()
+      """
+
+      assert run!(code) == [7]
+    end
+
+    test "call_stack is restored to empty after a __call dispatch" do
+      code = """
+      local t = setmetatable({}, {__call = function(self) return 7 end})
+      local function outer() return t() end
+      return outer()
+      """
+
+      assert {:ok, [7], state} = run(code)
+      assert state.call_stack == []
+      assert state.call_depth == 0
     end
   end
 
