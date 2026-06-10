@@ -17,7 +17,7 @@ This is the strategic overview. For per-PR detail, see [`.agents/plans/`](.agent
 - **Current focus**: closing the `1.0.0` release gates in
   [`A13`](.agents/plans/A13-release-rc1.md) — suite gate (settled at
   **20/29 with 9 documented exclusions**; 17 pass today, 3 triage
-  plans remain: `strings` cheap, `sort`/`math` need a pass), perf gate
+  plans remain — `strings`/`sort`/`math`), perf gate
   (A33–A35 baseline + parity, recursion regression #324), and the DX
   gate (`Lua.dbg/2`, PR #219).
 

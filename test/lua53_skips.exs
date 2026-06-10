@@ -271,7 +271,7 @@
       lines: :all,
       category: :stdlib,
       reason:
-        "fixable (cheap): tostring(function) renders `function` with no `: 0x...` address, so line 126 `string.find(tostring(print), 'function:')` fails. tostring({}) is correct (`table: 0x...`). One tostring fix should convert this file (modulo later string.rep/perf sections).",
+        "triage candidate: tostring(function) now prints `function: 0x...` (was bare `function`), clearing line 126. Next blocker is `string.format('%q', ...)` escaping at line 153; later string.rep sections may also need range skips. A format chain, not a one-shot.",
       issue: nil
     }
   ]

@@ -48,10 +48,11 @@ final.
       best-guess ≥22, which was never achievable — 22 would require a
       capability or perf rewrite we have deliberately deferred.)
       - **Today: 17/29 pass.** Path to 20 is three triage plans:
-        `strings.lua` (cheap — `tostring(function)` lacks the
-        `: 0x...` address that PUC prints), `sort.lua` and `math.lua`
-        (need a triage pass each; the first-failure sites are recorded
-        in `test/lua53_skips.exs`).
+        `strings.lua` (`tostring(function)` address fixed, clearing
+        line 126; next blocker is `string.format('%q')` escaping at
+        line 153 — a format chain), `sort.lua` and `math.lua` (need a
+        triage pass each). First-failure sites are recorded in
+        `test/lua53_skips.exs`.
       - **9 documented exclusions**, by category (reasons live in
         `test/lua53_skips.exs` + `@deferred_permanent`):
         - filesystem / subprocess non-goals (4): `main`, `files`,
