@@ -542,6 +542,45 @@ defmodule Lua.VM.Executor do
     %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
   end
 
+  # Synthesizes `state.call_stack` entries from the executor's `frames` stack.
+  #
+  # The hot `:lua_closure` call path no longer pushes a per-call `call_info`
+  # map onto `state.call_stack`; instead each frame records the call-site
+  # `line` and `name_hint` (the only bits not derivable from the caller's
+  # `proto`). This walks the `frames` stack innermost-first and rebuilds the
+  # exact 4-key shape (`source`/`line`/`name`/`namewhat`) consumed by
+  # `Lua.VM.ErrorFormatter` and `debug.getinfo`/`debug.traceback`. `frame.proto`
+  # is the caller's proto, matching the eager `call_info`'s `source`.
+  #
+  # Called only at the boundaries that actually read the stack — native-call
+  # dispatch, dispatcher hand-off, and error raise sites — never on the hot
+  # success path.
+  @spec rebuild_call_stack(list(map())) :: list(map())
+  defp rebuild_call_stack(frames) do
+    Enum.map(frames, fn frame ->
+      %{
+        source: frame.proto.source,
+        line: frame.line,
+        name: hint_name(frame.name_hint),
+        namewhat: hint_namewhat(frame.name_hint)
+      }
+    end)
+  end
+
+  # Invokes a `generic_for` iterator with the executor's in-flight Lua frames
+  # materialized into `state.call_stack` for the duration of the call. The
+  # iterator may itself be a Lua closure (recursing back through `do_execute`)
+  # or a native function reading the live stack — both need the enclosing
+  # executor frames visible, just like the `:call` opcode's native dispatch.
+  # The inherited stack is restored on the returned state so the lazy
+  # bookkeeping stays balanced.
+  defp call_iterator(iter_func, args, proto, state, line, frames) do
+    inherited_call_stack = state.call_stack
+    state = %{state | call_stack: rebuild_call_stack(frames) ++ inherited_call_stack}
+    {results, state} = call_value(iter_func, args, proto, state, line)
+    {results, %{state | call_stack: inherited_call_stack}}
+  end
+
   # ── Break ──────────────────────────────────────────────────────────────────
 
   defp do_execute([:break | _rest], regs, upvalues, proto, state, cont, frames, line) do
@@ -641,7 +680,7 @@ defmodule Lua.VM.Executor do
         invariant_state = elem(regs, base + 1)
         control = elem(regs, base + 2)
 
-        {results, state} = call_value(iter_func, [invariant_state, control], proto, state, line)
+        {results, state} = call_iterator(iter_func, [invariant_state, control], proto, state, line, frames)
         first_result = List.first(results)
 
         if first_result == nil do
@@ -926,7 +965,7 @@ defmodule Lua.VM.Executor do
     invariant_state = elem(regs, base + 1)
     control = elem(regs, base + 2)
 
-    {results, state} = call_value(iter_func, [invariant_state, control], proto, state, line)
+    {results, state} = call_iterator(iter_func, [invariant_state, control], proto, state, line, frames)
     first_result = List.first(results)
 
     if first_result == nil do
@@ -1036,9 +1075,23 @@ defmodule Lua.VM.Executor do
         args = collect_args(regs, base + 1, total_args)
         call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
         State.check_call_depth!(state)
-        state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
+
+        # The executor's own in-flight Lua frames are tracked lazily via the
+        # `frames` argument and are NOT in `state.call_stack`. Materialize them
+        # here (innermost-first, prepended to the inherited stack) so the
+        # dispatcher and any native callback it runs see a complete stack for
+        # `debug.*` / tracebacks. Restore the inherited stack on return so the
+        # lazy bookkeeping stays balanced.
+        inherited_call_stack = state.call_stack
+
+        state = %{
+          state
+          | call_stack: [call_info | rebuild_call_stack(frames) ++ inherited_call_stack],
+            call_depth: state.call_depth + 1
+        }
+
         {results, state} = Dispatcher.execute(callee_proto, args, callee_upvalues, state)
-        state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
+        state = %{state | call_stack: inherited_call_stack, call_depth: state.call_depth - 1}
         continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, base, result_count)
 
       {:lua_closure, callee_proto, callee_upvalues} ->
@@ -1060,6 +1113,13 @@ defmodule Lua.VM.Executor do
             callee_proto
           end
 
+        # The frame carries the caller context plus the two bits a call_stack
+        # entry needs that can't be derived from the caller's `proto`: the
+        # call-site `line` and the `name_hint`. `state.call_stack` is left
+        # untouched on this hot path — entries are synthesized lazily from
+        # `frames` only when a native call or an error actually reads the
+        # stack (see `rebuild_call_stack/1`). The O(1) `call_depth` counter
+        # is the sole per-call bookkeeping cost.
         frame = %{
           rest: rest,
           cont: cont,
@@ -1068,17 +1128,16 @@ defmodule Lua.VM.Executor do
           proto: proto,
           base: base,
           result_count: result_count,
-          open_upvalues: state.open_upvalues
+          open_upvalues: state.open_upvalues,
+          line: line,
+          name_hint: name_hint
         }
-
-        call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
 
         State.check_call_depth!(state)
 
         state = %{
           state
-          | call_stack: [call_info | state.call_stack],
-            call_depth: state.call_depth + 1,
+          | call_depth: state.call_depth + 1,
             open_upvalues: %{}
         }
 
@@ -1107,14 +1166,23 @@ defmodule Lua.VM.Executor do
         prev_pos = Process.get(@position_key, @unset)
         set_position(line, proto.source)
 
+        # The executor's in-flight Lua frames are tracked lazily via `frames`,
+        # so they are not in `state.call_stack`. Materialize them for the
+        # duration of the native call: `debug.getinfo`/`debug.traceback` read
+        # `state.call_stack` live during successful execution, not just on the
+        # error path. Restore the inherited stack on the returned state so the
+        # lazy bookkeeping stays balanced once control returns to the executor.
+        inherited_call_stack = state.call_stack
+        state = %{state | call_stack: rebuild_call_stack(frames) ++ inherited_call_stack}
+
         {results, state} =
           try do
             case fun.(args, state) do
               {r, %State{} = s} when is_list(r) ->
-                {r, s}
+                {r, %{s | call_stack: inherited_call_stack}}
 
               {r, %State{} = s} ->
-                {List.wrap(r), s}
+                {List.wrap(r), %{s | call_stack: inherited_call_stack}}
 
               other ->
                 raise InternalError,
@@ -1132,7 +1200,7 @@ defmodule Lua.VM.Executor do
         raise TypeError,
           value: "attempt to call a nil value" <> format_target_hint(name_hint),
           source: proto.source,
-          call_stack: state.call_stack,
+          call_stack: rebuild_call_stack(frames) ++ state.call_stack,
           line: line,
           error_kind: :call_nil,
           value_type: nil,
@@ -1144,7 +1212,7 @@ defmodule Lua.VM.Executor do
             raise TypeError,
               value: "attempt to call a #{Value.type_name(other)} value" <> format_target_hint(name_hint),
               source: proto.source,
-              call_stack: state.call_stack,
+              call_stack: rebuild_call_stack(frames) ++ state.call_stack,
               line: line,
               error_kind: :call_non_function,
               value_type: value_type(other),
@@ -1158,7 +1226,7 @@ defmodule Lua.VM.Executor do
                 raise TypeError,
                   value: "attempt to call a #{Value.type_name(other)} value" <> format_target_hint(name_hint),
                   source: proto.source,
-                  call_stack: state.call_stack,
+                  call_stack: rebuild_call_stack(frames) ++ state.call_stack,
                   line: line,
                   error_kind: :call_non_function,
                   value_type: value_type(other),
@@ -1986,10 +2054,13 @@ defmodule Lua.VM.Executor do
       open_upvalues: saved_open_upvalues
     } = frame
 
+    # The `:lua_closure` call path does not push onto `state.call_stack`
+    # (frames are tracked lazily — see the `:call` clause), so there is
+    # nothing to pop here. Only the O(1) `call_depth` counter moves in
+    # lockstep with the `frames` stack.
     state = %{
       state
-      | call_stack: tl(state.call_stack),
-        call_depth: state.call_depth - 1,
+      | call_depth: state.call_depth - 1,
         open_upvalues: saved_open_upvalues
     }
 
