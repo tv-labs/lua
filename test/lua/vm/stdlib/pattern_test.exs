@@ -77,6 +77,11 @@ defmodule Lua.VM.Stdlib.PatternTest do
 
     test "compile_cached returns the same tuple as compile for varied patterns" do
       for p <- @patterns do
+        # Call three times to cross the first-sighting -> second-sighting
+        # -> cached-hit transitions; every call must be tuple-identical to
+        # a bare recompile.
+        assert Pattern.compile_cached(p) == Pattern.compile(p)
+        assert Pattern.compile_cached(p) == Pattern.compile(p)
         assert Pattern.compile_cached(p) == Pattern.compile(p)
       end
     end
