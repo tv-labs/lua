@@ -318,7 +318,7 @@ defmodule DemoWeb.Layouts do
             </a>
             and three decades of Lua.
           </span>
-          <span>Apache 2.0 licensed</span>
+          <span>v{Website.LuaSandbox.lua_version()} &middot; Apache 2.0 licensed</span>
         </div>
       </div>
     </footer>

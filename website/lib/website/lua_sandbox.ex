@@ -43,6 +43,16 @@ defmodule Website.LuaSandbox do
   @lua_max_string_bytes 16 * 1024 * 1024
 
   @doc """
+  Returns the version of the `:lua` package this site is built against,
+  read from the loaded application spec so it tracks the dependency
+  automatically (no manual edits on a version bump).
+  """
+  @spec lua_version() :: String.t()
+  def lua_version do
+    :lua |> Application.spec(:vsn) |> to_string()
+  end
+
+  @doc """
   Compiles a Lua snippet into a `Lua.Chunk` (without running it) and
   returns the chunk plus the disassembled prototype tree. Returns
   `{:error, formatted_messages}` if parsing or compilation fails.

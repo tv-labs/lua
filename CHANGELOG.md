@@ -7,8 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v1.0.0-rc.2] - 2026-06-10
+
+The third release candidate for `1.0.0`. It builds on rc.1 with a major
+table-storage performance win, two non-standard `os` epoch helpers, and
+a batch of protected-call and error-value correctness fixes that bring
+`pcall` / `xpcall` and `Lua.call_function/3` in line with Lua 5.3 §6.1.
+The public API is unchanged from rc.1.
+
+### Performance
+
+- **Split-storage tables (Erlang `:array` + map)** — dense
+  positive-integer keys (`1..n`) now route to an Erlang `:array` for
+  O(1) functional read/write and dense iteration ordering, while
+  strings, sparse/non-positive integers, and other key types stay in
+  the hash map with the existing iteration bookkeeping (#328).
+  String-keyed reads (globals, fields, metatable lookups) are unchanged.
+  Table-heavy workloads improve **28–37%** at n=1000 (Apple M4, `lua`
+  chunk path): Build **−36%**, Iterate/Sum **−36%**, Map+Reduce
+  **−37%**, Sort **−28%**. Build, Iterate, and Map+Reduce now beat
+  Luerl; Sort closes most of the gap.
+
+### Added
+
+- **`os.time_ms()` and `os.time_us()`** — non-standard extensions
+  returning the current epoch in milliseconds / microseconds, for
+  programs that need sub-second precision (`os.time()` is unchanged and
+  still returns whole seconds). Both are current-time-only and are
+  documented as extensions not present in PUC-Lua (#340).
+- The `os.clock()` monotonic origin is now seeded in `install/1` rather
+  than lazily on the first call, so elapsed time is measured from a
+  stable startup point instead of drifting to whenever a program first
+  happened to call `os.clock()` (#340).
+
 ### Fixed
 
+- **`deflua/2` guarded heads register under their real name** (#344). A
+  guarded head with no state argument
+  (`deflua clamp(a) when is_integer(a)`) was registered under the name
+  `:when` instead of `clamp`, making it uncallable from Lua (calling it
+  raised an undefined-function error). The macro now unwraps the `:when`
+  AST node to reach the real name, matching the `deflua/3` (state-arg)
+  variant, which was never affected.
 - **`Lua.call_function/3` returns the terse Lua error value, not the terminal
   render** (#336). Its `{:error, reason, _}` previously surfaced the
   terminal-formatted error string — ANSI escape codes, the `at <source>:<line>:`
@@ -38,6 +78,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   protected-call boundaries recover it: heap state is kept, control state
   (call stack, open upvalues) unwinds. The `xpcall` message handler now also
   observes those mutations, matching PUC-Lua's handler semantics.
+
+### Known issues
+
+- **Deep recursion is ~25% slower than rc.0.** Carried forward from
+  rc.1: the configurable call-depth limit (#283) adds per-call
+  bookkeeping that recursion-dense workloads (e.g. naive `fib(30)`) pay
+  in full. Workloads that do real work per call are unaffected or
+  faster. This remains a deliberate safety/speed tradeoff for the RC and
+  will be addressed before `1.0.0` final.
 
 ## [v1.0.0-rc.1] - 2026-06-02
 

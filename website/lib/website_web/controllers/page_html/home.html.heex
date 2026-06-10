@@ -603,12 +603,12 @@
           id="hex-install"
           class="bg-base-100/50 border border-base-300/60 px-3 py-1.5 rounded-md"
         >
-          {"{:lua, \"~> 1.0.0-rc.1\"}"}
+          {"{:lua, \"~> #{@lua_version}\"}"}
         </code>
         <button
           id="copy-hex"
           phx-hook="CopyButton"
-          data-copy={"{:lua, \"~> 1.0.0-rc.1\"}"}
+          data-copy={"{:lua, \"~> #{@lua_version}\"}"}
           class="btn btn-xs btn-ghost border border-base-300/60 normal-case"
           aria-label="Copy mix dependency"
         >

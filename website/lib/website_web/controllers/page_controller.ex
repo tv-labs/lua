@@ -6,7 +6,8 @@ defmodule DemoWeb.PageController do
 
     render(conn, :home,
       fib_source: fib_source,
-      fib_bytecode: compile_bytecode(fib_source)
+      fib_bytecode: compile_bytecode(fib_source),
+      lua_version: Website.LuaSandbox.lua_version()
     )
   end
 
