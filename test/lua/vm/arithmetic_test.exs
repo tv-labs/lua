@@ -336,4 +336,51 @@ defmodule Lua.VM.ArithmeticTest do
       assert eval_int("return -1 % 0x7fffffffffffffff") == @maxint - 1
     end
   end
+
+  describe "integer fast-path inline range guard (add/subtract/multiply)" do
+    # In-range results return the plain integer arithmetic value unchanged
+    # (the inline `if … in range` branch, not the to_signed_int64 fallback).
+
+    test "in-range add returns plain sum" do
+      assert eval_int("return 2 + 3") == 5
+    end
+
+    test "in-range subtract returns plain difference" do
+      assert eval_int("return 10 - 4") == 6
+    end
+
+    test "in-range multiply returns plain product" do
+      assert eval_int("return 6 * 7") == 42
+    end
+
+    # Positive overflow takes the wrap (else) branch.
+
+    test "add positive overflow wraps maxint + 1 to minint" do
+      assert eval_int("return 0x7fffffffffffffff + 1") == @minint
+    end
+
+    test "multiply positive overflow wraps maxint * 2 to -2" do
+      assert eval_int("return 0x7fffffffffffffff * 2") == -2
+    end
+
+    # Negative overflow takes the wrap (else) branch.
+
+    test "subtract negative overflow wraps minint - 1 to maxint" do
+      assert eval_int("return -0x8000000000000000 - 1") == @maxint
+    end
+
+    test "multiply negative overflow wraps minint * -1 to minint" do
+      assert eval_int("local x = -0x8000000000000000; return x * -1") == @minint
+    end
+
+    # Exact boundary values stay in range (inclusive bounds) and pass through.
+
+    test "maxint + 0 passes through unchanged" do
+      assert eval_int("return 0x7fffffffffffffff + 0") == @maxint
+    end
+
+    test "minint + 0 passes through unchanged" do
+      assert eval_int("return -0x8000000000000000 + 0") == @minint
+    end
+  end
 end

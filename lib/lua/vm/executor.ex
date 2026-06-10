@@ -21,6 +21,13 @@ defmodule Lua.VM.Executor do
   alias Lua.VM.TypeError
   alias Lua.VM.Value
 
+  # Signed 64-bit integer bounds, matching Dispatcher and Numeric. Inlined as
+  # module-attribute literals so the in-range check is a guard-eligible
+  # compile-time constant in the integer arithmetic fast paths below; the
+  # cross-module `Numeric.to_signed_int64/1` call only fires on actual overflow.
+  @max_int 0x7FFFFFFFFFFFFFFF
+  @min_int -0x8000000000000000
+
   # ── Source position bridge for native callbacks ───────────────────────────
   #
   # In-executor raise sites get `line` / `proto.source` threaded as args
@@ -1277,7 +1284,8 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:add, dest, a, b, _hint_a, _hint_b} | rest], regs, upvalues, proto, state, cont, frames, line)
        when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
     sum = :erlang.element(a + 1, regs) + :erlang.element(b + 1, regs)
-    regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(sum))
+    wrapped = if sum >= @min_int and sum <= @max_int, do: sum, else: Numeric.to_signed_int64(sum)
+    regs = :erlang.setelement(dest + 1, regs, wrapped)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
@@ -1304,7 +1312,8 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:subtract, dest, a, b, _hint_a, _hint_b} | rest], regs, upvalues, proto, state, cont, frames, line)
        when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
     diff = :erlang.element(a + 1, regs) - :erlang.element(b + 1, regs)
-    regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(diff))
+    wrapped = if diff >= @min_int and diff <= @max_int, do: diff, else: Numeric.to_signed_int64(diff)
+    regs = :erlang.setelement(dest + 1, regs, wrapped)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
@@ -1331,7 +1340,8 @@ defmodule Lua.VM.Executor do
   defp do_execute([{:multiply, dest, a, b, _hint_a, _hint_b} | rest], regs, upvalues, proto, state, cont, frames, line)
        when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
     prod = :erlang.element(a + 1, regs) * :erlang.element(b + 1, regs)
-    regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(prod))
+    wrapped = if prod >= @min_int and prod <= @max_int, do: prod, else: Numeric.to_signed_int64(prod)
+    regs = :erlang.setelement(dest + 1, regs, wrapped)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
