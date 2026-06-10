@@ -5,7 +5,7 @@ issue: null
 pr: 241
 branch: fix/parser-error-tuple-shapes
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - Table-field syntax errors render with position and source context

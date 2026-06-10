@@ -5,7 +5,7 @@ issue: 280
 pr: 289
 branch: fix/runtime-type-errors
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - all.lua

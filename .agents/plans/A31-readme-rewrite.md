@@ -5,7 +5,7 @@ issue: 265
 pr: 298
 branch: docs/readme-rewrite
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - "first-impression" of the library on Hex/GitHub

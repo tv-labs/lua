@@ -5,7 +5,7 @@ issue: 307
 pr: 318
 branch: perf/table-sort-batch-writeback
 base: main
-status: review
+status: merged
 direction: B
 ---
 

@@ -5,7 +5,7 @@ issue: null
 pr: 222
 branch: fix/parser-error-positions
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - `Lua.eval!("2 + 2")` produces a useful error message

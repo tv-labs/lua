@@ -5,7 +5,7 @@ issue: 309
 pr: 317
 branch: perf/string-format-flags-bitmask
 base: main
-status: review
+status: merged
 direction: B
 ---
 

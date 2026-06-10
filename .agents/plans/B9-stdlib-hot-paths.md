@@ -5,7 +5,7 @@ issue: 273
 pr: 299
 branch: perf/stdlib-hot-paths
 base: main
-status: review
+status: merged
 direction: B
 unlocks:
   - closes most of the string.format gap vs Luerl (1.77x) and C Lua (5.5x)

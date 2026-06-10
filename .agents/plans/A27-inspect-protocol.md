@@ -5,7 +5,7 @@ issue: null
 pr: 218
 branch: dx/inspect-protocol
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - readable iex output for Lua values

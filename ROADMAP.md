@@ -2,14 +2,24 @@
 
 This is the strategic overview. For per-PR detail, see [`.agents/plans/`](.agents/plans).
 
-## Status: 2026-05-21
+## Status: 2026-06-10
 
-- **Unit tests**: 1,705 passing, 0 failing, 30 skipped.
-- **Lua 5.3 official suite**: 6/29 files passing (`simple_test.lua`,
-  `api.lua`, `bitwise.lua`, `code.lua`, `tpack.lua`, `vararg.lua`).
-- **Current focus**: post-B-series consolidation. See [Direction B —
-  Performance](#direction-b--performance-1-0-x) for what was tried,
-  what shipped, and what we learned about the limits.
+- **Version**: `1.0.0-rc.2` shipped (rc.0, rc.1, rc.2 all released).
+- **Unit tests**: 2,230 passing (62 doctests, 51 properties, 2,117
+  tests), 0 failing, 7 skipped.
+- **Lua 5.3 official suite**: 17/29 files passing. 8 fully clean
+  (`api`, `bitwise`, `code`, `nextvar`, `simple_test`, `tpack`, `utf8`,
+  `vararg`) plus 9 passing with documented skip-ranges (`all`, `calls`,
+  `constructs`, `events`, `gc`, `goto`, `literals`, `locals`, `pm`). 4
+  deliberate non-goals (`main`, `files`, `attrib`, `verybig`). 8 still
+  whole-file-skipped pending triage (`big`, `closure`, `coroutine`,
+  `db`, `errors`, `math`, `sort`, `strings`).
+- **Current focus**: closing the `1.0.0` release gates in
+  [`A13`](.agents/plans/A13-release-rc1.md) — suite gate (settled at
+  **20/29 with 9 documented exclusions**; 17 pass today, 3 triage
+  plans remain — `strings`/`sort`/`math`), perf gate
+  (A33–A35 baseline + parity, recursion regression #324), and the DX
+  gate (`Lua.dbg/2`, PR #219).
 
 ## Done
 

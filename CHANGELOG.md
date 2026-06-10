@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- **`tostring` on a function now returns a `function: 0x...` address**
+  instead of the bare string `"function"`, matching PUC-Lua's
+  `tostring(print)`-style output (builtins render as
+  `function: builtin: 0x...`). The address is a deterministic
+  per-value pseudo-pointer. Table rendering (`table: 0x...`) is
+  unchanged. `type(f)` still returns `"function"`.
+
 ## [v1.0.0-rc.2] - 2026-06-10
 
 The third release candidate for `1.0.0`. It builds on rc.1 with a major

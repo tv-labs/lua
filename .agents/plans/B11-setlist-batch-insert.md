@@ -5,7 +5,7 @@ issue: 308
 pr: 321
 branch: perf/setlist-batch-insert
 base: main
-status: review
+status: merged
 direction: B
 ---
 

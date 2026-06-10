@@ -5,7 +5,7 @@ issue: null
 pr: 217
 branch: feat/string-pack-unpack
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - tpack.lua

@@ -5,7 +5,7 @@ issue: 266
 pr: 301
 branch: docs/docstring-audit
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - "world-class docs" promise

@@ -278,4 +278,28 @@ defmodule Lua.VM.ValueTest do
       assert user2 == [{"age", 25}, {"name", "Bob"}]
     end
   end
+
+  describe "to_string/1 functions" do
+    test "lua closures render with a function: 0x address" do
+      assert Value.to_string({:lua_closure, :proto, {}}) =~ ~r/^function: 0x[0-9A-F]{14}$/
+    end
+
+    test "compiled closures render with a function: 0x address" do
+      assert Value.to_string({:compiled_closure, :proto, {}}) =~ ~r/^function: 0x[0-9A-F]{14}$/
+    end
+
+    test "native functions render as builtins" do
+      assert Value.to_string({:native_func, fn -> :ok end}) =~
+               ~r/^function: builtin: 0x[0-9A-F]{14}$/
+    end
+
+    test "is deterministic for the same value" do
+      f = {:native_func, fn -> :ok end}
+      assert Value.to_string(f) == Value.to_string(f)
+    end
+
+    test "carries the function: prefix that the suite and host code match on" do
+      assert Value.to_string({:lua_closure, :proto, {}}) =~ "function:"
+    end
+  end
 end

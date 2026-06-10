@@ -56,12 +56,18 @@ defmodule Lua.VM.Value do
 
   def to_string(v) when is_binary(v), do: v
 
-  def to_string({:tref, id}), do: "table: 0x#{String.pad_leading(Integer.to_string(id, 16), 14, "0")}"
+  def to_string({:tref, id}), do: "table: 0x#{address(id)}"
 
-  def to_string({:lua_closure, _, _}), do: "function"
-  def to_string({:compiled_closure, _, _}), do: "function"
-  def to_string({:native_func, _}), do: "function"
+  # PUC-Lua renders functions as `function: 0x<addr>`; the suite and host
+  # code that calls `tostring` on a function rely on the `function:` prefix.
+  # There is no stable identity to print like a table's tref id, so derive a
+  # deterministic pseudo-address from the term itself.
+  def to_string({:lua_closure, _, _} = f), do: "function: 0x#{address(:erlang.phash2(f))}"
+  def to_string({:compiled_closure, _, _} = f), do: "function: 0x#{address(:erlang.phash2(f))}"
+  def to_string({:native_func, _} = f), do: "function: builtin: 0x#{address(:erlang.phash2(f))}"
   def to_string(other), do: inspect(other)
+
+  defp address(id), do: String.pad_leading(Integer.to_string(id, 16), 14, "0")
 
   @doc """
   Parses a string to a number (integer or float), supporting hex notation.
