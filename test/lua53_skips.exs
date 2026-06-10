@@ -48,8 +48,9 @@
   "big.lua" => [
     %{
       lines: :all,
-      category: :unimplemented,
-      reason: "pending initial triage (suspected timeout per ROADMAP A10)",
+      category: :performance,
+      reason:
+        "1.0 exclusion (perf): runs >90s in isolation. Perf-bound on the BEAM tuple-copy ceiling; revisit in 1.0.x alongside B5 / the recursion-cost work (#324).",
       issue: nil
     }
   ],
@@ -84,8 +85,9 @@
   "closure.lua" => [
     %{
       lines: :all,
-      category: :unimplemented,
-      reason: "pending initial triage (suspected timeout per ROADMAP A10)",
+      category: :performance,
+      reason:
+        "1.0 exclusion (perf): runs >90s in isolation. Perf-bound; revisit in 1.0.x alongside B5 / the recursion-cost work (#324).",
       issue: nil
     }
   ],
@@ -113,17 +115,27 @@
     }
   ],
   "coroutine.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "coroutines not implemented", issue: nil}
+    %{
+      lines: :all,
+      category: :unimplemented,
+      reason: "1.0 exclusion (capability non-goal): coroutines not implemented",
+      issue: nil
+    }
   ],
   "db.lua" => [
-    %{lines: :all, category: :unimplemented, reason: "full debug library not implemented", issue: nil}
+    %{
+      lines: :all,
+      category: :unimplemented,
+      reason: "1.0 exclusion (capability non-goal): full debug library not implemented",
+      issue: nil
+    }
   ],
   "errors.lua" => [
     %{
       lines: :all,
       category: :stdlib,
       reason:
-        "checkmessage/checksyntax expect PUC-Lua [string \"...\"]:N: prefixes on load() errors; many parse-error templates still differ",
+        "1.0 exclusion: checkmessage/checksyntax assert PUC-Lua `[string \"...\"]:N:` parse-error wording, but the suite-harness load() returns `parse error: ...`. Matching PUC error wording verbatim is out of scope for 1.0.",
       issue: nil
     }
   ],
@@ -196,7 +208,7 @@
       lines: :all,
       category: :stdlib,
       reason:
-        "math.huge is a finite 1.0e308 stand-in so identities like math.huge + 1 == math.huge fail; not a wording issue",
+        "triage candidate: fails a checkerror near line 47. NB the prior `math.huge is a finite stand-in` reason was inaccurate — `math.huge + 1 == math.huge` and `1/0 == math.huge` both hold with the 1.0e308 value. Real first failure is unclassified; needs a triage pass.",
       issue: nil
     }
   ],
@@ -250,7 +262,7 @@
       lines: :all,
       category: :stdlib,
       reason:
-        "times out: the 2000-element unpack loop and O(n^2) table.sort over the perm/timesort sections run for minutes; the os.clock timing harness is also unimplemented",
+        "triage candidate: the first checkerror (line 19, table.insert arg count) passes; a later assertion fails. Also has O(n^2) table.sort / 2000-element unpack sections that may need range skips. Needs a triage pass.",
       issue: 262
     }
   ],
@@ -258,7 +270,8 @@
     %{
       lines: :all,
       category: :stdlib,
-      reason: "times out (>30s) on string.rep with large counts; pending finer triage",
+      reason:
+        "fixable (cheap): tostring(function) renders `function` with no `: 0x...` address, so line 126 `string.find(tostring(print), 'function:')` fails. tostring({}) is correct (`table: 0x...`). One tostring fix should convert this file (modulo later string.rep/perf sections).",
       issue: nil
     }
   ]
