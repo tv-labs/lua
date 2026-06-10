@@ -5,7 +5,7 @@ issue: 271
 pr: 275
 branch: perf/dispatcher-tables
 base: main
-status: review
+status: merged
 direction: B
 unlocks:
   - ~2x speedup on table_ops benchmarks

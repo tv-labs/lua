@@ -5,7 +5,7 @@ issue: 276
 pr: 303
 branch: fix/open-upvalue-block-close
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - calls.lua

@@ -5,7 +5,7 @@ issue: null
 pr: 215
 branch: fix/error-line-info-stdlib
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - line numbers on `string.upper(nil)`, `table.insert(t, nil, 5)`, etc.

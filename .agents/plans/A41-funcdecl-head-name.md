@@ -5,7 +5,7 @@ issue: 255
 pr: 274
 branch: fix/funcdecl-head-name
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - calls.lua

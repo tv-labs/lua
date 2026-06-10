@@ -5,7 +5,7 @@ issue: 252
 pr: 270
 branch: errors/arith-bitwise-hints
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - math.lua (reason narrowed)

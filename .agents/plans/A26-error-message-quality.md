@@ -5,7 +5,7 @@ issue: 263
 pr: 304
 branch: errors/quality-pass
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - "world-class error messages" promise of the library

@@ -5,7 +5,7 @@ issue: 264
 pr: 300
 branch: docs/examples
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - "embedding patterns are obvious" promise

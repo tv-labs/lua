@@ -5,7 +5,7 @@ issue: null
 pr: 227
 branch: perf/inline-numeric-narrowing
 base: main
-status: review
+status: merged
 direction: B
 unlocks:
   - small but free win on all integer-arithmetic workloads

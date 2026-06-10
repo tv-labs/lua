@@ -5,7 +5,7 @@ issue: 311
 pr: 319
 branch: perf/string-format-iolib-float
 base: main
-status: review
+status: merged
 direction: B
 ---
 
