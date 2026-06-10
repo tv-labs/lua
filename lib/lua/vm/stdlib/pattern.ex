@@ -16,6 +16,15 @@ defmodule Lua.VM.Stdlib.Pattern do
   alias Lua.VM.RuntimeError
   alias Lua.VM.Stdlib.Util
 
+  # Bounded cache of compiled patterns keyed by the raw pattern binary.
+  # `compile/1` is a pure `binary -> {anchored, elements}` function, so
+  # memoizing it is correctness-transparent: a hit is bit-identical to a
+  # recompile, and a miss/eviction just recompiles. Repeated-pattern loops
+  # (the common `string.find(s, ",")` / `gsub` shape) compile once and read
+  # thereafter.
+  @cache_table :lua_pattern_cache
+  @cache_max_entries 512
+
   @doc """
   Find first match of pattern in subject starting at position `init` (1-based).
   Returns `{start, stop, captures}` or `:nomatch`.
@@ -28,7 +37,7 @@ defmodule Lua.VM.Stdlib.Pattern do
         :nomatch
 
       start_pos ->
-        {anchored, pattern_elems} = compile(pattern)
+        {anchored, pattern_elems} = compile_cached(pattern)
 
         if anchored do
           case match_pattern(subject, start_pos, pattern_elems, subject) do
@@ -74,6 +83,8 @@ defmodule Lua.VM.Stdlib.Pattern do
   Global match - returns list of all matches as {start, stop, captures}.
   """
   def gmatch(subject, pattern) do
+    # Intentionally bypasses compile_cached/1: gmatch compiles once per
+    # iterator, so caching here adds churn without payoff.
     {_anchored, pattern_elems} = compile(pattern)
     gmatch_from(subject, 0, byte_size(subject), pattern_elems, [], -1)
   end
@@ -121,7 +132,7 @@ defmodule Lua.VM.Stdlib.Pattern do
   `gsub_stateful/5` instead.
   """
   def gsub(subject, pattern, repl, max_n \\ nil) do
-    {_anchored, pattern_elems} = compile(pattern)
+    {_anchored, pattern_elems} = compile_cached(pattern)
 
     stateful_repl =
       if is_function(repl, 1) do
@@ -144,7 +155,7 @@ defmodule Lua.VM.Stdlib.Pattern do
   changes back out. String and table replacements are state-pass-through.
   """
   def gsub_stateful(subject, pattern, repl, state, max_n \\ nil) do
-    {_anchored, pattern_elems} = compile(pattern)
+    {_anchored, pattern_elems} = compile_cached(pattern)
     gsub_from(subject, 0, byte_size(subject), pattern_elems, repl, max_n, 0, [], state, false)
   end
 
@@ -319,6 +330,68 @@ defmodule Lua.VM.Stdlib.Pattern do
 
     elements = compile_elements(rest, [])
     {anchored, elements}
+  end
+
+  @doc """
+  Memoized `compile/1`. Returns the same `{anchored, elements}` tuple,
+  reading from a bounded ETS cache keyed by the raw pattern binary.
+  """
+  def compile_cached(pattern) do
+    table = cache_table()
+
+    case :ets.lookup(table, pattern) do
+      [{^pattern, compiled}] ->
+        compiled
+
+      [] ->
+        compiled = compile(pattern)
+        maybe_evict_and_insert(table, pattern, compiled)
+        compiled
+    end
+  end
+
+  # Lazily and idempotently ensure the named cache table exists. This is a
+  # library with no OTP supervision tree, so there is no boot-time owner —
+  # the first process to touch a pattern creates the table. It is `:public`,
+  # so any process reads/writes it. The table is owned by the creating
+  # process and dies with it; on a fresh miss after that, it is transparently
+  # recreated. The cache is a pure optimization, never a correctness
+  # dependency.
+  defp cache_table do
+    case :ets.whereis(@cache_table) do
+      :undefined ->
+        try do
+          :ets.new(@cache_table, [
+            :set,
+            :named_table,
+            :public,
+            read_concurrency: true,
+            write_concurrency: true
+          ])
+        rescue
+          ArgumentError ->
+            # Lost the creation race against another process — re-resolve.
+            :ets.whereis(@cache_table)
+        end
+
+      ref ->
+        ref
+    end
+  end
+
+  # Bounded write: clear-and-restart on overflow. This is O(1), needs no
+  # access-order bookkeeping, and caps memory hard against adversarial
+  # varied-pattern streams — at most @cache_max_entries compiled patterns
+  # plus the one being inserted are ever resident. The trade-off is that an
+  # adversary interleaving a hot pattern with 512+ cold ones can evict the
+  # hot entry repeatedly; the degraded case is recompilation, never wrong
+  # results.
+  defp maybe_evict_and_insert(table, pattern, compiled) do
+    if :ets.info(table, :size) >= @cache_max_entries do
+      :ets.delete_all_objects(table)
+    end
+
+    :ets.insert(table, {pattern, compiled})
   end
 
   defp compile_elements("", acc), do: Enum.reverse(acc)

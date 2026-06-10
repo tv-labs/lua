@@ -71,4 +71,31 @@ defmodule Lua.VM.Stdlib.PatternTest do
       assert {[6], _} = Lua.eval!(script)
     end
   end
+
+  describe "compiled-pattern cache transparency" do
+    @patterns ["^a", "[%w]", "(%a+)", "%bxy", "a*b-c?", "()", ",", "%d+%.%d+"]
+
+    test "compile_cached returns the same tuple as compile for varied patterns" do
+      for p <- @patterns do
+        assert Pattern.compile_cached(p) == Pattern.compile(p)
+      end
+    end
+
+    test "repeated compile_cached for the same pattern is stable" do
+      first = Pattern.compile_cached("(%a+),(%d+)")
+      second = Pattern.compile_cached("(%a+),(%d+)")
+      assert first == second
+      assert first == Pattern.compile("(%a+),(%d+)")
+    end
+
+    test "string.find through the cache matches the uncached engine" do
+      assert Pattern.find("a,b,c", ",") == {2, 2, []}
+      assert Pattern.find("a,b,c", ",") == {2, 2, []}
+    end
+
+    test "string.gsub through the cache matches the uncached engine" do
+      assert Pattern.gsub("a,b,c", ",", ";") == {"a;b;c", 2}
+      assert Pattern.gsub("a,b,c", ",", ";") == {"a;b;c", 2}
+    end
+  end
 end
