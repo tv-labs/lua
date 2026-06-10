@@ -146,4 +146,27 @@ defmodule Lua.VM.TableBorderTest do
     assert t.border == 1000
     assert Table.length(t) == 1000
   end
+
+  test "appending past a leading hole does not resurrect a stale border" do
+    # delete leaves a hole inside the array region while keeping arr_n as the
+    # high-water mark. A later append at arr_n + 1 must NOT cache arr_n as the
+    # border: slot 1 is still a hole, so the only borders are 0 and the new top.
+    t = seq(5)
+    t = Table.put(t, 1, nil)
+    assert Table.length(t) == 0
+
+    t = Table.put(t, 6, 60)
+    # 1..5 still has the hole at 1, so the contiguous-from-1 border is 0.
+    assert Table.length(t) == 0
+    refute t.border == 6
+  end
+
+  test "appending past an interior hole keeps length at the hole" do
+    t = seq(5)
+    t = Table.put(t, 3, nil)
+    t = Table.put(t, 6, 60)
+    # Hole at 3: contiguous-from-1 border is 2 (1,2 then gap).
+    assert Table.length(t) == 2
+    refute t.border == 6
+  end
 end

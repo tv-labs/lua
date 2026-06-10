@@ -138,10 +138,27 @@ defmodule Lua.VM.Table do
   defp put_array(%__MODULE__{arr: arr, arr_n: n} = table, key, value) when key == n + 1 do
     arr = :array.set(key - 1, value, ensure_arr(arr))
     # Pull any contiguous successors that were parked in the hash into arr.
-    # After absorb, slots 1..arr_n are dense and arr_n+1 is absent, so the
-    # resulting arr_n is a valid Lua border — cache it (O(1), no scan).
     absorbed = absorb_from_hash(%{table | arr: arr, arr_n: key})
-    %{absorbed | border: absorbed.arr_n}
+    # Cache the new border, but only if slots 1..arr_n are actually dense.
+    # The append proves the top slot is filled; it says nothing about a hole
+    # punched lower down (delete keeps arr_n as the high-water mark, so a
+    # cleared slot stays a nil inside the region). An integer incoming border
+    # already proves 1..(arr_n - 1) was dense, so the new run is dense too —
+    # cache in O(1), the hot insert-loop path. A :dirty incoming border might
+    # hide a lower hole, so scan once to learn the true border; a clean run
+    # re-establishes the O(1) cache, a holey one stays :dirty.
+    case table.border do
+      b when is_integer(b) ->
+        %{absorbed | border: absorbed.arr_n}
+
+      :dirty ->
+        # array_border == arr_n means no hole inside 1..arr_n: a valid border.
+        if array_border(absorbed.arr, absorbed.arr_n) == absorbed.arr_n do
+          %{absorbed | border: absorbed.arr_n}
+        else
+          absorbed
+        end
+    end
   end
 
   defp put_array(%__MODULE__{arr_n: n} = table, key, value) when key <= n do
