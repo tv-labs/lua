@@ -33,6 +33,8 @@ defmodule Lua.VM.Table do
             data: %{},
             order: [],
             order_tail: [],
+            order_index: nil,
+            order_arr: nil,
             dead: %{},
             metatable: nil
 
@@ -42,6 +44,8 @@ defmodule Lua.VM.Table do
           data: %{optional(term()) => term()},
           order: list(term()),
           order_tail: list(term()),
+          order_index: %{optional(term()) => non_neg_integer()} | nil,
+          order_arr: :array.array() | nil,
           dead: %{optional(term()) => true},
           metatable: {:tref, non_neg_integer()} | nil
         }
@@ -72,7 +76,20 @@ defmodule Lua.VM.Table do
   """
   @spec replace_data(t(), map()) :: t()
   def replace_data(%__MODULE__{} = table, data) when is_map(data) do
-    split_from_map(%{table | arr: :undefined, arr_n: 0, data: %{}, order: [], order_tail: [], dead: %{}}, data)
+    split_from_map(
+      %{
+        table
+        | arr: :undefined,
+          arr_n: 0,
+          data: %{},
+          order: [],
+          order_tail: [],
+          order_index: nil,
+          order_arr: nil,
+          dead: %{}
+      },
+      data
+    )
   end
 
   defp split_from_map(table, data) do
@@ -141,6 +158,8 @@ defmodule Lua.VM.Table do
           | data: Map.put(data, key, value),
             order: new_order,
             order_tail: [key],
+            order_index: nil,
+            order_arr: nil,
             dead: Map.delete(dead, key)
         }
 
@@ -148,7 +167,13 @@ defmodule Lua.VM.Table do
         %{table | data: Map.put(data, key, value)}
 
       true ->
-        %{table | data: Map.put(data, key, value), order_tail: [key | order_tail]}
+        %{
+          table
+          | data: Map.put(data, key, value),
+            order_tail: [key | order_tail],
+            order_index: nil,
+            order_arr: nil
+        }
     end
   end
 
@@ -182,7 +207,9 @@ defmodule Lua.VM.Table do
       table
       | data: Map.delete(data, key),
         order: Enum.reject(order, &(&1 === key)),
-        order_tail: Enum.reject(tail, &(&1 === key))
+        order_tail: Enum.reject(tail, &(&1 === key)),
+        order_index: nil,
+        order_arr: nil
     }
   end
 
@@ -371,7 +398,7 @@ defmodule Lua.VM.Table do
   @spec next_entry(t(), term()) :: {term(), term()} | nil | :invalid_key
   def next_entry(%__MODULE__{} = table, nil) do
     case first_array_live(table, 1) do
-      nil -> first_live(merged_order(table), table.data)
+      nil -> first_hash_live(table)
       pair -> pair
     end
   end
@@ -381,13 +408,52 @@ defmodule Lua.VM.Table do
 
     if is_integer(key) and key >= 1 and key <= n do
       case first_array_live(table, key + 1) do
-        nil -> first_live(merged_order(table), table.data)
+        nil -> first_hash_live(table)
         pair -> pair
       end
     else
-      case advance_past(merged_order(table), key) do
-        :not_found -> :invalid_key
-        remaining -> first_live(remaining, table.data)
+      next_hash_after(table, key)
+    end
+  end
+
+  # First live hash entry at or after the start of iteration order. Uses the
+  # memoized order array when present (built once per iteration in
+  # `flush_order/1`); otherwise falls back to the structural `order` list.
+  defp first_hash_live(%__MODULE__{order_arr: nil} = table) do
+    first_live(merged_order(table), table.data)
+  end
+
+  defp first_hash_live(%__MODULE__{order_arr: arr, data: data}) do
+    first_live_from(arr, 0, data)
+  end
+
+  # First live hash entry strictly after `key`. With the memo present this is
+  # an O(1) index lookup plus a forward scan to the next live key; the scan
+  # only ever advances, so a full `pairs` loop is O(n) total. Without the memo
+  # it falls back to the linear `advance_past/2` scan.
+  defp next_hash_after(%__MODULE__{order_index: nil} = table, key) do
+    case advance_past(merged_order(table), key) do
+      :not_found -> :invalid_key
+      remaining -> first_live(remaining, table.data)
+    end
+  end
+
+  defp next_hash_after(%__MODULE__{order_index: index, order_arr: arr, data: data}, key) do
+    case Map.get(index, key) do
+      nil -> :invalid_key
+      idx -> first_live_from(arr, idx + 1, data)
+    end
+  end
+
+  defp first_live_from(arr, idx, data) do
+    if idx >= :array.size(arr) do
+      nil
+    else
+      k = :array.get(idx, arr)
+
+      case Map.fetch(data, k) do
+        {:ok, v} -> {k, v}
+        :error -> first_live_from(arr, idx + 1, data)
       end
     end
   end
@@ -402,13 +468,23 @@ defmodule Lua.VM.Table do
   end
 
   @doc """
-  Flushes any pending `order_tail` appends into `order`. Idempotent.
+  Flushes any pending `order_tail` appends into `order` and (re)builds the
+  O(1)-lookup iteration memo (`order_arr`/`order_index`). Idempotent.
+
+  Called once at the start of a `pairs`/`next` iteration so the per-step
+  hash advance is an index lookup rather than a linear scan. The memo is
+  invalidated (set to `nil`) by any structural mutation of `order`, so a
+  flush with an already-empty tail still rebuilds it when missing.
   """
   @spec flush_order(t()) :: t()
-  def flush_order(%__MODULE__{order_tail: []} = table), do: table
+  def flush_order(%__MODULE__{order_tail: [], order_index: index} = table) when index != nil do
+    table
+  end
 
   def flush_order(%__MODULE__{order: order, order_tail: tail} = table) do
-    %{table | order: order ++ Enum.reverse(tail), order_tail: []}
+    flushed = order ++ Enum.reverse(tail)
+    index = flushed |> Enum.with_index() |> Map.new()
+    %{table | order: flushed, order_tail: [], order_arr: :array.from_list(flushed), order_index: index}
   end
 
   defp merged_order(%__MODULE__{order: order, order_tail: []}), do: order

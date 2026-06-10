@@ -339,18 +339,16 @@ defmodule Lua.VM.Stdlib do
     key = List.first(rest)
     table = Map.fetch!(state.tables, id)
 
-    # Eagerly flush any deferred-append `order_tail` so subsequent
-    # iteration steps don't re-merge on every call. The first call to
-    # `lua_next` for a given iteration pays the cost once; the rest see
-    # a clean `order` list.
+    # Eagerly flush any deferred-append `order_tail` and build the O(1)
+    # iteration memo so subsequent steps are index lookups rather than
+    # linear scans. The first call to `lua_next` for a given iteration
+    # pays the cost once; the rest see a clean `order` and a live memo.
     {table, state} =
-      case table.order_tail do
-        [] ->
-          {table, state}
-
-        _ ->
-          flushed = Table.flush_order(table)
-          {flushed, %{state | tables: Map.put(state.tables, id, flushed)}}
+      if table.order_tail == [] and table.order_index != nil do
+        {table, state}
+      else
+        flushed = Table.flush_order(table)
+        {flushed, %{state | tables: Map.put(state.tables, id, flushed)}}
       end
 
     case Table.next_entry(table, key) do
