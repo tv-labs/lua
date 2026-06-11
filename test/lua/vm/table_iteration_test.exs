@@ -253,6 +253,32 @@ defmodule Lua.VM.TableIterationTest do
       assert Enum.map(walk(Table.flush_order(absorbed)), &elem(&1, 0)) == [1, 2, 3, "s"]
     end
 
+    test "replace_data drops the memo and walks the new key set exactly once" do
+      table =
+        %Table{}
+        |> Table.put(1, "a")
+        |> Table.put("old", "x")
+        |> Table.put("gone", "y")
+        |> Table.flush_order()
+
+      assert table.order_index
+      assert table.order_arr
+
+      # Wholesale replacement must reset the memo so a stale order_arr built
+      # from the previous contents can never leak into the new walk.
+      replaced = Table.replace_data(table, %{1 => "one", 2 => "two", "new" => "n"})
+      assert replaced.order_index == nil
+      assert replaced.order_arr == nil
+
+      walked = walk(Table.flush_order(replaced))
+      keys = Enum.map(walked, &elem(&1, 0))
+
+      assert keys == [1, 2, "new"]
+      assert length(keys) == length(Enum.uniq(keys))
+      refute "old" in keys
+      refute "gone" in keys
+    end
+
     test "first_hash_live(nil) skips a value-cleared leading key with the memo live" do
       table =
         %Table{}
