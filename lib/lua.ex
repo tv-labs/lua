@@ -6,6 +6,9 @@ defmodule Lua do
              |> String.split("<!-- MDOC !-->")
              |> Enum.fetch!(1)
 
+  # `dbg/2` is part of this module's public API; shadow Kernel.dbg/2.
+  import Kernel, except: [dbg: 2]
+
   alias Lua.Util
   alias Lua.VM.AssertionError
   alias Lua.VM.Display
@@ -490,6 +493,17 @@ defmodule Lua do
 
       iex> {[42], _} = Lua.eval!(Lua.new(), "return 42")
 
+  Multiple return values come back as a list:
+
+      iex> {result, _} = Lua.eval!(Lua.new(), "return 1, 2, 3")
+      iex> result
+      [1, 2, 3]
+
+  Tables are decoded into a list of `{key, value}` tuples by default:
+
+      iex> {[result], _} = Lua.eval!(Lua.new(), "return {a = 1, b = 2}")
+      iex> Enum.sort(result)
+      [{"a", 1}, {"b", 2}]
 
   `eval!/2` can also evaluate chunks by passing instead of a script. As a
   performance optimization, it is recommended to call `load_chunk!/2` if you
@@ -497,6 +511,14 @@ defmodule Lua do
 
       iex> {[4], _} = Lua.eval!(~LUA[return 2 + 2]c)
 
+  Closures returned from Lua wrap as `Lua.VM.Display.Closure` for
+  legible display in `iex`. The wrapped value is still callable via
+  `call_function/3` (or directly through `Lua.unwrap/1` for the raw
+  VM tag):
+
+      iex> {[c], _} = Lua.eval!(Lua.new(), "return function(x) return x * 2 end")
+      iex> match?(%Lua.VM.Display.Closure{}, c)
+      true
 
   ### Options
   * `:decode` - (default `true`) By default, all values returned from Lua scripts are decoded.
@@ -640,6 +662,161 @@ defmodule Lua do
   defp internal_module?(mod) do
     mod_str = Atom.to_string(mod)
     Enum.any?(@internal_module_prefixes, &String.starts_with?(mod_str, &1))
+  end
+
+  @doc """
+  Evaluates Lua source from `iex` and prints a structured summary
+  alongside the usual return tuple.
+
+  Like `eval!/2`, but also captures any `print()` output emitted
+  during evaluation and prints a debug block to stdout containing:
+
+  - a preview of the source (first 2 lines, ellipsised if longer);
+  - the return values;
+  - the elapsed time, in milliseconds;
+  - whatever the script wrote to standard out via `print()`.
+
+  Intended for poking at Lua state from `iex`. Not intended for
+  production paths — it does its own `IO.puts/1` and swaps the
+  calling process's group leader temporarily to capture output.
+  Use `eval!/2` directly when you want a quiet evaluation.
+
+  ## Example
+
+  Calling `Lua.dbg/2` with a script that prints and returns:
+
+  ```
+  > Lua.dbg(Lua.new(), ~S{print("hi"); return 1, 2})
+  --- Lua.dbg ---
+  source:  print("hi"); return 1, 2
+  return:  [1, 2]
+  elapsed: 0 ms
+  prints:
+    hi
+  ---------------
+  {[1, 2], #Lua<>}
+  ```
+
+  When evaluation raises, the summary records the error under
+  `raised:` and `dbg/2` re-raises so the caller sees the original
+  exception:
+
+  ```
+  > Lua.dbg(Lua.new(), "error('boom')")
+  --- Lua.dbg ---
+  source:  error('boom')
+  raised:  %Lua.RuntimeException{message: ..., line: 0, source: "<eval>", ...}
+  elapsed: 0 ms
+  prints:  (none)
+  ---------------
+  ** (Lua.RuntimeException) Lua runtime error: ...
+  ```
+  """
+  @spec dbg(t() | binary(), binary()) :: {[term()], t()}
+  def dbg(state_or_source, source \\ nil)
+
+  def dbg(source, nil) when is_binary(source) do
+    dbg(Lua.new(), source)
+  end
+
+  def dbg(%__MODULE__{} = state, source) when is_binary(source) do
+    start = System.monotonic_time()
+
+    # Capture stdout from print() by temporarily redirecting the
+    # calling process's group leader to a StringIO process. Lua's
+    # `print` (lib/lua/vm/stdlib.ex:151) writes via IO.puts/1, which
+    # honours the caller's group leader. The try/after restores the
+    # original group leader even if eval raises.
+    {:ok, capture} = StringIO.open("")
+    original_gl = Process.group_leader()
+
+    {return, new_state, eval_error, eval_stacktrace} =
+      try do
+        Process.group_leader(self(), capture)
+        {result, lua} = eval!(state, source)
+        {result, lua, nil, nil}
+      rescue
+        e ->
+          {nil, state, e, __STACKTRACE__}
+      after
+        Process.group_leader(self(), original_gl)
+      end
+
+    # StringIO.contents/1 returns {input_buffer, output_buffer}.
+    # We never write to the input side; we just want what was written
+    # to the device (the output buffer).
+    {_input, output} = StringIO.contents(capture)
+    StringIO.close(capture)
+
+    elapsed_ms =
+      System.convert_time_unit(
+        System.monotonic_time() - start,
+        :native,
+        :millisecond
+      )
+
+    IO.puts(format_dbg_summary(source, return, eval_error, elapsed_ms, output))
+
+    if eval_error do
+      reraise eval_error, eval_stacktrace
+    else
+      {return, new_state}
+    end
+  end
+
+  defp format_dbg_summary(source, return, error, elapsed_ms, output) do
+    inspect_opts = [pretty: false, limit: 10, charlists: :as_lists]
+
+    return_line =
+      case error do
+        nil -> "return:  #{inspect(return, inspect_opts)}"
+        e -> "raised:  #{inspect(e, inspect_opts)}"
+      end
+
+    prints_line =
+      case String.trim(output) do
+        "" -> "prints:  (none)"
+        captured -> "prints:\n" <> indent_block(captured, "  ")
+      end
+
+    """
+    --- Lua.dbg ---
+    source:  #{preview_source(source)}
+    #{return_line}
+    elapsed: #{elapsed_ms} ms
+    #{prints_line}
+    ---------------\
+    """
+  end
+
+  defp preview_source(source) do
+    case String.split(source, "\n", parts: 3) do
+      [single] ->
+        ellipsise(single, 80)
+
+      [first, ""] ->
+        ellipsise(first, 80)
+
+      [first, second] ->
+        ellipsise(first <> " ⏎ " <> second, 100)
+
+      [first, second, _rest] ->
+        ellipsise(first <> " ⏎ " <> second <> " ⏎ …", 100)
+    end
+  end
+
+  defp ellipsise(s, max) do
+    if String.length(s) > max do
+      String.slice(s, 0, max - 1) <> "…"
+    else
+      s
+    end
+  end
+
+  defp indent_block(text, prefix) do
+    text
+    |> String.split("\n")
+    |> Enum.map_join("\n", &(prefix <> &1))
   end
 
   @doc """
