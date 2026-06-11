@@ -274,6 +274,28 @@ defmodule Lua.VM.DispatcherTest do
       assert results == [9_223_372_036_854_775_807]
     end
 
+    test "negative shift count flips direction (a >> -n == a << n)" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a >> b end
+        return f(1, -4)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [16]
+    end
+
+    test ">> by >= 64 yields 0" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a >> b end
+        return f(-1, 64)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [0]
+    end
+
     test "shift with a float-valued operand coerces (shift bridge)" do
       # Shifts route through a distinct dispatcher clause that bridges to
       # Executor.dispatcher_bitwise(:shl, ...); the band coercion tests do
@@ -553,6 +575,31 @@ defmodule Lua.VM.DispatcherTest do
 
       assert encodes_op?(proto, Bytecode.op_set_list_multi())
       # t holds the leading 0 plus all n varargs; t[#t] is the last vararg.
+      assert results == [n + 1, 0, n]
+    end
+
+    test "multi-return call tail past the @reg_slack boundary exercises grow_regs" do
+      # The vararg-tail boundary test above grows the tuple through
+      # `write_varargs/4`. A `{0, f()}` constructor instead routes the
+      # callee's results through `write_results/3` at the multi-return
+      # return site, a distinct grow_regs caller. With more than 16 values
+      # those writes land beyond the `@reg_slack` (16) buffer, so the call
+      # path must grow the tuple too rather than crash with `:badarg`.
+      n = 20
+      values = Enum.map_join(1..n, ", ", &Integer.to_string/1)
+
+      {proto, results} =
+        run!("""
+        function many() return #{values} end
+        function build()
+          local t = {0, many()}
+          return #t, t[1], t[#t]
+        end
+        return build()
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_set_list_multi())
+      # t holds the leading 0 plus all n returns; t[#t] is the last return.
       assert results == [n + 1, 0, n]
     end
   end
