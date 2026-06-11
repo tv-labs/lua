@@ -28,6 +28,7 @@ defmodule Lua.VM.DispatcherTest do
   alias Lua.VM.Dispatcher
   alias Lua.VM.State
   alias Lua.VM.Stdlib
+  alias Lua.VM.TypeError
 
   defp run!(code) do
     {:ok, ast} = Parser.parse(code)
@@ -40,6 +41,19 @@ defmodule Lua.VM.DispatcherTest do
   # Pulls out the first sub-prototype — the one wrapping a `function`
   # body the dispatcher is expected to run.
   defp first_sub(%Prototype{prototypes: [fp | _]}), do: fp
+
+  # True if `op` is encoded anywhere in the prototype tree rooted at
+  # `proto`. Used to confirm a specific opcode reached bytecode without
+  # assuming which (sub-)prototype owns it.
+  defp encodes_op?(%Prototype{} = proto, op) do
+    own =
+      case proto.bytecode do
+        nil -> false
+        bc -> bc |> Tuple.to_list() |> Enum.any?(&(:erlang.element(1, &1) == op))
+      end
+
+    own or Enum.any?(proto.prototypes, &encodes_op?(&1, op))
+  end
 
   describe "arithmetic opcodes (dispatcher-compiled body)" do
     test ":add — integer fast path" do
@@ -266,6 +280,61 @@ defmodule Lua.VM.DispatcherTest do
       assert first_sub(proto).bytecode
       assert results == [9_223_372_036_854_775_807]
     end
+
+    test "numeric string operand coerces (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a & b end
+        return f("6", 3)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [2]
+    end
+
+    test "float with a fractional part raises (no integer representation)" do
+      assert_raise TypeError, ~r/no integer representation/, fn ->
+        run!("""
+        function f(a, b) return a & b end
+        return f(3.5, 1)
+        """)
+      end
+    end
+
+    test "non-numeric string operand raises (bitwise on a string value)" do
+      assert_raise TypeError, ~r/bitwise operation on a string/, fn ->
+        run!("""
+        function f(a, b) return a & b end
+        return f("x", 1)
+        """)
+      end
+    end
+
+    test "__shl metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, n) return t << n end
+        local mt = {__shl = function(_, n) return n + 1 end}
+        local t = setmetatable({}, mt)
+        return f(t, 5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [6]
+    end
+
+    test "__bnot metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t) return ~t end
+        local mt = {__bnot = function(_) return 42 end}
+        local t = setmetatable({}, mt)
+        return f(t)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [42]
+    end
   end
 
   describe "set_list multi-return tail (dispatcher-compiled body)" do
@@ -280,8 +349,36 @@ defmodule Lua.VM.DispatcherTest do
         return build()
         """)
 
-      assert first_sub(proto).bytecode
+      assert encodes_op?(proto, Bytecode.op_set_list_multi())
       assert results == [1, 10, 20]
+    end
+
+    test "constructor absorbing a vararg tail matches the interpreter" do
+      {proto, results} =
+        run!("""
+        function build(...)
+          local t = {1, ...}
+          return t[1], t[2], t[3]
+        end
+        return build(10, 20)
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_set_list_multi())
+      assert results == [1, 10, 20]
+    end
+
+    test "constructor with a bare vararg tail (init_count==0) matches the interpreter" do
+      {proto, results} =
+        run!("""
+        function build(...)
+          local t = {...}
+          return t[1], t[2], t[3]
+        end
+        return build(10, 20, 30)
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_set_list_multi())
+      assert results == [10, 20, 30]
     end
   end
 
