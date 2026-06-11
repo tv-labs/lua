@@ -11,6 +11,7 @@ defmodule Lua.VM.TableIterationTest do
   """
 
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Lua.VM.Table
 
@@ -26,6 +27,46 @@ defmodule Lua.VM.TableIterationTest do
       end
     end)
     |> Enum.to_list()
+  end
+
+  # Mix of array keys, sparse-integer hash keys, and string hash keys, so the
+  # array arm, the integer-hash arm, and the string-hash arm of next_entry/2
+  # all get exercised in one table.
+  defp key_gen do
+    frequency([
+      {5, integer(1..12)},
+      {2, integer(100..110)},
+      {5, string(?a..?z, min_length: 1, max_length: 3)}
+    ])
+  end
+
+  defp entries_gen, do: list_of(tuple({key_gen(), integer(1..1000)}), max_length: 40)
+
+  # Builds the table and an independent key=>value oracle from the same ops
+  # (last write wins on both sides; generated values are always non-nil).
+  defp build_pair(ops) do
+    Enum.reduce(ops, {%Table{}, %{}}, fn {k, v}, {t, m} ->
+      {Table.put(t, k, v), Map.put(m, k, v)}
+    end)
+  end
+
+  # Walks like `walk/1`, but deletes the just-returned key before resuming
+  # from it — the canonical Lua "remove the current field during traversal"
+  # pattern. §6.1 guarantees the cleared key stays a valid resume point, so
+  # this must visit every originally-live key once and never see :invalid_key.
+  defp walk_deleting(table), do: walk_deleting(table, nil, [])
+
+  defp walk_deleting(table, key, acc) do
+    case Table.next_entry(table, key) do
+      nil ->
+        Enum.reverse(acc)
+
+      :invalid_key ->
+        flunk("next_entry returned :invalid_key resuming from just-cleared key #{inspect(key)}")
+
+      {k, _v} ->
+        walk_deleting(Table.put(table, k, nil), k, [k | acc])
+    end
   end
 
   describe "memoized iteration path" do
@@ -162,6 +203,45 @@ defmodule Lua.VM.TableIterationTest do
 
       assert cleared.order_index
       assert cleared.order_arr == table.order_arr
+    end
+  end
+
+  describe "iteration properties (StreamData)" do
+    property "a full walk visits exactly the live key set, once each, with matching values" do
+      check all(ops <- entries_gen()) do
+        {table, oracle} = build_pair(ops)
+        walked = walk(Table.flush_order(table))
+        keys = Enum.map(walked, &elem(&1, 0))
+
+        # No duplicates and nothing missing.
+        assert length(keys) == map_size(oracle)
+        assert MapSet.new(keys) == MapSet.new(Map.keys(oracle))
+
+        for {k, v} <- walked do
+          assert v == Map.fetch!(oracle, k), "value for #{inspect(k)} diverged from the oracle"
+        end
+      end
+    end
+
+    property "the memoized walk equals the unflushed list-based fallback walk" do
+      check all(ops <- entries_gen()) do
+        {table, _oracle} = build_pair(ops)
+        assert walk(Table.flush_order(table)) == walk(table)
+      end
+    end
+
+    property "clearing the current key mid-walk still visits every live key once (§6.1), memo and fallback" do
+      check all(ops <- entries_gen()) do
+        {table, oracle} = build_pair(ops)
+        expected = MapSet.new(Map.keys(oracle))
+
+        for start <- [table, Table.flush_order(table)] do
+          visited = walk_deleting(start)
+
+          assert length(visited) == map_size(oracle)
+          assert MapSet.new(visited) == expected
+        end
+      end
     end
   end
 end
