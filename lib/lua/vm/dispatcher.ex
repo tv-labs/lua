@@ -573,7 +573,7 @@ defmodule Lua.VM.Dispatcher do
       # "throw the return value away"; `return_one/3` skips its
       # setelement write when it sees it.
 
-      {@op_call_zero, base, arg_count, name_hint} ->
+      {@op_call_zero, base, arg_count, name_hint, line} ->
         func_value = :erlang.element(base + 1, regs)
 
         case func_value do
@@ -621,12 +621,12 @@ defmodule Lua.VM.Dispatcher do
             args = collect_args(regs, base + 1, arg_count)
 
             {_results, state} =
-              Executor.dispatcher_call_function(func_value, args, state, proto, name_hint)
+              Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
 
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
         end
 
-      {@op_call_one, base, arg_count, name_hint} ->
+      {@op_call_one, base, arg_count, name_hint, line} ->
         func_value = :erlang.element(base + 1, regs)
 
         case func_value do
@@ -682,7 +682,7 @@ defmodule Lua.VM.Dispatcher do
             args = collect_args(regs, base + 1, arg_count)
 
             {results, state} =
-              Executor.dispatcher_call_function(func_value, args, state, proto, name_hint)
+              Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
 
             first =
               case results do
@@ -1041,7 +1041,7 @@ defmodule Lua.VM.Dispatcher do
       #   -2 → expand into consecutive regs at base, set multi_return_count.
       #    n>1 → place first n results into regs starting at base.
 
-      {@op_call_multi, base, arg_count, result_count, name_hint} ->
+      {@op_call_multi, base, arg_count, result_count, name_hint, line} ->
         func_value = :erlang.element(base + 1, regs)
 
         total_args =
@@ -1102,7 +1102,7 @@ defmodule Lua.VM.Dispatcher do
             args = collect_args(regs, base + 1, total_args)
 
             {results, state} =
-              Executor.dispatcher_call_function(func_value, args, state, proto, name_hint)
+              Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
 
             apply_multi_call_result(result_count, base, results, code, pc + 1, regs, upvalues, proto, state, cont, frames)
         end

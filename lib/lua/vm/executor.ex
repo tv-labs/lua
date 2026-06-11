@@ -468,34 +468,39 @@ defmodule Lua.VM.Executor do
   # the callable shapes and inlines the type-error paths so the
   # dispatcher's error messages match the interpreter's `:call` opcode.
   @doc false
-  @spec dispatcher_call_function(term(), [term()], State.t(), term(), term()) ::
+  @spec dispatcher_call_function(term(), [term()], State.t(), term(), term(), non_neg_integer()) ::
           {[term()], State.t()}
-  def dispatcher_call_function(nil, _args, state, proto, name_hint) do
+  def dispatcher_call_function(nil, _args, state, proto, name_hint, line) do
     raise TypeError,
       value: "attempt to call a nil value" <> format_target_hint(name_hint),
       source: proto.source,
       call_stack: state.call_stack,
-      line: 0,
+      line: line,
       error_kind: :call_nil,
       value_type: nil,
       state: state
   end
 
-  def dispatcher_call_function({:lua_closure, _, _} = closure, args, state, _proto, _name_hint),
+  def dispatcher_call_function({:lua_closure, _, _} = closure, args, state, _proto, _name_hint, _line),
     do: call_function(closure, args, state)
 
-  def dispatcher_call_function({:compiled_closure, _, _} = closure, args, state, _proto, _name_hint),
-    do: call_function(closure, args, state)
+  def dispatcher_call_function(
+        {:compiled_closure, _, _} = closure,
+        args,
+        state,
+        _proto,
+        _name_hint,
+        _line
+      ),
+      do: call_function(closure, args, state)
 
-  def dispatcher_call_function({:native_func, _} = nf, args, state, proto, _name_hint) do
-    # The dispatcher strips per-instruction line info at encode time, so any
-    # position visible here is a stale snapshot from an outer executor frame.
-    # Publish `{nil, source}` for the duration of the native call: raise
-    # sites that read `current_position/0` (e.g. `error()`'s §6.1 position
-    # prefix) then omit the line rather than attribute a wrong one. Restored
-    # after the call so nested invocations don't leak.
+  def dispatcher_call_function({:native_func, _} = nf, args, state, proto, _name_hint, line) do
+    # Publish the source line baked into the call opcode by the encoder so
+    # raise sites reading `current_position/0` — `error()`'s §6.1 prefix,
+    # stdlib bad-argument raises — attribute to the right call site.
+    # Restored after the call so nested invocations don't leak.
     prev_pos = Process.get(@position_key, @unset)
-    set_position(nil, proto.source)
+    set_position(line, proto.source)
 
     try do
       call_function(nf, args, state)
@@ -504,14 +509,14 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  def dispatcher_call_function(other, args, state, proto, name_hint) do
+  def dispatcher_call_function(other, args, state, proto, name_hint, line) do
     case get_metatable(other, state) do
       nil ->
         raise TypeError,
           value: "attempt to call a #{Value.type_name(other)} value" <> format_target_hint(name_hint),
           source: proto.source,
           call_stack: state.call_stack,
-          line: 0,
+          line: line,
           error_kind: :call_non_function,
           value_type: value_type(other),
           state: state
@@ -525,7 +530,7 @@ defmodule Lua.VM.Executor do
               value: "attempt to call a #{Value.type_name(other)} value" <> format_target_hint(name_hint),
               source: proto.source,
               call_stack: state.call_stack,
-              line: 0,
+              line: line,
               error_kind: :call_non_function,
               value_type: value_type(other),
               state: state

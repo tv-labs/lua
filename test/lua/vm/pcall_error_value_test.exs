@@ -181,19 +181,11 @@ defmodule Lua.VM.PcallErrorValueTest do
 
         assert [false, "string", err] = results
 
-        case @engine do
-          :interpreted ->
-            # Source-first shape: a swapped `{line, source}` destructure
-            # (emitting `2:test.lua: boom`) must fail this, not just the
-            # loose `:\d+:` shape.
-            assert err =~ ~r/^test\.lua:\d+: boom$/
-
-          :compiled ->
-            # The dispatcher does not yet plumb a per-call line for native
-            # calls inside compiled closures, so the prefix is suppressed
-            # rather than attributed to a stale outer line.
-            assert err == "boom"
-        end
+        # Source-first shape: a swapped `{line, source}` destructure
+        # (emitting `2:test.lua: boom`) must fail this, not just the
+        # loose `:\d+:` shape. Both engines now plumb per-call lines
+        # through to native raise sites.
+        assert err =~ ~r/^test\.lua:\d+: boom$/
       end
 
       test "level 0 suppresses the prefix" do

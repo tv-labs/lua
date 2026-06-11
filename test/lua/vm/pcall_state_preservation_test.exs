@@ -65,13 +65,9 @@ defmodule Lua.VM.PcallStatePreservationTest do
 
         assert [2, false, err] = results
 
-        # §6.1 position prefix on string errors: correct source:line under
-        # the interpreter; suppressed (not mis-attributed) under the
-        # dispatcher, which lacks per-call line info.
-        case @engine do
-          :interpreted -> assert err =~ ~r/^test\.lua:\d+: boom$/
-          :compiled -> assert err == "boom"
-        end
+        # §6.1 position prefix on string errors: both engines now plumb
+        # per-call line info through to native raise sites.
+        assert err =~ ~r/^test\.lua:\d+: boom$/
       end
 
       test "table field write before error() is kept" do

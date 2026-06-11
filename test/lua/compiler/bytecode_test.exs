@@ -265,4 +265,77 @@ defmodule Lua.Compiler.BytecodeTest do
       assert fn_proto.bytecode == nil
     end
   end
+
+  describe "call opcodes carry the source line" do
+    test "@op_call_one bakes the line of the call site into its tuple" do
+      # `pairs(x)` is a `:call` with result_count > 0 used as an rvalue,
+      # encoding to either @op_call_one (when used for one result) or
+      # @op_call_multi (when generic_for asks for 3 results). Both shapes
+      # MUST include the line.
+      proto =
+        compile!("""
+        function f()
+          local x = pairs({1})
+        end
+        """)
+
+      [fn_proto] = proto.prototypes
+
+      call_ops =
+        fn_proto.bytecode
+        |> Tuple.to_list()
+        |> Enum.filter(fn op ->
+          tag = :erlang.element(1, op)
+          tag in [Bytecode.op_call_one(), Bytecode.op_call_zero(), Bytecode.op_call_multi()]
+        end)
+
+      # Every call opcode carries a positive source line at its last slot.
+      for op <- call_ops do
+        last = :erlang.element(tuple_size(op), op)
+        assert is_integer(last) and last > 0,
+               "call opcode #{inspect(op)} should end with a line number, got #{inspect(last)}"
+      end
+    end
+
+    test "calls in nested bodies carry their own line, not the outer one" do
+      # The `print` call lives inside the `for`-body. Its line must be 3,
+      # not the line of the outer `pairs(...)` call (which is line 2).
+      proto =
+        compile!("""
+        function f()
+          for i in pairs({1}) do
+            print(i)
+          end
+        end
+        """)
+
+      [fn_proto] = proto.prototypes
+
+      # The outer body has the pairs call (call_multi, line 2).
+      outer_lines =
+        fn_proto.bytecode
+        |> Tuple.to_list()
+        |> Enum.filter(fn op -> :erlang.element(1, op) == Bytecode.op_call_multi() end)
+        |> Enum.map(fn op -> :erlang.element(tuple_size(op), op) end)
+
+      assert outer_lines == [2]
+
+      # The generic_for body has the print call (call_zero, line 3).
+      generic_for_op =
+        fn_proto.bytecode
+        |> Tuple.to_list()
+        |> Enum.find(fn op -> :erlang.element(1, op) == 51 end)
+
+      assert generic_for_op != nil
+      nested_body = :erlang.element(4, generic_for_op)
+
+      nested_call_lines =
+        nested_body
+        |> Tuple.to_list()
+        |> Enum.filter(fn op -> :erlang.element(1, op) == Bytecode.op_call_zero() end)
+        |> Enum.map(fn op -> :erlang.element(tuple_size(op), op) end)
+
+      assert nested_call_lines == [3]
+    end
+  end
 end

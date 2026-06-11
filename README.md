@@ -79,7 +79,9 @@ end
 Lua-level error handling works too — `pcall` catches the error and returns it
 as a value:
 
-    iex> {[false, "nope"], _lua} = Lua.eval!(~S[return pcall(function() error("nope") end)])
+    iex> {[false, err], _lua} = Lua.eval!(~S[return pcall(function() error("nope") end)])
+    iex> err =~ "nope"
+    true
 
 ### Calling Elixir functions from Lua
 
