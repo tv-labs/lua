@@ -433,22 +433,26 @@ defmodule Lua.VM.Dispatcher do
 
       # ── Bitwise ─────────────────────────────────────────────────────
       #
-      # band/bor/bxor of two integers stay within int64 (a bitwise combo
-      # of two in-range int64s cannot overflow), so the fast path skips the
-      # `to_signed_int64` narrow that the executor applies. Any non-integer
-      # operand (incl. float-with-fraction, string-coercible, tref with
-      # `__band` etc.) bridges to `Executor.dispatcher_bitwise/7` so
-      # coercion, metamethod dispatch, and hint-suffixed error attribution
-      # all match the interpreter. Shifts and bnot have no profitable
-      # number-only fast path (shift amounts and pre-truncation values need
-      # `lua_shift_*` masking), so they always bridge.
+      # band/bor/bxor of two integers take a fast path, but still apply the
+      # `to_signed_int64` narrow the executor uses: a register can hold an
+      # integer outside [-2^63, 2^63-1] (e.g. a host int injected via
+      # `Lua.set!` / `Value.encode/2`, which do not narrow), and skipping
+      # the narrow would both diverge from the interpreter and leak an
+      # out-of-range integer back into Lua state. For two already-narrow
+      # int64s the narrow is a cheap range check that masks nothing. Any
+      # non-integer operand (incl. float-with-fraction, string-coercible,
+      # tref with `__band` etc.) bridges to `Executor.dispatcher_bitwise/7`
+      # so coercion, metamethod dispatch, and hint-suffixed error
+      # attribution all match the interpreter. Shifts and bnot have no
+      # profitable number-only fast path (shift amounts and pre-truncation
+      # values need `lua_shift_*` masking), so they always bridge.
 
       {@op_bitwise_and, dest, a, b, hint_a, hint_b} ->
         va = :erlang.element(a + 1, regs)
         vb = :erlang.element(b + 1, regs)
 
         if is_integer(va) and is_integer(vb) do
-          regs = :erlang.setelement(dest + 1, regs, Bitwise.band(va, vb))
+          regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(Bitwise.band(va, vb)))
           dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
         else
           {value, state} = Executor.dispatcher_bitwise(:band, va, vb, state, proto, hint_a, hint_b)
@@ -461,7 +465,7 @@ defmodule Lua.VM.Dispatcher do
         vb = :erlang.element(b + 1, regs)
 
         if is_integer(va) and is_integer(vb) do
-          regs = :erlang.setelement(dest + 1, regs, Bitwise.bor(va, vb))
+          regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(Bitwise.bor(va, vb)))
           dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
         else
           {value, state} = Executor.dispatcher_bitwise(:bor, va, vb, state, proto, hint_a, hint_b)
@@ -474,7 +478,7 @@ defmodule Lua.VM.Dispatcher do
         vb = :erlang.element(b + 1, regs)
 
         if is_integer(va) and is_integer(vb) do
-          regs = :erlang.setelement(dest + 1, regs, Bitwise.bxor(va, vb))
+          regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(Bitwise.bxor(va, vb)))
           dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
         else
           {value, state} = Executor.dispatcher_bitwise(:bxor, va, vb, state, proto, hint_a, hint_b)

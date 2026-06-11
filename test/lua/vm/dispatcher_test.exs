@@ -26,6 +26,7 @@ defmodule Lua.VM.DispatcherTest do
   alias Lua.Parser
   alias Lua.VM
   alias Lua.VM.Dispatcher
+  alias Lua.VM.Numeric
   alias Lua.VM.State
   alias Lua.VM.Stdlib
   alias Lua.VM.TypeError
@@ -34,6 +35,22 @@ defmodule Lua.VM.DispatcherTest do
     {:ok, ast} = Parser.parse(code)
     {:ok, proto} = Compiler.compile(ast, source: "test.lua")
     state = Stdlib.install(State.new())
+    {:ok, results, _state} = VM.execute(proto, state)
+    {proto, results}
+  end
+
+  # Like `run!/1` but seeds host-supplied globals before executing. Lets a
+  # test inject a raw value (e.g. an integer outside int64) the way
+  # `Lua.set!` / `Value.encode/2` would, since neither narrows.
+  defp run_with_globals!(code, globals) do
+    {:ok, ast} = Parser.parse(code)
+    {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+    state =
+      Enum.reduce(globals, Stdlib.install(State.new()), fn {name, value}, acc ->
+        State.set_global(acc, to_string(name), value)
+      end)
+
     {:ok, results, _state} = VM.execute(proto, state)
     {proto, results}
   end
@@ -329,6 +346,35 @@ defmodule Lua.VM.DispatcherTest do
       {proto, results} = run!(code)
       assert first_sub(proto).bytecode
       assert results == [9_223_372_036_854_775_807]
+    end
+
+    test "narrows an out-of-int64 integer operand to match the interpreter" do
+      # A host can inject an integer outside [-2^63, 2^63-1] via `Lua.set!`
+      # (Value.encode/2 passes host ints through unnarrowed). The integer
+      # fast path must still narrow its result, matching the interpreter's
+      # `Numeric.to_signed_int64` wrap — otherwise it both diverges and
+      # leaks an out-of-range integer back into Lua state.
+      big = Bitwise.bsl(1, 64)
+
+      for {op, mask} <- [{"&", 1}, {"|", 1}, {"~", 1}] do
+        code = """
+        function f(a, b) return a #{op} b end
+        return f(big, #{mask})
+        """
+
+        {proto, [result]} = run_with_globals!(code, big: big)
+        assert first_sub(proto).bytecode
+
+        expected =
+          case op do
+            "&" -> Numeric.to_signed_int64(Bitwise.band(big, mask))
+            "|" -> Numeric.to_signed_int64(Bitwise.bor(big, mask))
+            "~" -> Numeric.to_signed_int64(Bitwise.bxor(big, mask))
+          end
+
+        assert result == expected
+        assert result >= -Bitwise.bsl(1, 63) and result <= Bitwise.bsl(1, 63) - 1
+      end
     end
 
     test "numeric string operand coerces (slow-path bridge)" do
