@@ -436,12 +436,15 @@ defmodule Lua.VM.Executor do
   # `:generic_for` step: invoke the iterator function. The iterator can be
   # any callable value (Lua closure, compiled closure, native function,
   # value with `__call`), so we route through `call_value/5` which handles
-  # the whole shape via the interpreter's call machinery.
+  # the whole shape via the interpreter's call machinery. `line` is the
+  # source line baked into the `:generic_for` opcode so a native iterator
+  # that raises mid-iteration (e.g. `error()`) attributes to the `for`
+  # statement rather than leaking `:0:`.
   @doc false
-  @spec dispatcher_call_value(term(), [term()], term(), State.t()) ::
+  @spec dispatcher_call_value(term(), [term()], term(), State.t(), non_neg_integer()) ::
           {[term()], State.t()}
-  def dispatcher_call_value(callable, args, proto, state) do
-    call_value(callable, args, proto, state, 0)
+  def dispatcher_call_value(callable, args, proto, state, line) do
+    call_value(callable, args, proto, state, line)
   end
 
   # `:concatenate` slow path. Mirrors the interpreter's three-way fallback:
@@ -484,15 +487,8 @@ defmodule Lua.VM.Executor do
   def dispatcher_call_function({:lua_closure, _, _} = closure, args, state, _proto, _name_hint, _line),
     do: call_function(closure, args, state)
 
-  def dispatcher_call_function(
-        {:compiled_closure, _, _} = closure,
-        args,
-        state,
-        _proto,
-        _name_hint,
-        _line
-      ),
-      do: call_function(closure, args, state)
+  def dispatcher_call_function({:compiled_closure, _, _} = closure, args, state, _proto, _name_hint, _line),
+    do: call_function(closure, args, state)
 
   def dispatcher_call_function({:native_func, _} = nf, args, state, proto, _name_hint, line) do
     # Publish the source line baked into the call opcode by the encoder so

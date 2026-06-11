@@ -19,10 +19,11 @@ defmodule Lua.VM.PcallErrorValueTest do
   Each case runs under both execution engines: the default compile path
   (closures carry bytecode and run on the dispatcher) and with bytecode
   recursively stripped (closures run on the instruction interpreter).
-  The position prefix is asserted with the correct source and line under
-  the interpreter; under the dispatcher the per-call line is not yet
-  plumbed, so the prefix is suppressed rather than attributed to a stale
-  line.
+  Both engines emit the `source:line:` prefix: the per-call line is baked
+  into the call opcode at encode time, so the dispatcher publishes it via
+  `current_position/0` at native-call boundaries exactly as the
+  interpreter threads it. The prefix is pinned to the exact source line
+  under both engines.
   """
   use ExUnit.Case, async: true
 
@@ -181,11 +182,11 @@ defmodule Lua.VM.PcallErrorValueTest do
 
         assert [false, "string", err] = results
 
-        # Source-first shape: a swapped `{line, source}` destructure
-        # (emitting `2:test.lua: boom`) must fail this, not just the
-        # loose `:\d+:` shape. Both engines now plumb per-call lines
-        # through to native raise sites.
-        assert err =~ ~r/^test\.lua:\d+: boom$/
+        # `error("boom")` sits on line 2 of the chunk. Pin the exact line
+        # (not a loose `:\d+:`) so an off-by-one or a swapped
+        # `{line, source}` destructure (`2:test.lua: boom`) fails here.
+        # Both engines plumb the per-call line to native raise sites.
+        assert err == "test.lua:2: boom"
       end
 
       test "level 0 suppresses the prefix" do
@@ -288,6 +289,38 @@ defmodule Lua.VM.PcallErrorValueTest do
 
         assert [false, "string", _err] = results
       end
+    end
+  end
+
+  describe "compiled and interpreted engines agree on the error() prefix" do
+    test "an in-VM pcall over error() yields byte-identical strings on both engines" do
+      code = """
+      local ok, err = pcall(function()
+        error("boom")
+      end)
+      return ok, type(err), err
+      """
+
+      {[false, "string", compiled], _} = run(code, :compiled)
+      {[false, "string", interpreted], _} = run(code, :interpreted)
+
+      assert compiled == "test.lua:2: boom"
+      assert compiled == interpreted
+    end
+
+    test "a native iterator raising mid-step yields byte-identical strings on both engines" do
+      code = """
+      local ok, err = pcall(function()
+        for x in error, "deep", nil do end
+      end)
+      return ok, type(err), err
+      """
+
+      {[false, "string", compiled], _} = run(code, :compiled)
+      {[false, "string", interpreted], _} = run(code, :interpreted)
+
+      assert compiled == "test.lua:2: deep"
+      assert compiled == interpreted
     end
   end
 end

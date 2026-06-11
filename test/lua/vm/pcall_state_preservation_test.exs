@@ -66,8 +66,10 @@ defmodule Lua.VM.PcallStatePreservationTest do
         assert [2, false, err] = results
 
         # §6.1 position prefix on string errors: both engines now plumb
-        # per-call line info through to native raise sites.
-        assert err =~ ~r/^test\.lua:\d+: boom$/
+        # per-call line info through to native raise sites. `error("boom")`
+        # sits on line 4 (three statements precede it) — pin the exact line
+        # so an off-by-one regression fails here, not just a loose `:\d+:`.
+        assert err == "test.lua:4: boom"
       end
 
       test "table field write before error() is kept" do

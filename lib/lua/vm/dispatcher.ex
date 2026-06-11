@@ -75,8 +75,10 @@ defmodule Lua.VM.Dispatcher do
   @op_return_one 27
   @op_return_zero 28
   # `@op_source_line 29` is reserved but never reaches the dispatcher: the
-  # bytecode encoder strips `:source_line` entries in `encode_list/2`.
-  # Line tracking for compiled prototypes is B5d-v2.
+  # bytecode encoder strips `:source_line` entries in `encode_list/3`,
+  # baking the rolling line into the call opcodes (and `:generic_for`)
+  # instead so this dispatcher can attribute native-call errors without a
+  # parallel per-instruction lookup.
   @op_new_table 30
   @op_get_table 31
   @op_set_table 32
@@ -889,17 +891,19 @@ defmodule Lua.VM.Dispatcher do
         loop_exit = {:loop_exit, code, pc + 1}
         dispatch(body_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | cont], frames)
 
-      {@op_generic_for, base, var_regs, body_bc} ->
+      {@op_generic_for, base, var_regs, body_bc, line} ->
         # Iterator call follows the same shape as the executor:
         # results = iter_func(invariant_state, control). If the first
         # result is nil the loop terminates; otherwise control gets the
-        # first result, var_regs[i] each get results[i].
+        # first result, var_regs[i] each get results[i]. `line` is baked in
+        # by the encoder so a native iterator raising mid-step attributes
+        # to the `for` statement rather than leaking `:0:`.
         iter_func = :erlang.element(base + 1, regs)
         invariant_state = :erlang.element(base + 2, regs)
         control = :erlang.element(base + 3, regs)
 
         {results, state} =
-          Executor.dispatcher_call_value(iter_func, [invariant_state, control], proto, state)
+          Executor.dispatcher_call_value(iter_func, [invariant_state, control], proto, state, line)
 
         case results do
           [nil | _] ->
@@ -913,7 +917,7 @@ defmodule Lua.VM.Dispatcher do
             regs = assign_iter_results(regs, var_regs, results, 0)
             first_var_reg = :erlang.element(1, var_regs)
             state = Executor.dispatcher_close_open_upvalues_at_or_above(state, first_var_reg)
-            marker = {:cps_generic_for, base, var_regs, body_bc, code, pc + 1}
+            marker = {:cps_generic_for, base, var_regs, body_bc, line, code, pc + 1}
             loop_exit = {:loop_exit, code, pc + 1}
             dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | cont], frames)
         end
@@ -1270,7 +1274,7 @@ defmodule Lua.VM.Dispatcher do
          proto,
          state,
          [
-           {:cps_generic_for, base, var_regs, body_bc, outer_code, outer_pc} = marker,
+           {:cps_generic_for, base, var_regs, body_bc, line, outer_code, outer_pc} = marker,
            {:loop_exit, _, _} = loop_exit | rest_cont
          ],
          frames
@@ -1280,7 +1284,7 @@ defmodule Lua.VM.Dispatcher do
     control = :erlang.element(base + 3, regs)
 
     {results, state} =
-      Executor.dispatcher_call_value(iter_func, [invariant_state, control], proto, state)
+      Executor.dispatcher_call_value(iter_func, [invariant_state, control], proto, state, line)
 
     case results do
       [nil | _] ->

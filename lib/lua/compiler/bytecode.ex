@@ -148,18 +148,22 @@ defmodule Lua.Compiler.Bytecode do
     end
   end
 
-  # Bakes the current source line into the three call opcodes so the
-  # dispatcher can attribute native-call errors without a parallel lookup
-  # table. Other opcodes pass through unchanged — line attribution for
-  # non-call raise sites (binops, indexing, concat) is deferred.
-  defp annotate_line({@op_call_one, base, args, hint}, line),
-    do: {@op_call_one, base, args, hint, line}
+  # Bakes the current source line into the call opcodes and `:generic_for`
+  # so the dispatcher can attribute native-call errors without a parallel
+  # lookup table. `:generic_for` carries its own line because the iterator
+  # is invoked at the `for` statement before the body's `:source_line`
+  # opcodes run, so a native iterator raising mid-step (e.g. `error()`)
+  # would otherwise leak `:0:`. Other opcodes pass through unchanged —
+  # line attribution for non-call raise sites (binops, indexing, concat)
+  # is deferred.
+  defp annotate_line({@op_call_one, base, args, hint}, line), do: {@op_call_one, base, args, hint, line}
 
-  defp annotate_line({@op_call_zero, base, args, hint}, line),
-    do: {@op_call_zero, base, args, hint, line}
+  defp annotate_line({@op_call_zero, base, args, hint}, line), do: {@op_call_zero, base, args, hint, line}
 
   defp annotate_line({@op_call_multi, base, args, results, hint}, line),
     do: {@op_call_multi, base, args, results, hint, line}
+
+  defp annotate_line({@op_generic_for, base, var_regs, body}, line), do: {@op_generic_for, base, var_regs, body, line}
 
   defp annotate_line(other, _line), do: other
 
