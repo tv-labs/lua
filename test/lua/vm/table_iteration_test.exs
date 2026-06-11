@@ -227,6 +227,32 @@ defmodule Lua.VM.TableIterationTest do
       assert resumed == {"b", 2}
     end
 
+    test "absorbing a parked hash key into the array nils the memo" do
+      # put(3) lands in the hash (border is at 1, so 3 is sparse). After
+      # flush_order the memo is live and 3 is part of order_arr/order_index.
+      # put(2) is a contiguous append that extends the border to 2, which
+      # then absorbs the parked key 3 into the array via drop_hash_key — a
+      # distinct memo-invalidation trigger from insert_hash and plain delete.
+      table =
+        %Table{}
+        |> Table.put(1, "a")
+        |> Table.put(3, "c")
+        |> Table.put("s", "ess")
+        |> Table.flush_order()
+
+      assert table.order_index
+      assert table.order_arr
+
+      absorbed = Table.put(table, 2, "b")
+      assert absorbed.order_index == nil
+      assert absorbed.order_arr == nil
+
+      # The walk is correct both before reflush (list-based fallback) and
+      # after reflush (rebuilt memo): array keys 1,2,3 then the hash key "s".
+      assert Enum.map(walk(absorbed), &elem(&1, 0)) == [1, 2, 3, "s"]
+      assert Enum.map(walk(Table.flush_order(absorbed)), &elem(&1, 0)) == [1, 2, 3, "s"]
+    end
+
     test "first_hash_live(nil) skips a value-cleared leading key with the memo live" do
       table =
         %Table{}
