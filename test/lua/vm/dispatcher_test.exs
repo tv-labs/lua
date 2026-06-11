@@ -274,6 +274,30 @@ defmodule Lua.VM.DispatcherTest do
       assert results == [9_223_372_036_854_775_807]
     end
 
+    test "shift with a float-valued operand coerces (shift bridge)" do
+      # Shifts route through a distinct dispatcher clause that bridges to
+      # Executor.dispatcher_bitwise(:shl, ...); the band coercion tests do
+      # not touch it. Pin that the shared `to_integer!` coercion reaches
+      # the shift bridge too.
+      {proto, results} =
+        run!("""
+        function f(a, b) return a << b end
+        return f(256.0, 2)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [1024]
+    end
+
+    test "shift with a fractional float raises (no integer representation)" do
+      assert_raise TypeError, ~r/no integer representation/, fn ->
+        run!("""
+        function f(a, b) return a << b end
+        return f(3.5, 1)
+        """)
+      end
+    end
+
     test "float with integer value coerces (slow path)" do
       {proto, results} =
         run!("""
@@ -386,6 +410,21 @@ defmodule Lua.VM.DispatcherTest do
 
       assert first_sub(proto).bytecode
       assert results == [2]
+    end
+
+    test "hex-float string operand coerces via float_to_integer! (matches interpreter)" do
+      # Mirrors the interpreter assertion in bitwise_test.exs: "0xFD.0"
+      # parses to the float 253.0, which `to_integer!` routes through its
+      # `float_to_integer!` branch. Plain integer strings ("6") never
+      # exercise that branch, so the two paths stay demonstrably aligned.
+      {proto, results} =
+        run!("""
+        function f(a, b) return a & b end
+        return f("0xFD.0", 0xFF)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [253]
     end
 
     test "float with a fractional part raises (no integer representation)" do
