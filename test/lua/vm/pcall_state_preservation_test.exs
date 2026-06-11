@@ -329,6 +329,30 @@ defmodule Lua.VM.PcallStatePreservationTest do
         assert [1, 2, 3, false] = results
       end
 
+      test "outer native error reports the outer line after an inner native error is caught" do
+        # The per-call position the dispatcher publishes is saved/restored
+        # around each native call. After the inner `error("inner")` (line 4)
+        # is trapped by the inner pcall, the outer `error("outer")` must
+        # report ITS OWN line (line 7) — a leaked inner position would
+        # surface as `test.lua:4:`.
+        {results, _state} =
+          run(
+            """
+            local _, inner_err = pcall(function()
+              local _, deep_err = pcall(function()
+                error("inner")
+              end)
+              error("outer")
+            end)
+            return inner_err
+            """,
+            @engine
+          )
+
+        assert [outer_err] = results
+        assert outer_err == "test.lua:5: outer"
+      end
+
       test "setmetatable before error is kept" do
         {results, _state} =
           run(

@@ -356,5 +356,27 @@ defmodule Lua.VM.PcallErrorValueTest do
       assert compiled == "test.lua:2: rc"
       assert compiled == interpreted
     end
+
+    test "a stdlib ArgumentError yields byte-identical strings on both engines" do
+      # An in-VM `pcall` over a bad-argument stdlib call returns the raw Lua
+      # error value with no `source:line:` prefix (the prefix is added only
+      # by the Elixir-side rich render in `call_function!`, not by the
+      # native raise that `pcall` traps). The point pinned here is that the
+      # dispatcher and the interpreter agree byte-for-byte on that value, so
+      # the per-call line plumbing this PR adds cannot make the two engines
+      # diverge on the bad-argument render.
+      code = """
+      local ok, err = pcall(function()
+        pairs("asdf")
+      end)
+      return ok, type(err), err
+      """
+
+      {[false, "string", compiled], _} = run(code, :compiled)
+      {[false, "string", interpreted], _} = run(code, :interpreted)
+
+      assert compiled == "bad argument #1 to 'pairs' (table expected, got string)"
+      assert compiled == interpreted
+    end
   end
 end
