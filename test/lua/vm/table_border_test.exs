@@ -300,6 +300,52 @@ defmodule Lua.VM.TableBorderTest do
     assert Table.get(t, 5) == 10
   end
 
+  test "a positive-int hash insert dirties the border and drops the order memo together" do
+    # arr_n is 3; a sparse insert at 10 routes through insert_hash, which sits
+    # one line apart from the order memo invalidation. Both caches must drop:
+    # the border because a later contiguous fill could promote 10 into #t, and
+    # the memo because order_tail just grew a new hash key.
+    t = 3 |> seq() |> Table.put("x", 1) |> Table.flush_order()
+    assert is_integer(t.border)
+    assert t.order_index
+
+    t = Table.put(t, 10, 10)
+    assert t.border == :dirty
+    assert t.order_index == nil
+    assert t.order_arr == nil
+    assert Table.length(t) == 3
+  end
+
+  test "an in-array delete dirties the border but leaves the order memo intact" do
+    # Array keys never live in `order`, so clearing an in-array slot must dirty
+    # the border (the dense run from 1 can only shrink) without touching the
+    # hash iteration memo built by flush_order/1.
+    t = 3 |> seq() |> Table.put("x", 1) |> Table.flush_order()
+    index = t.order_index
+    arr = t.order_arr
+    assert index
+
+    t = Table.put(t, 2, nil)
+    assert t.border == :dirty
+    assert t.order_index == index
+    assert t.order_arr == arr
+    assert legal_border?(MapSet.new([1, 3]), Table.length(t))
+  end
+
+  test "a string-key write drops the order memo but keeps the integer border" do
+    # A non-positive-integer hash key never bears on #t, so the cached integer
+    # border survives untouched while the order memo drops (order_tail grew).
+    t = 3 |> seq() |> Table.put("x", 1) |> Table.flush_order()
+    assert t.border == 3
+    assert t.order_index
+
+    t = Table.put(t, "y", 2)
+    assert t.border == 3
+    assert t.order_index == nil
+    assert t.order_arr == nil
+    assert Table.length(t) == 3
+  end
+
   property "length/1 returns a legal border after every mutation" do
     check all(ops <- list_of(op_gen(), max_length: 60)) do
       Enum.reduce(ops, {%Table{}, MapSet.new()}, fn {k, v}, {t, present} ->
