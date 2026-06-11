@@ -7,11 +7,43 @@ defmodule Lua.VM.TableBorderTest do
   """
 
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Lua.VM.Table
 
   defp build(pairs), do: Enum.reduce(pairs, %Table{}, fn {k, v}, t -> Table.put(t, k, v) end)
   defp seq(n), do: build(Enum.map(1..n, &{&1, &1}))
+
+  # A single mutation: a key drawn from a small range (so dense runs, holes,
+  # and contiguous refills interleave heavily — the shape the stale-border
+  # bug lived in) paired with either a value or the :delete sentinel.
+  defp op_gen do
+    key =
+      frequency([
+        {9, integer(1..10)},
+        {1, string(?a..?z, min_length: 1, max_length: 2)}
+      ])
+
+    value = frequency([{3, integer(1..1000)}, {1, constant(:delete)}])
+
+    tuple({key, value})
+  end
+
+  defp apply_op(t, k, :delete), do: Table.put(t, k, nil)
+  defp apply_op(t, k, v), do: Table.put(t, k, v)
+
+  # `present` tracks only positive-integer keys mapped to a non-nil value —
+  # the only keys that bear on the sequence border.
+  defp track(present, k, :delete) when is_integer(k), do: MapSet.delete(present, k)
+  defp track(present, k, _v) when is_integer(k), do: MapSet.put(present, k)
+  defp track(present, _k, _v), do: present
+
+  # `b` is a legal Lua 5.3 §6.1 border for the live key set `present` iff
+  # t[b] is non-nil (or b == 0) and t[b + 1] is nil. A holey table has more
+  # than one legal border, so this checks the boundary condition, not a value.
+  defp legal_border?(present, b) do
+    (b == 0 or MapSet.member?(present, b)) and not MapSet.member?(present, b + 1)
+  end
 
   test "empty table has length 0 and an integer border" do
     t = %Table{}
@@ -168,5 +200,38 @@ defmodule Lua.VM.TableBorderTest do
     # Hole at 3: contiguous-from-1 border is 2 (1,2 then gap).
     assert Table.length(t) == 2
     refute t.border == 6
+  end
+
+  property "length/1 returns a legal border after every mutation" do
+    check all(ops <- list_of(op_gen(), max_length: 60)) do
+      Enum.reduce(ops, {%Table{}, MapSet.new()}, fn {k, v}, {t, present} ->
+        t = apply_op(t, k, v)
+        present = track(present, k, v)
+        len = Table.length(t)
+
+        assert is_integer(len) and len >= 0
+
+        assert legal_border?(present, len),
+               "length=#{len} is not a legal border for live keys " <>
+                 "#{inspect(Enum.sort(present))} after op #{inspect({k, v})} " <>
+                 "(border field=#{inspect(t.border)})"
+
+        {t, present}
+      end)
+    end
+  end
+
+  property "get/2 stays consistent with an independent key=>value oracle" do
+    check all(ops <- list_of(op_gen(), max_length: 60)) do
+      {table, oracle} =
+        Enum.reduce(ops, {%Table{}, %{}}, fn {k, v}, {t, oracle} ->
+          oracle = if v == :delete, do: Map.delete(oracle, k), else: Map.put(oracle, k, v)
+          {apply_op(t, k, v), oracle}
+        end)
+
+      for k <- ops |> Enum.map(&elem(&1, 0)) |> Enum.uniq() do
+        assert Table.get(table, k) == Map.get(oracle, k)
+      end
+    end
   end
 end
