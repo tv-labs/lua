@@ -259,6 +259,182 @@ defmodule Lua.VM.LazyCallInfoTest do
     end
   end
 
+  describe "metamethod dispatch materializes the executor stack" do
+    # `__index`/`__newindex`/arithmetic metamethods re-enter via
+    # `call_function/3` from inside the interpreter opcode clauses, where the
+    # enclosing Lua frames are tracked lazily in the `frames` argument and are
+    # NOT in `state.call_stack`. They must be materialized for the duration of
+    # the metamethod call exactly like the native-dispatch and `__call`
+    # boundaries — otherwise a callback reading the stack sees a truncated
+    # traceback (the enclosing frame gone) and `currentline` of -1.
+
+    test "debug.traceback inside an __index callback sees the enclosing frame" do
+      code = """
+      local t = setmetatable({}, {__index = function(self, k)
+        return debug.traceback("im")
+      end})
+      function p()
+        return t.foo
+      end
+      return p()
+      """
+
+      assert run!(code) == ["im\nstack traceback:\n\ttest.lua:7: in ?"]
+    end
+
+    test "debug.traceback inside an __index callback on the forced-lazy path" do
+      code = """
+      local t = setmetatable({}, {__index = function(self, k)
+        local _ = 3 & 1
+        return debug.traceback("im")
+      end})
+      function p()
+        local _ = 3 & 1
+        return t.foo
+      end
+      return p()
+      """
+
+      assert run!(code) == ["im\nstack traceback:\n\ttest.lua:9: in ?"]
+    end
+
+    test "debug.getinfo currentline inside an __index callback is the call site" do
+      code = """
+      local t = setmetatable({}, {__index = function(self, k)
+        return debug.getinfo(2, "nl").currentline
+      end})
+      function p()
+        return t.foo
+      end
+      return p()
+      """
+
+      assert run!(code) == [7]
+    end
+
+    test "debug.getinfo currentline inside an __index callback on the forced-lazy path" do
+      code = """
+      local t = setmetatable({}, {__index = function(self, k)
+        local _ = 3 & 1
+        return debug.getinfo(2, "nl").currentline
+      end})
+      function p()
+        local _ = 3 & 1
+        return t.foo
+      end
+      return p()
+      """
+
+      assert run!(code) == [9]
+    end
+
+    test "debug.traceback inside a __newindex callback on the forced-lazy path" do
+      code = """
+      local t = setmetatable({}, {__newindex = function(self, k, v)
+        local _ = 3 & 1
+        _G.captured = debug.traceback("nm")
+      end})
+      function p()
+        local _ = 3 & 1
+        t.foo = 1
+      end
+      p()
+      return _G.captured
+      """
+
+      assert run!(code) == ["nm\nstack traceback:\n\ttest.lua:9: in ?"]
+    end
+
+    test "debug.traceback inside an arithmetic metamethod on the forced-lazy path" do
+      code = """
+      local t = setmetatable({}, {__add = function(a, b)
+        local _ = 3 & 1
+        return debug.traceback("am")
+      end})
+      function p()
+        local _ = 3 & 1
+        return t + 1
+      end
+      return p()
+      """
+
+      assert run!(code) == ["am\nstack traceback:\n\ttest.lua:9: in ?"]
+    end
+
+    test "call_stack is restored to empty after an __index dispatch on the forced-lazy path" do
+      code = """
+      local t = setmetatable({}, {__index = function(self, k) local _ = 3 & 1 return 5 end})
+      local function outer() local _ = 3 & 1 return t.foo end
+      return outer()
+      """
+
+      assert {:ok, [5], state} = run(code)
+      assert state.call_stack == []
+      assert state.call_depth == 0
+    end
+  end
+
+  describe "generic_for iterator dispatch materializes the executor stack" do
+    # `call_iterator/6` materializes the lazy `frames` into `state.call_stack`
+    # for a `for _ in iter, ... do` iterator call. The iterator can read the
+    # live stack via `debug.*`, so the enclosing `for`-loop frame must be
+    # visible — and the inherited stack restored afterward.
+
+    test "debug.traceback inside the iterator sees the enclosing frame" do
+      code = """
+      local function iter(s, c)
+        if c < 1 then return c + 1, debug.traceback("it") end
+      end
+      function driver()
+        for _, v in iter, nil, 0 do
+          return v
+        end
+      end
+      return driver()
+      """
+
+      assert run!(code) == ["it\nstack traceback:\n\ttest.lua:9: in ?"]
+    end
+
+    test "debug.traceback inside the iterator on the forced-lazy path" do
+      code = """
+      local function iter(s, c)
+        local _ = 3 & 1
+        if c < 1 then return c + 1, debug.traceback("it") end
+      end
+      function driver()
+        local _ = 3 & 1
+        for _, v in iter, nil, 0 do
+          return v
+        end
+      end
+      return driver()
+      """
+
+      assert run!(code) == ["it\nstack traceback:\n\ttest.lua:11: in ?"]
+    end
+
+    test "call_stack is restored to empty after a generic_for loop on the forced-lazy path" do
+      code = """
+      local function iter(s, c)
+        local _ = 3 & 1
+        if c < 1 then return c + 1, c end
+      end
+      local function driver()
+        local _ = 3 & 1
+        local sum = 0
+        for _, v in iter, nil, 0 do sum = sum + v end
+        return sum
+      end
+      return driver()
+      """
+
+      assert {:ok, [0], state} = run(code)
+      assert state.call_stack == []
+      assert state.call_depth == 0
+    end
+  end
+
   describe "error tracebacks materialize the executor stack" do
     test "attempt to call a nil value from a nested call" do
       code = """
