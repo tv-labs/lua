@@ -20,7 +20,8 @@ defmodule Lua.VM.TableBorderTest do
   defp op_gen do
     key =
       frequency([
-        {9, integer(1..10)},
+        {8, integer(1..10)},
+        {1, integer(-2..0)},
         {1, string(?a..?z, min_length: 1, max_length: 2)}
       ])
 
@@ -34,8 +35,8 @@ defmodule Lua.VM.TableBorderTest do
 
   # `present` tracks only positive-integer keys mapped to a non-nil value —
   # the only keys that bear on the sequence border.
-  defp track(present, k, :delete) when is_integer(k), do: MapSet.delete(present, k)
-  defp track(present, k, _v) when is_integer(k), do: MapSet.put(present, k)
+  defp track(present, k, :delete) when is_integer(k) and k >= 1, do: MapSet.delete(present, k)
+  defp track(present, k, _v) when is_integer(k) and k >= 1, do: MapSet.put(present, k)
   defp track(present, _k, _v), do: present
 
   # `b` is a legal Lua 5.3 §6.1 border for the live key set `present` iff
@@ -147,6 +148,28 @@ defmodule Lua.VM.TableBorderTest do
     t = seq(3)
     t = Table.put(t, "x", 1)
     t = Table.put(t, "x", nil)
+    assert t.border == 3
+    assert Table.length(t) == 3
+  end
+
+  test "non-positive integer-key write does not dirty the border" do
+    # Keys <= 0 never bear on the sequence border, so they route through the
+    # hash without invalidating the cached integer (border stays O(1)).
+    t = seq(3)
+
+    t = Table.put(t, 0, :zero)
+    assert t.border == 3
+    assert Table.length(t) == 3
+
+    t = Table.put(t, -5, :neg)
+    assert t.border == 3
+    assert Table.length(t) == 3
+  end
+
+  test "deleting a non-positive integer key does not dirty the border" do
+    t = seq(3)
+    t = Table.put(t, 0, :zero)
+    t = Table.put(t, 0, nil)
     assert t.border == 3
     assert Table.length(t) == 3
   end
