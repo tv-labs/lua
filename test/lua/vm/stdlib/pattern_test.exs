@@ -73,16 +73,44 @@ defmodule Lua.VM.Stdlib.PatternTest do
   end
 
   describe "compiled-pattern cache transparency" do
-    @patterns ["^a", "[%w]", "(%a+)", "%bxy", "a*b-c?", "()", ",", "%d+%.%d+"]
+    # Short patterns (<= @cache_min_len, 8 bytes) bypass the cache entirely,
+    # so they only ever exercise the inline compile path.
+    @bypass_patterns ["^a", "[%w]", "(%a+)", "%bxy", "a*b-c?", "()", ",", "%d+%.%d+"]
 
-    test "compile_cached returns the same tuple as compile for varied patterns" do
-      for p <- @patterns do
-        # Call three times to cross the first-sighting -> second-sighting
-        # -> cached-hit transitions; every call must be tuple-identical to
-        # a bare recompile.
+    # Longer than @cache_min_len (8 bytes) so they actually traverse the
+    # cache machinery: sentinel on first sighting, promotion on the second,
+    # cached hit on the third. One per element type — anchored `^`, set,
+    # capture group, balanced `%b`, quantifiers, and position capture `()` —
+    # so the sentinel/promotion/hit transitions are validated tuple-identical
+    # for every construct, not just plain literals.
+    @cached_patterns [
+      "^abcdefgh",
+      "[%w][%w][%w]",
+      "%bxy_padding",
+      "()abcdef()",
+      "a*b-c?d+e",
+      "(%a+)-(%d+)"
+    ]
+
+    test "compile_cached returns the same tuple as compile for bypass patterns" do
+      for p <- @bypass_patterns do
+        # Three calls; each must be tuple-identical to a bare recompile even
+        # though these stay on the inline (cache-bypass) path.
         assert Pattern.compile_cached(p) == Pattern.compile(p)
         assert Pattern.compile_cached(p) == Pattern.compile(p)
         assert Pattern.compile_cached(p) == Pattern.compile(p)
+      end
+    end
+
+    test "compile_cached is tuple-identical across the cache transitions" do
+      for p <- @cached_patterns do
+        expected = Pattern.compile(p)
+        # First sighting: compiles inline, records a sentinel.
+        assert Pattern.compile_cached(p) == expected
+        # Second sighting: promotes the sentinel to a compiled entry.
+        assert Pattern.compile_cached(p) == expected
+        # Third sighting: genuine cached hit, served from ETS.
+        assert Pattern.compile_cached(p) == expected
       end
     end
 

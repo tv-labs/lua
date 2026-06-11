@@ -22,10 +22,13 @@ defmodule Lua.VM.Stdlib.Pattern do
   # recompile, and a miss/eviction just recompiles.
   #
   # The cache only pays for itself when compilation is expensive relative to
-  # the ETS round-trip. Benchmarking shows a single `:ets.lookup` hit costs
-  # ~60-95 ns, while trivial patterns (`"%d+"`, `","`) compile in ~35 ns — so
-  # for short patterns the cache is pure overhead and a *regression* on a
-  # repeated-call hot loop. Two guards keep the cache where it earns its keep:
+  # the ETS round-trip: a single `:ets.lookup` hit costs more than a trivial
+  # pattern (`"%d+"`, `","`) takes to recompile, so for short patterns the
+  # cache is pure overhead and a *regression* on a repeated-call hot loop.
+  # The crossover, the @cache_min_len threshold below, and the @cache_max_entries
+  # cap are all reproducible via `benchmarks/pattern_ops.exs` (length sweep +
+  # trivial / expensive / miss-stream workloads) rather than asserted in prose.
+  # Two guards keep the cache where it earns its keep:
   #
   #   1. Patterns shorter than `@cache_min_len` bytes bypass the cache
   #      entirely and compile inline. This is the dominant cost-driver and
@@ -44,10 +47,11 @@ defmodule Lua.VM.Stdlib.Pattern do
   @cache_max_entries 512
 
   # Patterns at or below this byte length compile faster than an ETS lookup
-  # costs, so they skip the cache. Measured crossover for this engine sits
-  # around a handful of bytes; 8 keeps the common trivial patterns
-  # (`"%d+"`, `","`, `"%s"`, `"[%w]"`) on the inline path while still caching
-  # the longer, branch-heavy patterns where compilation dominates.
+  # costs, so they skip the cache. The crossover for this engine sits around a
+  # handful of bytes (see the length sweep in `benchmarks/pattern_ops.exs`); 8
+  # keeps the common trivial patterns (`"%d+"`, `","`, `"%s"`, `"[%w]"`) on the
+  # inline path while still caching the longer, branch-heavy patterns where
+  # compilation dominates.
   @cache_min_len 8
 
   # Sentinel stored on a pattern's first sighting. Distinct from any
@@ -465,12 +469,31 @@ defmodule Lua.VM.Stdlib.Pattern do
   # race an insert). For a pure optimization cache the worst outcome is an
   # extra recompilation, never a wrong result, so this is left lock-free even
   # with write_concurrency enabled.
+  #
+  # The write is wrapped to tolerate the table vanishing mid-operation
+  # (another process deletes it between `cache_table/0` resolving it and the
+  # `:ets.info`/`:ets.delete_all_objects`/`:ets.insert` below — all of which
+  # raise ArgumentError on a dead table; note `:ets.info(missing, :size)`
+  # returns `:undefined`, which compares `>= @cache_max_entries` as true under
+  # term ordering, so the check alone does not save us). On loss we recreate
+  # the table and retry the insert once. This mirrors the read path's
+  # `:no_table` handling so the moduledoc's "never a correctness dependency" /
+  # "transparently recreated" guarantee holds on writes too, not just reads.
   defp maybe_evict_and_insert(table, pattern, compiled) do
     if :ets.info(table, :size) >= @cache_max_entries do
       :ets.delete_all_objects(table)
     end
 
     :ets.insert(table, {pattern, compiled})
+  rescue
+    ArgumentError ->
+      # Table was deleted out from under us. Recreate and insert once; if it
+      # races away again we give up silently — the cache is best-effort.
+      try do
+        :ets.insert(cache_table(), {pattern, compiled})
+      rescue
+        ArgumentError -> :ok
+      end
   end
 
   defp compile_elements("", acc), do: Enum.reverse(acc)
