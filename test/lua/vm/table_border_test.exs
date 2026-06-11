@@ -202,6 +202,59 @@ defmodule Lua.VM.TableBorderTest do
     refute t.border == 6
   end
 
+  test "from_data over an out-of-order map reports a legal integer border" do
+    # A literal map iterates in an arbitrary order; from_data folds put/3 over
+    # it starting from border 0. When key 2 lands before key 1, the write at 2
+    # cannot take the O(1) contiguous-append arm — it parks in the hash and
+    # dirties the border, and the later fill at 1 must absorb-scan to a valid
+    # border rather than caching a stale integer.
+    t = Table.from_data(%{2 => :b, 1 => :a, 3 => :c})
+
+    assert Table.length(t) == 3
+    assert legal_border?(MapSet.new([1, 2, 3]), Table.length(t))
+    assert Table.get(t, 1) == :a
+    assert Table.get(t, 2) == :b
+    assert Table.get(t, 3) == :c
+  end
+
+  test "from_data over a holey map reports a legal border, not a stale top" do
+    t = Table.from_data(%{1 => :a, 2 => :b, 4 => :d})
+
+    # Hole at 3: legal borders are 2 and 4; #t must be one of them, never a
+    # stale value that skips the gap.
+    assert Table.length(t) in [2, 4]
+    assert legal_border?(MapSet.new([1, 2, 4]), Table.length(t))
+    assert Table.get(t, 4) == :d
+  end
+
+  test "replace_data over a dense table with an interior hole re-splits to a legal border" do
+    # Seed the border integer cache via a dense append run, then replace the
+    # contents wholesale with a map that has an interior hole. replace_data
+    # seeds border: :dirty before re-splitting, so the result must reflect the
+    # new key set, not the prior dense cache.
+    t = Table.replace_data(seq(5), %{1 => :a, 2 => :b, 4 => :d})
+
+    assert Table.length(t) in [2, 4]
+    assert legal_border?(MapSet.new([1, 2, 4]), Table.length(t))
+    assert Table.get(t, 1) == :a
+    assert Table.get(t, 4) == :d
+    # No resurrected key from the replaced dense table.
+    assert Table.get(t, 3) == nil
+    assert Table.get(t, 5) == nil
+  end
+
+  test "put_many full reorder of a dense table keeps the length" do
+    # table.sort's fast path writes the sorted slice back via put_many, folding
+    # put/3 through the in-border-overwrite arm (which flips border to :dirty).
+    # A full reorder must leave length unchanged at 5.
+    t = Table.put_many(seq(5), [{1, 50}, {2, 40}, {3, 30}, {4, 20}, {5, 10}])
+
+    assert Table.length(t) == 5
+    assert legal_border?(MapSet.new([1, 2, 3, 4, 5]), Table.length(t))
+    assert Table.get(t, 1) == 50
+    assert Table.get(t, 5) == 10
+  end
+
   property "length/1 returns a legal border after every mutation" do
     check all(ops <- list_of(op_gen(), max_length: 60)) do
       Enum.reduce(ops, {%Table{}, MapSet.new()}, fn {k, v}, {t, present} ->
