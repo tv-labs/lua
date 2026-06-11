@@ -121,12 +121,30 @@ defmodule Lua.VM.Stdlib.PatternTest do
       assert first == Pattern.compile("(%a+),(%d+)")
     end
 
-    test "string.find through the cache matches the uncached engine" do
+    # `(%a+)-(%d+)` is 11 bytes, so it traverses the cache machinery rather
+    # than the inline bypass. Calling find/gsub three times exercises every
+    # transition — sentinel, promotion, then a genuine ETS hit on the third
+    # call — and each result must equal the uncached engine.
+    test "string.find through the cache matches the uncached engine on every transition" do
+      for _ <- 1..3 do
+        assert Pattern.find("foo-123 bar-456", "(%a+)-(%d+)") == {1, 7, ["foo", "123"]}
+      end
+    end
+
+    test "string.gsub through the cache matches the uncached engine on every transition" do
+      for _ <- 1..3 do
+        assert Pattern.gsub("foo-123 bar-456", "(%a+)-(%d+)", "X") == {"X X", 2}
+      end
+    end
+
+    # Keep coverage of the inline bypass path with a short (<= 8 byte) pattern,
+    # which never touches ETS.
+    test "string.find on the bypass path matches the uncached engine" do
       assert Pattern.find("a,b,c", ",") == {2, 2, []}
       assert Pattern.find("a,b,c", ",") == {2, 2, []}
     end
 
-    test "string.gsub through the cache matches the uncached engine" do
+    test "string.gsub on the bypass path matches the uncached engine" do
       assert Pattern.gsub("a,b,c", ",", ";") == {"a;b;c", 2}
       assert Pattern.gsub("a,b,c", ",", ";") == {"a;b;c", 2}
     end
