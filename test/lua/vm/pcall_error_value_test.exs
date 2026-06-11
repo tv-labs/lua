@@ -322,5 +322,39 @@ defmodule Lua.VM.PcallErrorValueTest do
       assert compiled == "test.lua:2: deep"
       assert compiled == interpreted
     end
+
+    test "a native call raising inside a while condition keeps the condition's line" do
+      code = """
+      local ok, err = pcall(function()
+        while error("wc") do end
+      end)
+      return ok, type(err), err
+      """
+
+      {[false, "string", compiled], _} = run(code, :compiled)
+      {[false, "string", interpreted], _} = run(code, :interpreted)
+
+      assert compiled == "test.lua:2: wc"
+      assert compiled == interpreted
+    end
+
+    test "a native call raising inside a repeat-until condition keeps the loop's line" do
+      code = """
+      local ok, err = pcall(function()
+        repeat
+        until error("rc")
+      end)
+      return ok, type(err), err
+      """
+
+      {[false, "string", compiled], _} = run(code, :compiled)
+      {[false, "string", interpreted], _} = run(code, :interpreted)
+
+      # The condition body carries no `:source_line` of its own, so it
+      # inherits the enclosing loop's line (the `repeat` at line 2) under
+      # both engines — the point is that they agree, with no `:0:` leak.
+      assert compiled == "test.lua:2: rc"
+      assert compiled == interpreted
+    end
   end
 end
