@@ -8,7 +8,7 @@ defmodule Lua.MixProject do
     [
       app: :lua,
       version: @version,
-      elixir: "~> 1.16",
+      elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -75,6 +75,7 @@ defmodule Lua.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:vfs, github: "ivarvong/vfs", ref: "32d2ab618ec12c16fe4f675b5ee8b563c660dd69"},
       {:tidewave, "~> 0.5", only: [:dev]},
       {:usage_rules, "~> 0.1", only: [:dev]},
       {:ex_doc, "~> 0.38", only: :dev, runtime: false},

@@ -224,6 +224,13 @@ defmodule Lua do
   Now you can use the [Lua require](https://www.lua.org/pil/8.1.html) function to import
   these scripts
 
+  Calling this function also opts the VM into a host-disk fallback for `require`:
+  by default modules resolve only against the virtual filesystem (see
+  `write_file/3`, `put_dep/3`, and `mount/3`), so the VM never touches real
+  files. Pointing the search path at an on-disk module tree with this function
+  is the explicit signal that the host trusts those paths; the VFS is still
+  consulted first, so seeded modules take precedence.
+
   > #### Warning {: .warning}
   > In order to use `Lua.set_lua_paths/2`, the following functions cannot be sandboxed:
   > * `[:package]`
@@ -236,7 +243,8 @@ defmodule Lua do
     set_lua_paths(lua, Enum.join(paths, ";"))
   end
 
-  def set_lua_paths(%__MODULE__{} = lua, paths) when is_binary(paths) do
+  def set_lua_paths(%__MODULE__{state: state} = lua, paths) when is_binary(paths) do
+    lua = %{lua | state: State.allow_vfs_host_fallback(state)}
     set!(lua, ["package", "path"], paths)
   end
 
@@ -1022,6 +1030,61 @@ defmodule Lua do
       end)
 
     Lua.API.install(lua, module, scope, opts[:data])
+  end
+
+  @doc """
+  Writes a file into the VM's virtual filesystem.
+
+  The contents become readable by sandbox code through the rerouted `os` and
+  `require` paths. Writing a file under `/lua/deps` makes it loadable with
+  `require` (see `put_dep/3` for the convenience form).
+
+      iex> lua = Lua.new(sandboxed: []) |> Lua.write_file("/lua/deps/greet.lua", "return 'hi'")
+      iex> {[result], _lua} = Lua.eval!(lua, "return require('greet')")
+      iex> result
+      "hi"
+  """
+  @spec write_file(t(), binary(), binary()) :: t()
+  def write_file(%__MODULE__{state: state} = lua, path, contents) when is_binary(path) and is_binary(contents) do
+    case State.vfs_write(state, path, contents) do
+      {:ok, state} -> %{lua | state: state}
+      {:error, error, _state} -> raise "failed to write #{path} to VFS: #{Exception.message(error)}"
+    end
+  end
+
+  @doc """
+  Writes a Lua module's source into the dependency root (`/lua/deps`).
+
+  Convenience over `write_file/3` for the common case of seeding a module that
+  sandbox code can then `require`.
+
+      iex> lua = Lua.new(sandboxed: []) |> Lua.put_dep("mymod", "return 42")
+      iex> {[result], _lua} = Lua.eval!(lua, "return require('mymod')")
+      iex> result
+      42
+  """
+  @spec put_dep(t(), binary(), binary()) :: t()
+  def put_dep(%__MODULE__{} = lua, modname, source) when is_binary(modname) and is_binary(source) do
+    path = Path.join("/lua/deps", String.replace(modname, ".", "/") <> ".lua")
+    write_file(lua, path, source)
+  end
+
+  @doc """
+  Mounts a `VFS.Mountable` backend at `mountpoint` in the VM's virtual
+  filesystem.
+
+  Lets an embedding host back part of the virtual tree with another backend
+  (e.g. another `VFS.Memory`), returning the updated `%Lua{}`.
+
+      iex> backend = VFS.Memory.new(%{"/util.lua" => "return 7"})
+      iex> lua = Lua.new(sandboxed: []) |> Lua.mount("/lua/deps", backend)
+      iex> {[result], _lua} = Lua.eval!(lua, "return require('util')")
+      iex> result
+      7
+  """
+  @spec mount(t(), binary(), struct()) :: t()
+  def mount(%__MODULE__{state: state} = lua, mountpoint, backend) when is_binary(mountpoint) do
+    %{lua | state: State.vfs_mount(state, mountpoint, backend)}
   end
 
   @doc """

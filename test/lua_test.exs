@@ -1319,20 +1319,26 @@ defmodule LuaTest do
 
   describe "require" do
     test "it can find lua code when modifying package.path" do
-      lua = Lua.new(sandboxed: [])
+      lua =
+        [sandboxed: []]
+        |> Lua.new()
+        |> Lua.write_file("/fixtures/test_require.lua", "return \"required file successfully\"")
 
       assert {["required file successfully"], _} =
                Lua.eval!(lua, """
-               package.path = "./test/fixtures/?.lua"
+               package.path = "/fixtures/?.lua"
 
                return require("test_require")
                """)
     end
 
     test "we can use set_lua_paths/2 to add the paths" do
-      lua = Lua.new(sandboxed: [])
+      lua =
+        [sandboxed: []]
+        |> Lua.new()
+        |> Lua.write_file("/fixtures/test_require.lua", "return \"required file successfully\"")
 
-      lua = Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
+      lua = Lua.set_lua_paths(lua, "/fixtures/?.lua")
 
       assert {["required file successfully"], _} =
                Lua.eval!(lua, """
