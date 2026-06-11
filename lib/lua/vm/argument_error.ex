@@ -96,8 +96,7 @@ defmodule Lua.VM.ArgumentError do
   header, no ANSI, no stack trace.
 
   This is the §6.1 error value that `pcall`/`xpcall` and
-  `Lua.call_function/3` hand back at a protected-call boundary. See
-  `Lua.VM.ProtectedCall.error_value/1`.
+  `Lua.call_function/3` hand back at a protected-call boundary.
   """
   @spec raw_message(t()) :: String.t()
   def raw_message(%__MODULE__{} = e) do
