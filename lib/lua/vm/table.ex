@@ -142,11 +142,14 @@ defmodule Lua.VM.Table do
     # Cache the new border, but only if slots 1..arr_n are actually dense.
     # The append proves the top slot is filled; it says nothing about a hole
     # punched lower down (delete keeps arr_n as the high-water mark, so a
-    # cleared slot stays a nil inside the region). An integer incoming border
-    # already proves 1..(arr_n - 1) was dense, so the new run is dense too —
-    # cache in O(1), the hot insert-loop path. A :dirty incoming border might
-    # hide a lower hole, so scan once to learn the true border; a clean run
-    # re-establishes the O(1) cache, a holey one stays :dirty.
+    # cleared slot stays a nil inside the region). The load-bearing invariant:
+    # a cached integer border always equals arr_n (it is only ever set here, to
+    # absorbed.arr_n, and arr_n only grows on this same arm). So an integer
+    # incoming border proves 1..arr_n was fully dense, the new top slot extends
+    # it, and the run stays dense — cache in O(1), the hot insert-loop path. A
+    # :dirty incoming border might hide a lower hole, so scan once to learn the
+    # true border; a clean run re-establishes the O(1) cache, a holey one stays
+    # :dirty.
     case table.border do
       b when is_integer(b) ->
         %{absorbed | border: absorbed.arr_n}
@@ -240,13 +243,13 @@ defmodule Lua.VM.Table do
     # `length/1` derives the Lua border by scanning to the first hole, so a
     # cleared tail still reports the correct `#t`.
     #
-    # Cached border: punching a hole at `key` only invalidates a cached
-    # integer border `B` when `key <= B` (it could shorten the dense run
-    # reachable from 1). A hole strictly beyond `B` leaves slots `1..B`
-    # untouched and `B + 1` still absent-or-hole, so `B` stays a valid
-    # border — keep it. This keeps tail-pop loops cheap.
-    border = if dirty_after_array_hole?(table.border, key), do: :dirty, else: table.border
-    %{table | arr: :array.set(key - 1, nil, table.arr), border: border}
+    # Cached border: a cached integer border always equals arr_n (see
+    # put_array clause 1), and this clause only fires for in-array keys
+    # (1 <= key <= arr_n == border). Punching a hole anywhere in that range can
+    # only shorten the dense run reachable from 1, so every in-array delete
+    # invalidates a cached border. Drop straight to :dirty; length/1 rescans
+    # lazily on the next read.
+    %{table | arr: :array.set(key - 1, nil, table.arr), border: :dirty}
   end
 
   defp delete(%__MODULE__{data: data, dead: dead} = table, key) do
@@ -259,9 +262,6 @@ defmodule Lua.VM.Table do
       table
     end
   end
-
-  defp dirty_after_array_hole?(:dirty, _key), do: true
-  defp dirty_after_array_hole?(border, key) when is_integer(border), do: key <= border
 
   defp drop_hash_key(%__MODULE__{data: data, order: order, order_tail: tail} = table, key) do
     %{

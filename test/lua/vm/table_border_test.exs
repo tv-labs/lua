@@ -74,6 +74,28 @@ defmodule Lua.VM.TableBorderTest do
     assert Table.length(t) == 4
   end
 
+  test "every in-array delete dirties the cached border and keeps length legal" do
+    # An integer border always equals arr_n, and an in-array delete (1..arr_n)
+    # can only shorten the dense run reachable from 1, so each such delete must
+    # flip the cache to :dirty while length/1 still reports a legal border.
+    t = seq(5)
+    assert t.border == 5
+
+    # Tail delete (key == arr_n) dirties the cache even though it removes the
+    # top of a dense run.
+    t = Table.put(t, 5, nil)
+    assert t.border == :dirty
+    assert Table.length(t) == 4
+
+    # A fresh dense run re-establishes the O(1) integer border; an interior
+    # delete (key < arr_n) also dirties it. Legal borders are 1 and 4.
+    t = seq(4)
+    assert t.border == 4
+    t = Table.put(t, 2, nil)
+    assert t.border == :dirty
+    assert legal_border?(MapSet.new([1, 3, 4]), Table.length(t))
+  end
+
   test "repeated tail pop stays correct down to empty" do
     t = seq(4)
 
