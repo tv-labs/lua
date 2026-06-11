@@ -252,4 +252,29 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
       end
     end
   end
+
+  describe "instruction_peak backstop counts every comparison destination" do
+    # `peak_reg`/`next_reg` tracking happens to cover comparison results in
+    # the organically generated shapes above, so the corpus walker cannot
+    # catch a comparison opcode that the backstop forgets to count. These
+    # pin the backstop directly: it must report the destination register of
+    # every comparison (`<`/`<=`/`>`/`>=`/`==`/`~=`) the executor writes,
+    # because the dispatcher and interpreter `:call` path size the register
+    # tuple to exactly `max_registers` with no buffer to absorb a miss.
+    comparisons = [
+      {:less_than, {:less_than, 7, 1, 2}},
+      {:less_equal, {:less_equal, 7, 1, 2}},
+      {:greater_than, {:greater_than, 7, 1, 2}},
+      {:greater_equal, {:greater_equal, 7, 1, 2}},
+      {:equal, {:equal, 7, 1, 2}},
+      {:not_equal, {:not_equal, 7, 1, 2}}
+    ]
+
+    for {label, instr} <- comparisons do
+      test "#{label} destination contributes its slot" do
+        # Destination register 7 must reserve 8 slots (indices 0..7).
+        assert Compiler.Codegen.instruction_peak([unquote(Macro.escape(instr))]) == 8
+      end
+    end
+  end
 end
