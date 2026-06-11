@@ -785,7 +785,7 @@ defmodule Lua.VM.Stdlib do
     {:tref, loaded_id} = get_package_loaded_ref(state)
 
     State.update_table(state, {:tref, loaded_id}, fn loaded_table ->
-      %{loaded_table | data: Map.put(loaded_table.data, modname, result)}
+      Table.put(loaded_table, modname, result)
     end)
   end
 

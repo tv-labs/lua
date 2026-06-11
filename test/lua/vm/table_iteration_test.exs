@@ -204,6 +204,44 @@ defmodule Lua.VM.TableIterationTest do
       assert cleared.order_index
       assert cleared.order_arr == table.order_arr
     end
+
+    test "inserting a new key mid-walk then resuming from a prior key still advances" do
+      table =
+        %Table{}
+        |> Table.put("a", 1)
+        |> Table.put("b", 2)
+        |> Table.flush_order()
+
+      # Begin the walk, then insert a brand-new hash key. The insert nils the
+      # memo (order_index/order_arr), so resuming from the already-returned
+      # "a" must fall back to advance_past over merged_order — which still
+      # contains "a" — and find the next live key rather than raising.
+      assert Table.next_entry(table, nil) == {"a", 1}
+
+      mutated = Table.put(table, "zzz", 99)
+      assert mutated.order_index == nil
+      assert mutated.order_arr == nil
+
+      resumed = Table.next_entry(mutated, "a")
+      assert resumed != :invalid_key
+      assert resumed == {"b", 2}
+    end
+
+    test "first_hash_live(nil) skips a value-cleared leading key with the memo live" do
+      table =
+        %Table{}
+        |> Table.put("a", 1)
+        |> Table.put("b", 2)
+        |> Table.flush_order()
+
+      # Clear the FIRST key in order_arr. The value-clear keeps the memo live
+      # (order_index stays set), so first_hash_live must scan past the now-dead
+      # leading "a" rather than returning it.
+      cleared = Table.put(table, "a", nil)
+
+      assert cleared.order_index
+      assert Table.next_entry(cleared, nil) == {"b", 2}
+    end
   end
 
   describe "iteration properties (StreamData)" do
