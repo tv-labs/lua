@@ -491,6 +491,31 @@ defmodule Lua.VM.DispatcherTest do
       assert encodes_op?(proto, Bytecode.op_set_list_multi())
       assert results == [1, 1]
     end
+
+    test "vararg tail past the @reg_slack boundary exercises grow_regs" do
+      # The dispatcher sizes its register tuple to `max_registers + 16`
+      # (`@reg_slack`). A `{0, ...}` tail expands the varargs into
+      # regs[base..] via the `:vararg` opcode before `:set_list_multi`
+      # folds them into the table. With more than 16 varargs those writes
+      # land beyond the slack buffer, so `write_varargs/4` must grow the
+      # tuple via `grow_regs/2` rather than crash with `:badarg`. Pin the
+      # boundary with 30 varargs (well past the 16-slot slack).
+      n = 30
+      args = Enum.map_join(1..n, ", ", &Integer.to_string/1)
+
+      {proto, results} =
+        run!("""
+        function build(...)
+          local t = {0, ...}
+          return #t, t[1], t[#t]
+        end
+        return build(#{args})
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_set_list_multi())
+      # t holds the leading 0 plus all n varargs; t[#t] is the last vararg.
+      assert results == [n + 1, 0, n]
+    end
   end
 
   describe "comparison opcodes" do

@@ -1239,6 +1239,15 @@ defmodule Lua.VM.Executor do
 
     {regs, state} =
       if count == 0 do
+        # `count == 0` is the "consume all" form: every vararg lands in
+        # regs[base..]. The compiler sizes registers for the syntactic
+        # call site, but a vararg expansion can outrun that statically
+        # reserved range (e.g. `{0, ...}` invoked with more varargs than
+        # the caller's other locals require), so grow before writing —
+        # matching the dispatcher's `write_varargs/4` and the call-site
+        # multi-return paths below.
+        regs = ensure_regs_capacity(regs, base + length(varargs))
+
         regs =
           Enum.reduce(Enum.with_index(varargs), regs, fn {val, i}, r ->
             put_elem(r, base + i, val)
