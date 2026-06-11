@@ -246,6 +246,17 @@ defmodule Lua.VM.DispatcherTest do
       assert results == [0]
     end
 
+    test ">> is a logical (unsigned) shift on a negative operand" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a >> b end
+        return f(-1, 1)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [9_223_372_036_854_775_807]
+    end
+
     test "float with integer value coerces (slow path)" do
       {proto, results} =
         run!("""
@@ -268,6 +279,45 @@ defmodule Lua.VM.DispatcherTest do
 
       assert first_sub(proto).bytecode
       assert results == [105]
+    end
+
+    test "__bor metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, n) return t | n end
+        local mt = {__bor = function(_, n) return n + 200 end}
+        local t = setmetatable({}, mt)
+        return f(t, 5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [205]
+    end
+
+    test "__bxor metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, n) return t ~ n end
+        local mt = {__bxor = function(_, n) return n + 300 end}
+        local t = setmetatable({}, mt)
+        return f(t, 5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [305]
+    end
+
+    test "__shr metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, n) return t >> n end
+        local mt = {__shr = function(_, n) return n + 7 end}
+        local t = setmetatable({}, mt)
+        return f(t, 5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [12]
     end
 
     test "matches the interpreter for an int64-boundary AND" do
@@ -379,6 +429,21 @@ defmodule Lua.VM.DispatcherTest do
 
       assert encodes_op?(proto, Bytecode.op_set_list_multi())
       assert results == [10, 20, 30]
+    end
+
+    test "constructor with a tail call returning zero values matches the interpreter" do
+      {proto, results} =
+        run!("""
+        function none() end
+        function build()
+          local t = {1, none()}
+          return #t, t[1]
+        end
+        return build()
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_set_list_multi())
+      assert results == [1, 1]
     end
   end
 
