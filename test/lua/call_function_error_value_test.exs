@@ -54,6 +54,20 @@ defmodule Lua.CallFunctionErrorValueTest do
       refute reason =~ "\e["
       refute reason =~ "\n"
     end
+
+    test "a stdlib bad-argument ArgumentError stays a terse one-line string" do
+      {ref, lua} = fun!(~S|function() for i in pairs("asdf") do end end|)
+
+      assert {:error, reason, %Lua{}} = Lua.call_function(lua, ref, [])
+
+      assert is_binary(reason)
+      assert reason =~ "bad argument #1 to 'pairs'"
+      assert reason =~ "table expected"
+      assert reason =~ "got string"
+      refute reason =~ "\e["
+      refute reason =~ "at -no-source-"
+      refute reason =~ "\n"
+    end
   end
 
   describe "call_function/3 passes non-string error objects through (pcall parity)" do
@@ -92,6 +106,19 @@ defmodule Lua.CallFunctionErrorValueTest do
       assert IO.ANSI.enabled?()
 
       {ref, lua} = fun!("function() error('boom') end")
+      assert {:error, reason, %Lua{}} = Lua.call_function(lua, ref, [])
+
+      refute reason =~ "\e["
+    end
+
+    test "ArgumentError reason has no escape codes when ANSI is enabled" do
+      previous = Application.get_env(:elixir, :ansi_enabled)
+      Application.put_env(:elixir, :ansi_enabled, true)
+      on_exit(fn -> Application.put_env(:elixir, :ansi_enabled, previous) end)
+
+      assert IO.ANSI.enabled?()
+
+      {ref, lua} = fun!(~S|function() pairs("asdf") end|)
       assert {:error, reason, %Lua{}} = Lua.call_function(lua, ref, [])
 
       refute reason =~ "\e["
