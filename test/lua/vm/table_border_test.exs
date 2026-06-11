@@ -346,6 +346,90 @@ defmodule Lua.VM.TableBorderTest do
     assert Table.length(t) == 3
   end
 
+  test "absorb promoting a parked key out of the hash drops the order memo" do
+    # Park key 4 in the hash (sparse beyond arr_n == 2), flush_order to build
+    # the iteration memo, then fill the gap at 3. The put at 3 absorbs both 3
+    # and the parked 4 into the array via absorb_from_hash, which calls
+    # drop_hash_key to evict 4 from `order`. The order memo must be dropped
+    # (not left stale, surfacing 4 as a phantom hash entry), and a fresh
+    # integer border must be re-established.
+    t = 2 |> seq() |> Table.put(4, 4) |> Table.flush_order()
+    assert t.order_index
+    assert t.order_arr
+
+    t = Table.put(t, 3, 3)
+    assert t.border == 4
+    assert t.order_index == nil
+    assert t.order_arr == nil
+    assert Table.length(t) == 4
+
+    # pairs() must yield 1..4 from the array exactly once, with no stale hash
+    # entry resurrecting the now-promoted key 4.
+    assert iter_keys(t) == [1, 2, 3, 4]
+  end
+
+  # Walk the table the way pairs() does — `next_entry/2` from nil, threading the
+  # previous key — and collect the keys in iteration order.
+  defp iter_keys(table) do
+    nil
+    |> Stream.unfold(fn key ->
+      case Table.next_entry(table, key) do
+        nil -> nil
+        {k, _v} -> {k, k}
+      end
+    end)
+    |> Enum.to_list()
+  end
+
+  describe "Lua-level #t through the table stdlib" do
+    test "table.insert append loop reports the loop count" do
+      assert {[100], _} =
+               Lua.eval!("""
+               local t = {}
+               for i = 1, 100 do table.insert(t, i) end
+               return #t
+               """)
+    end
+
+    test "mid-sequence table.insert(t, pos, v) grows the length by one" do
+      assert {[101], _} =
+               Lua.eval!("""
+               local t = {}
+               for i = 1, 100 do table.insert(t, i) end
+               table.insert(t, 50, 999)
+               return #t
+               """)
+    end
+
+    test "table.remove of the tail and at a position each shrink the length by one" do
+      assert {[99], _} =
+               Lua.eval!("""
+               local t = {}
+               for i = 1, 100 do table.insert(t, i) end
+               table.remove(t)
+               return #t
+               """)
+
+      assert {[99], _} =
+               Lua.eval!("""
+               local t = {}
+               for i = 1, 100 do table.insert(t, i) end
+               table.remove(t, 50)
+               return #t
+               """)
+    end
+
+    test "table.sort leaves the length unchanged" do
+      assert {[100, 1, 100], _} =
+               Lua.eval!("""
+               local t = {}
+               for i = 1, 100 do table.insert(t, 101 - i) end
+               table.sort(t)
+               return #t, t[1], t[100]
+               """)
+    end
+  end
+
   property "length/1 returns a legal border after every mutation" do
     check all(ops <- list_of(op_gen(), max_length: 60)) do
       Enum.reduce(ops, {%Table{}, MapSet.new()}, fn {k, v}, {t, present} ->
