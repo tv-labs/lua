@@ -73,14 +73,51 @@ defmodule Lua.VM.State do
   No-op when depth is under the limit or when `max_call_depth` is
   `:infinity` (the default). The clauses are ordered so both common cases
   resolve in a single function-head match with no struct rebuild.
+
+  Callers on the executor's lazy `:lua_closure`/`:compiled_closure` paths
+  keep their in-flight frames in the `frames` argument rather than in
+  `state.call_stack`, so passing `state` alone would render an empty
+  overflow traceback. Such callers use `check_call_depth!/2` to supply the
+  materialized stack that should be reported when the limit is hit.
   """
   @spec check_call_depth!(t()) :: :ok
-  def check_call_depth!(%__MODULE__{max_call_depth: :infinity}), do: :ok
-  def check_call_depth!(%__MODULE__{call_depth: depth, max_call_depth: max}) when depth < max, do: :ok
+  def check_call_depth!(%__MODULE__{} = state), do: check_call_depth!(state, nil)
 
-  def check_call_depth!(%__MODULE__{call_stack: call_stack} = state) do
-    raise Lua.VM.RuntimeError, value: "stack overflow", call_stack: call_stack, state: state
+  @doc """
+  Like `check_call_depth!/1`, but reports `overflow_call_stack` (instead of
+  `state.call_stack`) in the raised `"stack overflow"` error.
+
+  The executor's hot call paths track in-flight Lua frames lazily in their
+  `frames` argument; `overflow_call_stack` lets them materialize that stack
+  only when the limit is actually hit, preserving traceback fidelity
+  without paying the cost on the success path.
+  """
+  @spec check_call_depth!(t(), [map()] | nil) :: :ok
+  def check_call_depth!(%__MODULE__{max_call_depth: :infinity}, _overflow_call_stack), do: :ok
+
+  def check_call_depth!(%__MODULE__{call_depth: depth, max_call_depth: max}, _overflow_call_stack) when depth < max,
+    do: :ok
+
+  def check_call_depth!(%__MODULE__{call_stack: call_stack} = state, overflow_call_stack) do
+    raise Lua.VM.RuntimeError,
+      value: "stack overflow",
+      call_stack: overflow_call_stack || call_stack,
+      state: state
   end
+
+  @doc """
+  Returns `true` when another call may be pushed without exceeding
+  `max_call_depth`.
+
+  A pure, allocation-free counterpart to `check_call_depth!/1` for the
+  executor's hot `:lua_closure` path: it lets the caller defer building the
+  overflow traceback (`rebuild_call_stack/1`) to the rare failing branch
+  instead of paying for it on every call. The clauses mirror
+  `check_call_depth!/1` exactly.
+  """
+  @spec call_depth_ok?(t()) :: boolean()
+  def call_depth_ok?(%__MODULE__{max_call_depth: :infinity}), do: true
+  def call_depth_ok?(%__MODULE__{call_depth: depth, max_call_depth: max}), do: depth < max
 
   @doc """
   Recovers the state a protected call should continue with after trapping

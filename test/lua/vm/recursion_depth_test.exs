@@ -4,6 +4,11 @@ defmodule Lua.VM.RecursionDepthTest do
   catchable Lua `"stack overflow"` error, the depth counter unwinds on
   return and after a caught error, and `:infinity` (the default) imposes
   no bound.
+
+  Also pins traceback fidelity on overflow: the executor's hot
+  `:lua_closure` path tracks in-flight frames lazily (outside
+  `state.call_stack`), so the overflow report must materialize them or the
+  traceback comes back empty.
   """
   use ExUnit.Case, async: true
 
@@ -53,6 +58,60 @@ defmodule Lua.VM.RecursionDepthTest do
       assert_raise RuntimeException, ~r/stack overflow/, fn ->
         eval!(lua, "local function loop(n) return loop(n + 1) end loop(1)")
       end
+    end
+  end
+
+  describe "overflow traceback fidelity" do
+    # The `n & 1` bitwise op is not encodable to bytecode, so `rec` falls
+    # back to the pure-interpreter `:lua_closure` path where in-flight
+    # frames live only in the lazy `frames` argument, not `state.call_stack`.
+    @lazy_recursion """
+    local function rec(n)
+      local x = n & 1
+      if n > 0 then return rec(n - 1) end
+      return x
+    end
+    return rec(50)
+    """
+
+    test "overflow on the lazy interpreter path carries a full traceback" do
+      lua = Lua.new(max_call_depth: 20)
+
+      err =
+        assert_raise RuntimeException, ~r/stack overflow/, fn ->
+          eval!(lua, @lazy_recursion)
+        end
+
+      # The lazy frames must be materialized into the report, not dropped.
+      assert length(err.call_stack) >= 20
+
+      message = Exception.message(err)
+      assert message =~ "Stack trace:"
+      assert message =~ "in function 'rec'"
+    end
+
+    test "the lazy path's traceback matches the eager path's depth" do
+      compiled_recursion = """
+      local function rec(n)
+        if n > 0 then return rec(n - 1) end
+        return n
+      end
+      return rec(50)
+      """
+
+      lua = Lua.new(max_call_depth: 20)
+
+      lazy =
+        assert_raise RuntimeException, ~r/stack overflow/, fn -> eval!(lua, @lazy_recursion) end
+
+      eager =
+        assert_raise RuntimeException, ~r/stack overflow/, fn -> eval!(lua, compiled_recursion) end
+
+      # Both paths report a full 'rec' traceback at the same recursion depth
+      # (the lazy path additionally includes the overflowing call, so allow
+      # the off-by-one).
+      assert abs(length(lazy.call_stack) - length(eager.call_stack)) <= 1
+      assert Enum.all?(lazy.call_stack, &(&1.name == "rec"))
     end
   end
 

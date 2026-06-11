@@ -1074,7 +1074,6 @@ defmodule Lua.VM.Executor do
         # without going through this branch.
         args = collect_args(regs, base + 1, total_args)
         call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
-        State.check_call_depth!(state)
 
         # The executor's own in-flight Lua frames are tracked lazily via the
         # `frames` argument and are NOT in `state.call_stack`. Materialize them
@@ -1083,10 +1082,15 @@ defmodule Lua.VM.Executor do
         # `debug.*` / tracebacks. Restore the inherited stack on return so the
         # lazy bookkeeping stays balanced.
         inherited_call_stack = state.call_stack
+        materialized_call_stack = [call_info | rebuild_call_stack(frames) ++ inherited_call_stack]
+
+        # Check depth against the materialized stack so an overflow here
+        # reports the full traceback, not the bare inherited stack.
+        State.check_call_depth!(state, materialized_call_stack)
 
         state = %{
           state
-          | call_stack: [call_info | rebuild_call_stack(frames) ++ inherited_call_stack],
+          | call_stack: materialized_call_stack,
             call_depth: state.call_depth + 1
         }
 
@@ -1133,7 +1137,18 @@ defmodule Lua.VM.Executor do
           name_hint: name_hint
         }
 
-        State.check_call_depth!(state)
+        # Hot path: `call_depth_ok?/1` is a pure comparison, so the lazy
+        # frames are only materialized into a traceback when the limit is
+        # actually hit. `frames` excludes the call about to be made, so its
+        # synthesized entry is prepended.
+        if State.call_depth_ok?(state) do
+          :ok
+        else
+          overflow_call_stack =
+            [dispatcher_call_info(proto, name_hint, line) | rebuild_call_stack(frames)] ++ state.call_stack
+
+          State.check_call_depth!(state, overflow_call_stack)
+        end
 
         state = %{
           state
