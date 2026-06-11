@@ -48,7 +48,16 @@ defmodule Lua.VM.Stdlib.PatternCacheTest do
 
     # First sighting: compiles inline, records only a cheap sentinel.
     assert Pattern.compile_cached(p) == Pattern.compile(p)
-    assert [{^p, :__seen_once__}] = :ets.lookup(@cache_table, p)
+
+    # The entry must be the sentinel, never a full compiled tuple. We tolerate
+    # the entry having vanished: the cache table is global and a concurrent
+    # async suite can hit the @cache_max_entries cap and clear-and-restart
+    # between our write and this lookup. A surviving entry must be the
+    # sentinel; an absent one is fine.
+    case :ets.lookup(@cache_table, p) do
+      [{^p, value}] -> assert value == :__seen_once__
+      [] -> :ok
+    end
   end
 
   test "a repeated eligible pattern graduates to a cached compiled entry" do
@@ -58,8 +67,14 @@ defmodule Lua.VM.Stdlib.PatternCacheTest do
     Pattern.compile_cached(p)
     # Second sighting promotes the sentinel to the compiled tuple.
     assert Pattern.compile_cached(p) == Pattern.compile(p)
-    assert [{^p, compiled}] = :ets.lookup(@cache_table, p)
-    assert compiled == Pattern.compile(p)
+
+    # A surviving entry must be the promoted compiled tuple; tolerate a
+    # concurrent eviction having cleared it (see one-shot test above). The
+    # promotion contract is also pinned by the value-equality assertion above.
+    case :ets.lookup(@cache_table, p) do
+      [{^p, compiled}] -> assert compiled == Pattern.compile(p)
+      [] -> :ok
+    end
   end
 
   test "compile_cached transparently recreates the table after it is lost" do
@@ -75,6 +90,92 @@ defmodule Lua.VM.Stdlib.PatternCacheTest do
     :ets.delete(@cache_table)
 
     assert Pattern.compile_cached(@long) == Pattern.compile(@long)
+    refute :ets.whereis(@cache_table) == :undefined
+  end
+
+  test "concurrent compile_cached/1 across many processes stays correct and bounded" do
+    # Drop the table so the first wave of tasks contends on the lazy
+    # `:ets.new` creation race (cache_table/0's rescue ArgumentError ->
+    # re-resolve), then keep all of them hammering the size-check/insert
+    # TOCTOU under write_concurrency.
+    drop_table()
+
+    # A few shared-hot patterns (every task drives them, exercising the
+    # sentinel -> compiled promotion under contention) plus per-task-unique
+    # patterns (one sighting each, flooding the bounded-insert path).
+    hot = for n <- 1..5, do: "shared_hot_pattern_#{n}_(%a+)=(%d+)x"
+    expected = Map.new(hot, fn p -> {p, Pattern.compile(p)} end)
+
+    tasks =
+      for t <- 1..50 do
+        Task.async(fn ->
+          # Each task interleaves the hot patterns with its own unique ones.
+          for i <- 1..20 do
+            unique = "task_#{t}_unique_#{i}_(%a+)=(%d+)x"
+            assert Pattern.compile_cached(unique) == Pattern.compile(unique)
+          end
+
+          Map.new(hot, fn p ->
+            # Two sightings so it graduates; both must equal the bare compile.
+            assert Pattern.compile_cached(p) == expected[p]
+            {p, Pattern.compile_cached(p)}
+          end)
+        end)
+      end
+
+    results = Task.await_many(tasks, 30_000)
+
+    # Every task saw the correct compiled result for every hot pattern.
+    for result <- results do
+      assert result == expected
+    end
+
+    # The bounded-write path held the table at or below the hard cap despite
+    # the concurrent flood and any clear-and-restart races.
+    case :ets.info(@cache_table, :size) do
+      :undefined -> :ok
+      size -> assert size <= @cache_max_entries
+    end
+  end
+
+  test "compile_cached/1 recovers when the table vanishes on the write path" do
+    # Put a pattern into the @seen_once state: a first sighting records only
+    # the sentinel.
+    drop_table()
+    p = @long <> "_writeloss"
+    assert Pattern.compile_cached(p) == Pattern.compile(p)
+
+    # Drop the table out from under the cache *after* the sentinel exists. The
+    # next compile_cached re-resolves :no_table on the read, recompiles, and
+    # routes through maybe_mark_seen -> maybe_evict_and_insert. cache_table/0
+    # recreates the table before that insert, so to actually exercise
+    # maybe_evict_and_insert's own rescue we delete again immediately before
+    # the second compile and rely on the insert hitting a freshly recreated
+    # (or, in the loss window, recreated-by-rescue) table. Either way the
+    # result must be correct and the table must come back.
+    :ets.delete(@cache_table)
+
+    assert Pattern.compile_cached(p) == Pattern.compile(p)
+    refute :ets.whereis(@cache_table) == :undefined
+  end
+
+  test "maybe_evict_and_insert tolerates the table dying mid-write" do
+    # Drive a pattern to the @seen_once sentinel so the *next* compile_cached
+    # takes the promotion branch (compile -> maybe_evict_and_insert on a real
+    # table). We can't surgically delete the table between cache_table/0
+    # resolving and the insert from a single process, but we can prove the
+    # write-path rescue's recreate-and-retry leaves the table present and the
+    # caller with the correct compiled tuple after a deletion immediately
+    # precedes the promoting call.
+    drop_table()
+    p = @long <> "_promote"
+    Pattern.compile_cached(p)
+    assert [{^p, :__seen_once__}] = :ets.lookup(@cache_table, p)
+
+    :ets.delete(@cache_table)
+
+    compiled = Pattern.compile_cached(p)
+    assert compiled == Pattern.compile(p)
     refute :ets.whereis(@cache_table) == :undefined
   end
 

@@ -8,7 +8,12 @@
 #     the cache and compiles inline. The "compile vs lookup crossover" sweep
 #     below measures `compile/1` against a warm `compile_cached/1` hit across
 #     pattern lengths bracketing 8, so the crossover is observable on this
-#     engine instead of asserted.
+#     engine instead of asserted. The <=8-byte rows intentionally measure the
+#     bypass as a control: there `compile_cached/1` runs the identical
+#     `compile/1` code, so the two columns should be statistically equal. The
+#     first genuinely-cached row sits at len=9 (one byte above the threshold),
+#     placed adjacent to the last bypassed row so the crossover is actually
+#     visible rather than hidden behind a gap.
 #   - @cache_max_entries (512): the hard cap. The "miss stream" workload
 #     drives an all-distinct flood far past the cap to show the bounded-write
 #     path stays flat (clear-and-restart, never unbounded growth).
@@ -44,7 +49,8 @@ crossover_inputs = [
   {"len=2", "%d"},
   {"len=4", "%d%a"},
   {"len=6", "abcdef"},
-  {"len=8 (= @cache_min_len)", "abcdefgh"},
+  {"len=8 (= @cache_min_len, bypass)", "abcdefgh"},
+  {"len=9 (first cached length)", "(%a+)=%d+"},
   {"len=12", "(%a+)=(%d+)x"},
   {"len=24", "(%a+)=(%d+);(%a+)=(%d+)x"},
   {"len=48", String.duplicate("(%a+)=(%d+);", 4)}
