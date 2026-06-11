@@ -9,6 +9,22 @@ defmodule Lua.VM.LazyCallInfoTest do
   call, the `__call` metamethod dispatch, and error raise sites. These golden
   values were captured from the previous eager-`call_info` executor and must
   remain byte-identical.
+
+  Two distinct executor materialization sites are covered:
+
+    * The compiled `:compiled_closure` hand-off — exercised by plain
+      `function f() ... end` / `setmetatable` closures, whose sub-prototypes
+      compile WITH bytecode and so route through `Dispatcher.execute/4`. On
+      this path the executor strips call-site line info (`currentline` reports
+      `0` / `-1`).
+    * The lazy `:lua_closure` interpreter path — the branch this module's name
+      refers to, where `state.call_stack` is left untouched and entries are
+      synthesized from `frames` only at a read boundary. Sub-prototypes only
+      route here when they can NOT be lowered to bytecode, so the
+      lazy-variant tests below sprinkle a bitwise op (`3 & 1`, not
+      bytecode-encodable) into each function to force the interpreter path.
+      On this path the live call-site line survives, so the golden
+      `currentline` / traceback line numbers differ from the compiled path.
   """
   use ExUnit.Case, async: true
 
@@ -48,6 +64,27 @@ defmodule Lua.VM.LazyCallInfoTest do
       assert run!(code) == ["outer", "global", 0, "test.lua", "Lua"]
     end
 
+    test "name/namewhat/currentline on the forced-lazy interpreter path" do
+      # The `3 & 1` bitwise op is not bytecode-encodable, so both functions
+      # fall onto the `:lua_closure` interpreter path. Unlike the compiled
+      # hand-off above, the live call-site `line` survives, so `currentline`
+      # is 3 (the `return inner()` site) rather than 0.
+      code = """
+      function outer()
+        local _ = 3 & 1
+        return inner()
+      end
+      function inner()
+        local _ = 3 & 1
+        local info = debug.getinfo(2, "nSl")
+        return info.name, info.namewhat, info.currentline, info.source, info.what
+      end
+      return outer()
+      """
+
+      assert run!(code) == ["outer", "global", 3, "test.lua", "Lua"]
+    end
+
     test "level 1 currentline" do
       code = """
       function f()
@@ -59,11 +96,41 @@ defmodule Lua.VM.LazyCallInfoTest do
       assert run!(code) == [-1]
     end
 
+    test "level 1 currentline on the forced-lazy interpreter path" do
+      # On the lazy `:lua_closure` path the call site survives, so level-1
+      # `currentline` is the live line (3) rather than -1.
+      code = """
+      function f()
+        local _ = 3 & 1
+        return debug.getinfo(1, "Sl").currentline
+      end
+      return f()
+      """
+
+      assert run!(code) == [3]
+    end
+
     test "three-deep chain resolves distinct levels" do
       code = """
       function a() return b() end
       function b() return c() end
       function c()
+        local l2 = debug.getinfo(2, "n").name
+        local l3 = debug.getinfo(3, "n").name
+        return l2, l3
+      end
+      return a()
+      """
+
+      assert run!(code) == ["b", "a"]
+    end
+
+    test "three-deep chain resolves distinct levels on the forced-lazy path" do
+      code = """
+      function a() local _ = 3 & 1 return b() end
+      function b() local _ = 3 & 1 return c() end
+      function c()
+        local _ = 3 & 1
         local l2 = debug.getinfo(2, "n").name
         local l3 = debug.getinfo(3, "n").name
         return l2, l3
@@ -84,6 +151,18 @@ defmodule Lua.VM.LazyCallInfoTest do
       """
 
       assert run!(code) == ["stack traceback:\n\ttest.lua:0: in ?\n\ttest.lua:3: in ?"]
+    end
+
+    test "renders the live call-site lines on the forced-lazy path" do
+      # The compiled path above strips the line to 0; the lazy `:lua_closure`
+      # path preserves each frame's call-site line (outer at 1, inner at 3).
+      code = """
+      function outer() local _ = 3 & 1 return inner() end
+      function inner() local _ = 3 & 1 return debug.traceback() end
+      return outer()
+      """
+
+      assert run!(code) == ["stack traceback:\n\ttest.lua:1: in ?\n\ttest.lua:3: in ?"]
     end
   end
 
@@ -109,6 +188,22 @@ defmodule Lua.VM.LazyCallInfoTest do
       assert run!(code) == ["cm\nstack traceback:\n\ttest.lua:7: in ?"]
     end
 
+    test "debug.traceback inside a __call callback on the forced-lazy path" do
+      code = """
+      local t = setmetatable({}, {__call = function(self)
+        local _ = 3 & 1
+        return debug.traceback("cm")
+      end})
+      function p()
+        local _ = 3 & 1
+        return t()
+      end
+      return p()
+      """
+
+      assert run!(code) == ["cm\nstack traceback:\n\ttest.lua:9: in ?"]
+    end
+
     test "debug.getinfo currentline inside a __call callback is the call site" do
       code = """
       local t = setmetatable({}, {__call = function(self)
@@ -123,10 +218,38 @@ defmodule Lua.VM.LazyCallInfoTest do
       assert run!(code) == [7]
     end
 
+    test "debug.getinfo currentline inside a __call callback on the forced-lazy path" do
+      code = """
+      local t = setmetatable({}, {__call = function(self)
+        local _ = 3 & 1
+        return debug.getinfo(2, "nl").currentline
+      end})
+      function p()
+        local _ = 3 & 1
+        return t()
+      end
+      return p()
+      """
+
+      assert run!(code) == [9]
+    end
+
     test "call_stack is restored to empty after a __call dispatch" do
       code = """
       local t = setmetatable({}, {__call = function(self) return 7 end})
       local function outer() return t() end
+      return outer()
+      """
+
+      assert {:ok, [7], state} = run(code)
+      assert state.call_stack == []
+      assert state.call_depth == 0
+    end
+
+    test "call_stack is restored to empty after a __call dispatch on the forced-lazy path" do
+      code = """
+      local t = setmetatable({}, {__call = function(self) local _ = 3 & 1 return 7 end})
+      local function outer() local _ = 3 & 1 return t() end
       return outer()
       """
 
@@ -143,6 +266,24 @@ defmodule Lua.VM.LazyCallInfoTest do
         return inner()
       end
       function inner()
+        return notafunction()
+      end
+      return outer()
+      """
+
+      assert_raise LuaTypeError, ~r/attempt to call a nil value \(global 'notafunction'\)/, fn ->
+        run(code)
+      end
+    end
+
+    test "attempt to call a nil value from a nested call on the forced-lazy path" do
+      code = """
+      function outer()
+        local _ = 3 & 1
+        return inner()
+      end
+      function inner()
+        local _ = 3 & 1
         return notafunction()
       end
       return outer()
@@ -180,6 +321,26 @@ defmodule Lua.VM.LazyCallInfoTest do
 
       assert {:ok, [true], state} = run(code)
       assert state.call_stack == []
+    end
+
+    test "is empty after a native callback mid-stack on the forced-lazy path" do
+      # Same as above but the bitwise op forces both functions onto the
+      # `:lua_closure` path, where the native-dispatch boundary materializes
+      # the lazy `frames` into call_stack and must restore the inherited
+      # (empty) stack afterward.
+      code = """
+      local function deep()
+        local _ = 3 & 1
+        debug.getinfo(1, "l")
+        return true
+      end
+      local function outer() local _ = 3 & 1 return deep() end
+      return outer()
+      """
+
+      assert {:ok, [true], state} = run(code)
+      assert state.call_stack == []
+      assert state.call_depth == 0
     end
 
     test "call_depth returns to zero after recursion" do

@@ -553,8 +553,14 @@ defmodule Lua.VM.Executor do
   # is the caller's proto, matching the eager `call_info`'s `source`.
   #
   # Called only at the boundaries that actually read the stack — native-call
-  # dispatch, dispatcher hand-off, and error raise sites — never on the hot
-  # success path.
+  # dispatch, dispatcher hand-off, `generic_for` iterator calls, and error
+  # raise sites. The pure interpreter → interpreter `:lua_closure` path never
+  # materializes (it only appends a lazy `frame`), so a Lua-only call chain
+  # pays nothing here. The interpreter → dispatcher hand-off is the one
+  # success-path exception: it materializes eagerly on every call because the
+  # dispatcher pushes its own entries onto this stack and may run native
+  # callbacks mid-execution that read it live, so it needs a complete stack
+  # for the dispatcher's whole duration, not just on overflow.
   @spec rebuild_call_stack(list(map())) :: list(map())
   defp rebuild_call_stack(frames) do
     Enum.map(frames, fn frame ->
