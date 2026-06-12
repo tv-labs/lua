@@ -21,6 +21,22 @@ defmodule Lua.VM.Table do
   `data` lazily on read). A write to a sparse integer key beyond the
   border goes to `data` until a later contiguous fill promotes it.
 
+  ## Cached sequence border
+
+  `border` caches a value `length/1` is allowed to return, so the common
+  no-hole `#t` is O(1) and `table.insert` (which reads `#t` per call) stays
+  linear instead of quadratic. An integer `B` means slots `1..B` are known
+  non-nil and `B + 1` is a known hole or the array high-water end, i.e. `B`
+  is a valid Lua 5.3 §6.1 border; `length/1` returns it directly. `:dirty`
+  means "recompute": `length/1` falls back to the scan-based path.
+
+  The cache is only ever set to an integer the scan would itself return
+  (`arr_n` right after a full contiguous absorb). Every mutation that could
+  invalidate that — an in-border overwrite, a hole punched at or below the
+  cached border, a positive-integer hash insert/delete — flips it to
+  `:dirty`. Non-integer key writes never affect `#t` and leave it untouched,
+  protecting the executor's string-field fast path from churn.
+
   ## Dead-key tracking
 
   Lua 5.3 §6.1 dead-key iteration semantics are preserved for the hash
@@ -30,6 +46,7 @@ defmodule Lua.VM.Table do
 
   defstruct arr: :undefined,
             arr_n: 0,
+            border: 0,
             data: %{},
             order: [],
             order_tail: [],
@@ -41,6 +58,7 @@ defmodule Lua.VM.Table do
   @type t :: %__MODULE__{
           arr: :array.array() | :undefined,
           arr_n: non_neg_integer(),
+          border: non_neg_integer() | :dirty,
           data: %{optional(term()) => term()},
           order: list(term()),
           order_tail: list(term()),
@@ -81,6 +99,7 @@ defmodule Lua.VM.Table do
         table
         | arr: :undefined,
           arr_n: 0,
+          border: :dirty,
           data: %{},
           order: [],
           order_tail: [],
@@ -119,15 +138,42 @@ defmodule Lua.VM.Table do
   defp put_array(%__MODULE__{arr: arr, arr_n: n} = table, key, value) when key == n + 1 do
     arr = :array.set(key - 1, value, ensure_arr(arr))
     # Pull any contiguous successors that were parked in the hash into arr.
-    absorb_from_hash(%{table | arr: arr, arr_n: key})
+    absorbed = absorb_from_hash(%{table | arr: arr, arr_n: key})
+    # Cache the new border, but only if slots 1..arr_n are actually dense.
+    # The append proves the top slot is filled; it says nothing about a hole
+    # punched lower down (delete keeps arr_n as the high-water mark, so a
+    # cleared slot stays a nil inside the region). The load-bearing invariant:
+    # a cached integer border always equals arr_n (it is only ever set here, to
+    # absorbed.arr_n, and arr_n only grows on this same arm). So an integer
+    # incoming border proves 1..arr_n was fully dense, the new top slot extends
+    # it, and the run stays dense — cache in O(1), the hot insert-loop path. A
+    # :dirty incoming border might hide a lower hole, so scan once to learn the
+    # true border; a clean run re-establishes the O(1) cache, a holey one stays
+    # :dirty.
+    case table.border do
+      b when is_integer(b) ->
+        %{absorbed | border: absorbed.arr_n}
+
+      :dirty ->
+        # array_border == arr_n means no hole inside 1..arr_n: a valid border.
+        if array_border(absorbed.arr, absorbed.arr_n) == absorbed.arr_n do
+          %{absorbed | border: absorbed.arr_n}
+        else
+          absorbed
+        end
+    end
   end
 
   defp put_array(%__MODULE__{arr_n: n} = table, key, value) when key <= n do
-    %{table | arr: :array.set(key - 1, value, table.arr)}
+    # In-border overwrite. value is non-nil (put/3 routes nil to delete/2);
+    # filling a former hole could raise the reachable border, so recompute.
+    %{table | arr: :array.set(key - 1, value, table.arr), border: :dirty}
   end
 
   defp put_array(%__MODULE__{} = table, key, value) do
-    # Sparse integer beyond the border — store in hash for now.
+    # Sparse integer beyond the border — store in hash for now. insert_hash
+    # marks the border :dirty because a positive-int key could later be
+    # promoted into the sequence and extend #t.
     insert_hash(table, key, value)
   end
 
@@ -148,6 +194,11 @@ defmodule Lua.VM.Table do
   end
 
   defp insert_hash(%__MODULE__{data: data, order: order, order_tail: order_tail, dead: dead} = table, key, value) do
+    # A positive-integer hash key sits adjacent to the probe range and can
+    # change #t once a contiguous fill reaches it, so invalidate the cache.
+    # Non-integer keys (strings/floats/bools) never affect #t — leave it.
+    table = if positive_int?(key), do: %{table | border: :dirty}, else: table
+
     cond do
       Map.has_key?(dead, key) ->
         merged_order = order ++ Enum.reverse(order_tail)
@@ -191,12 +242,22 @@ defmodule Lua.VM.Table do
     #
     # `length/1` derives the Lua border by scanning to the first hole, so a
     # cleared tail still reports the correct `#t`.
-    %{table | arr: :array.set(key - 1, nil, table.arr)}
+    #
+    # Cached border: a cached integer border always equals arr_n (see
+    # put_array clause 1), and this clause only fires for in-array keys
+    # (1 <= key <= arr_n == border). Punching a hole anywhere in that range can
+    # only shorten the dense run reachable from 1, so every in-array delete
+    # invalidates a cached border. Drop straight to :dirty; length/1 rescans
+    # lazily on the next read.
+    %{table | arr: :array.set(key - 1, nil, table.arr), border: :dirty}
   end
 
   defp delete(%__MODULE__{data: data, dead: dead} = table, key) do
     if Map.has_key?(data, key) do
-      %{table | data: Map.delete(data, key), dead: Map.put(dead, key, true)}
+      # Removing a positive-integer hash key can lower #t; recompute. Other
+      # keys never affect the sequence border.
+      border = if positive_int?(key), do: :dirty, else: table.border
+      %{table | data: Map.delete(data, key), dead: Map.put(dead, key, true), border: border}
     else
       table
     end
@@ -332,6 +393,8 @@ defmodule Lua.VM.Table do
   probing the hash for sparse integers parked beyond the border.
   """
   @spec length(t()) :: non_neg_integer()
+  def length(%__MODULE__{border: border}) when is_integer(border), do: border
+
   def length(%__MODULE__{arr_n: 0, data: data}), do: probe_hash_length(data, 1, 0)
 
   def length(%__MODULE__{arr: arr, arr_n: n, data: data}) do
