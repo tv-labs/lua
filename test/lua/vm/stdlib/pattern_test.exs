@@ -71,4 +71,82 @@ defmodule Lua.VM.Stdlib.PatternTest do
       assert {[6], _} = Lua.eval!(script)
     end
   end
+
+  describe "compiled-pattern cache transparency" do
+    # Short patterns (<= @cache_min_len, 8 bytes) bypass the cache entirely,
+    # so they only ever exercise the inline compile path.
+    @bypass_patterns ["^a", "[%w]", "(%a+)", "%bxy", "a*b-c?", "()", ",", "%d+%.%d+"]
+
+    # Longer than @cache_min_len (8 bytes) so they actually traverse the
+    # cache machinery: sentinel on first sighting, promotion on the second,
+    # cached hit on the third. One per element type — anchored `^`, set,
+    # capture group, balanced `%b`, quantifiers, and position capture `()` —
+    # so the sentinel/promotion/hit transitions are validated tuple-identical
+    # for every construct, not just plain literals.
+    @cached_patterns [
+      "^abcdefgh",
+      "[%w][%w][%w]",
+      "%bxy_padding",
+      "()abcdef()",
+      "a*b-c?d+e",
+      "(%a+)-(%d+)"
+    ]
+
+    test "compile_cached returns the same tuple as compile for bypass patterns" do
+      for p <- @bypass_patterns do
+        # Three calls; each must be tuple-identical to a bare recompile even
+        # though these stay on the inline (cache-bypass) path.
+        assert Pattern.compile_cached(p) == Pattern.compile(p)
+        assert Pattern.compile_cached(p) == Pattern.compile(p)
+        assert Pattern.compile_cached(p) == Pattern.compile(p)
+      end
+    end
+
+    test "compile_cached is tuple-identical across the cache transitions" do
+      for p <- @cached_patterns do
+        expected = Pattern.compile(p)
+        # First sighting: compiles inline, records a sentinel.
+        assert Pattern.compile_cached(p) == expected
+        # Second sighting: promotes the sentinel to a compiled entry.
+        assert Pattern.compile_cached(p) == expected
+        # Third sighting: genuine cached hit, served from ETS.
+        assert Pattern.compile_cached(p) == expected
+      end
+    end
+
+    test "repeated compile_cached for the same pattern is stable" do
+      first = Pattern.compile_cached("(%a+),(%d+)")
+      second = Pattern.compile_cached("(%a+),(%d+)")
+      assert first == second
+      assert first == Pattern.compile("(%a+),(%d+)")
+    end
+
+    # `(%a+)-(%d+)` is 11 bytes, so it traverses the cache machinery rather
+    # than the inline bypass. Calling find/gsub three times exercises every
+    # transition — sentinel, promotion, then a genuine ETS hit on the third
+    # call — and each result must equal the uncached engine.
+    test "string.find through the cache matches the uncached engine on every transition" do
+      for _ <- 1..3 do
+        assert Pattern.find("foo-123 bar-456", "(%a+)-(%d+)") == {1, 7, ["foo", "123"]}
+      end
+    end
+
+    test "string.gsub through the cache matches the uncached engine on every transition" do
+      for _ <- 1..3 do
+        assert Pattern.gsub("foo-123 bar-456", "(%a+)-(%d+)", "X") == {"X X", 2}
+      end
+    end
+
+    # Keep coverage of the inline bypass path with a short (<= 8 byte) pattern,
+    # which never touches ETS.
+    test "string.find on the bypass path matches the uncached engine" do
+      assert Pattern.find("a,b,c", ",") == {2, 2, []}
+      assert Pattern.find("a,b,c", ",") == {2, 2, []}
+    end
+
+    test "string.gsub on the bypass path matches the uncached engine" do
+      assert Pattern.gsub("a,b,c", ",", ";") == {"a;b;c", 2}
+      assert Pattern.gsub("a,b,c", ",", ";") == {"a;b;c", 2}
+    end
+  end
 end
