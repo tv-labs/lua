@@ -3,6 +3,7 @@ defmodule Lua.Parser.ErrorToMapTest do
 
   alias Lua.Parser
   alias Lua.Parser.Error
+  alias Lua.VM.ErrorFormatter
 
   @ansi_escape "\e["
 
@@ -95,11 +96,26 @@ defmodule Lua.Parser.ErrorToMapTest do
 
       formatter_keys =
         :type_error
-        |> Lua.VM.ErrorFormatter.to_map("boom", source_code: "a\nb", line: 1)
+        |> ErrorFormatter.to_map("boom", source_code: "a\nb", line: 1)
         |> Map.keys()
         |> Enum.sort()
 
       assert parse_keys == formatter_keys
+    end
+
+    test "source_context shape matches Lua.VM.ErrorFormatter.to_map/3 key-for-key" do
+      parse_context = "x +" |> error!() |> Error.to_map("x +") |> Map.fetch!(:source_context)
+
+      formatter_context =
+        :type_error
+        |> ErrorFormatter.to_map("boom", source_code: "a\nb", line: 1)
+        |> Map.fetch!(:source_context)
+
+      assert parse_context |> Map.keys() |> Enum.sort() ==
+               formatter_context |> Map.keys() |> Enum.sort()
+
+      assert parse_context.lines |> hd() |> Map.keys() |> Enum.sort() ==
+               formatter_context.lines |> hd() |> Map.keys() |> Enum.sort()
     end
 
     test "no ANSI escapes appear in any string field" do

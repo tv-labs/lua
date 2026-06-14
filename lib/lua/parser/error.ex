@@ -148,8 +148,8 @@ defmodule Lua.Parser.Error do
 
   The shape is identical to `Lua.VM.ErrorFormatter.to_map/3`, so runtime and
   parse errors can flow through a single renderer (HTML, JSON, structured
-  logs). No ANSI escapes appear in any string field, and trailing newlines
-  from the internal message/suggestion templates are trimmed.
+  logs). No ANSI escapes appear in any string field, and leading/trailing
+  whitespace from the internal message/suggestion templates is trimmed.
 
       %{
         type: atom(),
@@ -159,7 +159,7 @@ defmodule Lua.Parser.Error do
         call_stack: [],
         source_context: %{
           lines: [%{number: pos_integer(), text: String.t(), highlight?: boolean()}],
-          pointer_column: pos_integer() | nil
+          pointer_column: pos_integer()
         } | nil,
         suggestion: String.t() | nil,
         error_kind: nil
@@ -196,6 +196,10 @@ defmodule Lua.Parser.Error do
   defp clean(nil), do: nil
   defp clean(text) when is_binary(text), do: String.trim(text)
 
+  # Deliberately mirrors `Lua.VM.ErrorFormatter`'s private source-context
+  # windowing (same 2-before/2-after math) to keep the wire shapes in lockstep.
+  # Duplicated rather than shared so the parser stays decoupled from the VM;
+  # the parity test in error_to_map_test.exs guards against the two drifting.
   defp build_source_context(nil, _position), do: nil
   defp build_source_context(_source_code, nil), do: nil
 
