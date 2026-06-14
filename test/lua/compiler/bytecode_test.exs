@@ -292,6 +292,7 @@ defmodule Lua.Compiler.BytecodeTest do
       # Every call opcode carries a positive source line at its last slot.
       for op <- call_ops do
         last = :erlang.element(tuple_size(op), op)
+
         assert is_integer(last) and last > 0,
                "call opcode #{inspect(op)} should end with a line number, got #{inspect(last)}"
       end
@@ -326,7 +327,7 @@ defmodule Lua.Compiler.BytecodeTest do
         |> Tuple.to_list()
         |> Enum.find(fn op -> :erlang.element(1, op) == 51 end)
 
-      assert generic_for_op != nil
+      assert generic_for_op
       nested_body = :erlang.element(4, generic_for_op)
 
       nested_call_lines =
