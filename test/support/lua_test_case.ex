@@ -11,9 +11,16 @@ defmodule Lua.TestCase do
 
   @doc false
   def run_lua_file(path, opts \\ []) do
-    case Lua.SuiteRunner.run_file(path, opts) do
-      :ok -> :ok
-      {:error, e} -> raise e
-    end
+    # Suite files print() heavily. Swallow that chatter so test output stays
+    # readable; capture_io re-raises after capturing, so a failing Lua
+    # assert() still fails the ExUnit test with its message intact.
+    ExUnit.CaptureIO.capture_io(fn ->
+      case Lua.SuiteRunner.run_file(path, opts) do
+        :ok -> :ok
+        {:error, e} -> raise e
+      end
+    end)
+
+    :ok
   end
 end
