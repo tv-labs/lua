@@ -9,19 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- **Deep recursion regression recovered (#324).** Call-dense, work-light
-  workloads (naive `fib(30)` most visibly) were ~25%+ slower than rc.0.
-  The rc.1/rc.2 changelog attributed this to the call-depth bookkeeping
-  added in #283, but bisection showed that bookkeeping is now negligible;
-  the dominant regressor was the blanket `+16` register-slack buffer #347
-  reserved on every prototype's register tuple, paid on every call frame
-  by the dispatcher's `init_callee_regs/4`. The dispatcher now sizes each
-  register file to an exact `reg_file_size` derived from the emitted
-  bytecode (authoritative even where codegen's `max_registers` undercounts
-  the peak); runtime-dynamic expansion still grows the tuple on demand.
-  `fib(30)` improves from ~1.32× slower than Luerl to ~1.11× (Apple M-series,
-  drift-controlled), with no other workload slower. Fixes the latent
-  register undercount the slack had been masking.
+- **Register tuples are sized to an honest peak, with no slack buffer, on
+  both VM engines (#312, #324).** Both the interpreter (`call_function/3`,
+  the `:call` opcode, `call_value/5`) and the dispatcher
+  (`init_callee_regs/4`) used to over-allocate every call frame's register
+  tuple — the interpreter with a `+16` buffer, the dispatcher with the `+16`
+  slack #347 added. On call-dense, work-light code (naive `fib(30)` most
+  visibly, ~25%+ slower than rc.0) that per-frame over-allocation dominated.
+  Both buffers existed to mask a latent codegen bug: `max_registers` could
+  undercount the true register peak for some deeply-nested expression
+  shapes. Codegen's new `instruction_peak/1` backstop makes `max_registers`
+  honest (it counts every statically-fixed destination the emitted stream
+  writes), so both engines now size to exactly `max(max_registers,
+  param_count)` and grow on demand only for runtime-dynamic writes (vararg
+  spread, multi-return distribution). The interpreter path is ~26% faster
+  on `fib(25)` (closing the dispatcher–interpreter gap to ~1.02×), and
+  `fib(30)` on the dispatcher improves from ~1.32× slower than Luerl to
+  ~1.11× (Apple M-series, drift-controlled), with no other workload slower.
 
 ### Fixed
 

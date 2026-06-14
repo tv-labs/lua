@@ -165,15 +165,15 @@ defmodule Lua.VM.Dispatcher do
     end
   end
 
-  # Register tuples are sized to the prototype's exact `reg_file_size`
-  # (computed from the emitted bytecode in `Lua.Compiler.Bytecode`). No slack
-  # buffer: every runtime-dynamic write — vararg spread, multi-return result
-  # distribution — grows the tuple on demand via `grow_regs/2`, so the static
-  # size only has to cover the syntactic register peak. This avoids
+  # Register tuples are sized to the prototype's exact register peak. No
+  # slack buffer: codegen reports an honest `max_registers` (its
+  # `instruction_peak/1` backstop counts every statically-fixed destination),
+  # and every runtime-dynamic write — vararg spread, multi-return result
+  # distribution — grows the tuple on demand via `grow_regs/2`. This avoids
   # over-allocating a register tuple on every call frame, which dominated
   # call-dense workloads like deep recursion (issue #324).
   defp init_regs(proto, args) do
-    regs = Tuple.duplicate(nil, proto.reg_file_size)
+    regs = Tuple.duplicate(nil, max(proto.max_registers, proto.param_count))
     copy_args(regs, 0, args, proto.param_count)
   end
 
@@ -1527,9 +1527,9 @@ defmodule Lua.VM.Dispatcher do
 
   defp init_callee_regs(callee_proto, src_regs, src_off, arg_count) do
     # Exact-sized like `init_regs/2`; runs on every compiled-closure call,
-    # so sizing to the callee's true register peak (no slack) is what keeps
+    # so sizing to the callee's honest register peak (no slack) is what keeps
     # deep recursion off a per-frame over-allocation (issue #324).
-    regs = Tuple.duplicate(nil, callee_proto.reg_file_size)
+    regs = Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count))
     copy_n = min(arg_count, callee_proto.param_count)
     copy_regs(src_regs, src_off, regs, 0, copy_n)
   end

@@ -22,8 +22,7 @@ defmodule Lua.Compiler.Prototype do
           max_registers: non_neg_integer(),
           source: binary(),
           lines: {non_neg_integer(), non_neg_integer()},
-          bytecode: tuple() | nil,
-          reg_file_size: non_neg_integer()
+          bytecode: tuple() | nil
         }
 
   # `bytecode` is an optional dense encoding produced by `Lua.Compiler.Bytecode`.
@@ -33,16 +32,13 @@ defmodule Lua.Compiler.Prototype do
   # `instructions` list (used by error reporting, debugging, and any future
   # tooling) survives untouched.
   #
-  # `reg_file_size` is the exact number of registers the dispatcher must
-  # allocate to run `bytecode` — the highest register index any encoded op
-  # reads or writes, plus one (and never below `param_count`). It is derived
-  # from the emitted bytecode in `Lua.Compiler.Bytecode.compile/1`, which is
-  # authoritative even where codegen's `max_registers` undercounts the peak;
-  # runtime-dynamic expansion (vararg spread, multi-return) grows the tuple
-  # on demand in the dispatcher. Sizing to this exact value rather than a
-  # blanket slack buffer keeps call-dense code (deep recursion) off a
-  # per-call register over-allocation (issue #324). Zero for prototypes that
-  # fell back to the interpreter, which sizes its own register file.
+  # Both engines size their register file to `max(max_registers, param_count)`
+  # with no slack buffer. `max_registers` is the honest register peak —
+  # codegen's `instruction_peak/1` backstop counts every statically-fixed
+  # destination the emitted stream writes — and runtime-dynamic expansion
+  # (vararg spread, multi-return) grows the tuple on demand. Sizing exactly
+  # keeps call-dense code (deep recursion) off a per-call over-allocation
+  # (issues #312, #324).
   defstruct instructions: [],
             prototypes: [],
             upvalue_descriptors: [],
@@ -53,8 +49,7 @@ defmodule Lua.Compiler.Prototype do
             source: <<"-no-source-">>,
             lines: {0, 0},
             varargs: [],
-            bytecode: nil,
-            reg_file_size: 0
+            bytecode: nil
 
   @doc """
   Creates a new prototype with the given options.

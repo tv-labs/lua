@@ -16,10 +16,12 @@ defmodule Lua.VM do
   """
   @spec execute(Prototype.t(), State.t()) :: {:ok, list(), State.t()}
   def execute(%Prototype{} = proto, state \\ State.new()) do
-    # Create register file sized to the prototype's needs.
-    # The +16 buffer covers multi-return expansion slots that the codegen doesn't
-    # always track in max_registers (call results can land beyond the stated max).
-    registers = Tuple.duplicate(nil, proto.max_registers + 16)
+    # Size the register file to the prototype's honest register peak, with no
+    # slack buffer — same contract as every other call frame. `max_registers`
+    # covers every statically-fixed destination (codegen's `instruction_peak/1`
+    # backstop); runtime-dynamic writes (multi-return result distribution,
+    # unbounded varargs) grow the tuple lazily via `ensure_regs_capacity/2`.
+    registers = Tuple.duplicate(nil, max(proto.max_registers, proto.param_count))
 
     # Execute the prototype instructions
     {results, _final_regs, final_state} =
