@@ -141,7 +141,7 @@ defmodule Lua.VM.Stdlib.Debug do
   defp name_info_for_level(level, state) when level >= 1 do
     case Enum.at(state.call_stack, level - 1) do
       nil -> {nil, ""}
-      frame -> {Map.get(frame, :name), Map.get(frame, :namewhat, "")}
+      frame -> {Executor.frame_name(frame), Executor.frame_namewhat(frame)}
     end
   end
 
@@ -157,7 +157,7 @@ defmodule Lua.VM.Stdlib.Debug do
   defp stack_position_for_level(level, state) when level > 1 do
     case Enum.at(state.call_stack, level - 2) do
       nil -> nil
-      frame -> {Map.get(frame, :line), Map.get(frame, :source)}
+      frame -> {Executor.frame_line(frame), Executor.frame_source(frame)}
     end
   end
 
@@ -172,8 +172,8 @@ defmodule Lua.VM.Stdlib.Debug do
       state.call_stack
       |> Enum.with_index(1)
       |> Enum.map(fn {frame, _i} ->
-        source = Map.get(frame, :source, "?")
-        line = Map.get(frame, :line, 0)
+        source = Executor.frame_source(frame) || "?"
+        line = Executor.frame_line(frame) || 0
         "\t#{source}:#{line}: in ?"
       end)
 

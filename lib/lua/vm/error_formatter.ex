@@ -27,6 +27,8 @@ defmodule Lua.VM.ErrorFormatter do
   the category. Stacking a second header would be redundant.
   """
 
+  alias Lua.VM.Executor
+
   @doc """
   Formats a runtime error into a multi-line string.
 
@@ -224,9 +226,9 @@ defmodule Lua.VM.ErrorFormatter do
   defp build_call_stack(call_stack) when is_list(call_stack) do
     Enum.map(call_stack, fn frame ->
       %{
-        source: Map.get(frame, :source),
-        line: Map.get(frame, :line),
-        name: Map.get(frame, :name)
+        source: Executor.frame_source(frame),
+        line: Executor.frame_line(frame),
+        name: Executor.frame_name(frame)
       }
     end)
   end
