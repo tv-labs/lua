@@ -75,7 +75,9 @@ jobs:
         run: mix deps.get
 
       - name: Run tests
-        run: mix test
+        # :lua53 is opt-in locally (excluded by default); include it here so
+        # the curated Lua 5.3 suite stays enforced in CI.
+        run: mix test --include lua53
 
       - name: Format
         run: mix format --check-formatted

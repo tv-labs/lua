@@ -10,6 +10,9 @@ defmodule Lua.MixProject do
       version: @version,
       elixir: "~> 1.16",
       elixirc_paths: elixirc_paths(Mix.env()),
+      # test/lua53_skips.exs is suite config data (loaded via Code.eval_file),
+      # not a test file — tell the loader to ignore it instead of warning.
+      test_ignore_filters: [&String.ends_with?(&1, "_skips.exs")],
       start_permanent: Mix.env() == :prod,
       deps: deps(),
 

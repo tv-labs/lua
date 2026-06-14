@@ -61,7 +61,6 @@ defmodule Lua.Lua53SuiteTest do
       ranges = entries |> Enum.reject(&(&1.lines == :all)) |> Enum.map(& &1.lines)
 
       @test_file file
-      @ranges ranges
 
       cond do
         whole_file? ->
@@ -76,6 +75,8 @@ defmodule Lua.Lua53SuiteTest do
           end
 
         true ->
+          @ranges ranges
+
           skipped =
             Enum.reduce(ranges, 0, fn r, acc -> Enum.count(r) + acc end)
 
