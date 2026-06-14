@@ -233,11 +233,16 @@ defmodule Lua.VM.Executor do
   # current `proto` (for source attribution) and returns the same
   # `{value, state}` shape the interpreter clauses produce.
   #
-  # Line position for raise sites is passed as `0` because the dispatcher
-  # does not yet track per-instruction line numbers — error attribution
-  # for compiled prototypes is the subject of B5d-v2. Native callbacks
-  # invoked via metamethods still get accurate positions via the
-  # process-dictionary bridge installed at the call boundary.
+  # Line position for these non-call raise sites is passed as `nil` rather
+  # than a literal line: the dispatcher does not yet bake per-instruction
+  # lines into binop / compare / index / concat opcodes (that is B5d-v2's
+  # subject). `nil` lets `Lua.VM.TypeError.exception/1` / `RuntimeError`
+  # fall back to `current_position/0` instead of rendering a bogus `:0:`.
+  # The pcall error *value* is unaffected (TypeError's §6.1 value carries no
+  # source:line: prefix); this only keeps the rich render / `to_map` line in
+  # sync with the interpreter. Native callbacks invoked via metamethods
+  # still get accurate positions via the process-dictionary bridge installed
+  # at the call boundary.
 
   @doc false
   @spec dispatcher_binop(atom(), term(), term(), State.t(), term(), term(), term()) ::
@@ -249,7 +254,7 @@ defmodule Lua.VM.Executor do
       b,
       state,
       fn ->
-        safe_add(a, b, 0, proto.source, hint_a, hint_b, state)
+        safe_add(a, b, nil, proto.source, hint_a, hint_b, state)
       end,
       :materialized
     )
@@ -262,7 +267,7 @@ defmodule Lua.VM.Executor do
       b,
       state,
       fn ->
-        safe_subtract(a, b, 0, proto.source, hint_a, hint_b, state)
+        safe_subtract(a, b, nil, proto.source, hint_a, hint_b, state)
       end,
       :materialized
     )
@@ -275,7 +280,7 @@ defmodule Lua.VM.Executor do
       b,
       state,
       fn ->
-        safe_multiply(a, b, 0, proto.source, hint_a, hint_b, state)
+        safe_multiply(a, b, nil, proto.source, hint_a, hint_b, state)
       end,
       :materialized
     )
@@ -288,7 +293,7 @@ defmodule Lua.VM.Executor do
       b,
       state,
       fn ->
-        safe_divide(a, b, 0, proto.source, hint_a, hint_b, state)
+        safe_divide(a, b, nil, proto.source, hint_a, hint_b, state)
       end,
       :materialized
     )
@@ -301,7 +306,7 @@ defmodule Lua.VM.Executor do
       b,
       state,
       fn ->
-        safe_floor_divide(a, b, 0, proto.source, hint_a, hint_b, state)
+        safe_floor_divide(a, b, nil, proto.source, hint_a, hint_b, state)
       end,
       :materialized
     )
@@ -314,7 +319,7 @@ defmodule Lua.VM.Executor do
       b,
       state,
       fn ->
-        safe_modulo(a, b, 0, proto.source, hint_a, hint_b, state)
+        safe_modulo(a, b, nil, proto.source, hint_a, hint_b, state)
       end,
       :materialized
     )
@@ -327,7 +332,7 @@ defmodule Lua.VM.Executor do
       b,
       state,
       fn ->
-        safe_power(a, b, 0, proto.source, hint_a, hint_b, state)
+        safe_power(a, b, nil, proto.source, hint_a, hint_b, state)
       end,
       :materialized
     )
@@ -336,7 +341,7 @@ defmodule Lua.VM.Executor do
   @doc false
   @spec dispatcher_unop(atom(), term(), State.t(), term(), term()) :: {term(), State.t()}
   def dispatcher_unop(:negate, val, state, proto, hint) do
-    try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, 0, proto.source, hint, state) end, :materialized)
+    try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, nil, proto.source, hint, state) end, :materialized)
   end
 
   # Bitwise bridges mirror the `:bitwise_*` / `:shift_*` interpreter clauses
@@ -446,21 +451,21 @@ defmodule Lua.VM.Executor do
   @doc false
   @spec dispatcher_cmp(atom(), term(), term(), State.t(), term()) :: {term(), State.t()}
   def dispatcher_cmp(:less_than, a, b, state, proto) do
-    try_binary_metamethod("__lt", a, b, state, fn -> safe_compare_lt(a, b, 0, proto.source, state) end, :materialized)
+    try_binary_metamethod("__lt", a, b, state, fn -> safe_compare_lt(a, b, nil, proto.source, state) end, :materialized)
   end
 
   def dispatcher_cmp(:less_equal, a, b, state, proto) do
-    compare_le(a, b, state, 0, proto.source, :materialized)
+    compare_le(a, b, state, nil, proto.source, :materialized)
   end
 
   def dispatcher_cmp(:greater_than, a, b, state, proto) do
     # Lua 5.3 §3.4.4: a > b dispatches __lt with swapped operands.
-    try_binary_metamethod("__lt", b, a, state, fn -> safe_compare_lt(b, a, 0, proto.source, state) end, :materialized)
+    try_binary_metamethod("__lt", b, a, state, fn -> safe_compare_lt(b, a, nil, proto.source, state) end, :materialized)
   end
 
   def dispatcher_cmp(:greater_equal, a, b, state, proto) do
     # Lua 5.3 §3.4.4: a >= b is rewritten to b <= a.
-    compare_le(b, a, state, 0, proto.source, :materialized)
+    compare_le(b, a, state, nil, proto.source, :materialized)
   end
 
   def dispatcher_cmp(:equal, a, b, state, _proto) do
@@ -487,30 +492,31 @@ defmodule Lua.VM.Executor do
       _ ->
         case :erlang.map_get(:metatable, table) do
           nil -> {nil, state}
-          _ -> index_value(tref, name, state, 0, proto.source, name_hint, :materialized)
+          _ -> index_value(tref, name, state, nil, proto.source, name_hint, :materialized)
         end
     end
   end
 
   def dispatcher_get_field(value, name, state, proto, name_hint) do
-    index_value(value, name, state, 0, proto.source, name_hint, :materialized)
+    index_value(value, name, state, nil, proto.source, name_hint, :materialized)
   end
 
   # ── Dispatcher bridges: table opcodes ───────────────────────────────────
   #
   # These wrap the same `defp` helpers that the interpreter's `:get_table`
   # / `:set_table` / `:set_field` / `:length` clauses call, so the
-  # dispatcher inherits metamethod fidelity for free. Line attribution
-  # is uniformly `0` here; threading honest line info into compiled
-  # prototypes is B5d-v2. Native callbacks reached via metamethods still
-  # see accurate positions via the process-dictionary bridge installed
+  # dispatcher inherits metamethod fidelity for free. Line attribution is
+  # uniformly `nil` here so the error render falls back to
+  # `current_position/0` instead of `:0:`; threading honest line info into
+  # compiled prototypes is B5d-v2. Native callbacks reached via metamethods
+  # still see accurate positions via the process-dictionary bridge installed
   # at the call boundary.
 
   @doc false
   @spec dispatcher_get_table(term(), term(), State.t(), term(), term()) ::
           {term(), State.t()}
   def dispatcher_get_table(value, key, state, proto, name_hint) do
-    index_value(value, key, state, 0, proto.source, name_hint, :materialized)
+    index_value(value, key, state, nil, proto.source, name_hint, :materialized)
   end
 
   @doc false
@@ -521,7 +527,7 @@ defmodule Lua.VM.Executor do
   end
 
   def dispatcher_set_table(value, _key, _value, state, proto, name_hint) do
-    raise_index_type_error(value, 0, proto.source, name_hint, state)
+    raise_index_type_error(value, nil, proto.source, name_hint, state)
   end
 
   @doc false
@@ -532,7 +538,7 @@ defmodule Lua.VM.Executor do
   end
 
   def dispatcher_set_field(value, _name, _value, state, proto, name_hint) do
-    raise_index_type_error(value, 0, proto.source, name_hint, state)
+    raise_index_type_error(value, nil, proto.source, name_hint, state)
   end
 
   # The `_proto` parameter is unused today because `try_unary_metamethod`
@@ -583,24 +589,28 @@ defmodule Lua.VM.Executor do
   #
   # `:self` method resolution. Wraps `index_value/6` so __index metamethod
   # dispatch matches the interpreter clause-for-clause. Line attribution is
-  # `0` for the same reason as the other bridges — error positions are
-  # B5d-v2.
+  # `nil` for the same reason as the other non-call bridges — it falls back
+  # to `current_position/0` rather than rendering `:0:`; per-instruction line
+  # baking for these opcodes is B5d-v2.
   @doc false
   @spec dispatcher_index_method_target(term(), term(), State.t(), term(), term()) ::
           {term(), State.t()}
   def dispatcher_index_method_target(obj, method_name, state, proto, name_hint) do
-    index_value(obj, method_name, state, 0, proto.source, name_hint, :materialized)
+    index_value(obj, method_name, state, nil, proto.source, name_hint, :materialized)
   end
 
   # `:generic_for` step: invoke the iterator function. The iterator can be
   # any callable value (Lua closure, compiled closure, native function,
   # value with `__call`), so we route through `call_value/5` which handles
-  # the whole shape via the interpreter's call machinery.
+  # the whole shape via the interpreter's call machinery. `line` is the
+  # source line baked into the `:generic_for` opcode so a native iterator
+  # that raises mid-iteration (e.g. `error()`) attributes to the `for`
+  # statement rather than leaking `:0:`.
   @doc false
-  @spec dispatcher_call_value(term(), [term()], term(), State.t()) ::
+  @spec dispatcher_call_value(term(), [term()], term(), State.t(), non_neg_integer()) ::
           {[term()], State.t()}
-  def dispatcher_call_value(callable, args, proto, state) do
-    call_value(callable, args, proto, state, 0)
+  def dispatcher_call_value(callable, args, proto, state, line) do
+    call_value(callable, args, proto, state, line)
   end
 
   # `:concatenate` slow path. Mirrors the interpreter's three-way fallback:
@@ -621,7 +631,7 @@ defmodule Lua.VM.Executor do
       right,
       state,
       fn ->
-        concat_checked(concat_coerce(left, 0, src, state), concat_coerce(right, 0, src, state), state)
+        concat_checked(concat_coerce(left, nil, src, state), concat_coerce(right, nil, src, state), state)
       end,
       :materialized
     )
@@ -634,34 +644,32 @@ defmodule Lua.VM.Executor do
   # the callable shapes and inlines the type-error paths so the
   # dispatcher's error messages match the interpreter's `:call` opcode.
   @doc false
-  @spec dispatcher_call_function(term(), [term()], State.t(), term(), term()) ::
+  @spec dispatcher_call_function(term(), [term()], State.t(), term(), term(), non_neg_integer()) ::
           {[term()], State.t()}
-  def dispatcher_call_function(nil, _args, state, proto, name_hint) do
+  def dispatcher_call_function(nil, _args, state, proto, name_hint, line) do
     raise TypeError,
       value: "attempt to call a nil value" <> format_target_hint(name_hint),
       source: proto.source,
       call_stack: state.call_stack,
-      line: 0,
+      line: line,
       error_kind: :call_nil,
       value_type: nil,
       state: state
   end
 
-  def dispatcher_call_function({:lua_closure, _, _} = closure, args, state, _proto, _name_hint),
+  def dispatcher_call_function({:lua_closure, _, _} = closure, args, state, _proto, _name_hint, _line),
     do: call_function(closure, args, state)
 
-  def dispatcher_call_function({:compiled_closure, _, _} = closure, args, state, _proto, _name_hint),
+  def dispatcher_call_function({:compiled_closure, _, _} = closure, args, state, _proto, _name_hint, _line),
     do: call_function(closure, args, state)
 
-  def dispatcher_call_function({:native_func, _} = nf, args, state, proto, _name_hint) do
-    # The dispatcher strips per-instruction line info at encode time, so any
-    # position visible here is a stale snapshot from an outer executor frame.
-    # Publish `{nil, source}` for the duration of the native call: raise
-    # sites that read `current_position/0` (e.g. `error()`'s §6.1 position
-    # prefix) then omit the line rather than attribute a wrong one. Restored
-    # after the call so nested invocations don't leak.
+  def dispatcher_call_function({:native_func, _} = nf, args, state, proto, _name_hint, line) do
+    # Publish the source line baked into the call opcode by the encoder so
+    # raise sites reading `current_position/0` — `error()`'s §6.1 prefix,
+    # stdlib bad-argument raises — attribute to the right call site.
+    # Restored after the call so nested invocations don't leak.
     prev_pos = Process.get(@position_key, @unset)
-    set_position(nil, proto.source)
+    set_position(line, proto.source)
 
     try do
       call_function(nf, args, state)
@@ -670,14 +678,14 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  def dispatcher_call_function(other, args, state, proto, name_hint) do
+  def dispatcher_call_function(other, args, state, proto, name_hint, line) do
     case get_metatable(other, state) do
       nil ->
         raise TypeError,
           value: "attempt to call a #{Value.type_name(other)} value" <> format_target_hint(name_hint),
           source: proto.source,
           call_stack: state.call_stack,
-          line: 0,
+          line: line,
           error_kind: :call_non_function,
           value_type: value_type(other),
           state: state
@@ -691,7 +699,7 @@ defmodule Lua.VM.Executor do
               value: "attempt to call a #{Value.type_name(other)} value" <> format_target_hint(name_hint),
               source: proto.source,
               call_stack: state.call_stack,
-              line: 0,
+              line: line,
               error_kind: :call_non_function,
               value_type: value_type(other),
               state: state

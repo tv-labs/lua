@@ -65,13 +65,11 @@ defmodule Lua.VM.PcallStatePreservationTest do
 
         assert [2, false, err] = results
 
-        # §6.1 position prefix on string errors: correct source:line under
-        # the interpreter; suppressed (not mis-attributed) under the
-        # dispatcher, which lacks per-call line info.
-        case @engine do
-          :interpreted -> assert err =~ ~r/^test\.lua:\d+: boom$/
-          :compiled -> assert err == "boom"
-        end
+        # §6.1 position prefix on string errors: both engines now plumb
+        # per-call line info through to native raise sites. `error("boom")`
+        # sits on line 4 (three statements precede it) — pin the exact line
+        # so an off-by-one regression fails here, not just a loose `:\d+:`.
+        assert err == "test.lua:4: boom"
       end
 
       test "table field write before error() is kept" do
@@ -329,6 +327,30 @@ defmodule Lua.VM.PcallStatePreservationTest do
           )
 
         assert [1, 2, 3, false] = results
+      end
+
+      test "outer native error reports the outer line after an inner native error is caught" do
+        # The per-call position the dispatcher publishes is saved/restored
+        # around each native call. After the inner `error("inner")` (line 4)
+        # is trapped by the inner pcall, the outer `error("outer")` must
+        # report ITS OWN line (line 7) — a leaked inner position would
+        # surface as `test.lua:4:`.
+        {results, _state} =
+          run(
+            """
+            local _, inner_err = pcall(function()
+              local _, deep_err = pcall(function()
+                error("inner")
+              end)
+              error("outer")
+            end)
+            return inner_err
+            """,
+            @engine
+          )
+
+        assert [outer_err] = results
+        assert outer_err == "test.lua:5: outer"
       end
 
       test "setmetatable before error is kept" do

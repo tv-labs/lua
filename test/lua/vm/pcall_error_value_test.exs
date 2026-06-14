@@ -19,10 +19,11 @@ defmodule Lua.VM.PcallErrorValueTest do
   Each case runs under both execution engines: the default compile path
   (closures carry bytecode and run on the dispatcher) and with bytecode
   recursively stripped (closures run on the instruction interpreter).
-  The position prefix is asserted with the correct source and line under
-  the interpreter; under the dispatcher the per-call line is not yet
-  plumbed, so the prefix is suppressed rather than attributed to a stale
-  line.
+  Both engines emit the `source:line:` prefix: the per-call line is baked
+  into the call opcode at encode time, so the dispatcher publishes it via
+  `current_position/0` at native-call boundaries exactly as the
+  interpreter threads it. The prefix is pinned to the exact source line
+  under both engines.
   """
   use ExUnit.Case, async: true
 
@@ -181,19 +182,11 @@ defmodule Lua.VM.PcallErrorValueTest do
 
         assert [false, "string", err] = results
 
-        case @engine do
-          :interpreted ->
-            # Source-first shape: a swapped `{line, source}` destructure
-            # (emitting `2:test.lua: boom`) must fail this, not just the
-            # loose `:\d+:` shape.
-            assert err =~ ~r/^test\.lua:\d+: boom$/
-
-          :compiled ->
-            # The dispatcher does not yet plumb a per-call line for native
-            # calls inside compiled closures, so the prefix is suppressed
-            # rather than attributed to a stale outer line.
-            assert err == "boom"
-        end
+        # `error("boom")` sits on line 2 of the chunk. Pin the exact line
+        # (not a loose `:\d+:`) so an off-by-one or a swapped
+        # `{line, source}` destructure (`2:test.lua: boom`) fails here.
+        # Both engines plumb the per-call line to native raise sites.
+        assert err == "test.lua:2: boom"
       end
 
       test "level 0 suppresses the prefix" do
@@ -296,6 +289,94 @@ defmodule Lua.VM.PcallErrorValueTest do
 
         assert [false, "string", _err] = results
       end
+    end
+  end
+
+  describe "compiled and interpreted engines agree on the error() prefix" do
+    test "an in-VM pcall over error() yields byte-identical strings on both engines" do
+      code = """
+      local ok, err = pcall(function()
+        error("boom")
+      end)
+      return ok, type(err), err
+      """
+
+      {[false, "string", compiled], _} = run(code, :compiled)
+      {[false, "string", interpreted], _} = run(code, :interpreted)
+
+      assert compiled == "test.lua:2: boom"
+      assert compiled == interpreted
+    end
+
+    test "a native iterator raising mid-step yields byte-identical strings on both engines" do
+      code = """
+      local ok, err = pcall(function()
+        for x in error, "deep", nil do end
+      end)
+      return ok, type(err), err
+      """
+
+      {[false, "string", compiled], _} = run(code, :compiled)
+      {[false, "string", interpreted], _} = run(code, :interpreted)
+
+      assert compiled == "test.lua:2: deep"
+      assert compiled == interpreted
+    end
+
+    test "a native call raising inside a while condition keeps the condition's line" do
+      code = """
+      local ok, err = pcall(function()
+        while error("wc") do end
+      end)
+      return ok, type(err), err
+      """
+
+      {[false, "string", compiled], _} = run(code, :compiled)
+      {[false, "string", interpreted], _} = run(code, :interpreted)
+
+      assert compiled == "test.lua:2: wc"
+      assert compiled == interpreted
+    end
+
+    test "a native call raising inside a repeat-until condition keeps the loop's line" do
+      code = """
+      local ok, err = pcall(function()
+        repeat
+        until error("rc")
+      end)
+      return ok, type(err), err
+      """
+
+      {[false, "string", compiled], _} = run(code, :compiled)
+      {[false, "string", interpreted], _} = run(code, :interpreted)
+
+      # The condition body carries no `:source_line` of its own, so it
+      # inherits the enclosing loop's line (the `repeat` at line 2) under
+      # both engines — the point is that they agree, with no `:0:` leak.
+      assert compiled == "test.lua:2: rc"
+      assert compiled == interpreted
+    end
+
+    test "a stdlib ArgumentError yields byte-identical strings on both engines" do
+      # An in-VM `pcall` over a bad-argument stdlib call returns the raw Lua
+      # error value with no `source:line:` prefix (the prefix is added only
+      # by the Elixir-side rich render in `call_function!`, not by the
+      # native raise that `pcall` traps). The point pinned here is that the
+      # dispatcher and the interpreter agree byte-for-byte on that value, so
+      # the per-call line plumbing this PR adds cannot make the two engines
+      # diverge on the bad-argument render.
+      code = """
+      local ok, err = pcall(function()
+        pairs("asdf")
+      end)
+      return ok, type(err), err
+      """
+
+      {[false, "string", compiled], _} = run(code, :compiled)
+      {[false, "string", interpreted], _} = run(code, :interpreted)
+
+      assert compiled == "bad argument #1 to 'pairs' (table expected, got string)"
+      assert compiled == interpreted
     end
   end
 end
