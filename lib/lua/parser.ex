@@ -960,8 +960,8 @@ defmodule Lua.Parser do
   defp parse_paren_expr([{:delimiter, :lparen, pos} | rest]) do
     case parse_expr(rest) do
       {:ok, expr, rest2} ->
-        case expect(rest2, :delimiter, :rparen) do
-          {:ok, _, rest3} ->
+        case expect_closing(rest2, :rparen, :lparen, pos) do
+          {:ok, rest3} ->
             {:ok, wrap_paren(expr, pos), rest3}
 
           {:error, reason} ->
@@ -985,8 +985,8 @@ defmodule Lua.Parser do
   defp parse_table([{:delimiter, :lbrace, pos} | rest]) do
     case parse_table_fields(rest, []) do
       {:ok, fields, rest2} ->
-        case expect(rest2, :delimiter, :rbrace) do
-          {:ok, _, rest3} ->
+        case expect_closing(rest2, :rbrace, :lbrace, pos) do
+          {:ok, rest3} ->
             {:ok, %Expr.Table{fields: Enum.reverse(fields), meta: Meta.new(pos)}, rest3}
 
           {:error, reason} ->
@@ -1132,16 +1132,16 @@ defmodule Lua.Parser do
   end
 
   # Parse function call arguments: (args)
-  defp parse_call_args([{:delimiter, :lparen, _} | rest]) do
-    parse_expr_list_until(rest, :rparen)
+  defp parse_call_args([{:delimiter, :lparen, open_pos} | rest]) do
+    parse_expr_list_until(rest, :rparen, :lparen, open_pos)
   end
 
   # Parse indexing: [key]
-  defp parse_index([{:delimiter, :lbracket, _} | rest]) do
+  defp parse_index([{:delimiter, :lbracket, open_pos} | rest]) do
     case parse_expr(rest) do
       {:ok, key, rest2} ->
-        case expect(rest2, :delimiter, :rbracket) do
-          {:ok, _, rest3} ->
+        case expect_closing(rest2, :rbracket, :lbracket, open_pos) do
+          {:ok, rest3} ->
             {:ok, key, rest3}
 
           {:error, reason} ->
@@ -1177,15 +1177,43 @@ defmodule Lua.Parser do
         end
 
       {:error, reason} ->
-        if acc == [] do
-          {:error, reason}
-        else
-          {:ok, Enum.reverse(acc), tokens}
+        # Recover (treat the list as ended) ONLY when the failed sub-parse
+        # made no progress — i.e. the next token simply cannot begin an
+        # expression, so the caller's terminator check should produce the
+        # error. If the sub-parse *committed* (consumed input before
+        # failing), that deeper error is the real one and must propagate;
+        # swallowing it here surfaces a misleading "expected <terminator>"
+        # at the list boundary instead of pointing at the actual mistake.
+        cond do
+          acc == [] -> {:error, reason}
+          committed?(reason, tokens) -> {:error, reason}
+          true -> {:ok, Enum.reverse(acc), tokens}
         end
     end
   end
 
-  defp parse_expr_list_until(tokens, terminator) do
+  # A sub-parse "committed" if it consumed input before failing. We detect
+  # this by comparing the error's byte offset against the offset of the
+  # token the sub-parse started on: an error positioned strictly past the
+  # start means tokens were consumed. `:unexpected_end` (EOF) is always
+  # committed — running out of input mid-list is a real error, never a
+  # clean list terminator. A missing position falls back to "not
+  # committed", preserving the previous recovery behaviour.
+  defp committed?({:unexpected_end, _message, _pos}, _tokens), do: true
+
+  defp committed?(reason, tokens) do
+    with %{byte_offset: error_offset} <- error_position(reason),
+         {_, _, %{byte_offset: start_offset}} <- peek(tokens) do
+      error_offset > start_offset
+    else
+      _ -> false
+    end
+  end
+
+  defp error_position({:unexpected_token, _type, pos, _message}), do: pos
+  defp error_position(_), do: nil
+
+  defp parse_expr_list_until(tokens, terminator, delimiter, open_pos) do
     tokens = skip_comments(tokens)
 
     case peek(tokens) do
@@ -1200,8 +1228,8 @@ defmodule Lua.Parser do
             # the terminator (e.g. `f(1, 2 -- note\n)`).
             rest = skip_comments(rest)
 
-            case expect(rest, :delimiter, terminator) do
-              {:ok, _, rest2} ->
+            case expect_closing(rest, terminator, delimiter, open_pos) do
+              {:ok, rest2} ->
                 {:ok, exprs, rest2}
 
               {:error, reason} ->
@@ -1211,6 +1239,27 @@ defmodule Lua.Parser do
           {:error, reason} ->
             {:error, reason}
         end
+    end
+  end
+
+  # Expect a closing delimiter. When the stream is exhausted (EOF), the
+  # opener was never closed — report it against the opening position (with a
+  # "add a closing X at line N" suggestion) rather than a bare "expected X,
+  # got eof" pinned to the end of the file. A non-EOF mismatch keeps the
+  # specific "expected X, got <token>" error pointing at the offending token.
+  defp expect_closing(tokens, terminator, delimiter, open_pos) do
+    case expect(tokens, :delimiter, terminator) do
+      {:ok, _, rest} ->
+        {:ok, rest}
+
+      {:error, {:unexpected_token, :eof, _close_pos, _msg}} ->
+        {:error, {:unclosed_delimiter, delimiter, open_pos}}
+
+      {:error, {:unexpected_end, _msg, _close_pos}} ->
+        {:error, {:unclosed_delimiter, delimiter, open_pos}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -1310,6 +1359,10 @@ defmodule Lua.Parser do
 
   defp convert_error({:unexpected_token, type, pos, message}, _code) do
     Error.new(:unexpected_token, message, pos, suggestion: suggest_for_token_error(type, message))
+  end
+
+  defp convert_error({:unclosed_delimiter, delimiter, open_pos}, _code) do
+    Error.unclosed_delimiter(delimiter, open_pos)
   end
 
   defp convert_error({:unexpected_end, message, pos}, _code) do
