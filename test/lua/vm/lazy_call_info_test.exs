@@ -14,9 +14,10 @@ defmodule Lua.VM.LazyCallInfoTest do
 
     * The compiled `:compiled_closure` hand-off — exercised by plain
       `function f() ... end` / `setmetatable` closures, whose sub-prototypes
-      compile WITH bytecode and so route through `Dispatcher.execute/4`. On
-      this path the executor strips call-site line info (`currentline` reports
-      `0` / `-1`).
+      compile WITH bytecode and so route through `Dispatcher.execute/4`. The
+      per-call source line is baked into the call opcode, so the live frame's
+      `currentline` resolves on this path; caller frames reached across the
+      hand-off still report `0` / `-1`.
     * The lazy `:lua_closure` interpreter path — the branch this module's name
       refers to, where `state.call_stack` is left untouched and entries are
       synthesized from `frames` only at a read boundary. Sub-prototypes only
@@ -87,6 +88,10 @@ defmodule Lua.VM.LazyCallInfoTest do
     end
 
     test "level 1 currentline" do
+      # On the compiled hand-off the per-call source line is now baked into
+      # the call opcode (feat: plumb per-call source lines through the
+      # compiled dispatcher), so level-1 `currentline` resolves to the live
+      # `debug.getinfo` call site (line 2) rather than the stripped `-1`.
       code = """
       function f()
         return debug.getinfo(1, "Sl").currentline
@@ -94,7 +99,7 @@ defmodule Lua.VM.LazyCallInfoTest do
       return f()
       """
 
-      assert run!(code) == [-1]
+      assert run!(code) == [2]
     end
 
     test "level 1 currentline on the forced-lazy interpreter path" do
