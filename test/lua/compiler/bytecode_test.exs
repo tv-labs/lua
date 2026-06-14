@@ -247,6 +247,43 @@ defmodule Lua.Compiler.BytecodeTest do
     end
   end
 
+  describe "fully_compiled?/1 coverage guard" do
+    # A representative corpus exercising every covered opcode family. Each
+    # program must compile end-to-end — root chunk and every nested function —
+    # so the dispatcher never silently falls back to the interpreter. The only
+    # documented exception is `:goto` / `:label` (asserted separately below).
+    @corpus [
+      {"arithmetic", "function f(a, b) return a + b * 2 - 1 end return f(3, 4)"},
+      {"comparison + branch", "function f(n) if n < 0 then return -n end return n end return f(-5)"},
+      {"recursion", "function fib(n) if n < 2 then return n end return fib(n-1)+fib(n-2) end return fib(10)"},
+      {"bitwise", "function f(n) return (n & 1) | (n << 2) end return f(7)"},
+      {"tables + length", "local t = {1, 2, 3} t[4] = 4 return #t"},
+      {"numeric for", "local s = 0 for i = 1, 10 do s = s + i end return s"},
+      {"generic for", "local n = 0 for _ in pairs({a=1, b=2}) do n = n + 1 end return n"},
+      {"while loop", "local i = 0 while i < 5 do i = i + 1 end return i"},
+      {"repeat loop", "local i = 0 repeat i = i + 1 until i >= 5 return i"},
+      {"break", "local i = 0 while true do i = i + 1 if i == 3 then break end end return i"},
+      {"closures + upvalues",
+       "local function counter() local n = 0 return function() n = n + 1 return n end end local c = counter() c() return c()"},
+      {"varargs + multi-return", "local function f(...) return ... end return f(1, 2, 3)"},
+      {"method call (self)", "local t = {v = 10} function t:get() return self.v end return t:get()"},
+      {"string concat", ~s{local function f(a, b) return a .. b end return f("x", "y")}}
+    ]
+
+    for {label, src} <- @corpus do
+      test "compiles fully: #{label}" do
+        assert Bytecode.fully_compiled?(compile!(unquote(src)))
+      end
+    end
+
+    test "goto/label is the one documented exception (not yet covered)" do
+      # Until the goto/label port lands, a program using `goto` is expected to
+      # fall back. This is the only construct codegen emits that the dispatcher
+      # does not yet cover; when it lands this assertion flips.
+      refute Bytecode.fully_compiled?(compile!("local i = 0 ::top:: i = i + 1 if i < 3 then goto top end return i"))
+    end
+  end
+
   describe "bitwise coverage" do
     test "a whole function using `n & 1` compiles end-to-end" do
       proto =

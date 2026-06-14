@@ -798,14 +798,6 @@ defmodule Lua.VM.Executor do
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
-  # ── set_global ─────────────────────────────────────────────────────────────
-
-  defp do_execute([{:set_global, name, source} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    value = elem(regs, source)
-    state = State.set_global(state, name, value)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
-  end
-
   # ── load_env ───────────────────────────────────────────────────────────────
   # Loads the chunk's `_ENV` table reference into `dest`. Plan A16 emits this
   # at the start of every chunk so `_ENV` (a chunk-level local at register 0)
