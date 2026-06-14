@@ -24,7 +24,6 @@ defmodule Lua.Compiler.Instruction do
   # re-uses of those registers don't read through the stale cell.
   def close_upvalues(threshold), do: {:close_upvalues, threshold}
   def get_global(dest, name), do: {:get_global, dest, name}
-  def set_global(name, source), do: {:set_global, name, source}
 
   # Loads the runtime `_G` table reference into `dest`. Emitted at the start
   # of every chunk to bind `_ENV` as a chunk-level local. Plan A16 (Lua 5.3

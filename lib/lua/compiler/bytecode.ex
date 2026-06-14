@@ -71,8 +71,7 @@ defmodule Lua.Compiler.Bytecode do
   # The bitwise family and the `:set_list` multi-return tail (below) since
   # joined the covered set, so the only opcodes the encoder still rejects
   # are `:goto` / `:label` (label-resolution semantics not yet ported to the
-  # dispatcher's flat tuple model) and `:set_global` (a codegen vestige;
-  # modern codegen emits `:set_field` on `_ENV` instead).
+  # dispatcher's flat tuple model).
   @op_closure 37
   @op_set_upvalue 38
   @op_get_open_upvalue 39
@@ -129,6 +128,21 @@ defmodule Lua.Compiler.Bytecode do
       :fallback ->
         proto_with_children
     end
+  end
+
+  @doc """
+  True when `proto` and every prototype nested within it carry a `bytecode`
+  encoding — i.e. nothing in the tree fell back to the interpreter.
+
+  Use this after `compile/1` to assert dispatcher coverage. A `false` result
+  means at least one prototype contains an opcode the encoder still rejects
+  (today: `:goto` / `:label`).
+  """
+  @spec fully_compiled?(Prototype.t()) :: boolean()
+  def fully_compiled?(%Prototype{bytecode: nil}), do: false
+
+  def fully_compiled?(%Prototype{prototypes: children}) do
+    Enum.all?(children, &fully_compiled?/1)
   end
 
   # ── Encoding ────────────────────────────────────────────────────────────
@@ -424,9 +438,7 @@ defmodule Lua.Compiler.Bytecode do
   defp encode(:break), do: {:ok, {@op_break}}
 
   # Anything else — `:goto` / `:label` (label-resolution semantics not
-  # ported to the dispatcher's flat tuple model) and `:set_global` (codegen
-  # vestige; modern codegen uses `:set_field` on `_ENV` instead) — stays on
-  # the interpreter.
+  # ported to the dispatcher's flat tuple model) — stays on the interpreter.
   #
   # `:source_line` is stripped upstream in `encode_list/2`, so it never
   # reaches this clause table.
