@@ -604,10 +604,45 @@ defmodule Lua.VM.Executor do
   end
 
   @doc false
-  @spec dispatcher_call_info(term(), term(), non_neg_integer()) :: map()
+  @spec dispatcher_call_info(term(), term(), non_neg_integer()) :: call_frame()
   def dispatcher_call_info(proto, name_hint, line) do
-    %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
+    # Hot path: every Lua call pushes one of these. Keep it a flat 3-tuple
+    # carrying the raw `name_hint` tag, and defer the `hint_name`/
+    # `hint_namewhat` decoding to the cold readers (`frame_name/1`,
+    # `frame_namewhat/1`) that only run during traceback formatting and
+    # `debug.getinfo`. A tuple is ~4 words vs ~7 for the old 4-key map, and
+    # skips two function calls per call frame.
+    {proto.source, line, name_hint}
   end
+
+  @typedoc false
+  @type call_frame() :: {term(), non_neg_integer(), term()} | map()
+
+  # Frame accessors decode either the runtime's flat 3-tuple
+  # `{source, line, name_hint}` or a caller-supplied map frame
+  # (`%{source:, line:, name:}` — accepted by the public `ErrorFormatter`
+  # entry points and used in tests). Map frames already carry decoded
+  # `:name`/`:namewhat`, so there is no hint to expand.
+
+  @doc false
+  @spec frame_source(call_frame()) :: term()
+  def frame_source({source, _line, _hint}), do: source
+  def frame_source(frame) when is_map(frame), do: Map.get(frame, :source)
+
+  @doc false
+  @spec frame_line(call_frame()) :: non_neg_integer() | nil
+  def frame_line({_source, line, _hint}), do: line
+  def frame_line(frame) when is_map(frame), do: Map.get(frame, :line)
+
+  @doc false
+  @spec frame_name(call_frame()) :: String.t() | nil
+  def frame_name({_source, _line, hint}), do: hint_name(hint)
+  def frame_name(frame) when is_map(frame), do: Map.get(frame, :name)
+
+  @doc false
+  @spec frame_namewhat(call_frame()) :: String.t()
+  def frame_namewhat({_source, _line, hint}), do: hint_namewhat(hint)
+  def frame_namewhat(frame) when is_map(frame), do: Map.get(frame, :namewhat, "")
 
   # ── Break ──────────────────────────────────────────────────────────────────
 
@@ -1101,7 +1136,7 @@ defmodule Lua.VM.Executor do
         # `:call_one` clause handles dispatcher → dispatcher chains
         # without going through this branch.
         args = collect_args(regs, base + 1, total_args)
-        call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
+        call_info = {proto.source, line, name_hint}
         State.check_call_depth!(state)
         state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1}
         {results, state} = Dispatcher.execute(callee_proto, args, callee_upvalues, state)
@@ -1143,7 +1178,7 @@ defmodule Lua.VM.Executor do
           open_upvalues: state.open_upvalues
         }
 
-        call_info = %{source: proto.source, line: line, name: hint_name(name_hint), namewhat: hint_namewhat(name_hint)}
+        call_info = {proto.source, line, name_hint}
 
         State.check_call_depth!(state)
 
