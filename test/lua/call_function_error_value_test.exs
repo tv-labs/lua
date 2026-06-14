@@ -182,4 +182,47 @@ defmodule Lua.CallFunctionErrorValueTest do
       assert %Lua.VM.TypeError{error_kind: :index_non_table} = error.original
     end
   end
+
+  describe "call_function!/3 rich render attributes the right source:line" do
+    test "ArgumentError raised from a stdlib call inside a compiled chunk" do
+      code = """
+      function foo()
+        pairs("asdf")
+      end
+      """
+
+      {_, lua} = Lua.eval!(Lua.new(), code, source: "regression.lua")
+
+      error =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.call_function!(lua, [:foo], [])
+        end
+
+      message = Exception.message(error)
+      assert message =~ "regression.lua:2:"
+      assert message =~ "bad argument #1 to 'pairs'"
+      assert error.original.line == 2
+      assert error.original.source == "regression.lua"
+    end
+
+    test "ArgumentError raised inside a generic_for loop body attributes the call line" do
+      code = """
+      function foo()
+        for i in pairs("asdf") do
+          print(i)
+        end
+      end
+      """
+
+      {_, lua} = Lua.eval!(Lua.new(), code, source: "regression.lua")
+
+      error =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.call_function!(lua, [:foo], [])
+        end
+
+      assert error.original.line == 2
+      assert Exception.message(error) =~ "regression.lua:2:"
+    end
+  end
 end

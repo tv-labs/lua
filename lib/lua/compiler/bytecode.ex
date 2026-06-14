@@ -122,7 +122,7 @@ defmodule Lua.Compiler.Bytecode do
 
     proto_with_children = %{proto | prototypes: compiled_children}
 
-    case encode_list(proto.instructions, []) do
+    case encode_list(proto.instructions, [], 0) do
       {:ok, encoded} ->
         %{proto_with_children | bytecode: List.to_tuple(encoded)}
 
@@ -135,26 +135,103 @@ defmodule Lua.Compiler.Bytecode do
   #
   # Walks an instruction list, accumulating opcode tuples in reverse. On
   # the first uncovered opcode, the whole list bails out as `:fallback`.
+  #
+  # `:source_line` opcodes are stripped from the bytecode entirely — keeping
+  # them would cost one no-op dispatch each (~228k extra cycles for fib(25))
+  # — and instead update the rolling `current_line`. Call opcodes
+  # (`:call_one`/`:call_zero`/`:call_multi`) bake that line into their own
+  # tuple so the dispatcher can pass it through to the executor at native-
+  # call boundaries without any parallel lookup table. Other opcodes ignore
+  # the line.
 
-  defp encode_list([], acc), do: {:ok, Enum.reverse(acc)}
+  defp encode_list([], acc, _current_line), do: {:ok, Enum.reverse(acc)}
 
-  # `:source_line` opcodes are stripped from the bytecode entirely. They
-  # only feed error attribution, which is deferred to B5d-v2 for compiled
-  # prototypes. Keeping them in the bytecode would cost one no-op
-  # dispatch each — for fib(25), that's ~228k extra dispatch cycles
-  # against zero observable benefit at this stage.
-  defp encode_list([{:source_line, _, _} | rest], acc) do
-    encode_list(rest, acc)
+  defp encode_list([{:source_line, n, _} | rest], acc, _current_line) do
+    encode_list(rest, acc, n)
   end
 
-  defp encode_list([instr | rest], acc) do
-    case encode(instr) do
-      {:ok, encoded} -> encode_list(rest, [encoded | acc])
-      :fallback -> :fallback
+  defp encode_list([instr | rest], acc, current_line) do
+    case encode(instr, current_line) do
+      {:ok, encoded} ->
+        encode_list(rest, [annotate_line(encoded, current_line) | acc], current_line)
+
+      :fallback ->
+        :fallback
     end
   end
 
+  # Bakes the current source line into the call opcodes and `:generic_for`
+  # so the dispatcher can attribute native-call errors without a parallel
+  # lookup table. `:generic_for` carries its own line because the iterator
+  # is invoked at the `for` statement before the body's `:source_line`
+  # opcodes run, so a native iterator raising mid-step (e.g. `error()`)
+  # would otherwise leak `:0:`. Other opcodes pass through unchanged —
+  # line attribution for non-call raise sites (binops, indexing, concat)
+  # is deferred.
+  defp annotate_line({@op_call_one, base, args, hint}, line), do: {@op_call_one, base, args, hint, line}
+
+  defp annotate_line({@op_call_zero, base, args, hint}, line), do: {@op_call_zero, base, args, hint, line}
+
+  defp annotate_line({@op_call_multi, base, args, results, hint}, line),
+    do: {@op_call_multi, base, args, results, hint, line}
+
+  defp annotate_line({@op_generic_for, base, var_regs, body}, line), do: {@op_generic_for, base, var_regs, body, line}
+
+  defp annotate_line(other, _line), do: other
+
   # ── Per-opcode encoding ─────────────────────────────────────────────────
+  #
+  # Body-carrying opcodes (`:test` / `:numeric_for` / `:while_loop` /
+  # `:repeat_loop` / `:generic_for`) match `encode/2` so they can seed their
+  # nested-body `encode_list` with the in-scope `current_line`. Without it
+  # the nested body would restart at line 0 and a native call raising inside
+  # a while/repeat condition (which carries no `:source_line` opcode of its
+  # own) would bake `:0:` into the §6.1 error value, diverging from the
+  # interpreter, which threads the enclosing line through the body. Every
+  # other opcode is line-agnostic and delegates to `encode/1`.
+
+  defp encode({:test, reg, then_body, else_body}, current_line) do
+    with {:ok, then_enc} <- encode_list(then_body, [], current_line),
+         {:ok, else_enc} <- encode_list(else_body, [], current_line) do
+      {:ok, {@op_test, reg, List.to_tuple(then_enc), List.to_tuple(else_enc)}}
+    end
+  end
+
+  defp encode({:numeric_for, base, loop_var, body}, current_line) do
+    case encode_list(body, [], current_line) do
+      {:ok, body_enc} ->
+        {:ok, {@op_numeric_for, base, loop_var, List.to_tuple(body_enc)}}
+
+      :fallback ->
+        :fallback
+    end
+  end
+
+  defp encode({:while_loop, cond_body, test_reg, loop_body}, current_line) do
+    with {:ok, cond_enc} <- encode_list(cond_body, [], current_line),
+         {:ok, body_enc} <- encode_list(loop_body, [], current_line) do
+      {:ok, {@op_while_loop, test_reg, List.to_tuple(cond_enc), List.to_tuple(body_enc)}}
+    end
+  end
+
+  defp encode({:repeat_loop, loop_body, cond_body, test_reg}, current_line) do
+    with {:ok, body_enc} <- encode_list(loop_body, [], current_line),
+         {:ok, cond_enc} <- encode_list(cond_body, [], current_line) do
+      {:ok, {@op_repeat_loop, test_reg, List.to_tuple(body_enc), List.to_tuple(cond_enc)}}
+    end
+  end
+
+  defp encode({:generic_for, base, var_regs, body}, current_line) when is_list(var_regs) do
+    case encode_list(body, [], current_line) do
+      {:ok, body_enc} ->
+        {:ok, {@op_generic_for, base, List.to_tuple(var_regs), List.to_tuple(body_enc)}}
+
+      :fallback ->
+        :fallback
+    end
+  end
+
+  defp encode(instr, _current_line), do: encode(instr)
 
   defp encode({:load_constant, dest, value}), do: {:ok, {@op_load_constant, dest, value}}
 
@@ -216,16 +293,8 @@ defmodule Lua.Compiler.Bytecode do
   defp encode({:not, dest, src}), do: {:ok, {@op_not, dest, src}}
 
   # `:test` carries nested instruction lists for the then/else branches.
-  # Both branches encode independently; either falling back collapses the
-  # whole test (and the enclosing prototype) to interpretation. Empty
-  # branches encode to an empty tuple so the dispatcher can distinguish
-  # "no branch" from "fell off the end of a branch".
-  defp encode({:test, reg, then_body, else_body}) do
-    with {:ok, then_enc} <- encode_list(then_body, []),
-         {:ok, else_enc} <- encode_list(else_body, []) do
-      {:ok, {@op_test, reg, List.to_tuple(then_enc), List.to_tuple(else_enc)}}
-    end
-  end
+  # It encodes via `encode/2` (above) so each branch inherits the enclosing
+  # `current_line`.
 
   # `:call` shapes:
   #
@@ -320,50 +389,16 @@ defmodule Lua.Compiler.Bytecode do
 
   defp encode({:length, dest, source}), do: {:ok, {@op_length, dest, source}}
 
-  # `:numeric_for`, `:while_loop`, `:repeat_loop`, `:generic_for` each
-  # carry nested instruction lists for the loop body (and, for while /
-  # repeat, the condition). Bodies encode recursively. The B5b-v2 guard
-  # against `:break` inside `:numeric_for` is gone — `:break` is a
-  # first-class opcode now and the dispatcher's `find_loop_exit/1`
-  # handles the unwind.
-
-  defp encode({:numeric_for, base, loop_var, body}) do
-    case encode_list(body, []) do
-      {:ok, body_enc} ->
-        {:ok, {@op_numeric_for, base, loop_var, List.to_tuple(body_enc)}}
-
-      :fallback ->
-        :fallback
-    end
-  end
-
-  defp encode({:while_loop, cond_body, test_reg, loop_body}) do
-    with {:ok, cond_enc} <- encode_list(cond_body, []),
-         {:ok, body_enc} <- encode_list(loop_body, []) do
-      {:ok, {@op_while_loop, test_reg, List.to_tuple(cond_enc), List.to_tuple(body_enc)}}
-    end
-  end
-
-  defp encode({:repeat_loop, loop_body, cond_body, test_reg}) do
-    with {:ok, body_enc} <- encode_list(loop_body, []),
-         {:ok, cond_enc} <- encode_list(cond_body, []) do
-      {:ok, {@op_repeat_loop, test_reg, List.to_tuple(body_enc), List.to_tuple(cond_enc)}}
-    end
-  end
-
-  # `:generic_for` carries a list of variable register indices that
-  # receive successive iterator results plus the body. The variable list
-  # is small (typically one or two regs) so we encode it as a tuple for
-  # the dispatcher to walk with `:erlang.element/2`.
-  defp encode({:generic_for, base, var_regs, body}) when is_list(var_regs) do
-    case encode_list(body, []) do
-      {:ok, body_enc} ->
-        {:ok, {@op_generic_for, base, List.to_tuple(var_regs), List.to_tuple(body_enc)}}
-
-      :fallback ->
-        :fallback
-    end
-  end
+  # `:numeric_for`, `:while_loop`, `:repeat_loop`, `:generic_for` each carry
+  # nested instruction lists for the loop body (and, for while / repeat, the
+  # condition). They encode via `encode/2` (above) so the nested bodies
+  # inherit the enclosing `current_line` — the while/repeat condition body
+  # carries no `:source_line` opcode of its own, so without the inherited
+  # line a native call raising inside the condition would bake `:0:`. The
+  # B5b-v2 guard against `:break` inside `:numeric_for` is gone — `:break` is
+  # a first-class opcode now and the dispatcher's `find_loop_exit/1` handles
+  # the unwind. `:generic_for`'s variable-register list is encoded as a tuple
+  # for the dispatcher to walk with `:erlang.element/2`.
 
   # ── Closures, upvalues, varargs, self, concat, break ────────────────────
 
