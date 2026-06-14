@@ -652,20 +652,30 @@ defmodule Lua.VM.Executor do
   end
 
   # ── Goto ───────────────────────────────────────────────────────────────────
+  #
+  # `Lua.Compiler.GotoResolution` rewrote each `goto` to `{:goto, id}` and
+  # recorded `proto.goto_targets[id] = {depth, target_tail}`. Dropping `depth`
+  # `cont` entries leaves the blocks between here and the target; `target_tail`
+  # is the destination block's instruction suffix after the `::label::`.
 
-  defp do_execute([{:goto, label} | rest], regs, upvalues, proto, state, cont, frames, line) do
-    case find_label(rest, label) do
-      {:found, after_label} ->
-        do_execute(after_label, regs, upvalues, proto, state, cont, frames, line)
+  defp do_execute([{:goto, id} | _rest], regs, upvalues, proto, state, cont, frames, line) do
+    case proto.goto_targets do
+      %{^id => {depth, level, target_tail}} ->
+        # Close upvalue cells for locals allocated beyond the target's scope:
+        # the blocks the goto leaves (or re-enters, on a backward jump) take
+        # their captured locals with them, so the next pass through gets fresh
+        # cells — matching Lua 5.3 §3.3.4 block-exit semantics.
+        state = close_open_upvalues_at_or_above(state, level)
+        do_execute(target_tail, regs, upvalues, proto, state, Enum.drop(cont, depth), frames, line)
 
-      :not_found ->
-        raise InternalError, value: "goto target '#{label}' not found"
+      _ ->
+        raise InternalError, value: "goto target not found"
     end
   end
 
   # ── Label ──────────────────────────────────────────────────────────────────
 
-  defp do_execute([{:label, _name} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:label, _name, _level} | rest], regs, upvalues, proto, state, cont, frames, line) do
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
@@ -2224,29 +2234,6 @@ defmodule Lua.VM.Executor do
   defp find_loop_exit([{:loop_exit, exit_is} | rest_cont]), do: {exit_is, rest_cont}
   defp find_loop_exit([_ | rest_cont]), do: find_loop_exit(rest_cont)
   defp find_loop_exit([]), do: raise(InternalError, value: "break outside loop")
-
-  # ── find_label — scan instruction list for a :label marker ────────────────
-
-  defp find_label([], _label), do: :not_found
-
-  defp find_label([{:label, name} | rest], label) when name == label do
-    {:found, rest}
-  end
-
-  defp find_label([{:test, _reg, then_body, else_body} | rest], label) do
-    case find_label(then_body, label) do
-      {:found, _} = found ->
-        found
-
-      :not_found ->
-        case find_label(else_body, label) do
-          {:found, _} = found -> found
-          :not_found -> find_label(rest, label)
-        end
-    end
-  end
-
-  defp find_label([_ | rest], label), do: find_label(rest, label)
 
   # ── call_value — invoke a function for generic_for iterator ───────────────
 

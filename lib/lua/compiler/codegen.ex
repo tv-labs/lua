@@ -127,7 +127,7 @@ defmodule Lua.Compiler.Codegen do
   defp instruction_size({:call, base, _ac, _rc, _hint}), do: base + 1
   defp instruction_size({:source_line, _line, _src}), do: 0
   defp instruction_size({:close_upvalues, _threshold}), do: 0
-  defp instruction_size({:label, _name}), do: 0
+  defp instruction_size({:label, _name, _level}), do: 0
   defp instruction_size({:set_list, _table, start, count, _offset}) when is_integer(count), do: start + count
   defp instruction_size({:set_list, _table, start, {:multi, init}, _offset}), do: start + init
   defp instruction_size({:numeric_for, base, _loop_var, body}), do: max(base + 3, instruction_peak(body))
@@ -856,8 +856,16 @@ defmodule Lua.Compiler.Codegen do
   end
 
   # Label statement
-  defp gen_statement(%Statement.Label{name: name}, ctx) do
-    {[{:label, name}], ctx}
+  #
+  # The label carries the live-local register level recorded by scope
+  # resolution (`next_register` counts locals only, excluding temps) so a
+  # `goto` targeting it knows the close threshold: jumping to the label closes
+  # any open upvalue cell for a local allocated beyond this level (a local
+  # declared deeper in the block being re-entered or exited). See
+  # `Lua.Compiler.GotoResolution`.
+  defp gen_statement(%Statement.Label{name: name} = label, ctx) do
+    level = Map.fetch!(ctx.scope.var_map, {:label_level, label})
+    {[{:label, name, level}], ctx}
   end
 
   # Stub for other statements

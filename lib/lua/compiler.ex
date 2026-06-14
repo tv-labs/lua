@@ -8,6 +8,7 @@ defmodule Lua.Compiler do
   alias Lua.AST.Chunk
   alias Lua.Compiler.Bytecode
   alias Lua.Compiler.Codegen
+  alias Lua.Compiler.GotoResolution
   alias Lua.Compiler.Prototype
   alias Lua.Compiler.Scope
 
@@ -29,7 +30,16 @@ defmodule Lua.Compiler do
   def compile(%Chunk{} = chunk, opts \\ []) do
     with {:ok, scope_state} <- Scope.resolve(chunk, opts),
          {:ok, prototype} <- Codegen.generate(chunk, scope_state, opts) do
-      {:ok, Bytecode.compile(prototype)}
+      # Encode bytecode first (it reads the raw `:goto` / `:label` stream),
+      # then resolve gotos for the list interpreter. The two passes are
+      # independent: the dispatcher runs `bytecode`, the interpreter runs the
+      # resolved `instructions` plus `goto_targets`.
+      prototype =
+        prototype
+        |> Bytecode.compile()
+        |> GotoResolution.resolve()
+
+      {:ok, prototype}
     end
   end
 

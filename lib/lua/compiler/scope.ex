@@ -395,6 +395,16 @@ defmodule Lua.Compiler.Scope do
     %{state | locals: saved_locals, next_register: saved_next_register}
   end
 
+  # Record the live-local register watermark at each label. A `goto` to this
+  # label closes any open-upvalue cell at or above this register, so locals
+  # declared deeper in the blocks it leaves or re-enters get fresh cells
+  # (Lua 5.3 §3.3.4). `next_register` counts locals only (not codegen temps),
+  # which is exactly the close threshold. Keyed by the label node, which is
+  # unique per position, so reused names across sibling blocks stay distinct.
+  defp resolve_statement(%Statement.Label{} = label, state) do
+    %{state | var_map: Map.put(state.var_map, {:label_level, label}, state.next_register)}
+  end
+
   # For now, stub out other statement types - we'll implement them incrementally
   defp resolve_statement(_stmt, state), do: state
 
