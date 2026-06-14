@@ -1218,87 +1218,100 @@ defmodule Lua.Compiler.Codegen do
           end
       end
 
-    case last_arg_type do
-      :vararg ->
-        # f(a, b, ...) - load a, b then all varargs
-        init_args = Enum.slice(args, 0..-2//1)
-        arg_count = length(init_args)
-        ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
+    {instructions, ctx} =
+      case last_arg_type do
+        :vararg ->
+          # f(a, b, ...) - load a, b then all varargs
+          init_args = Enum.slice(args, 0..-2//1)
+          arg_count = length(init_args)
+          ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
 
-        {arg_instructions, arg_regs, ctx} =
-          Enum.reduce(init_args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
-            {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
-            {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
-          end)
+          {arg_instructions, arg_regs, ctx} =
+            Enum.reduce(init_args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
+              {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
+              {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
+            end)
 
-        move_instructions = gen_move_args(arg_regs, base_reg + 1)
+          move_instructions = gen_move_args(arg_regs, base_reg + 1)
 
-        vararg_base = base_reg + 1 + arg_count
-        vararg_instruction = Instruction.vararg(vararg_base, 0)
-        call_instruction = Instruction.call(base_reg, -(arg_count + 1), 1, name_hint)
+          vararg_base = base_reg + 1 + arg_count
+          vararg_instruction = Instruction.vararg(vararg_base, 0)
+          call_instruction = Instruction.call(base_reg, -(arg_count + 1), 1, name_hint)
 
-        {function_instructions ++
-           move_function ++
-           arg_instructions ++
-           move_instructions ++
-           [vararg_instruction, call_instruction], base_reg, ctx}
+          {function_instructions ++
+             move_function ++
+             arg_instructions ++
+             move_instructions ++
+             [vararg_instruction, call_instruction], ctx}
 
-      :multi_call ->
-        # f(a, b, g()) - load a, b then expand all results of g()
-        init_args = Enum.slice(args, 0..-2//1)
-        last_call = List.last(args)
-        fixed_count = length(init_args)
+        :multi_call ->
+          # f(a, b, g()) - load a, b then expand all results of g()
+          init_args = Enum.slice(args, 0..-2//1)
+          last_call = List.last(args)
+          fixed_count = length(init_args)
 
-        ctx = %{ctx | next_reg: base_reg + 1 + fixed_count}
+          ctx = %{ctx | next_reg: base_reg + 1 + fixed_count}
 
-        {arg_instructions, arg_regs, ctx} =
-          Enum.reduce(init_args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
-            {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
-            {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
-          end)
+          {arg_instructions, arg_regs, ctx} =
+            Enum.reduce(init_args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
+              {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
+              {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
+            end)
 
-        move_instructions = gen_move_args(arg_regs, base_reg + 1)
+          move_instructions = gen_move_args(arg_regs, base_reg + 1)
 
-        # Ensure next_reg is positioned for the inner call
-        ctx = %{ctx | next_reg: base_reg + 1 + fixed_count}
+          # Ensure next_reg is positioned for the inner call
+          ctx = %{ctx | next_reg: base_reg + 1 + fixed_count}
 
-        # Compile the inner call — its results will be placed at base+1+fixed_count
-        {inner_call_instructions, _inner_base, ctx} = gen_expr(last_call, ctx)
+          # Compile the inner call — its results will be placed at base+1+fixed_count
+          {inner_call_instructions, _inner_base, ctx} = gen_expr(last_call, ctx)
 
-        # Patch the inner call's result_count to -2 (expand all results)
-        inner_call_instructions = patch_call_result_count(inner_call_instructions, -2)
+          # Patch the inner call's result_count to -2 (expand all results)
+          inner_call_instructions = patch_call_result_count(inner_call_instructions, -2)
 
-        # Outer call uses {:multi, fixed_count} to collect fixed + expanded args
-        call_instruction = Instruction.call(base_reg, {:multi, fixed_count}, 1, name_hint)
+          # Outer call uses {:multi, fixed_count} to collect fixed + expanded args
+          call_instruction = Instruction.call(base_reg, {:multi, fixed_count}, 1, name_hint)
 
-        {function_instructions ++
-           move_function ++
-           arg_instructions ++
-           move_instructions ++
-           inner_call_instructions ++
-           [call_instruction], base_reg, ctx}
+          {function_instructions ++
+             move_function ++
+             arg_instructions ++
+             move_instructions ++
+             inner_call_instructions ++
+             [call_instruction], ctx}
 
-      :normal ->
-        # Normal function call
-        arg_count = length(args)
-        ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
+        :normal ->
+          # Normal function call
+          arg_count = length(args)
+          ctx = %{ctx | next_reg: base_reg + 1 + arg_count}
 
-        {arg_instructions, arg_regs, ctx} =
-          Enum.reduce(args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
-            {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
-            {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
-          end)
+          {arg_instructions, arg_regs, ctx} =
+            Enum.reduce(args, {[], [], ctx}, fn arg, {instructions, regs, ctx} ->
+              {arg_instructions, arg_reg, ctx} = gen_expr(arg, ctx)
+              {instructions ++ arg_instructions, regs ++ [arg_reg], ctx}
+            end)
 
-        move_instructions = gen_move_args(arg_regs, base_reg + 1)
+          move_instructions = gen_move_args(arg_regs, base_reg + 1)
 
-        call_instruction = Instruction.call(base_reg, arg_count, 1, name_hint)
+          call_instruction = Instruction.call(base_reg, arg_count, 1, name_hint)
 
-        {function_instructions ++
-           move_function ++
-           arg_instructions ++
-           move_instructions ++
-           [call_instruction], base_reg, ctx}
-    end
+          {function_instructions ++
+             move_function ++
+             arg_instructions ++
+             move_instructions ++
+             [call_instruction], ctx}
+      end
+
+    # A single-result call leaves its result in `base_reg`; the callee,
+    # argument, and vararg temp registers above it are dead. Record the
+    # peak so `max_registers` still covers that transient spread (the
+    # `instruction_size` backstop scans the emitted writes regardless),
+    # then reclaim everything above the result so sibling subexpressions
+    # — e.g. the second call in `fib(n-1) + fib(n-2)` — reuse the same
+    # registers instead of stacking fresh ones on top.
+    ctx = record_peak(ctx)
+    ctx = %{ctx | next_reg: base_reg + 1}
+
+    {instructions, base_reg, ctx}
   end
 
   defp gen_expr(%Expr.Table{fields: fields}, ctx) do
