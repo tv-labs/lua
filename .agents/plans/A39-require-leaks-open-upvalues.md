@@ -5,7 +5,7 @@ issue: 244
 pr: 245
 branch: fix/require-leaks-open-upvalues
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - luassert.assertions

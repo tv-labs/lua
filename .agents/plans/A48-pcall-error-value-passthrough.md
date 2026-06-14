@@ -5,7 +5,7 @@ issue: 334
 pr: 335
 branch: fix/pcall-error-value-passthrough
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - structured error objects (error({code = ...})) survive pcall

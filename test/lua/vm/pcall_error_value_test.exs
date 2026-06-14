@@ -148,6 +148,22 @@ defmodule Lua.VM.PcallErrorValueTest do
 
         assert results == [false, true]
       end
+
+      test "stdlib bad-argument error returns the terse raw string" do
+        {results, _state} =
+          run(
+            """
+            local ok, err = pcall(function()
+              pairs("asdf")
+            end)
+            return ok, type(err), err
+            """,
+            @engine
+          )
+
+        assert [false, "string", err] = results
+        assert err == "bad argument #1 to 'pairs' (table expected, got string)"
+      end
     end
 
     describe "error() position prefix on string messages (#{engine} engine)" do

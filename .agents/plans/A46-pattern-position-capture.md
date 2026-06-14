@@ -5,7 +5,7 @@ issue: 257
 pr: 288
 branch: feat/pattern-position-capture
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - pm.lua

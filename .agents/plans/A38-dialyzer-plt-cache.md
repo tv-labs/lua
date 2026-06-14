@@ -5,7 +5,7 @@ issue: null
 pr: 243
 branch: ci/dialyzer-plt-cache
 base: main
-status: review
+status: merged
 direction: A
 ---
 

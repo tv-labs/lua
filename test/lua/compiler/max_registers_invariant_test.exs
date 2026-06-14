@@ -3,12 +3,14 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
   Pins the load-bearing invariant that `proto.max_registers` is large
   enough to hold every register the encoded bytecode references.
 
-  The dispatcher sizes its register tuple exactly to `max_registers`
-  (no `+16` safety buffer like the interpreter), so any register write
-  beyond that bound raises `:badarg` from `:erlang.setelement/3`. The
-  invariant is enforced by `Lua.Compiler.Codegen.record_peak/1`; this
-  test pins it across the existing compilable surface so regressions
-  surface in CI rather than as a runtime crash.
+  The dispatcher sizes its register tuple to `max_registers` plus a
+  fixed `+16` slack buffer (`@reg_slack`), so a small codegen undercount
+  is absorbed rather than crashing. Writes beyond that buffer still raise
+  `:badarg` from `:erlang.setelement/3`, so the invariant — that codegen
+  bounds every encoded register index — is what keeps us off the slack.
+  It is enforced by `Lua.Compiler.Codegen.record_peak/1`; this test pins
+  it across the existing compilable surface so undercounts surface in CI
+  rather than as a runtime crash once they exceed the buffer.
 
   The walker recurses into nested branch bodies (`:test`) and nested
   prototypes so the bound is checked at every level.
@@ -89,6 +91,18 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
       # watermark can equal max_registers (one past the last live slot), so
       # it must not count toward the max-register bound.
       op == Bytecode.op_close_upvalues() -> []
+      # Bitwise opcodes: {tag, dest, a, b, hint_a, hint_b} read a/b and
+      # write dest. `bitwise_not` is unary: {tag, dest, src, hint}.
+      op == Bytecode.op_bitwise_and() -> [1, 2, 3]
+      op == Bytecode.op_bitwise_or() -> [1, 2, 3]
+      op == Bytecode.op_bitwise_xor() -> [1, 2, 3]
+      op == Bytecode.op_shift_left() -> [1, 2, 3]
+      op == Bytecode.op_shift_right() -> [1, 2, 3]
+      op == Bytecode.op_bitwise_not() -> [1, 2]
+      # set_list_multi: {tag, table_reg, start, init_count, offset}. The
+      # multi-return values occupy start..top at runtime, but the only
+      # syntactic register operands are table_reg and the start slot.
+      op == Bytecode.op_set_list_multi() -> [1, 2]
       true -> raise "register_positions/1 is missing a case for opcode #{inspect(op)}"
     end
   end
@@ -240,6 +254,39 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
        local y = c + d
        local z = x * y
        return z
+     end
+     """},
+    {"bitwise + shift + bnot",
+     """
+     function f(a, b)
+       local x = a & b
+       local y = a | b
+       local z = a ~ b
+       local s = a << b
+       local r = a >> b
+       return x + y + z + s + r + ~a
+     end
+     """},
+    {"constructor absorbing a call tail (set_list_multi)",
+     """
+     function pair() return 10, 20 end
+     function build()
+       local t = {1, pair()}
+       return t[1], t[2], t[3]
+     end
+     """},
+    {"constructor absorbing a vararg tail (set_list_multi)",
+     """
+     function build(...)
+       local t = {1, ...}
+       return t[1], t[2], t[3]
+     end
+     """},
+    {"constructor with a bare vararg tail (set_list_multi, init_count==0)",
+     """
+     function build(...)
+       local t = {...}
+       return t[1], t[2], t[3]
      end
      """}
   ]

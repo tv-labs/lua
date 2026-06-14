@@ -42,12 +42,28 @@ final.
       summarizing the diff vs `1.0.0-rc.1`.
 - [ ] `mix test` passes (≥ current count + new tests from
       A19-A35).
-- [ ] **Suite gate**: at least N/29 official Lua 5.3 suite files
-      passing, where N is set by A20-A24 outcomes. Target is
-      "near-fully compliant"; specific number to be set after triage
-      lands. Files explicitly out of scope (`os.execute` etc.) are
-      documented as deliberate non-goals in the README and
-      CHANGELOG. **Best-guess: ≥22/29 with documented exclusions.**
+- [ ] **Suite gate**: **20/29 official Lua 5.3 suite files passing,
+      with 9 documented exclusions.** (Settled 2026-06-10 after a live
+      re-triage of every whole-file skip; supersedes the earlier
+      best-guess ≥22, which was never achievable — 22 would require a
+      capability or perf rewrite we have deliberately deferred.)
+      - **Today: 17/29 pass.** Path to 20 is three triage plans:
+        `strings.lua` (`tostring(function)` address fixed, clearing
+        line 126; next blocker is `string.format('%q')` escaping at
+        line 153 — a format chain), `sort.lua` and `math.lua` (need a
+        triage pass each). First-failure sites are recorded in
+        `test/lua53_skips.exs`.
+      - **9 documented exclusions**, by category (reasons live in
+        `test/lua53_skips.exs` + `@deferred_permanent`):
+        - filesystem / subprocess non-goals (4): `main`, `files`,
+          `attrib`, `verybig`
+        - capability non-goals (2): `coroutine`, `db`
+        - perf-bound, revisit 1.0.x (2): `big`, `closure` (both >90s)
+        - PUC error-wording divergence (1): `errors`
+      - If `sort` or `math` proves to be a wording/perf rabbit hole,
+        exclude it too and ship at the resulting floor (≥18). Every
+        exclusion must stay a documented non-goal/known-limit in
+        `lua53_skips.exs`, the README, and the CHANGELOG.
 - [ ] **Perf gate**: `mix lua.bench --compare-baseline` passes
       against the locked-in baseline from A35. No workload more than
       25% slower than Luerl on the same machine.

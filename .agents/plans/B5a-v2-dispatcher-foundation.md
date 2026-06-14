@@ -5,7 +5,7 @@ issue: null
 pr: 237
 branch: perf/dispatcher-foundation
 base: main
-status: review
+status: merged
 direction: B
 unlocks:
   - B5b-v2 (table opcodes), B5c-v2 (closures), B5d-v2 (error fidelity)

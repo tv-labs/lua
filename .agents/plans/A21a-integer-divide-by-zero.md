@@ -5,7 +5,7 @@ issue: 259
 pr: 292
 branch: fix/runtime-type-cluster
 base: main
-status: review
+status: merged
 direction: A
 ---
 

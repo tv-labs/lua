@@ -5,7 +5,7 @@ issue: 261
 pr: 291
 branch: fix/metamethod-control-flow
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - pm.lua

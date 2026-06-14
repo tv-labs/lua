@@ -5,7 +5,7 @@ issue: 310
 pr: 316
 branch: perf/string-format-width-iolist
 base: main
-status: review
+status: merged
 direction: B
 ---
 

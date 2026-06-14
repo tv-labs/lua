@@ -5,7 +5,7 @@ issue: 279
 pr: 290
 branch: feat/debug-getinfo-name
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - constructs.lua

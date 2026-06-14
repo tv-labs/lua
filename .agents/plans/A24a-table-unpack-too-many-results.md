@@ -5,7 +5,7 @@ issue: 262
 pr: 293
 branch: fix/stdlib-data-structure
 base: main
-status: review
+status: merged
 direction: A
 ---
 

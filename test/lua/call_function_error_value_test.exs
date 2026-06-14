@@ -54,6 +54,20 @@ defmodule Lua.CallFunctionErrorValueTest do
       refute reason =~ "\e["
       refute reason =~ "\n"
     end
+
+    test "a stdlib bad-argument ArgumentError stays a terse one-line string" do
+      {ref, lua} = fun!(~S|function() for i in pairs("asdf") do end end|)
+
+      assert {:error, reason, %Lua{}} = Lua.call_function(lua, ref, [])
+
+      assert is_binary(reason)
+      assert reason =~ "bad argument #1 to 'pairs'"
+      assert reason =~ "table expected"
+      assert reason =~ "got string"
+      refute reason =~ "\e["
+      refute reason =~ "at -no-source-"
+      refute reason =~ "\n"
+    end
   end
 
   describe "call_function/3 passes non-string error objects through (pcall parity)" do
@@ -96,6 +110,19 @@ defmodule Lua.CallFunctionErrorValueTest do
 
       refute reason =~ "\e["
     end
+
+    test "ArgumentError reason has no escape codes when ANSI is enabled" do
+      previous = Application.get_env(:elixir, :ansi_enabled)
+      Application.put_env(:elixir, :ansi_enabled, true)
+      on_exit(fn -> Application.put_env(:elixir, :ansi_enabled, previous) end)
+
+      assert IO.ANSI.enabled?()
+
+      {ref, lua} = fun!(~S|function() pairs("asdf") end|)
+      assert {:error, reason, %Lua{}} = Lua.call_function(lua, ref, [])
+
+      refute reason =~ "\e["
+    end
   end
 
   describe "call_function!/3 keeps the rich render" do
@@ -113,6 +140,46 @@ defmodule Lua.CallFunctionErrorValueTest do
       # The rich render includes the raw-message body that the terse
       # programmatic reason deliberately omits.
       assert message =~ "runtime error:"
+    end
+  end
+
+  describe "call_function!/3 preserves the original VM exception via :original" do
+    test "ArgumentError passes through with all structured fields" do
+      {ref, lua} = fun!(~S|function() pairs("asdf") end|)
+
+      error =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.call_function!(lua, ref, [])
+        end
+
+      assert %Lua.VM.ArgumentError{
+               function_name: "pairs",
+               arg_num: 1,
+               expected: "table",
+               got: "string"
+             } = error.original
+    end
+
+    test "RuntimeError from error() passes through with its Lua value" do
+      {ref, lua} = fun!("function() error('boom') end")
+
+      error =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.call_function!(lua, ref, [])
+        end
+
+      assert %Lua.VM.RuntimeError{value: "boom"} = error.original
+    end
+
+    test "TypeError passes through with error_kind for programmatic dispatch" do
+      {ref, lua} = fun!("function() local t = nil; return t.x end")
+
+      error =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.call_function!(lua, ref, [])
+        end
+
+      assert %Lua.VM.TypeError{error_kind: :index_non_table} = error.original
     end
   end
 end

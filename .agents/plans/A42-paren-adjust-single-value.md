@@ -5,7 +5,7 @@ issue: 254
 pr: 278
 branch: fix/paren-adjust-single-value
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - constructs.lua

@@ -5,7 +5,7 @@ issue: 260
 pr: 287
 branch: fix/gc-vm-errors
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - gc.lua

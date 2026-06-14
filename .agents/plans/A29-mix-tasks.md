@@ -5,7 +5,7 @@ issue: null
 pr: 220
 branch: dx/mix-tasks
 base: main
-status: review
+status: merged
 direction: A
 unlocks:
   - one-line invocations from a Mix project

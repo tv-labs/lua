@@ -83,13 +83,24 @@ defmodule Lua.VM.ArgumentError do
 
   @impl true
   def message(%__MODULE__{} = e) do
-    base = build_base(e.function_name, e.arg_num, e.expected, e.got, e.details)
-
-    Lua.VM.ErrorFormatter.format(:type_error, base,
+    Lua.VM.ErrorFormatter.format(:type_error, raw_message(e),
       source: e.source,
       line: e.line,
       call_stack: e.call_stack
     )
+  end
+
+  @doc """
+  Returns the unformatted Lua-facing error value — the bare
+  `"bad argument #N to 'F' (expected, got got)"` string with no location
+  header, no ANSI, no stack trace.
+
+  This is the §6.1 error value that `pcall`/`xpcall` and
+  `Lua.call_function/3` hand back at a protected-call boundary.
+  """
+  @spec raw_message(t()) :: String.t()
+  def raw_message(%__MODULE__{} = e) do
+    build_base(e.function_name, e.arg_num, e.expected, e.got, e.details)
   end
 
   defp build_base(function_name, arg_num, expected, got, details) do
