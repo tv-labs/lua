@@ -295,6 +295,65 @@ defmodule Lua.VM.Executor do
     try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, nil, proto.source, hint, state) end)
   end
 
+  # Bitwise bridges mirror the `:bitwise_*` / `:shift_*` interpreter clauses
+  # (do_execute) with `line = 0`, matching how `dispatcher_binop/7` drops the
+  # line. The dispatcher inlines the two-integer fast path for band/bor/bxor
+  # and bridges here for everything else (non-integers, metamethods) and for
+  # all of shl/shr (no profitable inline fast path — shift semantics live in
+  # `lua_shift_left` / `lua_shift_right`).
+  @doc false
+  @spec dispatcher_bitwise(atom(), term(), term(), State.t(), term(), term(), term()) ::
+          {term(), State.t()}
+  def dispatcher_bitwise(:band, a, b, state, proto, hint_a, hint_b) do
+    src = proto.source
+
+    try_binary_metamethod("__band", a, b, state, fn ->
+      Numeric.to_signed_int64(Bitwise.band(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state)))
+    end)
+  end
+
+  def dispatcher_bitwise(:bor, a, b, state, proto, hint_a, hint_b) do
+    src = proto.source
+
+    try_binary_metamethod("__bor", a, b, state, fn ->
+      Numeric.to_signed_int64(Bitwise.bor(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state)))
+    end)
+  end
+
+  def dispatcher_bitwise(:bxor, a, b, state, proto, hint_a, hint_b) do
+    src = proto.source
+
+    try_binary_metamethod("__bxor", a, b, state, fn ->
+      Numeric.to_signed_int64(Bitwise.bxor(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state)))
+    end)
+  end
+
+  def dispatcher_bitwise(:shl, a, b, state, proto, hint_a, hint_b) do
+    src = proto.source
+
+    try_binary_metamethod("__shl", a, b, state, fn ->
+      lua_shift_left(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state))
+    end)
+  end
+
+  def dispatcher_bitwise(:shr, a, b, state, proto, hint_a, hint_b) do
+    src = proto.source
+
+    try_binary_metamethod("__shr", a, b, state, fn ->
+      lua_shift_right(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state))
+    end)
+  end
+
+  @doc false
+  @spec dispatcher_bnot(term(), State.t(), term(), term()) :: {term(), State.t()}
+  def dispatcher_bnot(val, state, proto, hint) do
+    src = proto.source
+
+    try_unary_metamethod("__bnot", val, state, fn ->
+      Numeric.to_signed_int64(Bitwise.bnot(to_integer!(val, 0, src, hint, state)))
+    end)
+  end
+
   @doc false
   @spec dispatcher_cmp(atom(), term(), term(), State.t(), term()) :: {term(), State.t()}
   def dispatcher_cmp(:less_than, a, b, state, proto) do

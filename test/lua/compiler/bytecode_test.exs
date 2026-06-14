@@ -176,14 +176,13 @@ defmodule Lua.Compiler.BytecodeTest do
       assert result.bytecode == nil
     end
 
-    test ":set_list with {:multi, _} count falls back" do
-      # Same multi-return splicing shape, produced by codegen when a
-      # constructor's last element is `f()` (and so absorbs the call's
-      # full result list). The dispatcher only handles literal-count
-      # constructors.
+    test ":goto falls back (label-resolution semantics not ported)" do
+      # `:goto` / `:label` resolve via a runtime structural scan over the
+      # remaining instruction list; the dispatcher's flat-tuple model has
+      # no analogue yet, so the encoder forces fallback.
       proto = %Prototype{
-        instructions: [{:set_list, 0, 1, {:multi, 2}, 0}, {:return, 0, 0}],
-        max_registers: 2,
+        instructions: [{:label, :done}, {:goto, :done}, {:return, 0, 0}],
+        max_registers: 1,
         source: "test-synthetic"
       }
 
@@ -192,14 +191,34 @@ defmodule Lua.Compiler.BytecodeTest do
     end
   end
 
+  describe "set_list multi-return tail" do
+    test ":set_list with {:multi, _} count encodes" do
+      # Produced by codegen when a constructor's last element is `f()`
+      # (so it absorbs the call's full result list). The dispatcher folds
+      # the static prefix with `state.multi_return_count` at run time.
+      proto = %Prototype{
+        instructions: [{:set_list, 0, 1, {:multi, 2}, 0}, {:return, 0, 0}],
+        max_registers: 2,
+        source: "test-synthetic"
+      }
+
+      result = Bytecode.compile(proto)
+      assert is_tuple(result.bytecode)
+      assert elem(elem(result.bytecode, 0), 0) == Bytecode.op_set_list_multi()
+    end
+  end
+
   describe "cascade independence" do
     test "child prototype compiles even when sibling falls back" do
-      # `pure` is pure arithmetic (covered). `impure` uses bitwise AND
-      # which is not yet in dispatcher coverage (its own follow-up plan).
+      # `pure` is pure arithmetic (covered). `impure` uses a `goto`, which
+      # is not yet in dispatcher coverage (its own follow-up plan).
       proto =
         compile!("""
         function pure(a, b) return a + b end
-        function impure(a, b) return a & b end
+        function impure()
+          ::top::
+          goto top
+        end
         """)
 
       [pure_proto, impure_proto] = proto.prototypes
@@ -208,12 +227,13 @@ defmodule Lua.Compiler.BytecodeTest do
     end
 
     test "deeply-nested function compiles even when its parent falls back" do
-      # The outer `make` uses bitwise AND (fallback), but the inner
-      # adder is a pure-arithmetic single-result function (compiles).
+      # The outer `make` uses a `goto` (fallback), but the inner adder is a
+      # pure-arithmetic single-result function (compiles).
       proto =
         compile!("""
         function make()
-          local m = 1 & 0
+          ::skip::
+          goto skip
           local function add(a, b) return a + b end
           return add
         end
@@ -224,6 +244,30 @@ defmodule Lua.Compiler.BytecodeTest do
 
       assert make_proto.bytecode == nil
       assert is_tuple(add_proto.bytecode)
+    end
+  end
+
+  describe "bitwise coverage" do
+    test "a whole function using `n & 1` compiles end-to-end" do
+      proto =
+        compile!("""
+        function odd(n) return n & 1 end
+        """)
+
+      [fn_proto] = proto.prototypes
+      assert is_tuple(fn_proto.bytecode)
+    end
+
+    test "every bitwise op encodes (band/bor/bxor/shl/shr/bnot)" do
+      proto =
+        compile!("""
+        function f(a, b)
+          return (a & b) | (a ~ b) | (a << b) | (a >> b) | (~a)
+        end
+        """)
+
+      [fn_proto] = proto.prototypes
+      assert is_tuple(fn_proto.bytecode)
     end
   end
 
@@ -256,10 +300,17 @@ defmodule Lua.Compiler.BytecodeTest do
     end
 
     test "fallback returns a Prototype with bytecode: nil, never an error" do
-      # The encoder must not crash on any well-formed prototype. Bitwise
-      # operations stay on the interpreter (out of scope for B5c-v2),
+      # The encoder must not crash on any well-formed prototype. `goto`
+      # stays on the interpreter (label-resolution semantics not ported),
       # so use one to exercise the fallback path.
-      proto = compile!("function f(a, b) return a | b end")
+      proto =
+        compile!("""
+        function f()
+          ::top::
+          goto top
+        end
+        """)
+
       [fn_proto] = proto.prototypes
       assert %Prototype{} = fn_proto
       assert fn_proto.bytecode == nil

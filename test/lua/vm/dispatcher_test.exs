@@ -26,8 +26,10 @@ defmodule Lua.VM.DispatcherTest do
   alias Lua.Parser
   alias Lua.VM
   alias Lua.VM.Dispatcher
+  alias Lua.VM.Numeric
   alias Lua.VM.State
   alias Lua.VM.Stdlib
+  alias Lua.VM.TypeError
 
   defp run!(code) do
     {:ok, ast} = Parser.parse(code)
@@ -37,9 +39,38 @@ defmodule Lua.VM.DispatcherTest do
     {proto, results}
   end
 
+  # Like `run!/1` but seeds host-supplied globals before executing. Lets a
+  # test inject a raw value (e.g. an integer outside int64) the way
+  # `Lua.set!` / `Value.encode/2` would, since neither narrows.
+  defp run_with_globals!(code, globals) do
+    {:ok, ast} = Parser.parse(code)
+    {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+    state =
+      Enum.reduce(globals, Stdlib.install(State.new()), fn {name, value}, acc ->
+        State.set_global(acc, to_string(name), value)
+      end)
+
+    {:ok, results, _state} = VM.execute(proto, state)
+    {proto, results}
+  end
+
   # Pulls out the first sub-prototype — the one wrapping a `function`
   # body the dispatcher is expected to run.
   defp first_sub(%Prototype{prototypes: [fp | _]}), do: fp
+
+  # True if `op` is encoded anywhere in the prototype tree rooted at
+  # `proto`. Used to confirm a specific opcode reached bytecode without
+  # assuming which (sub-)prototype owns it.
+  defp encodes_op?(%Prototype{} = proto, op) do
+    own =
+      case proto.bytecode do
+        nil -> false
+        bc -> bc |> Tuple.to_list() |> Enum.any?(&(:erlang.element(1, &1) == op))
+      end
+
+    own or Enum.any?(proto.prototypes, &encodes_op?(&1, op))
+  end
 
   describe "arithmetic opcodes (dispatcher-compiled body)" do
     test ":add — integer fast path" do
@@ -140,6 +171,325 @@ defmodule Lua.VM.DispatcherTest do
 
       assert first_sub(proto).bytecode
       assert results == [-9_223_372_036_854_775_808]
+    end
+  end
+
+  describe "bitwise opcodes (dispatcher-compiled body)" do
+    test ":bitwise_and — integer fast path" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a & b end
+        return f(6, 3)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [2]
+    end
+
+    test ":bitwise_or — integer fast path" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a | b end
+        return f(6, 3)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [7]
+    end
+
+    test ":bitwise_xor — integer fast path" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a ~ b end
+        return f(6, 3)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [5]
+    end
+
+    test ":bitwise_not" do
+      {proto, results} =
+        run!("""
+        function f(a) return ~a end
+        return f(0)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [-1]
+    end
+
+    test ":shift_left" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a << b end
+        return f(1, 4)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [16]
+    end
+
+    test ":shift_right" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a >> b end
+        return f(256, 4)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [16]
+    end
+
+    test "negative shift count flips direction (a << -n == a >> n)" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a << b end
+        return f(256, -4)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [16]
+    end
+
+    test "shift by >= 64 yields 0" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a << b end
+        return f(1, 64)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [0]
+    end
+
+    test ">> is a logical (unsigned) shift on a negative operand" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a >> b end
+        return f(-1, 1)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [9_223_372_036_854_775_807]
+    end
+
+    test "float with integer value coerces (slow path)" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a & b end
+        return f(6.0, 3.0)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [2]
+    end
+
+    test "__band metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, n) return t & n end
+        local mt = {__band = function(_, n) return n + 100 end}
+        local t = setmetatable({}, mt)
+        return f(t, 5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [105]
+    end
+
+    test "__bor metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, n) return t | n end
+        local mt = {__bor = function(_, n) return n + 200 end}
+        local t = setmetatable({}, mt)
+        return f(t, 5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [205]
+    end
+
+    test "__bxor metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, n) return t ~ n end
+        local mt = {__bxor = function(_, n) return n + 300 end}
+        local t = setmetatable({}, mt)
+        return f(t, 5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [305]
+    end
+
+    test "__shr metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, n) return t >> n end
+        local mt = {__shr = function(_, n) return n + 7 end}
+        local t = setmetatable({}, mt)
+        return f(t, 5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [12]
+    end
+
+    test "matches the interpreter for an int64-boundary AND" do
+      code = """
+      function f(a, b) return a & b end
+      return f(-1, 9223372036854775807)
+      """
+
+      {proto, results} = run!(code)
+      assert first_sub(proto).bytecode
+      assert results == [9_223_372_036_854_775_807]
+    end
+
+    test "narrows an out-of-int64 integer operand to match the interpreter" do
+      # A host can inject an integer outside [-2^63, 2^63-1] via `Lua.set!`
+      # (Value.encode/2 passes host ints through unnarrowed). The integer
+      # fast path must still narrow its result, matching the interpreter's
+      # `Numeric.to_signed_int64` wrap — otherwise it both diverges and
+      # leaks an out-of-range integer back into Lua state.
+      big = Bitwise.bsl(1, 64)
+
+      for {op, mask} <- [{"&", 1}, {"|", 1}, {"~", 1}] do
+        code = """
+        function f(a, b) return a #{op} b end
+        return f(big, #{mask})
+        """
+
+        {proto, [result]} = run_with_globals!(code, big: big)
+        assert first_sub(proto).bytecode
+
+        expected =
+          case op do
+            "&" -> Numeric.to_signed_int64(Bitwise.band(big, mask))
+            "|" -> Numeric.to_signed_int64(Bitwise.bor(big, mask))
+            "~" -> Numeric.to_signed_int64(Bitwise.bxor(big, mask))
+          end
+
+        assert result == expected
+        assert result >= -Bitwise.bsl(1, 63) and result <= Bitwise.bsl(1, 63) - 1
+      end
+    end
+
+    test "numeric string operand coerces (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(a, b) return a & b end
+        return f("6", 3)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [2]
+    end
+
+    test "float with a fractional part raises (no integer representation)" do
+      assert_raise TypeError, ~r/no integer representation/, fn ->
+        run!("""
+        function f(a, b) return a & b end
+        return f(3.5, 1)
+        """)
+      end
+    end
+
+    test "non-numeric string operand raises (bitwise on a string value)" do
+      assert_raise TypeError, ~r/bitwise operation on a string/, fn ->
+        run!("""
+        function f(a, b) return a & b end
+        return f("x", 1)
+        """)
+      end
+    end
+
+    test "__shl metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, n) return t << n end
+        local mt = {__shl = function(_, n) return n + 1 end}
+        local t = setmetatable({}, mt)
+        return f(t, 5)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [6]
+    end
+
+    test "__bnot metamethod (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t) return ~t end
+        local mt = {__bnot = function(_) return 42 end}
+        local t = setmetatable({}, mt)
+        return f(t)
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [42]
+    end
+  end
+
+  describe "set_list multi-return tail (dispatcher-compiled body)" do
+    test "constructor absorbing a multi-return call matches the interpreter" do
+      {proto, results} =
+        run!("""
+        function pair() return 10, 20 end
+        function build()
+          local t = {1, pair()}
+          return t[1], t[2], t[3]
+        end
+        return build()
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_set_list_multi())
+      assert results == [1, 10, 20]
+    end
+
+    test "constructor absorbing a vararg tail matches the interpreter" do
+      {proto, results} =
+        run!("""
+        function build(...)
+          local t = {1, ...}
+          return t[1], t[2], t[3]
+        end
+        return build(10, 20)
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_set_list_multi())
+      assert results == [1, 10, 20]
+    end
+
+    test "constructor with a bare vararg tail (init_count==0) matches the interpreter" do
+      {proto, results} =
+        run!("""
+        function build(...)
+          local t = {...}
+          return t[1], t[2], t[3]
+        end
+        return build(10, 20, 30)
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_set_list_multi())
+      assert results == [10, 20, 30]
+    end
+
+    test "constructor with a tail call returning zero values matches the interpreter" do
+      {proto, results} =
+        run!("""
+        function none() end
+        function build()
+          local t = {1, none()}
+          return #t, t[1]
+        end
+        return build()
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_set_list_multi())
+      assert results == [1, 1]
     end
   end
 

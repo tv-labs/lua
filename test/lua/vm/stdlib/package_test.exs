@@ -106,6 +106,28 @@ defmodule Lua.VM.Stdlib.PackageTest do
       assert {["a", "table"], _} = eval_with_path(code, tmp_dir)
     end
 
+    test "a newly required module is visible to pairs(package.loaded)", %{tmp_dir: tmp_dir} do
+      # cache_module_result/3 routes the write through Table.put/3 so the
+      # required module's key enters the order/memo maintenance and becomes
+      # reachable by `for k in pairs(package.loaded)`. A direct Table.data
+      # write would still pass key-access tests but leave the key invisible
+      # to iteration; this pins the iteration-visibility half of that fix.
+      File.write!(Path.join(tmp_dir, "mymod.lua"), """
+      return { ok = true }
+      """)
+
+      code = ~S"""
+      require("mymod")
+      local seen = false
+      for k in pairs(package.loaded) do
+        if k == "mymod" then seen = true end
+      end
+      return seen
+      """
+
+      assert {[true], _} = eval_with_path(code, tmp_dir)
+    end
+
     test "require returns the cached value on second call", %{tmp_dir: tmp_dir} do
       # The module increments a global counter on each evaluation; with the
       # cache working, the counter should be 1 after two requires.

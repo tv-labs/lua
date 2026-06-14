@@ -68,11 +68,11 @@ defmodule Lua.Compiler.Bytecode do
   @op_numeric_for 36
 
   # B5c-v2: closures, upvalues, varargs, multi-return, loops, self, concat.
-  # After this block lands, the only opcodes the encoder still rejects are
-  # the data-shape concerns explicitly out of scope (`:goto` / `:label` for
-  # label-resolution semantics, `:set_global` for codegen vestige, and the
-  # bitwise family — none of which are blockers for the closures / OOP /
-  # string_ops benchmarks).
+  # The bitwise family and the `:set_list` multi-return tail (below) since
+  # joined the covered set, so the only opcodes the encoder still rejects
+  # are `:goto` / `:label` (label-resolution semantics not yet ported to the
+  # dispatcher's flat tuple model) and `:set_global` (a codegen vestige;
+  # modern codegen emits `:set_field` on `_ENV` instead).
   @op_closure 37
   @op_set_upvalue 38
   @op_get_open_upvalue 39
@@ -92,6 +92,18 @@ defmodule Lua.Compiler.Bytecode do
   @op_repeat_loop 50
   @op_generic_for 51
   @op_close_upvalues 52
+
+  # Bitwise family (band/bor/bxor/shl/shr/bnot) plus the `:set_list`
+  # multi-return tail. Each compiles a single op that previously deopted
+  # the whole enclosing prototype to the interpreter. Tags stay contiguous
+  # to keep the dispatcher's jump table dense.
+  @op_bitwise_and 53
+  @op_bitwise_or 54
+  @op_bitwise_xor 55
+  @op_shift_left 56
+  @op_shift_right 57
+  @op_bitwise_not 58
+  @op_set_list_multi 59
 
   @doc """
   Compile a prototype, populating its `bytecode` field on success.
@@ -258,6 +270,19 @@ defmodule Lua.Compiler.Bytecode do
   defp encode({:power, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_power, dest, a, b, hint_a, hint_b}}
   defp encode({:negate, dest, src, hint}), do: {:ok, {@op_negate, dest, src, hint}}
 
+  # Bitwise instructions carry the same per-operand hint tuples as
+  # arithmetic. The dispatcher inlines a two-integer fast path for
+  # band/bor/bxor and bridges to `Executor.dispatcher_bitwise/7` /
+  # `dispatcher_bnot/5` for non-integer operands, metamethods, and all
+  # shifts — so on-disk bytecode preserves both the int64 wrap and the
+  # hint suffix on `attempt to perform bitwise operation` errors.
+  defp encode({:bitwise_and, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_bitwise_and, dest, a, b, hint_a, hint_b}}
+  defp encode({:bitwise_or, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_bitwise_or, dest, a, b, hint_a, hint_b}}
+  defp encode({:bitwise_xor, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_bitwise_xor, dest, a, b, hint_a, hint_b}}
+  defp encode({:shift_left, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_shift_left, dest, a, b, hint_a, hint_b}}
+  defp encode({:shift_right, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_shift_right, dest, a, b, hint_a, hint_b}}
+  defp encode({:bitwise_not, dest, src, hint}), do: {:ok, {@op_bitwise_not, dest, src, hint}}
+
   defp encode({:less_than, dest, a, b}), do: {:ok, {@op_less_than, dest, a, b}}
   defp encode({:less_equal, dest, a, b}), do: {:ok, {@op_less_equal, dest, a, b}}
   defp encode({:greater_than, dest, a, b}), do: {:ok, {@op_greater_than, dest, a, b}}
@@ -345,18 +370,22 @@ defmodule Lua.Compiler.Bytecode do
     do: {:ok, {@op_set_field, table_reg, name, value_reg, name_hint}}
 
   # `:set_list` with a positive integer `count` is the table-constructor
-  # form (`{1, 2, 3}`). Two adjacent shapes stay on the interpreter:
+  # form (`{1, 2, 3}`).
   #
-  # - `{:multi, _}` absorbs a multi-return call's results (e.g.
-  #   `{f(), 1}`); it's covered by B5c-v2 alongside the rest of the
-  #   multi-return machinery.
+  # - `{:multi, init_count}` absorbs a multi-return call's results (e.g.
+  #   `{f(), 1}`): the dispatcher folds `init_count` with
+  #   `state.multi_return_count` and reuses the same `set_list_pairs`
+  #   machinery, mirroring the interpreter's `{:multi, _}` clause.
   # - `count == 0` is the interpreter's "consume `multi_return_count`
   #   trailing values" sentinel. Current codegen never emits it from a
   #   literal constructor, but encoding it as a no-op would silently
   #   diverge from the interpreter if codegen ever did. The guard makes
-  #   that contract explicit.
+  #   that contract explicit — it stays on the interpreter.
   defp encode({:set_list, table_reg, start, count, offset}) when is_integer(count) and count > 0,
     do: {:ok, {@op_set_list, table_reg, start, count, offset}}
+
+  defp encode({:set_list, table_reg, start, {:multi, init_count}, offset}),
+    do: {:ok, {@op_set_list_multi, table_reg, start, init_count, offset}}
 
   defp encode({:length, dest, source}), do: {:ok, {@op_length, dest, source}}
 
@@ -395,10 +424,9 @@ defmodule Lua.Compiler.Bytecode do
   defp encode(:break), do: {:ok, {@op_break}}
 
   # Anything else — `:goto` / `:label` (label-resolution semantics not
-  # ported to the dispatcher), `:set_global` (codegen vestige; modern
-  # codegen uses `:set_field` on `_ENV` instead), and the bitwise family
-  # (out of scope for B5c-v2; their own follow-up) — stays on the
-  # interpreter.
+  # ported to the dispatcher's flat tuple model) and `:set_global` (codegen
+  # vestige; modern codegen uses `:set_field` on `_ENV` instead) — stays on
+  # the interpreter.
   #
   # `:source_line` is stripped upstream in `encode_list/2`, so it never
   # reaches this clause table.
@@ -463,4 +491,11 @@ defmodule Lua.Compiler.Bytecode do
   def op_repeat_loop, do: @op_repeat_loop
   def op_generic_for, do: @op_generic_for
   def op_close_upvalues, do: @op_close_upvalues
+  def op_bitwise_and, do: @op_bitwise_and
+  def op_bitwise_or, do: @op_bitwise_or
+  def op_bitwise_xor, do: @op_bitwise_xor
+  def op_shift_left, do: @op_shift_left
+  def op_shift_right, do: @op_shift_right
+  def op_bitwise_not, do: @op_bitwise_not
+  def op_set_list_multi, do: @op_set_list_multi
 end

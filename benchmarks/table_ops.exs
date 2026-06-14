@@ -5,6 +5,11 @@
 #   - sort:        sort a reverse-ordered array (worst case for naive sort)
 #   - iterate:     sum all values via ipairs
 #   - map_reduce:  build → square each element → sum (two passes)
+#   - pairs_hash:  build a string-keyed (hash-arm) table and sum every value
+#                  via a full `for k,v in pairs(t)` walk. This is the workload
+#                  the memoized hash-iteration path targets: each `next` step
+#                  is an O(1) order-index lookup, so the full walk is O(n)
+#                  rather than the O(n^2) of a linear order-list rescan.
 #
 # Compares:
 #   - This Lua implementation (eval with string, eval with pre-compiled chunk)
@@ -68,6 +73,21 @@ function run_table_map_reduce(n)
   end
   return sum
 end
+
+function run_table_pairs_hash(n)
+  -- String keys force every entry into the hash arm, so the full pairs
+  -- walk drives next_entry's hash advance path (the O(1) order-index
+  -- lookup this benchmark exists to measure) rather than the array arm.
+  local t = {}
+  for i = 1, n do
+    t["k" .. i] = i
+  end
+  local sum = 0
+  for _, v in pairs(t) do
+    sum = sum + v
+  end
+  return sum
+end
 """
 
 # --- This Lua implementation ---
@@ -101,6 +121,12 @@ map_reduce_chunks =
   Map.new(sizes, fn {label, n} ->
     {chunk, _} = Lua.load_chunk!(lua, "return run_table_map_reduce(#{n})")
     {label, {chunk, "return run_table_map_reduce(#{n})", n}}
+  end)
+
+pairs_hash_chunks =
+  Map.new(sizes, fn {label, n} ->
+    {chunk, _} = Lua.load_chunk!(lua, "return run_table_pairs_hash(#{n})")
+    {label, {chunk, "return run_table_pairs_hash(#{n})", n}}
   end)
 
 # --- Luerl ---
@@ -148,5 +174,6 @@ bench.("Table Build", build_chunks, :run_table_build)
 bench.("Table Sort", sort_chunks, :run_table_sort)
 bench.("Table Iterate/Sum", sum_chunks, :run_table_sum)
 bench.("Table Map + Reduce", map_reduce_chunks, :run_table_map_reduce)
+bench.("Table Pairs (hash)", pairs_hash_chunks, :run_table_pairs_hash)
 
 c_lua_cleanup.()
