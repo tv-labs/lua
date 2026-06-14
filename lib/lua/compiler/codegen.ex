@@ -144,51 +144,36 @@ defmodule Lua.Compiler.Codegen do
 
   defp instruction_size({:test_and, dest, _src, body}), do: max(dest + 1, instruction_peak(body))
   defp instruction_size({:test_or, dest, _src, body}), do: max(dest + 1, instruction_peak(body))
-  defp instruction_size({:scope, _count, body}), do: instruction_peak(body)
 
-  # Instructions whose first integer operand is the sole written register:
-  # the destination. Reads never establish a high-water mark, so they are
-  # ignored. Anything else (set_table/set_field/set_global/set_upvalue/…
-  # writes to a table or upvalue, not a fresh register; :return/:break/…)
-  # contributes nothing.
-  defp instruction_size(instr)
-       when is_tuple(instr) and
-              elem(instr, 0) in [
-                :load_constant,
-                :load_boolean,
-                :move,
-                :get_upvalue,
-                :get_open_upvalue,
-                :get_global,
-                :load_env,
-                :new_table,
-                :get_table,
-                :get_field,
-                :add,
-                :subtract,
-                :multiply,
-                :divide,
-                :floor_divide,
-                :modulo,
-                :power,
-                :negate,
-                :concatenate,
-                :bitwise_and,
-                :bitwise_or,
-                :bitwise_xor,
-                :shift_left,
-                :shift_right,
-                :bitwise_not,
-                :equal,
-                :less_than,
-                :less_equal,
-                :greater_than,
-                :greater_equal,
-                :not_equal,
-                :not,
-                :length,
-                :closure
-              ] do
+  # Stores, control flow, and debug annotations establish no fresh
+  # destination register. Stores write through an existing table / upvalue
+  # (the register they read was already counted by whatever wrote it);
+  # returns, breaks, and gotos write no register; labels and source lines
+  # are annotations. Reads of an existing register never raise the peak, so
+  # all of these contribute nothing.
+  defp instruction_size(:break), do: 0
+  defp instruction_size({:goto, _label}), do: 0
+  defp instruction_size({:return, _base, _count}), do: 0
+  defp instruction_size({:return_vararg}), do: 0
+  defp instruction_size({:set_table, _table, _key, _value, _hint}), do: 0
+  defp instruction_size({:set_field, _table, _name, _value, _hint}), do: 0
+  defp instruction_size({:set_upvalue, _index, _source}), do: 0
+  defp instruction_size({:set_open_upvalue, _reg, _source}), do: 0
+
+  # Everything that reaches here is an ordinary value-producing opcode —
+  # `{tag, dest, ...}` whose destination is operand 1. That is the rule for
+  # every load / move / arithmetic / comparison / bitwise / table-read /
+  # closure opcode, so it is the default rather than an enumerated allowlist:
+  # a new opcode of that shape needs no change here. The clauses above carve
+  # out the only exceptions — opcodes that write a range or a fixed offset
+  # off a base, recurse into nested bodies, or write no register at all.
+  #
+  # This default cannot reintroduce the #312 undercount: every value-less
+  # opcode whose operand 1 is a register index is listed above (a missing
+  # one would only ever *over*-count by a slot — benign slack, never a
+  # crash), and any instruction without an integer operand 1 falls through
+  # to zero.
+  defp instruction_size(instr) when is_tuple(instr) and tuple_size(instr) > 1 and is_integer(elem(instr, 1)) do
     elem(instr, 1) + 1
   end
 

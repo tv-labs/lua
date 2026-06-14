@@ -96,7 +96,6 @@ defmodule Lua.Compiler.Instruction do
   def generic_for(base, var_count, body), do: {:generic_for, base, var_count, body}
 
   def break_instr, do: :break
-  def scope(register_count, body), do: {:scope, register_count, body}
 
   # Functions
   def closure(dest, proto_index), do: {:closure, dest, proto_index}
