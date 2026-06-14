@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Performance
+
+- **Deep recursion regression recovered (#324).** Call-dense, work-light
+  workloads (naive `fib(30)` most visibly) were ~25%+ slower than rc.0.
+  The rc.1/rc.2 changelog attributed this to the call-depth bookkeeping
+  added in #283, but bisection showed that bookkeeping is now negligible;
+  the dominant regressor was the blanket `+16` register-slack buffer #347
+  reserved on every prototype's register tuple, paid on every call frame
+  by the dispatcher's `init_callee_regs/4`. The dispatcher now sizes each
+  register file to an exact `reg_file_size` derived from the emitted
+  bytecode (authoritative even where codegen's `max_registers` undercounts
+  the peak); runtime-dynamic expansion still grows the tuple on demand.
+  `fib(30)` improves from ~1.32× slower than Luerl to ~1.11× (Apple M-series,
+  drift-controlled), with no other workload slower. Fixes the latent
+  register undercount the slack had been masking.
+
 ### Fixed
 
 - **`tostring` on a function now returns a `function: 0x...` address**

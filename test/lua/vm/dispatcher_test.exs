@@ -870,6 +870,22 @@ defmodule Lua.VM.DispatcherTest do
 
       assert results == ["hello 42"]
     end
+
+    test "zero-arg method call where base+1 is the register peak" do
+      # `:self` writes the receiver into register base+1. With no arguments
+      # and a receiver living at a low register, base+1 is the prototype's
+      # high-water mark — which the register-file sizing must account for.
+      # Sized one short, `:erlang.setelement(base + 2, ...)` raised :badarg
+      # once the dispatcher dropped its register-slack buffer (issue #324).
+      {_proto, results} =
+        run!("""
+        local obj = { m = function(self) return 42 end }
+        local function f(o) return o:m() end
+        return f(obj)
+        """)
+
+      assert results == [42]
+    end
   end
 
   describe "loops + break" do
@@ -974,6 +990,10 @@ defmodule Lua.VM.DispatcherTest do
         },
         param_count: 0,
         max_registers: 1,
+        # Hand-forged bytecode bypasses Bytecode.compile/1, so set the
+        # register-file size the dispatcher allocates from (one slot for
+        # register 0) explicitly.
+        reg_file_size: 1,
         source: "test-synthetic"
       }
 

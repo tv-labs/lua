@@ -124,10 +124,179 @@ defmodule Lua.Compiler.Bytecode do
 
     case encode_list(proto.instructions, [], 0) do
       {:ok, encoded} ->
-        %{proto_with_children | bytecode: List.to_tuple(encoded)}
+        bytecode = List.to_tuple(encoded)
+
+        %{
+          proto_with_children
+          | bytecode: bytecode,
+            reg_file_size: reg_file_size(bytecode, proto.param_count)
+        }
 
       :fallback ->
         proto_with_children
+    end
+  end
+
+  # The exact register-file size the dispatcher must allocate to run
+  # `bytecode`: one past the highest register index any encoded op reads or
+  # writes, floored at `param_count` so the argument-copy range always fits.
+  #
+  # This is derived from the emitted bytecode rather than trusting
+  # `proto.max_registers`, which codegen can undercount for some expression
+  # shapes (it lost the peak of a few transient-register chains). The
+  # dispatcher used to paper over that with a blanket `+16` slack on every
+  # register tuple — costly on call-dense code that allocates a fresh tuple
+  # per frame (issue #324). Sizing exactly removes that per-call overhead
+  # while staying correct: runtime-dynamic expansion (vararg spread,
+  # multi-return results) is not counted here because the dispatcher grows
+  # the tuple on demand at those sites (`grow_regs/2`).
+  defp reg_file_size(bytecode, param_count) do
+    max(max_register_used(bytecode) + 1, param_count)
+  end
+
+  # Highest register index referenced anywhere in `bytecode`, or -1 if none.
+  # Recurses into the nested instruction tuples carried by branch/loop
+  # opcodes so the bound holds at every level.
+  defp max_register_used(bytecode) when is_tuple(bytecode) do
+    bytecode
+    |> Tuple.to_list()
+    |> Enum.reduce(-1, fn instr, acc -> max(acc, max_in_instr(instr)) end)
+  end
+
+  defp max_in_instr(instr) do
+    case register_positions(:erlang.element(1, instr)) do
+      :load_nil ->
+        # {tag, dest, count}: writes dest..dest+count-1.
+        :erlang.element(2, instr) + :erlang.element(3, instr) - 1
+
+      :vararg ->
+        # {tag, base, count}: writes base..base+count-1 when count>0; the
+        # count==0 spread grows on demand in the dispatcher, so bound by base.
+        base = :erlang.element(2, instr)
+        count = :erlang.element(3, instr)
+        if count == 0, do: base, else: base + count - 1
+
+      :return_multi ->
+        # {tag, base, count}: reads base..base+count-1.
+        :erlang.element(2, instr) + :erlang.element(3, instr) - 1
+
+      :numeric_for ->
+        # {tag, base, loop_var, body}: reads base..base+2, writes loop_var.
+        base = :erlang.element(2, instr)
+        Enum.max([base + 2, :erlang.element(3, instr), max_register_used(:erlang.element(4, instr))])
+
+      :while_loop ->
+        # {tag, test_reg, cond_body, loop_body}.
+        Enum.max([
+          :erlang.element(2, instr),
+          max_register_used(:erlang.element(3, instr)),
+          max_register_used(:erlang.element(4, instr))
+        ])
+
+      :repeat_loop ->
+        # {tag, test_reg, loop_body, cond_body}.
+        Enum.max([
+          :erlang.element(2, instr),
+          max_register_used(:erlang.element(3, instr)),
+          max_register_used(:erlang.element(4, instr))
+        ])
+
+      :generic_for ->
+        # {tag, base, var_regs_tuple, body, line}.
+        base = :erlang.element(2, instr)
+        var_max = Enum.reduce(Tuple.to_list(:erlang.element(3, instr)), -1, &max/2)
+        Enum.max([base + 2, var_max, max_register_used(:erlang.element(4, instr))])
+
+      :test ->
+        # {tag, reg, then_body, else_body}.
+        Enum.max([
+          :erlang.element(2, instr),
+          max_register_used(:erlang.element(3, instr)),
+          max_register_used(:erlang.element(4, instr))
+        ])
+
+      :self ->
+        # {tag, base, obj_reg, method, hint}: reads obj_reg, writes the
+        # resolved method into base and the receiver into base+1 (base+1
+        # dominates base). The base+1 write is not a syntactic operand, so it
+        # must be added explicitly — a zero-arg `obj:m()` call has no later op
+        # to cover it.
+        max(:erlang.element(2, instr) + 1, :erlang.element(3, instr))
+
+      positions when is_list(positions) ->
+        Enum.reduce(positions, -1, fn pos, acc -> max(acc, :erlang.element(pos + 1, instr)) end)
+    end
+  end
+
+  # Register operand positions per opcode, where position 0 is the opcode
+  # tag. Reads and writes fold together — any out-of-bounds index would
+  # crash the dispatcher's `:erlang.element/2` or `:erlang.setelement/3`.
+  # Opcodes whose register footprint needs structural handling (ranges,
+  # nested bodies) return an atom dispatched above. Mirror this when adding
+  # an encodable opcode; `max_registers_invariant_test.exs` pins the
+  # contract across the compilable surface.
+  defp register_positions(op) do
+    case op do
+      @op_load_constant -> [1]
+      @op_load_boolean -> [1]
+      @op_load_nil -> :load_nil
+      @op_move -> [1, 2]
+      @op_load_env -> [1]
+      @op_get_upvalue -> [1]
+      @op_get_global -> [1]
+      @op_get_field -> [1, 2]
+      @op_add -> [1, 2, 3]
+      @op_subtract -> [1, 2, 3]
+      @op_multiply -> [1, 2, 3]
+      @op_divide -> [1, 2, 3]
+      @op_floor_divide -> [1, 2, 3]
+      @op_modulo -> [1, 2, 3]
+      @op_power -> [1, 2, 3]
+      @op_negate -> [1, 2]
+      @op_bitwise_and -> [1, 2, 3]
+      @op_bitwise_or -> [1, 2, 3]
+      @op_bitwise_xor -> [1, 2, 3]
+      @op_shift_left -> [1, 2, 3]
+      @op_shift_right -> [1, 2, 3]
+      @op_bitwise_not -> [1, 2]
+      @op_less_than -> [1, 2, 3]
+      @op_less_equal -> [1, 2, 3]
+      @op_greater_than -> [1, 2, 3]
+      @op_greater_equal -> [1, 2, 3]
+      @op_equal -> [1, 2, 3]
+      @op_not_equal -> [1, 2, 3]
+      @op_not -> [1, 2]
+      @op_test -> :test
+      @op_call_zero -> [1]
+      @op_call_one -> [1]
+      @op_call_multi -> [1]
+      @op_return_one -> [1]
+      @op_return_zero -> []
+      @op_return_collect -> [1]
+      @op_return_multi -> :return_multi
+      @op_return_proto_varargs -> []
+      @op_new_table -> [1]
+      @op_get_table -> [1, 2, 3]
+      @op_set_table -> [1, 2, 3]
+      @op_set_field -> [1, 3]
+      @op_set_list -> [1, 2]
+      @op_set_list_multi -> [1, 2]
+      @op_length -> [1, 2]
+      @op_numeric_for -> :numeric_for
+      @op_closure -> [1]
+      @op_set_upvalue -> [2]
+      @op_get_open_upvalue -> [1, 2]
+      @op_set_open_upvalue -> [1, 2]
+      @op_vararg -> :vararg
+      @op_self -> :self
+      @op_concatenate -> [1, 2, 3]
+      @op_break -> []
+      @op_while_loop -> :while_loop
+      @op_repeat_loop -> :repeat_loop
+      @op_generic_for -> :generic_for
+      # Carries a register *watermark* (pre-block next_register), not an
+      # operand it touches; the watermark can be one past the last live slot.
+      @op_close_upvalues -> []
     end
   end
 

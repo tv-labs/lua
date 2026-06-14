@@ -165,18 +165,15 @@ defmodule Lua.VM.Dispatcher do
     end
   end
 
-  # The interpreter sizes register tuples with a +16 slack buffer
-  # (executor.ex:135) because codegen's `max_registers` undercounts the
-  # transient scratch slots a few constructs use — notably table
-  # constructors whose last element is a multi-return call (`{x, f()}`),
-  # which write through registers past the syntactic peak. The dispatcher
-  # mirrors that buffer so the same prototypes run safely once they
-  # compile; multi-return expansion still grows on demand beyond it.
-  @reg_slack 16
-
+  # Register tuples are sized to the prototype's exact `reg_file_size`
+  # (computed from the emitted bytecode in `Lua.Compiler.Bytecode`). No slack
+  # buffer: every runtime-dynamic write — vararg spread, multi-return result
+  # distribution — grows the tuple on demand via `grow_regs/2`, so the static
+  # size only has to cover the syntactic register peak. This avoids
+  # over-allocating a register tuple on every call frame, which dominated
+  # call-dense workloads like deep recursion (issue #324).
   defp init_regs(proto, args) do
-    size = max(proto.max_registers, proto.param_count) + @reg_slack
-    regs = Tuple.duplicate(nil, size)
+    regs = Tuple.duplicate(nil, proto.reg_file_size)
     copy_args(regs, 0, args, proto.param_count)
   end
 
@@ -1529,11 +1526,10 @@ defmodule Lua.VM.Dispatcher do
   end
 
   defp init_callee_regs(callee_proto, src_regs, src_off, arg_count) do
-    # Same +16 slack buffer as `init_regs/2` (executor.ex:1113): the callee
-    # body may use scratch registers past its reported `max_registers` for
-    # multi-return constructor tails.
-    size = max(callee_proto.max_registers, callee_proto.param_count) + @reg_slack
-    regs = Tuple.duplicate(nil, size)
+    # Exact-sized like `init_regs/2`; runs on every compiled-closure call,
+    # so sizing to the callee's true register peak (no slack) is what keeps
+    # deep recursion off a per-frame over-allocation (issue #324).
+    regs = Tuple.duplicate(nil, callee_proto.reg_file_size)
     copy_n = min(arg_count, callee_proto.param_count)
     copy_regs(src_regs, src_off, regs, 0, copy_n)
   end
