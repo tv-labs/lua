@@ -351,41 +351,80 @@ defmodule Lua.VM.Executor do
   def dispatcher_bitwise(:band, a, b, state, proto, hint_a, hint_b) do
     src = proto.source
 
-    try_binary_metamethod("__band", a, b, state, fn ->
-      Numeric.to_signed_int64(Bitwise.band(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state)))
-    end)
+    try_binary_metamethod(
+      "__band",
+      a,
+      b,
+      state,
+      fn ->
+        Numeric.to_signed_int64(
+          Bitwise.band(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state))
+        )
+      end,
+      :materialized
+    )
   end
 
   def dispatcher_bitwise(:bor, a, b, state, proto, hint_a, hint_b) do
     src = proto.source
 
-    try_binary_metamethod("__bor", a, b, state, fn ->
-      Numeric.to_signed_int64(Bitwise.bor(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state)))
-    end)
+    try_binary_metamethod(
+      "__bor",
+      a,
+      b,
+      state,
+      fn ->
+        Numeric.to_signed_int64(Bitwise.bor(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state)))
+      end,
+      :materialized
+    )
   end
 
   def dispatcher_bitwise(:bxor, a, b, state, proto, hint_a, hint_b) do
     src = proto.source
 
-    try_binary_metamethod("__bxor", a, b, state, fn ->
-      Numeric.to_signed_int64(Bitwise.bxor(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state)))
-    end)
+    try_binary_metamethod(
+      "__bxor",
+      a,
+      b,
+      state,
+      fn ->
+        Numeric.to_signed_int64(
+          Bitwise.bxor(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state))
+        )
+      end,
+      :materialized
+    )
   end
 
   def dispatcher_bitwise(:shl, a, b, state, proto, hint_a, hint_b) do
     src = proto.source
 
-    try_binary_metamethod("__shl", a, b, state, fn ->
-      lua_shift_left(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state))
-    end)
+    try_binary_metamethod(
+      "__shl",
+      a,
+      b,
+      state,
+      fn ->
+        lua_shift_left(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state))
+      end,
+      :materialized
+    )
   end
 
   def dispatcher_bitwise(:shr, a, b, state, proto, hint_a, hint_b) do
     src = proto.source
 
-    try_binary_metamethod("__shr", a, b, state, fn ->
-      lua_shift_right(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state))
-    end)
+    try_binary_metamethod(
+      "__shr",
+      a,
+      b,
+      state,
+      fn ->
+        lua_shift_right(to_integer!(a, 0, src, hint_a, state), to_integer!(b, 0, src, hint_b, state))
+      end,
+      :materialized
+    )
   end
 
   @doc false
@@ -393,9 +432,15 @@ defmodule Lua.VM.Executor do
   def dispatcher_bnot(val, state, proto, hint) do
     src = proto.source
 
-    try_unary_metamethod("__bnot", val, state, fn ->
-      Numeric.to_signed_int64(Bitwise.bnot(to_integer!(val, 0, src, hint, state)))
-    end)
+    try_unary_metamethod(
+      "__bnot",
+      val,
+      state,
+      fn ->
+        Numeric.to_signed_int64(Bitwise.bnot(to_integer!(val, 0, src, hint, state)))
+      end,
+      :materialized
+    )
   end
 
   @doc false

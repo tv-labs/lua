@@ -21,10 +21,11 @@ defmodule Lua.VM.LazyCallInfoTest do
       refers to, where `state.call_stack` is left untouched and entries are
       synthesized from `frames` only at a read boundary. Sub-prototypes only
       route here when they can NOT be lowered to bytecode, so the
-      lazy-variant tests below sprinkle a bitwise op (`3 & 1`, not
-      bytecode-encodable) into each function to force the interpreter path.
-      On this path the live call-site line survives, so the golden
-      `currentline` / traceback line numbers differ from the compiled path.
+      lazy-variant tests below sprinkle a short-circuit op (`1 and 2`, whose
+      `test_and` opcode is not bytecode-encodable) into each function to force
+      the interpreter path. On this path the live call-site line survives, so
+      the golden `currentline` / traceback line numbers differ from the
+      compiled path.
   """
   use ExUnit.Case, async: true
 
@@ -65,17 +66,17 @@ defmodule Lua.VM.LazyCallInfoTest do
     end
 
     test "name/namewhat/currentline on the forced-lazy interpreter path" do
-      # The `3 & 1` bitwise op is not bytecode-encodable, so both functions
-      # fall onto the `:lua_closure` interpreter path. Unlike the compiled
+      # The `1 and 2` short-circuit op is not bytecode-encodable, so both
+      # functions fall onto the `:lua_closure` interpreter path. Unlike the compiled
       # hand-off above, the live call-site `line` survives, so `currentline`
       # is 3 (the `return inner()` site) rather than 0.
       code = """
       function outer()
-        local _ = 3 & 1
+        local _ = 1 and 2
         return inner()
       end
       function inner()
-        local _ = 3 & 1
+        local _ = 1 and 2
         local info = debug.getinfo(2, "nSl")
         return info.name, info.namewhat, info.currentline, info.source, info.what
       end
@@ -101,7 +102,7 @@ defmodule Lua.VM.LazyCallInfoTest do
       # `currentline` is the live line (3) rather than -1.
       code = """
       function f()
-        local _ = 3 & 1
+        local _ = 1 and 2
         return debug.getinfo(1, "Sl").currentline
       end
       return f()
@@ -127,10 +128,10 @@ defmodule Lua.VM.LazyCallInfoTest do
 
     test "three-deep chain resolves distinct levels on the forced-lazy path" do
       code = """
-      function a() local _ = 3 & 1 return b() end
-      function b() local _ = 3 & 1 return c() end
+      function a() local _ = 1 and 2 return b() end
+      function b() local _ = 1 and 2 return c() end
       function c()
-        local _ = 3 & 1
+        local _ = 1 and 2
         local l2 = debug.getinfo(2, "n").name
         local l3 = debug.getinfo(3, "n").name
         return l2, l3
@@ -157,8 +158,8 @@ defmodule Lua.VM.LazyCallInfoTest do
       # The compiled path above strips the line to 0; the lazy `:lua_closure`
       # path preserves each frame's call-site line (outer at 1, inner at 3).
       code = """
-      function outer() local _ = 3 & 1 return inner() end
-      function inner() local _ = 3 & 1 return debug.traceback() end
+      function outer() local _ = 1 and 2 return inner() end
+      function inner() local _ = 1 and 2 return debug.traceback() end
       return outer()
       """
 
@@ -191,11 +192,11 @@ defmodule Lua.VM.LazyCallInfoTest do
     test "debug.traceback inside a __call callback on the forced-lazy path" do
       code = """
       local t = setmetatable({}, {__call = function(self)
-        local _ = 3 & 1
+        local _ = 1 and 2
         return debug.traceback("cm")
       end})
       function p()
-        local _ = 3 & 1
+        local _ = 1 and 2
         return t()
       end
       return p()
@@ -221,11 +222,11 @@ defmodule Lua.VM.LazyCallInfoTest do
     test "debug.getinfo currentline inside a __call callback on the forced-lazy path" do
       code = """
       local t = setmetatable({}, {__call = function(self)
-        local _ = 3 & 1
+        local _ = 1 and 2
         return debug.getinfo(2, "nl").currentline
       end})
       function p()
-        local _ = 3 & 1
+        local _ = 1 and 2
         return t()
       end
       return p()
@@ -248,8 +249,8 @@ defmodule Lua.VM.LazyCallInfoTest do
 
     test "call_stack is restored to empty after a __call dispatch on the forced-lazy path" do
       code = """
-      local t = setmetatable({}, {__call = function(self) local _ = 3 & 1 return 7 end})
-      local function outer() local _ = 3 & 1 return t() end
+      local t = setmetatable({}, {__call = function(self) local _ = 1 and 2 return 7 end})
+      local function outer() local _ = 1 and 2 return t() end
       return outer()
       """
 
@@ -285,11 +286,11 @@ defmodule Lua.VM.LazyCallInfoTest do
     test "debug.traceback inside an __index callback on the forced-lazy path" do
       code = """
       local t = setmetatable({}, {__index = function(self, k)
-        local _ = 3 & 1
+        local _ = 1 and 2
         return debug.traceback("im")
       end})
       function p()
-        local _ = 3 & 1
+        local _ = 1 and 2
         return t.foo
       end
       return p()
@@ -315,11 +316,11 @@ defmodule Lua.VM.LazyCallInfoTest do
     test "debug.getinfo currentline inside an __index callback on the forced-lazy path" do
       code = """
       local t = setmetatable({}, {__index = function(self, k)
-        local _ = 3 & 1
+        local _ = 1 and 2
         return debug.getinfo(2, "nl").currentline
       end})
       function p()
-        local _ = 3 & 1
+        local _ = 1 and 2
         return t.foo
       end
       return p()
@@ -331,11 +332,11 @@ defmodule Lua.VM.LazyCallInfoTest do
     test "debug.traceback inside a __newindex callback on the forced-lazy path" do
       code = """
       local t = setmetatable({}, {__newindex = function(self, k, v)
-        local _ = 3 & 1
+        local _ = 1 and 2
         _G.captured = debug.traceback("nm")
       end})
       function p()
-        local _ = 3 & 1
+        local _ = 1 and 2
         t.foo = 1
       end
       p()
@@ -348,11 +349,11 @@ defmodule Lua.VM.LazyCallInfoTest do
     test "debug.traceback inside an arithmetic metamethod on the forced-lazy path" do
       code = """
       local t = setmetatable({}, {__add = function(a, b)
-        local _ = 3 & 1
+        local _ = 1 and 2
         return debug.traceback("am")
       end})
       function p()
-        local _ = 3 & 1
+        local _ = 1 and 2
         return t + 1
       end
       return p()
@@ -363,8 +364,8 @@ defmodule Lua.VM.LazyCallInfoTest do
 
     test "call_stack is restored to empty after an __index dispatch on the forced-lazy path" do
       code = """
-      local t = setmetatable({}, {__index = function(self, k) local _ = 3 & 1 return 5 end})
-      local function outer() local _ = 3 & 1 return t.foo end
+      local t = setmetatable({}, {__index = function(self, k) local _ = 1 and 2 return 5 end})
+      local function outer() local _ = 1 and 2 return t.foo end
       return outer()
       """
 
@@ -399,11 +400,11 @@ defmodule Lua.VM.LazyCallInfoTest do
     test "debug.traceback inside the iterator on the forced-lazy path" do
       code = """
       local function iter(s, c)
-        local _ = 3 & 1
+        local _ = 1 and 2
         if c < 1 then return c + 1, debug.traceback("it") end
       end
       function driver()
-        local _ = 3 & 1
+        local _ = 1 and 2
         for _, v in iter, nil, 0 do
           return v
         end
@@ -417,11 +418,11 @@ defmodule Lua.VM.LazyCallInfoTest do
     test "call_stack is restored to empty after a generic_for loop on the forced-lazy path" do
       code = """
       local function iter(s, c)
-        local _ = 3 & 1
+        local _ = 1 and 2
         if c < 1 then return c + 1, c end
       end
       local function driver()
-        local _ = 3 & 1
+        local _ = 1 and 2
         local sum = 0
         for _, v in iter, nil, 0 do sum = sum + v end
         return sum
@@ -455,11 +456,11 @@ defmodule Lua.VM.LazyCallInfoTest do
     test "attempt to call a nil value from a nested call on the forced-lazy path" do
       code = """
       function outer()
-        local _ = 3 & 1
+        local _ = 1 and 2
         return inner()
       end
       function inner()
-        local _ = 3 & 1
+        local _ = 1 and 2
         return notafunction()
       end
       return outer()
@@ -506,11 +507,11 @@ defmodule Lua.VM.LazyCallInfoTest do
       # (empty) stack afterward.
       code = """
       local function deep()
-        local _ = 3 & 1
+        local _ = 1 and 2
         debug.getinfo(1, "l")
         return true
       end
-      local function outer() local _ = 3 & 1 return deep() end
+      local function outer() local _ = 1 and 2 return deep() end
       return outer()
       """
 
