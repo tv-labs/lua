@@ -1,16 +1,18 @@
 defmodule Lua.Compiler.MaxRegistersInvariantTest do
   @moduledoc """
-  Pins the load-bearing invariant that `proto.max_registers` is large
+  Pins the load-bearing invariant that `proto.reg_file_size` is large
   enough to hold every register the encoded bytecode references.
 
-  The dispatcher sizes its register tuple to `max_registers` plus a
-  fixed `+16` slack buffer (`@reg_slack`), so a small codegen undercount
-  is absorbed rather than crashing. Writes beyond that buffer still raise
-  `:badarg` from `:erlang.setelement/3`, so the invariant — that codegen
-  bounds every encoded register index — is what keeps us off the slack.
-  It is enforced by `Lua.Compiler.Codegen.record_peak/1`; this test pins
-  it across the existing compilable surface so undercounts surface in CI
-  rather than as a runtime crash once they exceed the buffer.
+  The dispatcher sizes its register tuple to exactly `reg_file_size`, with
+  no slack buffer — runtime-dynamic writes (vararg spread, multi-return
+  result distribution) grow the tuple on demand instead. `reg_file_size`
+  is derived from the emitted bytecode in `Lua.Compiler.Bytecode.compile/1`
+  precisely so it stays correct even where codegen's own `max_registers`
+  undercounts the peak. Any register index the bytecode reads or writes
+  beyond `reg_file_size` would raise `:badarg` from `:erlang.element/2` or
+  `:erlang.setelement/3`, so this test re-derives the peak with an
+  independent walker and pins that `reg_file_size` bounds it across the
+  compilable surface.
 
   The walker recurses into nested branch bodies (`:test`) and nested
   prototypes so the bound is checked at every level.
@@ -80,7 +82,7 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
       op == Bytecode.op_return_collect() -> [1]
       op == Bytecode.op_return_multi() -> :return_multi
       op == Bytecode.op_call_multi() -> [1]
-      op == Bytecode.op_self() -> [1, 2]
+      op == Bytecode.op_self() -> :self
       op == Bytecode.op_concatenate() -> [1, 2, 3]
       op == Bytecode.op_break() -> []
       op == Bytecode.op_while_loop() -> :while_loop
@@ -168,6 +170,13 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
         var_max = Enum.reduce(Tuple.to_list(var_regs_tuple), -1, &max/2)
         Enum.max([base + 2, var_max, max_register_used(body_bc)])
 
+      :self ->
+        # {tag, base, obj_reg, method, hint}: reads obj_reg, writes base
+        # (method) and base+1 (receiver). The base+1 write is not a syntactic
+        # operand, so it must be counted explicitly — a zero-arg `obj:m()`
+        # call has no later op to cover it.
+        max(:erlang.element(2, instr) + 1, :erlang.element(3, instr))
+
       positions when is_list(positions) ->
         direct = Enum.reduce(positions, -1, fn pos, acc -> max(acc, :erlang.element(pos + 1, instr)) end)
 
@@ -192,12 +201,12 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
         bytecode ->
           max_used = max_register_used(bytecode)
 
-          assert max_used < proto.max_registers,
+          assert max_used < proto.reg_file_size,
                  """
-                 #{proto.source} declares max_registers=#{proto.max_registers}
+                 #{proto.source} declares reg_file_size=#{proto.reg_file_size}
                  but the encoded bytecode writes/reads index #{max_used}.
                  The dispatcher sizes its register tuple to exactly
-                 max_registers, so this would crash with :badarg.
+                 reg_file_size, so this would crash with :badarg.
                  """
 
           :ok
@@ -288,6 +297,28 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
        local t = {...}
        return t[1], t[2], t[3]
      end
+     """},
+    # Short-circuit compositions threaded through concat build deep
+    # transient-register chains whose peak codegen's `max_registers`
+    # undercounts. This shape crashed the dispatcher while it sized from
+    # `max_registers` and only escaped CI because the slack buffer hid it;
+    # it is the case that drove sizing from `reg_file_size` instead.
+    {"short-circuit chain through concat",
+     """
+     function f(a, b, c)
+       return "(" .. tostring(a and b) .. " and " .. tostring(b and c) .. ")"
+     end
+     """},
+    # A zero-arg method call writes the receiver into register base+1 with no
+    # later op to raise the counted peak, so `:self` must contribute base+1 to
+    # the bound. Sized from the receiver's own register, this undercounts by
+    # one unless `:self` is handled structurally — it crashed `obj:m()`.
+    {"zero-arg method call (:self base+1)",
+     """
+     local function f(obj)
+       return obj:m()
+     end
+     return f
      """}
   ]
 
