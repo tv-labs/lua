@@ -1,18 +1,19 @@
 defmodule Lua.Compiler.MaxRegistersInvariantTest do
   @moduledoc """
-  Pins the load-bearing invariant that `proto.reg_file_size` is large
+  Pins the load-bearing invariant that `proto.max_registers` is large
   enough to hold every register the encoded bytecode references.
 
-  The dispatcher sizes its register tuple to exactly `reg_file_size`, with
-  no slack buffer — runtime-dynamic writes (vararg spread, multi-return
-  result distribution) grow the tuple on demand instead. `reg_file_size`
-  is derived from the emitted bytecode in `Lua.Compiler.Bytecode.compile/1`
-  precisely so it stays correct even where codegen's own `max_registers`
-  undercounts the peak. Any register index the bytecode reads or writes
-  beyond `reg_file_size` would raise `:badarg` from `:erlang.element/2` or
-  `:erlang.setelement/3`, so this test re-derives the peak with an
-  independent walker and pins that `reg_file_size` bounds it across the
-  compilable surface.
+  Both engines size their register tuple to exactly `max(max_registers,
+  param_count)` with no slack buffer — runtime-dynamic writes (vararg
+  spread, multi-return result distribution) grow the tuple on demand
+  instead. `max_registers` is kept honest by codegen's `instruction_peak/1`
+  backstop, which counts every statically-fixed destination the emitted
+  stream writes. Any register index the bytecode reads or writes beyond
+  `max_registers` would raise `:badarg` from `:erlang.element/2` or
+  `:erlang.setelement/3`, so this test re-derives the peak from the emitted
+  bytecode with an *independent* walker (a cross-check against
+  `instruction_peak/1`, which walks the pre-encoding instruction stream)
+  and pins that `max_registers` bounds it across the compilable surface.
 
   The walker recurses into nested branch bodies (`:test`) and nested
   prototypes so the bound is checked at every level.
@@ -201,12 +202,12 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
         bytecode ->
           max_used = max_register_used(bytecode)
 
-          assert max_used < proto.reg_file_size,
+          assert max_used < max(proto.max_registers, proto.param_count),
                  """
-                 #{proto.source} declares reg_file_size=#{proto.reg_file_size}
+                 #{proto.source} declares max_registers=#{proto.max_registers}
                  but the encoded bytecode writes/reads index #{max_used}.
-                 The dispatcher sizes its register tuple to exactly
-                 reg_file_size, so this would crash with :badarg.
+                 Both engines size their register tuple to exactly
+                 max(max_registers, param_count), so this would crash with :badarg.
                  """
 
           :ok
@@ -299,10 +300,11 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
      end
      """},
     # Short-circuit compositions threaded through concat build deep
-    # transient-register chains whose peak codegen's `max_registers`
-    # undercounts. This shape crashed the dispatcher while it sized from
-    # `max_registers` and only escaped CI because the slack buffer hid it;
-    # it is the case that drove sizing from `reg_file_size` instead.
+    # transient-register chains whose peak the `peak_reg`/`next_reg`
+    # tracking undercounts. This shape crashed once the register-slack
+    # buffer was dropped and only escaped CI because the buffer hid it; it
+    # is a case `instruction_peak/1` must cover to keep `max_registers`
+    # honest.
     {"short-circuit chain through concat",
      """
      function f(a, b, c)

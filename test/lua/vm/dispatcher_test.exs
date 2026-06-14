@@ -989,11 +989,9 @@ defmodule Lua.VM.DispatcherTest do
           {Bytecode.op_return_one(), 0}
         },
         param_count: 0,
+        # The dispatcher sizes its register tuple to max(max_registers,
+        # param_count); register 0 (the get_upvalue dest) needs one slot.
         max_registers: 1,
-        # Hand-forged bytecode bypasses Bytecode.compile/1, so set the
-        # register-file size the dispatcher allocates from (one slot for
-        # register 0) explicitly.
-        reg_file_size: 1,
         source: "test-synthetic"
       }
 
