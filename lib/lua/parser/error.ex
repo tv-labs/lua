@@ -31,6 +31,29 @@ defmodule Lua.Parser.Error do
           | :lexer_error
           | :multiple_errors
 
+  @type source_context :: %{
+          lines: [%{number: pos_integer(), text: String.t(), highlight?: boolean()}],
+          pointer_column: pos_integer()
+        }
+
+  @typedoc """
+  Wire-safe representation produced by `to_map/2`. Mirrors the shape of
+  `Lua.VM.ErrorFormatter.to_map/3` so runtime and parse errors render
+  through one path. `source`, `call_stack`, and `error_kind` are constant
+  for parse errors (no file name, stack, or error kind) and exist only for
+  shape parity.
+  """
+  @type wire_error :: %{
+          type: error_type(),
+          message: String.t() | nil,
+          source: nil,
+          line: pos_integer() | nil,
+          call_stack: [],
+          source_context: source_context() | nil,
+          suggestion: String.t() | nil,
+          error_kind: nil
+        }
+
   defstruct [
     :type,
     :message,
@@ -119,6 +142,84 @@ defmodule Lua.Parser.Error do
 
     new(:unexpected_end, message, position, suggestion: suggestion)
   end
+
+  @doc """
+  Returns a wire-safe structured representation of a parse error.
+
+  The shape is identical to `Lua.VM.ErrorFormatter.to_map/3`, so runtime and
+  parse errors can flow through a single renderer (HTML, JSON, structured
+  logs). No ANSI escapes appear in any string field, and trailing newlines
+  from the internal message/suggestion templates are trimmed.
+
+      %{
+        type: atom(),
+        message: String.t(),
+        source: String.t() | nil,
+        line: pos_integer() | nil,
+        call_stack: [],
+        source_context: %{
+          lines: [%{number: pos_integer(), text: String.t(), highlight?: boolean()}],
+          pointer_column: pos_integer() | nil
+        } | nil,
+        suggestion: String.t() | nil,
+        error_kind: nil
+      }
+
+  Parse errors carry no call stack or error kind, so `call_stack` is always
+  `[]` and `error_kind` is always `nil`; they are present for shape parity.
+  `source` is `nil` because the parser does not track a file name.
+
+  Pass the original source code as the second argument to populate
+  `source_context`. The `pointer_column` is taken from the error's real
+  column when a position is known, so the `^` marker lands on the offending
+  token instead of always pointing at column 1.
+
+      iex> {:error, [error]} = Lua.Parser.parse_structured("if x then")
+      iex> map = Lua.Parser.Error.to_map(error, "if x then")
+      iex> {map.type, map.source_context.pointer_column}
+      {:unexpected_token, 10}
+  """
+  @spec to_map(t(), String.t() | nil) :: wire_error()
+  def to_map(%__MODULE__{} = error, source_code \\ nil) do
+    %{
+      type: error.type,
+      message: clean(error.message),
+      source: nil,
+      line: error.position && error.position.line,
+      call_stack: [],
+      source_context: build_source_context(source_code, error.position),
+      suggestion: clean(error.suggestion),
+      error_kind: nil
+    }
+  end
+
+  defp clean(nil), do: nil
+  defp clean(text) when is_binary(text), do: String.trim(text)
+
+  defp build_source_context(nil, _position), do: nil
+  defp build_source_context(_source_code, nil), do: nil
+
+  defp build_source_context(source_code, %{line: line} = position) when is_binary(source_code) and is_integer(line) do
+    lines = String.split(source_code, "\n")
+    total = length(lines)
+
+    if line > 0 and line <= total do
+      start_line = max(1, line - 2)
+      end_line = min(total, line + 2)
+
+      rendered_lines =
+        lines
+        |> Enum.slice((start_line - 1)..(end_line - 1))
+        |> Enum.with_index(start_line)
+        |> Enum.map(fn {text, num} ->
+          %{number: num, text: text, highlight?: num == line}
+        end)
+
+      %{lines: rendered_lines, pointer_column: position.column}
+    end
+  end
+
+  defp build_source_context(_source_code, _position), do: nil
 
   @doc """
   Formats an error into a beautiful multi-line string with context.

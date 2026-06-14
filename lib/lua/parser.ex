@@ -35,22 +35,54 @@ defmodule Lua.Parser do
   """
   @spec parse(String.t()) :: {:ok, Chunk.t()} | {:error, String.t()}
   def parse(code) when is_binary(code) do
+    case parse_to_error(code) do
+      {:ok, chunk} -> {:ok, chunk}
+      {:error, error} -> {:error, Error.format(error, code)}
+    end
+  end
+
+  @doc """
+  Parses Lua source code and returns structured errors.
+
+  Unlike `parse/1`, which returns a pre-formatted display string, this
+  returns the `t:Lua.Parser.Error.t/0` structs directly so consumers can
+  render errors in their own UI (editors, LSPs, web frontends) without
+  scraping the formatted output. Use `Lua.Parser.Error.to_map/2` to obtain a
+  JSON-serializable shape.
+
+  The error list always holds a single error today; the list shape leaves
+  room for multi-error recovery without a breaking change.
+
+  ## Examples
+
+      iex> {:ok, %Lua.AST.Chunk{}} = Lua.Parser.parse_structured("local x = 42")
+
+      iex> {:error, [error]} = Lua.Parser.parse_structured("if x then")
+      iex> error.type
+      :unexpected_token
+  """
+  @spec parse_structured(String.t()) :: {:ok, Chunk.t()} | {:error, [Error.t()]}
+  def parse_structured(code) when is_binary(code) do
+    case parse_to_error(code) do
+      {:ok, chunk} -> {:ok, chunk}
+      {:error, error} -> {:error, [error]}
+    end
+  end
+
+  # Shared parse path producing a converted `Lua.Parser.Error` struct on
+  # failure. `parse/1` formats it; `parse_structured/1` returns it. Keeping
+  # both on this helper stops the display and structured paths from drifting.
+  @spec parse_to_error(String.t()) :: {:ok, Chunk.t()} | {:error, Error.t()}
+  defp parse_to_error(code) do
     case Lexer.tokenize(code) do
       {:ok, tokens} ->
         case parse_chunk(tokens) do
-          {:ok, chunk} ->
-            {:ok, chunk}
-
-          {:error, reason} ->
-            error = convert_error(reason, code)
-            formatted = Error.format(error, code)
-            {:error, formatted}
+          {:ok, chunk} -> {:ok, chunk}
+          {:error, reason} -> {:error, convert_error(reason, code)}
         end
 
       {:error, reason} ->
-        error = convert_lexer_error(reason, code)
-        formatted = Error.format(error, code)
-        {:error, formatted}
+        {:error, convert_lexer_error(reason, code)}
     end
   end
 
