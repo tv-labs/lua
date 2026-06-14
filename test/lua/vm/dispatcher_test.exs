@@ -63,14 +63,17 @@ defmodule Lua.VM.DispatcherTest do
   # `proto`. Used to confirm a specific opcode reached bytecode without
   # assuming which (sub-)prototype owns it.
   defp encodes_op?(%Prototype{} = proto, op) do
-    own =
-      case proto.bytecode do
-        nil -> false
-        bc -> bc |> Tuple.to_list() |> Enum.any?(&(:erlang.element(1, &1) == op))
-      end
-
-    own or Enum.any?(proto.prototypes, &encodes_op?(&1, op))
+    deep_has_op?(proto.bytecode, op) or Enum.any?(proto.prototypes, &encodes_op?(&1, op))
   end
+
+  # Scans the encoded tuple tree, descending into nested body tuples (`:test`
+  # branches, loop bodies) so an opcode emitted inside a block is found too.
+  defp deep_has_op?(t, op) when is_tuple(t) do
+    (tuple_size(t) > 0 and :erlang.element(1, t) == op) or
+      Enum.any?(Tuple.to_list(t), &deep_has_op?(&1, op))
+  end
+
+  defp deep_has_op?(_other, _op), do: false
 
   describe "arithmetic opcodes (dispatcher-compiled body)" do
     test ":add — integer fast path" do
@@ -1308,6 +1311,81 @@ defmodule Lua.VM.DispatcherTest do
 
       assert first_sub(proto).bytecode
       assert results == [1]
+    end
+  end
+
+  describe ":goto / :label" do
+    test "forward goto skips statements", %{} do
+      {proto, results} =
+        run!("""
+        function f()
+          local x = 1
+          goto skip
+          x = 99
+          ::skip::
+          return x
+        end
+        return f()
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_goto())
+      assert results == [1]
+    end
+
+    test "backward goto forms a counted loop", %{} do
+      {proto, results} =
+        run!("""
+        function f()
+          local i = 0
+          ::top::
+          i = i + 1
+          if i < 5 then goto top end
+          return i
+        end
+        return f()
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_goto())
+      assert results == [5]
+    end
+
+    test "goto out of a nested loop to a function-level label", %{} do
+      {proto, results} =
+        run!("""
+        function f()
+          for a = 1, 3 do
+            for b = 1, 3 do
+              if a * b == 6 then goto done end
+            end
+          end
+          ::done::
+          return 42
+        end
+        return f()
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_goto())
+      assert results == [42]
+    end
+
+    test "goto exiting a loop closes captured upvalues", %{} do
+      {proto, results} =
+        run!("""
+        function f()
+          local captured
+          for i = 1, 10 do
+            local v = i * 2
+            captured = function() return v end
+            if i == 3 then goto stop end
+          end
+          ::stop::
+          return captured()
+        end
+        return f()
+        """)
+
+      assert encodes_op?(proto, Bytecode.op_goto())
+      assert results == [6]
     end
   end
 end
