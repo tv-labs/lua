@@ -13,9 +13,18 @@ defmodule Lua.VM do
   Executes a compiled prototype.
 
   Returns {:ok, results, state} on success.
+
+  ## Options
+
+    * `:reset_steps` - (default `true`) reset the `:max_steps` instruction
+      tally to 0 before executing. True at a genuine top-level evaluation
+      (`Lua.eval`/`eval!`). Internal re-entries that run mid-evaluation —
+      notably `require`, which loads and runs a module's chunk through this
+      function — must pass `false` so the module body accumulates against the
+      one per-evaluation budget instead of resetting it.
   """
-  @spec execute(Prototype.t(), State.t()) :: {:ok, list(), State.t()}
-  def execute(%Prototype{} = proto, state \\ State.new()) do
+  @spec execute(Prototype.t(), State.t(), keyword()) :: {:ok, list(), State.t()}
+  def execute(%Prototype{} = proto, state \\ State.new(), opts \\ []) do
     # Size the register file to the prototype's honest register peak, with no
     # slack buffer — same contract as every other call frame. `max_registers`
     # covers every statically-fixed destination (codegen's `instruction_peak/1`
@@ -28,10 +37,12 @@ defmodule Lua.VM do
     # than accumulating over the whole %Lua{} lifetime. The terminals stamp
     # the per-eval tally back into `state.steps`, so without this reset a
     # long-lived %Lua{} running many small evals would eventually trip the
-    # budget even though no single eval came close. Nested calls within this
-    # evaluation still accumulate against the same budget — they thread the
-    # tally as a bare parameter and never re-enter here.
-    state = %{state | steps: 0}
+    # budget even though no single eval came close. Nested Lua/compiled calls
+    # within this evaluation thread the tally as a bare parameter and never
+    # re-enter here — but `require` does re-enter (it runs a module's chunk
+    # through this function), so it passes `reset_steps: false` to keep the
+    # module body counting against the same budget.
+    state = if Keyword.get(opts, :reset_steps, true), do: %{state | steps: 0}, else: state
 
     # Execute the prototype instructions
     {results, _final_regs, final_state} =

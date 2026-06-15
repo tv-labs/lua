@@ -1378,7 +1378,7 @@ defmodule Lua.VM.Executor do
     varargs = Map.get(proto, :varargs, [])
 
     case frames do
-      [] -> {varargs, regs, state}
+      [] -> {varargs, regs, finish_steps(state, steps)}
       [frame | rest_frames] -> do_frame_return(varargs, regs, state, frame, rest_frames, line, steps)
     end
   end

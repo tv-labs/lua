@@ -762,7 +762,10 @@ defmodule Lua.VM.Stdlib do
 
     with {:ok, ast} <- Lua.Parser.parse(content),
          {:ok, proto} <- Lua.Compiler.compile(ast),
-         {:ok, results, state} <- Lua.VM.execute(proto, state) do
+         # `require` runs mid-evaluation: inherit the caller's instruction
+         # budget instead of resetting it, so a looping module body counts
+         # against the same `:max_steps` and the pre-require work is preserved.
+         {:ok, results, state} <- Lua.VM.execute(proto, state, reset_steps: false) do
       # Get the return value (or true if no return value)
       result =
         case results do

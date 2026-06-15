@@ -213,6 +213,79 @@ defmodule Lua.VM.MaxStepsTest do
     end
   end
 
+  describe "budget integrity (non-conservative-accounting regressions)" do
+    test "an interpreted `return ...` terminal stamps the step tally back into state" do
+      # The bottom-frame `{:return_vararg}` terminal must stamp the accumulated
+      # tally into `state.steps` like every other terminal. If it returns a
+      # bare state, a compiled caller that reads `steps = state.steps` after the
+      # interpreted callee returns under-counts, so work done in `return ...`
+      # passthroughs vanishes from the budget.
+      run = fn src ->
+        {:ok, ast} = Parser.parse(src)
+        {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        {:ok, _results, state} = Lua.VM.execute(proto, Stdlib.install(State.new()))
+        state.steps
+      end
+
+      work = "local s = 0 for i = 1, 5 do s = s + i end "
+      named = run.(work <> "return s")
+      vararg = run.(work <> "return ...")
+
+      assert named > 0
+      assert vararg == named
+    end
+
+    test "pcall does not refund the instructions a caught budget error consumed" do
+      # Each inner protected call trips the budget; recovery must carry the
+      # exhausted tally forward (monotonic) rather than rewinding it to the
+      # pcall-entry value. Otherwise a `pcall`-in-a-loop pattern re-funds the
+      # inner work every iteration and the single evaluation runs far beyond
+      # `:max_steps` total instructions before tripping.
+      lua = Lua.new(max_steps: 2000)
+
+      assert_raise RuntimeException, ~r/instruction budget exceeded/, fn ->
+        eval!(lua, "for i = 1, 1000000 do pcall(function() while true do end end) end")
+      end
+    end
+
+    test "require runs the module body against the same budget (no mid-eval reset)" do
+      # `require` re-enters `Lua.VM.execute`, which resets the per-eval tally at
+      # genuine top-level entry only. The pre-require work must still count: with
+      # a mid-eval reset the 700 pre-require steps would be forgiven, leaving the
+      # 700 post-require steps under the 1000 budget so the eval would wrongly
+      # succeed. With the budget preserved, pre + post exceed it and it trips.
+      lua = Lua.new(sandboxed: [], max_steps: 1000)
+
+      code = ~S"""
+      package.path = "./test/fixtures/?.lua"
+      local s = 0
+      for i = 1, 700 do s = s + i end
+      require("budget_small_module")
+      for i = 1, 700 do s = s + i end
+      return s
+      """
+
+      assert_raise RuntimeException, ~r/instruction budget exceeded/, fn ->
+        eval!(lua, code)
+      end
+    end
+
+    test "a budget-exhausting require still trips, and pre-require work is preserved across it" do
+      # Sanity companion: requiring the trivial module under a comfortable
+      # budget, with light surrounding work, must succeed (the fix must not
+      # over-count and spuriously trip a legitimate require).
+      lua = Lua.new(sandboxed: [], max_steps: 100_000)
+
+      code = ~S"""
+      package.path = "./test/fixtures/?.lua"
+      local m = require("budget_small_module")
+      return m
+      """
+
+      assert {[1], _lua} = eval!(lua, code)
+    end
+  end
+
   describe ":max_steps validation" do
     test "rejects non-positive integers and non-integers" do
       assert_raise ArgumentError, ~r/:max_steps/, fn -> Lua.new(max_steps: 0) end

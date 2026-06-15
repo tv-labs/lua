@@ -115,16 +115,19 @@ defmodule Lua.VM.State do
 
   Raises the same `Lua.VM.RuntimeError` used by `"stack overflow"`, carrying
   the raise-time `state:` so `pcall`/`xpcall` recover heap effects for free.
+  The live tally is stamped into that `state:` (the threaded `steps` is not
+  otherwise in `%State{}`), so `unwind_to/2` can carry it forward and a caught
+  budget error stays spent — a protected call cannot refund the work it burned.
   """
   @spec check_steps!(t(), non_neg_integer()) :: :ok
   def check_steps!(%__MODULE__{max_steps: :infinity}, _steps), do: :ok
   def check_steps!(%__MODULE__{max_steps: max}, steps) when steps < max, do: :ok
 
-  def check_steps!(%__MODULE__{call_stack: call_stack} = state, _steps) do
+  def check_steps!(%__MODULE__{call_stack: call_stack} = state, steps) do
     raise RuntimeError,
       value: "instruction budget exceeded",
       call_stack: call_stack,
-      state: state
+      state: %{state | steps: steps}
   end
 
   @doc """
@@ -143,6 +146,11 @@ defmodule Lua.VM.State do
   | `tables`, `table_next_id`              | `call_stack`, `call_depth`      |
   | `userdata`, `userdata_next_id`         | `open_upvalues`                 |
   | `metatables`, `upvalue_cells`, `private` | `multi_return_count`          |
+
+  The instruction tally `steps` is also carried forward (monotonic max), not
+  reset to the entry value: the work a protected call burned must still count
+  against the one per-evaluation `:max_steps` budget, so wrapping heavy work in
+  `pcall` (or looping over `pcall`) cannot escape the cap.
 
   Keeping `upvalue_cells` while restoring `open_upvalues` matches reference
   upvalue semantics: cells captured before the protected call keep their
@@ -164,7 +172,8 @@ defmodule Lua.VM.State do
         userdata_next_id: raised.userdata_next_id,
         metatables: raised.metatables,
         upvalue_cells: raised.upvalue_cells,
-        private: raised.private
+        private: raised.private,
+        steps: max(entry.steps, raised.steps)
     }
   end
 
