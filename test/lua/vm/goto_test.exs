@@ -41,6 +41,13 @@ defmodule Lua.VM.GotoTest do
     assert run(src, :dispatcher) == expected, "dispatcher mismatch for:\n#{src}"
   end
 
+  # Assert `src` is rejected at compile time with a message matching `pattern`.
+  defp assert_compile_error(src, pattern) do
+    {:ok, ast} = Parser.parse(src)
+    assert {:error, message} = Compiler.compile(ast, source: "goto_test.lua")
+    assert message =~ pattern, "expected #{inspect(pattern)} in #{inspect(message)}"
+  end
+
   describe "goto conformance (both engines)" do
     test "forward goto skips statements" do
       assert_both("local x = 1; goto skip; x = 99; ::skip:: return x", [1])
@@ -149,6 +156,62 @@ defmodule Lua.VM.GotoTest do
         """,
         [6]
       )
+    end
+  end
+
+  describe "label visibility (Lua 5.3 §3.3.4)" do
+    test "goto binds to the outer label, never a nested do-block label" do
+      # The nested `do ::l:: end` must be invisible to the goto; the jump
+      # reaches the outer ::l::, skipping the `x=100` in the nested block.
+      assert_both(
+        "local x=0; goto l; do ::l:: x=100 end; ::l:: x=x+5; return x",
+        [5]
+      )
+    end
+
+    test "backward goto loops on its own block's label, not a sibling's" do
+      assert_both(
+        """
+        local out=0
+        do ::a:: out=out+1 if out<2 then goto a end end
+        do goto a out=out+100 ::a:: out=out+1000 end
+        return out
+        """,
+        [1002]
+      )
+    end
+
+    test "sibling blocks reuse a label name independently" do
+      assert_both(
+        """
+        local a,b=0,0
+        do ::l:: a=a+1 if a<2 then goto l end end
+        do ::l:: b=b+1 if b<3 then goto l end end
+        return a,b
+        """,
+        [2, 3]
+      )
+    end
+  end
+
+  describe "illegal goto rejection (compile error)" do
+    test "goto into the scope of a local is rejected" do
+      assert_compile_error(
+        "do goto skip; local y = 10; ::skip:: return y end",
+        "jumps into the scope of local 'y'"
+      )
+    end
+
+    test "duplicate label in the same scope is rejected" do
+      assert_compile_error("::a:: ::a:: return 1", "label 'a' already defined")
+    end
+
+    test "undefined label is rejected" do
+      assert_compile_error("goto nowhere; return 1", "no visible label 'nowhere'")
+    end
+
+    test "goto into a nested block is rejected" do
+      assert_compile_error("goto l; do ::l:: end", "no visible label 'l'")
     end
   end
 end

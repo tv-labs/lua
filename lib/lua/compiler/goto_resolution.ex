@@ -25,12 +25,15 @@ defmodule Lua.Compiler.GotoResolution do
       `{:label, name, level}` in its owning block.
 
   Label scope (Lua 5.3 §3.3.4): a goto targets a label in its own block or an
-  enclosing one, never inside a nested block. `do` blocks are flattened by
-  codegen, so a name can appear more than once in a single list; the nearest
-  label after the goto (else the nearest before) is chosen, which matches the
-  lexical intent of the forward `continue` / `break` idioms and the single
-  backward-jump loop. Labels are unique per real scope, so within one genuine
-  block there is never more than one candidate.
+  enclosing one, never inside a nested block or a sibling block. `do` blocks
+  are flattened by codegen into the parent's instruction list, so several
+  blocks' labels can share one flat list. Each `{:label, name, level, path}`
+  and `{:goto, name, path}` carries the lexical block `path` recorded by scope
+  resolution (innermost-last, unique per `do` block). A label is visible to a
+  goto only when the label's path is a prefix of the goto's path — i.e. the
+  label sits in the goto's own block or one enclosing it. Among visible
+  candidates the nearest after the goto (else the nearest before) is chosen,
+  matching the forward `continue` / `break` idioms and the backward-jump loop.
 
   Gotos never cross a function boundary, so each prototype is resolved
   independently against its own instruction tree.
@@ -72,7 +75,7 @@ defmodule Lua.Compiler.GotoResolution do
     {Enum.reverse(acc), counter, names}
   end
 
-  defp assign_instr({:goto, name}, c, names), do: {{:goto, c}, c + 1, Map.put(names, c, name)}
+  defp assign_instr({:goto, name, block_path}, c, names), do: {{:goto, c}, c + 1, Map.put(names, c, {name, block_path})}
 
   defp assign_instr({:test, reg, then_body, else_body}, c, names) do
     {then_body, c, names} = assign_ids(then_body, c, names)
@@ -117,13 +120,18 @@ defmodule Lua.Compiler.GotoResolution do
   end
 
   defp resolve_instr({:goto, id}, idx, block, ancestors, targets, names) do
-    name = Map.fetch!(names, id)
+    {name, block_path} = Map.fetch!(names, id)
 
-    case resolve_target(name, block, idx, ancestors) do
-      {:ok, depth, level, tail} -> Map.put(targets, id, {depth, level, tail})
-      # Unresolved (illegal goto the parser should have rejected): leave it
-      # out so the interpreter raises "goto target not found" at run time.
-      :error -> targets
+    case resolve_target(name, block_path, block, idx, ancestors) do
+      {:ok, depth, level, tail} ->
+        Map.put(targets, id, {depth, level, tail})
+
+      # Unresolved gotos are rejected up front by `Lua.Compiler.GotoValidation`
+      # as a compile error, so this branch is unreachable in practice; leaving
+      # the goto unresolved would surface as the interpreter's runtime
+      # "goto target not found".
+      :error ->
+        targets
     end
   end
 
@@ -155,36 +163,41 @@ defmodule Lua.Compiler.GotoResolution do
   # Search the current block, then each enclosing block, summing `cont`
   # weights along the way. Returns `{:ok, depth, level, target_tail}` where
   # `level` is the target label's scope register level (the goto's close
-  # threshold).
-  defp resolve_target(name, block, idx, ancestors) do
-    case find_label_pos(block, name, idx) do
+  # threshold). `goto_path` is the goto's lexical block path; only labels in
+  # the goto's own block or an enclosing one are visible.
+  defp resolve_target(name, goto_path, block, idx, ancestors) do
+    case find_label_pos(block, name, goto_path, idx) do
       {:ok, pos, level} -> {:ok, 0, level, Enum.drop(block, pos + 1)}
-      :error -> resolve_in_ancestors(name, ancestors, 0)
+      :error -> resolve_in_ancestors(name, goto_path, ancestors, 0)
     end
   end
 
-  defp resolve_in_ancestors(_name, [], _depth), do: :error
+  defp resolve_in_ancestors(_name, _goto_path, [], _depth), do: :error
 
-  defp resolve_in_ancestors(name, [{parent_block, child_idx, weight} | rest], depth) do
+  defp resolve_in_ancestors(name, goto_path, [{parent_block, child_idx, weight} | rest], depth) do
     depth = depth + weight
 
-    case find_label_pos(parent_block, name, child_idx) do
+    case find_label_pos(parent_block, name, goto_path, child_idx) do
       {:ok, pos, level} -> {:ok, depth, level, Enum.drop(parent_block, pos + 1)}
-      :error -> resolve_in_ancestors(name, rest, depth)
+      :error -> resolve_in_ancestors(name, goto_path, rest, depth)
     end
   end
 
-  # The label nearest after `from`, else the nearest before it. Within a
-  # genuine Lua scope a name is unique, so the only multi-candidate case is
-  # flattened `do` blocks, where forward-then-backward matches lexical intent.
+  # The visible label nearest after `from`, else the nearest before it. A
+  # label is visible when its block path is a prefix of the goto's path (the
+  # label is in the goto's block or one enclosing it) — this excludes nested
+  # and sibling `do` blocks flattened into the same list (Lua 5.3 §3.3.4).
   # Returns the chosen position and its codegen-recorded scope `level`.
-  defp find_label_pos(block, name, from) do
+  defp find_label_pos(block, name, goto_path, from) do
     labels =
       block
       |> Enum.with_index()
       |> Enum.flat_map(fn
-        {{:label, ^name, level}, i} -> [{i, level}]
-        _ -> []
+        {{:label, ^name, level, label_path}, i} ->
+          if visible?(label_path, goto_path), do: [{i, level}], else: []
+
+        _ ->
+          []
       end)
 
     after_label = labels |> Enum.filter(fn {i, _} -> i > from end) |> Enum.min_by(&elem(&1, 0), fn -> nil end)
@@ -195,4 +208,10 @@ defmodule Lua.Compiler.GotoResolution do
       nil -> :error
     end
   end
+
+  # A label is visible to a goto when the label's block path is a prefix of
+  # the goto's — i.e. the label's block encloses (or equals) the goto's.
+  defp visible?([], _goto_path), do: true
+  defp visible?([h | label_rest], [h | goto_rest]), do: visible?(label_rest, goto_rest)
+  defp visible?(_label_path, _goto_path), do: false
 end

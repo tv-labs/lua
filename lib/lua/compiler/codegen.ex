@@ -127,7 +127,7 @@ defmodule Lua.Compiler.Codegen do
   defp instruction_size({:call, base, _ac, _rc, _hint}), do: base + 1
   defp instruction_size({:source_line, _line, _src}), do: 0
   defp instruction_size({:close_upvalues, _threshold}), do: 0
-  defp instruction_size({:label, _name, _level}), do: 0
+  defp instruction_size({:label, _name, _level, _block_path}), do: 0
   defp instruction_size({:set_list, _table, start, count, _offset}) when is_integer(count), do: start + count
   defp instruction_size({:set_list, _table, start, {:multi, init}, _offset}), do: start + init
   defp instruction_size({:numeric_for, base, _loop_var, body}), do: max(base + 3, instruction_peak(body))
@@ -152,7 +152,7 @@ defmodule Lua.Compiler.Codegen do
   # are annotations. Reads of an existing register never raise the peak, so
   # all of these contribute nothing.
   defp instruction_size(:break), do: 0
-  defp instruction_size({:goto, _label}), do: 0
+  defp instruction_size({:goto, _label, _block_path}), do: 0
   defp instruction_size({:return, _base, _count}), do: 0
   defp instruction_size({:return_vararg}), do: 0
   defp instruction_size({:set_table, _table, _key, _value, _hint}), do: 0
@@ -851,8 +851,14 @@ defmodule Lua.Compiler.Codegen do
   end
 
   # Goto statement
-  defp gen_statement(%Statement.Goto{label: label}, ctx) do
-    {[{:goto, label}], ctx}
+  #
+  # Carries the lexical block path recorded by scope resolution so goto
+  # resolution (both engines) can bind the goto only to a label visible from
+  # its own block or an enclosing one, never a nested or sibling block
+  # (Lua 5.3 §3.3.4).
+  defp gen_statement(%Statement.Goto{label: label} = goto, ctx) do
+    block_path = Map.fetch!(ctx.scope.var_map, {:goto_block, goto})
+    {[{:goto, label, block_path}], ctx}
   end
 
   # Label statement
@@ -865,7 +871,8 @@ defmodule Lua.Compiler.Codegen do
   # `Lua.Compiler.GotoResolution`.
   defp gen_statement(%Statement.Label{name: name} = label, ctx) do
     level = Map.fetch!(ctx.scope.var_map, {:label_level, label})
-    {[{:label, name, level}], ctx}
+    block_path = Map.fetch!(ctx.scope.var_map, {:label_block, label})
+    {[{:label, name, level, block_path}], ctx}
   end
 
   # Stub for other statements

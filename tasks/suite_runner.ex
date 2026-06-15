@@ -154,19 +154,27 @@ defmodule Lua.SuiteRunner do
           env -> env
         end
 
-      case Lua.Parser.parse(code) do
-        {:ok, ast} ->
-          proto = Lua.Compiler.compile!(ast, source: chunk_name)
-          env_cell = make_ref()
-          vm = %{vm | upvalue_cells: Map.put(vm.upvalue_cells, env_cell, env)}
-          closure = {:lua_closure, proto, {env_cell}}
-          {[closure], %{lua | state: vm}}
-
-        {:error, error} ->
-          {[nil, "parse error: #{inspect(error)}"], lua}
+      with {:ok, ast} <- Lua.Parser.parse(code),
+           {:ok, proto} <- Lua.Compiler.compile(ast, source: chunk_name) do
+        env_cell = make_ref()
+        vm = %{vm | upvalue_cells: Map.put(vm.upvalue_cells, env_cell, env)}
+        closure = {:lua_closure, proto, {env_cell}}
+        {[closure], %{lua | state: vm}}
+      else
+        # Mirror PUC `load`: on a lexer/parser/compile failure return
+        # `nil, message` rather than raising, so callers can pattern-match the
+        # error (the suite's `errmsg` helper does `string.find(msg, ...)`).
+        {:error, message} ->
+          {[nil, format_load_error(message)], lua}
       end
     end)
   end
+
+  # The goto legality pass returns a plain string message; the parser returns
+  # a richer error term. Render either as a single string for `load`'s second
+  # return value.
+  defp format_load_error(message) when is_binary(message), do: message
+  defp format_load_error(error), do: "parse error: #{inspect(error)}"
 
   defp install_checkerr(lua) do
     Lua.set!(lua, ["checkerr"], fn [pattern, func | _], state ->

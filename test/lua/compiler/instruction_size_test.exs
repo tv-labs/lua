@@ -90,7 +90,7 @@ defmodule Lua.Compiler.InstructionSizeTest do
   # Stores, control flow, and debug annotations write no fresh register.
   @non_writers [
     {:break, 0},
-    {{:goto, :l1}, 0},
+    {{:goto, :l1, [0]}, 0},
     {{:return, 5, 1}, 0},
     {{:return_vararg}, 0},
     {{:set_table, 1, 2, 3, nil}, 0},
@@ -99,7 +99,7 @@ defmodule Lua.Compiler.InstructionSizeTest do
     {{:set_open_upvalue, 2, 3}, 0},
     {{:source_line, 10, "f.lua"}, 0},
     {{:close_upvalues, 3}, 0},
-    {{:label, :l1}, 0}
+    {{:label, :l1, 0, [0]}, 0}
   ]
 
   describe "instruction_peak classifies every emitted opcode" do

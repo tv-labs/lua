@@ -158,12 +158,6 @@
   ],
   "goto.lua" => [
     %{
-      lines: 12..40,
-      category: :stdlib,
-      reason: "load() parse-error messages do not match PUC-Lua 'label/local' format",
-      issue: nil
-    },
-    %{
       lines: 163..195,
       category: :stdlib,
       reason:

@@ -9,6 +9,7 @@ defmodule Lua.Compiler do
   alias Lua.Compiler.Bytecode
   alias Lua.Compiler.Codegen
   alias Lua.Compiler.GotoResolution
+  alias Lua.Compiler.GotoValidation
   alias Lua.Compiler.Prototype
   alias Lua.Compiler.Scope
 
@@ -28,7 +29,8 @@ defmodule Lua.Compiler do
   """
   @spec compile(Chunk.t(), compile_opts()) :: {:ok, Prototype.t()} | {:error, term()}
   def compile(%Chunk{} = chunk, opts \\ []) do
-    with {:ok, scope_state} <- Scope.resolve(chunk, opts),
+    with :ok <- GotoValidation.validate(chunk),
+         {:ok, scope_state} <- Scope.resolve(chunk, opts),
          {:ok, prototype} <- Codegen.generate(chunk, scope_state, opts) do
       # Encode bytecode first (it reads the raw `:goto` / `:label` stream),
       # then resolve gotos for the list interpreter. The two passes are
@@ -48,13 +50,13 @@ defmodule Lua.Compiler do
   """
   @spec compile!(Chunk.t(), compile_opts()) :: Prototype.t()
   def compile!(%Chunk{} = chunk, opts \\ []) do
-    # `compile/2`'s spec allows `{:error, _}` for forward compatibility, but the
-    # codegen path doesn't yet have an error-returning code path — codegen
-    # surfaces unsupported constructs by raising directly. Once codegen is
-    # converted to thread `{:ok, _} | {:error, _}` through every clause, swap
-    # this back to a `case` that re-raises `{:error, reason}` as a clear
-    # compiler exception.
-    {:ok, prototype} = compile(chunk, opts)
-    prototype
+    # Codegen surfaces unsupported constructs by raising directly, but the
+    # goto legality pass (`Lua.Compiler.GotoValidation`) returns `{:error,
+    # message}` for programs PUC-Lua rejects at compile time. Re-raise those as
+    # a clear compiler exception.
+    case compile(chunk, opts) do
+      {:ok, prototype} -> prototype
+      {:error, message} -> raise Lua.CompilerException, message
+    end
   end
 end

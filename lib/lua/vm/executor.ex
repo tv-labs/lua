@@ -675,7 +675,7 @@ defmodule Lua.VM.Executor do
 
   # ── Label ──────────────────────────────────────────────────────────────────
 
-  defp do_execute([{:label, _name, _level} | rest], regs, upvalues, proto, state, cont, frames, line) do
+  defp do_execute([{:label, _name, _level, _block_path} | rest], regs, upvalues, proto, state, cont, frames, line) do
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line)
   end
 
