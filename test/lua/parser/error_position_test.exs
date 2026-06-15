@@ -103,9 +103,16 @@ defmodule Lua.Parser.ErrorPositionTest do
     # A bare-expression error deep inside a function argument must blame the
     # inner statement, not the `function` keyword at the enclosing call's
     # opener. Regression for a stray `)` reported against the wrong line.
-    {"bare expression in nested function argument",
-     ~s|w:step("a", "b", function(output)\n  device.doesntExist)\nend)\n|, 2, 3,
-     "bare table-access expression"}
+    {"bare expression in nested function argument", ~s|w:step("a", "b", function(output)\n  device.doesntExist)\nend)\n|,
+     2, 3, "bare table-access expression"},
+    # An invalid assignment target deep inside a function argument must blame
+    # the inner statement even though the offending node (`f()`, an Expr.Call)
+    # carries no position — the error is structurally committed.
+    {"invalid assign target in nested function argument", ~s|outer("ok", function()\n  f() = 1\nend)\n|, 2, 7,
+     "syntax error near '='"},
+    # An unclosed delimiter opened inside a non-first argument propagates as
+    # the genuine deep error rather than being swallowed at the outer boundary.
+    {"unclosed delimiter in non-first call argument", "outer(1, inner(\n", 1, 15, "Unclosed opening parenthesis"}
   ]
 
   @statement_errors [
