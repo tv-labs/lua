@@ -1015,7 +1015,7 @@ defmodule Lua.Parser do
 
   # Parse table constructor: { fields }
   defp parse_table([{:delimiter, :lbrace, pos} | rest]) do
-    case parse_table_fields(rest, []) do
+    case parse_table_fields(rest, [], pos) do
       {:ok, fields, rest2} ->
         case expect_closing(rest2, :rbrace, :lbrace, pos) do
           {:ok, rest3} ->
@@ -1030,7 +1030,7 @@ defmodule Lua.Parser do
     end
   end
 
-  defp parse_table_fields(tokens, acc) do
+  defp parse_table_fields(tokens, acc, open_pos) do
     # Skip leading comments (and any orphaned trailing comments from a
     # previous field) before deciding whether we've hit the terminator
     # or another field.
@@ -1039,6 +1039,15 @@ defmodule Lua.Parser do
     case peek(tokens) do
       {:delimiter, :rbrace, _} ->
         {:ok, acc, tokens}
+
+      # The constructor ran off the end of input before a closing '}'.
+      # Point at the opening brace (like '(' and '[') rather than emitting
+      # a bare "expected ',' or '}', got eof" pinned to the end of the file.
+      {:eof, _} ->
+        {:error, {:unclosed_delimiter, :lbrace, open_pos}}
+
+      nil ->
+        {:error, {:unclosed_delimiter, :lbrace, open_pos}}
 
       _ ->
         case parse_table_field(tokens) do
@@ -1050,14 +1059,19 @@ defmodule Lua.Parser do
             case peek(rest) do
               {:delimiter, :comma, _} ->
                 {_, rest2} = consume(rest)
-                parse_table_fields(rest2, [field | acc])
+                parse_table_fields(rest2, [field | acc], open_pos)
 
               {:delimiter, :semicolon, _} ->
                 {_, rest2} = consume(rest)
-                parse_table_fields(rest2, [field | acc])
+                parse_table_fields(rest2, [field | acc], open_pos)
 
               {:delimiter, :rbrace, _} ->
                 {:ok, [field | acc], rest}
+
+              # Field parsed cleanly but the stream ended before a separator
+              # or '}'. Genuinely unclosed — blame the opening brace.
+              {:eof, _} ->
+                {:error, {:unclosed_delimiter, :lbrace, open_pos}}
 
               _ ->
                 unexpected_token_error(rest, "Expected ',' or '}' in table")
@@ -1252,6 +1266,15 @@ defmodule Lua.Parser do
       {:delimiter, ^terminator, _} ->
         {_, rest} = consume(tokens)
         {:ok, [], rest}
+
+      # Opened and ran straight off the end of input (e.g. `f(` at EOF).
+      # Blame the opener, matching the args-then-EOF case below, instead
+      # of a bare "Expected expression" pinned to the end of the file.
+      {:eof, _} ->
+        {:error, {:unclosed_delimiter, delimiter, open_pos}}
+
+      nil ->
+        {:error, {:unclosed_delimiter, delimiter, open_pos}}
 
       _ ->
         case parse_expr_list(tokens) do
