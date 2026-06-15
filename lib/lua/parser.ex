@@ -642,7 +642,7 @@ defmodule Lua.Parser do
   end
 
   defp parse_assignment(targets, [{:operator, :assign, pos} | rest]) do
-    case validate_assign_targets(targets) do
+    case validate_assign_targets(targets, pos) do
       :ok ->
         case parse_expr_list(rest) do
           {:ok, values, rest2} ->
@@ -669,13 +669,17 @@ defmodule Lua.Parser do
   # Name | prefixexp '[' exp ']' | prefixexp '.' Name. Anything else
   # (number, string, function call, parenthesised expression) is a
   # syntax error.
-  defp validate_assign_targets(targets) do
+  # `assign_pos` is the position of the `=` operator, used as a fallback when
+  # the offending target node carries no position (e.g. an `Expr.Call` LHS,
+  # built with `meta: nil`) so the error still points at the right line rather
+  # than degrading to a nil position.
+  defp validate_assign_targets(targets, assign_pos) do
     Enum.reduce_while(targets, :ok, fn target, :ok ->
       case target do
         %Expr.Var{} -> {:cont, :ok}
         %Expr.Property{} -> {:cont, :ok}
         %Expr.Index{} -> {:cont, :ok}
-        other -> {:halt, {:error, {:invalid_assign_target, target_position(other), other.__struct__}}}
+        other -> {:halt, {:error, {:invalid_assign_target, target_position(other) || assign_pos, other.__struct__}}}
       end
     end)
   end
@@ -1238,11 +1242,28 @@ defmodule Lua.Parser do
   # A sub-parse "committed" if it consumed input before failing. We detect
   # this by comparing the error's byte offset against the offset of the
   # token the sub-parse started on: an error positioned strictly past the
-  # start means tokens were consumed. `:unexpected_end` (EOF) is always
-  # committed — running out of input mid-list is a real error, never a
-  # clean list terminator. A missing position falls back to "not
+  # start means tokens were consumed. A missing position falls back to "not
   # committed", preserving the previous recovery behaviour.
+  #
+  # Some error shapes are always committed regardless of their reported
+  # position: `:unexpected_end` (EOF) means we ran out of input mid-list,
+  # and `:bare_expression` / `:invalid_assign_target` are statement-level
+  # errors only reachable through a `function() ... end` body — i.e. only
+  # after a full prefix expression has been consumed. None of these can ever
+  # represent a clean list terminator, so they propagate even when their
+  # position is absent (e.g. an invalid-assign target on a `meta: nil`
+  # postfix node, whose `target_position/1` is `nil`).
+  #
+  # `:unclosed_delimiter` joins them: an opened-but-unclosed delimiter has by
+  # construction consumed an opener and its content, so it can never be a clean
+  # list terminator. Gating it on position would make blame depend on whether
+  # the opener happens to be the argument's first token (`open_pos ==
+  # start_offset`) — the begins-a-non-first-argument case — versus opened
+  # mid-element. Always committing it blames the inner opener uniformly.
   defp committed?({:unexpected_end, _message, _pos}, _tokens), do: true
+  defp committed?({:bare_expression, _pos, _expr_struct}, _tokens), do: true
+  defp committed?({:invalid_assign_target, _pos, _expr_struct}, _tokens), do: true
+  defp committed?({:unclosed_delimiter, _delimiter, _open_pos}, _tokens), do: true
 
   defp committed?(reason, tokens) do
     with %{byte_offset: error_offset} <- error_position(reason),

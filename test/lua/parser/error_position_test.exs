@@ -99,7 +99,25 @@ defmodule Lua.Parser.ErrorPositionTest do
     {"bad token in function inside function inside call",
      "outer(function()\n  inner(function()\n    x = +\n  end)\nend)\n", 3, 9, "Expected expression"},
     {"deep error in a return list", "function f()\n  return 1, 2, g(\nend\n", 3, 1, "Expected expression"},
-    {"stray statement after nested calls", "outer(mid(inner(\n)))\n.. bad\n", 3, 1, "bare"}
+    {"stray statement after nested calls", "outer(mid(inner(\n)))\n.. bad\n", 3, 1, "bare"},
+    # A bare-expression error deep inside a function argument must blame the
+    # inner statement, not the `function` keyword at the enclosing call's
+    # opener. Regression for a stray `)` reported against the wrong line.
+    {"bare expression in nested function argument", ~s|w:step("a", "b", function(output)\n  device.doesntExist)\nend)\n|,
+     2, 3, "bare table-access expression"},
+    # An invalid assignment target deep inside a function argument must blame
+    # the inner statement even though the offending node (`f()`, an Expr.Call)
+    # carries no position — the error is structurally committed.
+    {"invalid assign target in nested function argument", ~s|outer("ok", function()\n  f() = 1\nend)\n|, 2, 7,
+     "syntax error near '='"},
+    # An unclosed delimiter opened inside a non-first argument propagates as
+    # the genuine deep error rather than being swallowed at the outer boundary.
+    {"unclosed delimiter in non-first call argument", "outer(1, inner(\n", 1, 15, "Unclosed opening parenthesis"},
+    # An unclosed delimiter that *begins* a non-first argument is blamed at
+    # that opener too, matching the first-argument and mid-element cases —
+    # not at a misleading "Expected )" on the outer call boundary.
+    {"unclosed brace beginning a non-first call argument", "outer(1, {a = 1\n", 1, 10, "Unclosed opening brace"},
+    {"unclosed paren beginning a non-first call argument", "outer(1, (2 + 3\n", 1, 10, "Unclosed opening parenthesis"}
   ]
 
   @statement_errors [
