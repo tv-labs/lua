@@ -142,10 +142,10 @@ and raise catchable runtime errors, so `pcall` recovers from them in-band:
 
 - `:max_call_depth` caps nested function-call depth; exceeding it raises
   `"stack overflow"`.
-- `:max_steps` caps the number of VM instructions a single evaluation may
+- `:max_instructions` caps the number of VM instructions a single evaluation may
   execute; exceeding it raises `"instruction budget exceeded"`.
 
-    iex> lua = Lua.new(max_steps: 1000)
+    iex> lua = Lua.new(max_instructions: 1000)
     iex> {[false, message], _lua} = Lua.eval!(lua, ~S[return pcall(function() while true do end end)])
     iex> message =~ "instruction budget exceeded"
     true

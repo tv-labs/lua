@@ -1,6 +1,6 @@
-defmodule Lua.VM.MaxStepsTest do
+defmodule Lua.VM.MaxInstructionsTest do
   @moduledoc """
-  Pins the `:max_steps` instruction budget: a finite budget aborts a
+  Pins the `:max_instructions` instruction budget: a finite budget aborts a
   non-terminating script with a catchable `"instruction budget exceeded"`
   runtime error, the budget is recoverable via `pcall`, it bounds both the
   interpreter and the compiled-dispatcher path, the budget is fresh per
@@ -18,9 +18,9 @@ defmodule Lua.VM.MaxStepsTest do
 
   defp eval!(lua, code), do: Lua.eval!(lua, code)
 
-  describe ":max_steps enforcement (interpreter path)" do
+  describe ":max_instructions enforcement (interpreter path)" do
     test "a finite budget aborts a non-terminating while loop" do
-      lua = Lua.new(max_steps: 1000)
+      lua = Lua.new(max_instructions: 1000)
 
       assert_raise RuntimeException, ~r/instruction budget exceeded/, fn ->
         eval!(lua, "while true do end")
@@ -28,7 +28,7 @@ defmodule Lua.VM.MaxStepsTest do
     end
 
     test "a finite budget aborts a tight numeric-for loop" do
-      lua = Lua.new(max_steps: 1000)
+      lua = Lua.new(max_instructions: 1000)
 
       assert_raise RuntimeException, ~r/instruction budget exceeded/, fn ->
         eval!(lua, "local s = 0 for i = 1, 1000000000 do s = s + i end return s")
@@ -40,7 +40,7 @@ defmodule Lua.VM.MaxStepsTest do
       # call-boundary increment trips before the recursion exhausts itself,
       # and the message is the budget error — distinct from the
       # `:max_call_depth` "stack overflow".
-      lua = Lua.new(max_steps: 100)
+      lua = Lua.new(max_instructions: 100)
 
       assert_raise RuntimeException, ~r/instruction budget exceeded/, fn ->
         eval!(lua, "local function f() return f() end f()")
@@ -48,9 +48,9 @@ defmodule Lua.VM.MaxStepsTest do
     end
   end
 
-  describe ":max_steps catchability and recovery" do
+  describe ":max_instructions catchability and recovery" do
     test "pcall catches the budget error and the VM keeps working afterward" do
-      lua = Lua.new(max_steps: 1000)
+      lua = Lua.new(max_instructions: 1000)
 
       {[false, msg], lua} =
         eval!(lua, "return pcall(function() while true do end end)")
@@ -64,14 +64,14 @@ defmodule Lua.VM.MaxStepsTest do
 
   describe "budget scoping" do
     test "a loop under the budget returns normally" do
-      lua = Lua.new(max_steps: 10_000)
+      lua = Lua.new(max_instructions: 10_000)
 
       assert {[5050], _lua} =
                eval!(lua, "local s = 0 for i = 1, 100 do s = s + i end return s")
     end
 
     test "the budget is fresh per evaluation (no cross-eval leak)" do
-      lua = Lua.new(max_steps: 5000)
+      lua = Lua.new(max_instructions: 5000)
 
       # First eval consumes ~100 iterations of budget.
       {[5050], lua} = eval!(lua, "local s = 0 for i = 1, 100 do s = s + i end return s")
@@ -93,7 +93,7 @@ defmodule Lua.VM.MaxStepsTest do
 
       # Establish a budget that comfortably clears one eval but is far below
       # the cumulative cost of running it 100 times.
-      lua = Lua.new(max_steps: 2000)
+      lua = Lua.new(max_instructions: 2000)
 
       final =
         Enum.reduce(1..100, lua, fn _i, acc ->
@@ -110,7 +110,7 @@ defmodule Lua.VM.MaxStepsTest do
       # its instructions and nested calls. A tight loop calling a helper on
       # every iteration must still trip the budget — the reset is a
       # top-level boundary, not a per-call one.
-      lua = Lua.new(max_steps: 1000)
+      lua = Lua.new(max_instructions: 1000)
 
       code = """
       local function step(x) return x + 1 end
@@ -137,7 +137,7 @@ defmodule Lua.VM.MaxStepsTest do
       # A `function` body compiles to a `:compiled_closure`; calling it routes
       # the loop through `Lua.VM.Dispatcher`, exercising the dispatcher's
       # back-edge counting rather than the interpreter's.
-      lua = Lua.new(max_steps: 1000)
+      lua = Lua.new(max_instructions: 1000)
 
       assert_raise RuntimeException, ~r/instruction budget exceeded/, fn ->
         eval!(lua, "local function spin() while true do end end spin()")
@@ -147,7 +147,7 @@ defmodule Lua.VM.MaxStepsTest do
     test "the dispatcher enforces the budget when driven directly" do
       {:ok, ast} = Parser.parse("local function spin() while true do end end return spin")
       {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-      state = %{Stdlib.install(State.new()) | max_steps: 1000}
+      state = %{Stdlib.install(State.new()) | max_instructions: 1000}
 
       # Run the chunk to obtain the compiled closure it returns, then drive
       # the dispatcher with the closure's prototype directly.
@@ -162,23 +162,21 @@ defmodule Lua.VM.MaxStepsTest do
 
   describe "cross-engine mutual recursion" do
     test "the budget bounds recursion that alternates execution engines" do
-      # A function whose body contains a `goto` cannot be bytecode-encoded,
-      # so it stays an interpreted `:lua_closure`; a plain arithmetic body
-      # compiles to a `:compiled_closure`. Pairing them in unbounded mutual
-      # recursion with no loop on either side forces a hand-off between the
-      # interpreter and the dispatcher on every call. The budget must span
+      # A function whose body contains a short-circuit `and`/`or` cannot be
+      # bytecode-encoded, so it stays an interpreted `:lua_closure`; a plain
+      # body compiles to a `:compiled_closure`. Pairing them in unbounded
+      # mutual recursion with no loop on either side forces a hand-off between
+      # the interpreter and the dispatcher on every call. The budget must span
       # those hand-offs rather than resetting at each boundary, so this
       # raises the budget error rather than recursing until `max_call_depth`
       # (which defaults to `:infinity`) or forever.
-      lua = Lua.new(max_steps: 1000)
+      lua = Lua.new(max_instructions: 1000)
 
       code = """
       local pong
-      -- `goto` keeps this body off the bytecode path: interpreted closure.
+      -- short-circuit `and` keeps this body off the bytecode path: interpreted closure.
       local function ping(n)
-        ::again::
-        if n < 0 then goto again end
-        return pong(n)
+        return n and pong(n)
       end
       -- Plain body: compiles to a dispatcher closure.
       pong = function(n) return ping(n) end
@@ -198,7 +196,7 @@ defmodule Lua.VM.MaxStepsTest do
       {:ok, ast} =
         Parser.parse("""
         local pong
-        local function ping(n) ::again:: if n < 0 then goto again end return pong end
+        local function ping(n) return n and pong end
         pong = function(n) return ping end
         return ping, pong
         """)
@@ -216,8 +214,8 @@ defmodule Lua.VM.MaxStepsTest do
   describe "budget integrity (non-conservative-accounting regressions)" do
     test "an interpreted `return ...` terminal stamps the step tally back into state" do
       # The bottom-frame `{:return_vararg}` terminal must stamp the accumulated
-      # tally into `state.steps` like every other terminal. If it returns a
-      # bare state, a compiled caller that reads `steps = state.steps` after the
+      # tally into `state.instruction_count` like every other terminal. If it returns a
+      # bare state, a compiled caller that reads `instruction_count = state.instruction_count` after the
       # interpreted callee returns under-counts, so work done in `return ...`
       # passthroughs vanishes from the budget. A finite budget keeps the tally
       # live (the default `:infinity` path charges nothing, so accrual is only
@@ -225,9 +223,9 @@ defmodule Lua.VM.MaxStepsTest do
       run = fn src ->
         {:ok, ast} = Parser.parse(src)
         {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-        state = %{Stdlib.install(State.new()) | max_steps: 1_000_000}
+        state = %{Stdlib.install(State.new()) | max_instructions: 1_000_000}
         {:ok, _results, state} = Lua.VM.execute(proto, state)
-        state.steps
+        state.instruction_count
       end
 
       work = "local s = 0 for i = 1, 5 do s = s + i end "
@@ -243,8 +241,8 @@ defmodule Lua.VM.MaxStepsTest do
       # exhausted tally forward (monotonic) rather than rewinding it to the
       # pcall-entry value. Otherwise a `pcall`-in-a-loop pattern re-funds the
       # inner work every iteration and the single evaluation runs far beyond
-      # `:max_steps` total instructions before tripping.
-      lua = Lua.new(max_steps: 2000)
+      # `:max_instructions` total instructions before tripping.
+      lua = Lua.new(max_instructions: 2000)
 
       assert_raise RuntimeException, ~r/instruction budget exceeded/, fn ->
         eval!(lua, "for i = 1, 1000000 do pcall(function() while true do end end) end")
@@ -254,10 +252,10 @@ defmodule Lua.VM.MaxStepsTest do
     test "require runs the module body against the same budget (no mid-eval reset)" do
       # `require` re-enters `Lua.VM.execute`, which resets the per-eval tally at
       # genuine top-level entry only. The pre-require work must still count: with
-      # a mid-eval reset the 700 pre-require steps would be forgiven, leaving the
-      # 700 post-require steps under the 1000 budget so the eval would wrongly
+      # a mid-eval reset the 700 pre-require instruction_count would be forgiven, leaving the
+      # 700 post-require instruction_count under the 1000 budget so the eval would wrongly
       # succeed. With the budget preserved, pre + post exceed it and it trips.
-      lua = Lua.new(sandboxed: [], max_steps: 1000)
+      lua = Lua.new(sandboxed: [], max_instructions: 1000)
 
       code = ~S"""
       package.path = "./test/fixtures/?.lua"
@@ -277,7 +275,7 @@ defmodule Lua.VM.MaxStepsTest do
       # Sanity companion: requiring the trivial module under a comfortable
       # budget, with light surrounding work, must succeed (the fix must not
       # over-count and spuriously trip a legitimate require).
-      lua = Lua.new(sandboxed: [], max_steps: 100_000)
+      lua = Lua.new(sandboxed: [], max_instructions: 100_000)
 
       code = ~S"""
       package.path = "./test/fixtures/?.lua"
@@ -289,16 +287,16 @@ defmodule Lua.VM.MaxStepsTest do
     end
   end
 
-  describe ":max_steps validation" do
+  describe ":max_instructions validation" do
     test "rejects non-positive integers and non-integers" do
-      assert_raise ArgumentError, ~r/:max_steps/, fn -> Lua.new(max_steps: 0) end
-      assert_raise ArgumentError, ~r/:max_steps/, fn -> Lua.new(max_steps: -1) end
-      assert_raise ArgumentError, ~r/:max_steps/, fn -> Lua.new(max_steps: :nope) end
+      assert_raise ArgumentError, ~r/:max_instructions/, fn -> Lua.new(max_instructions: 0) end
+      assert_raise ArgumentError, ~r/:max_instructions/, fn -> Lua.new(max_instructions: -1) end
+      assert_raise ArgumentError, ~r/:max_instructions/, fn -> Lua.new(max_instructions: :nope) end
     end
 
     test "accepts :infinity and positive integers" do
-      assert %Lua{} = Lua.new(max_steps: :infinity)
-      assert %Lua{} = Lua.new(max_steps: 1)
+      assert %Lua{} = Lua.new(max_instructions: :infinity)
+      assert %Lua{} = Lua.new(max_instructions: 1)
     end
   end
 end

@@ -5,12 +5,12 @@ defmodule Lua.VM.Executor do
   Fully tail-recursive CPS dispatch loop. The do_execute/8 function never
   grows the Erlang call stack for Lua-to-Lua function calls or control flow.
 
-  Signature: do_execute(instructions, registers, upvalues, proto, state, cont, frames, line, steps)
+  Signature: do_execute(instructions, registers, upvalues, proto, state, cont, frames, line, instruction_count)
 
     cont   — continuation stack: list of instruction lists or loop/CPS markers
     frames — call frame stack: saved caller context for each active Lua call
     line   — current source line (threaded to avoid State struct allocation)
-    steps  — running instruction tally for the `:max_steps` budget, threaded
+    instruction_count  — running instruction tally for the `:max_instructions` budget, threaded
              as a parameter (not stored in `%State{}`) for the same reason
              `line` is: it would otherwise force a struct rebuild on the hot
              path. Incremented only at loop back-edges and call boundaries —
@@ -91,7 +91,7 @@ defmodule Lua.VM.Executor do
       state = %{state | open_upvalues: %{}}
 
       {results, regs, state} =
-        do_execute(instructions, registers, upvalues, proto, state, [], [], 0, state.steps)
+        do_execute(instructions, registers, upvalues, proto, state, [], [], 0, state.instruction_count)
 
       {results, regs, %{state | open_upvalues: saved_open_upvalues}}
     rescue
@@ -161,9 +161,19 @@ defmodule Lua.VM.Executor do
       # Seed the interpreter tally from the budget carried across the boundary
       # so an alternating-engine call chain accumulates against one budget
       # rather than resetting here. The terminal writes the final tally back
-      # into `state.steps` (see `finish_steps/2`).
+      # into `state.instruction_count` (see `finish_instructions/2`).
       {results, _callee_regs, state} =
-        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0, state.steps)
+        do_execute(
+          callee_proto.instructions,
+          callee_regs,
+          callee_upvalues,
+          callee_proto,
+          state,
+          [],
+          [],
+          0,
+          state.instruction_count
+        )
 
       state = %{state | open_upvalues: saved_open_upvalues}
       {results, state}
@@ -655,9 +665,9 @@ defmodule Lua.VM.Executor do
 
   # ── Break ──────────────────────────────────────────────────────────────────
 
-  defp do_execute([:break | _rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([:break | _rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     {exit_is, rest_cont} = find_loop_exit(cont)
-    do_execute(exit_is, regs, upvalues, proto, state, rest_cont, frames, line, steps)
+    do_execute(exit_is, regs, upvalues, proto, state, rest_cont, frames, line, instruction_count)
   end
 
   # ── Goto ───────────────────────────────────────────────────────────────────
@@ -667,7 +677,7 @@ defmodule Lua.VM.Executor do
   # `cont` entries leaves the blocks between here and the target; `target_tail`
   # is the destination block's instruction suffix after the `::label::`.
 
-  defp do_execute([{:goto, id} | _rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:goto, id} | _rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     case proto.goto_targets do
       %{^id => {depth, level, target_tail}} ->
         # Close upvalue cells for locals allocated beyond the target's scope:
@@ -675,7 +685,7 @@ defmodule Lua.VM.Executor do
         # their captured locals with them, so the next pass through gets fresh
         # cells — matching Lua 5.3 §3.3.4 block-exit semantics.
         state = close_open_upvalues_at_or_above(state, level)
-        do_execute(target_tail, regs, upvalues, proto, state, Enum.drop(cont, depth), frames, line, steps)
+        do_execute(target_tail, regs, upvalues, proto, state, Enum.drop(cont, depth), frames, line, instruction_count)
 
       _ ->
         raise InternalError, value: "goto target not found"
@@ -684,21 +694,31 @@ defmodule Lua.VM.Executor do
 
   # ── Label ──────────────────────────────────────────────────────────────────
 
-  defp do_execute([{:label, _name, _level, _block_path} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+  defp do_execute(
+         [{:label, _name, _level, _block_path} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── Instructions exhausted — handle continuations and frames ───────────────
 
-  defp do_execute([], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     case cont do
       # Normal instruction continuation
       [next_is | rest_cont] when is_list(next_is) ->
-        do_execute(next_is, regs, upvalues, proto, state, rest_cont, frames, line, steps)
+        do_execute(next_is, regs, upvalues, proto, state, rest_cont, frames, line, instruction_count)
 
       # Fell off end of a loop body normally — consume the loop_exit marker
       [{:loop_exit, _} | rest_cont] ->
-        do_execute([], regs, upvalues, proto, state, rest_cont, frames, line, steps)
+        do_execute([], regs, upvalues, proto, state, rest_cont, frames, line, instruction_count)
 
       # After while condition body — check test_reg; enter body or exit loop
       [{:cps_while_test, test_reg, loop_body, cond_body, rest, outer_cont} | _] ->
@@ -706,35 +726,79 @@ defmodule Lua.VM.Executor do
 
         if Value.truthy?(elem(regs, test_reg)) do
           body_done = {:cps_while_body, test_reg, loop_body, cond_body, rest, outer_cont}
-          do_execute(loop_body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, steps)
+
+          do_execute(
+            loop_body,
+            regs,
+            upvalues,
+            proto,
+            state,
+            [body_done | loop_exit_cont],
+            frames,
+            line,
+            instruction_count
+          )
         else
-          do_execute(rest, regs, upvalues, proto, state, outer_cont, frames, line, steps)
+          do_execute(rest, regs, upvalues, proto, state, outer_cont, frames, line, instruction_count)
         end
 
       # After while loop body — restart condition
       [{:cps_while_body, test_reg, loop_body, cond_body, rest, outer_cont} | _] ->
-        steps = State.tick!(state, steps)
+        instruction_count = State.tick!(state, instruction_count)
         loop_exit_cont = [{:loop_exit, rest} | outer_cont]
         cond_check = {:cps_while_test, test_reg, loop_body, cond_body, rest, outer_cont}
-        do_execute(cond_body, regs, upvalues, proto, state, [cond_check | loop_exit_cont], frames, line, steps)
+
+        do_execute(
+          cond_body,
+          regs,
+          upvalues,
+          proto,
+          state,
+          [cond_check | loop_exit_cont],
+          frames,
+          line,
+          instruction_count
+        )
 
       # After repeat body — execute condition
       [{:cps_repeat_body, loop_body, cond_body, test_reg, rest, outer_cont} | _] ->
         loop_exit_cont = [{:loop_exit, rest} | outer_cont]
         cond_check = {:cps_repeat_cond, loop_body, cond_body, test_reg, rest, outer_cont}
-        do_execute(cond_body, regs, upvalues, proto, state, [cond_check | loop_exit_cont], frames, line, steps)
+
+        do_execute(
+          cond_body,
+          regs,
+          upvalues,
+          proto,
+          state,
+          [cond_check | loop_exit_cont],
+          frames,
+          line,
+          instruction_count
+        )
 
       # After repeat condition — check test_reg; exit or repeat
       [{:cps_repeat_cond, loop_body, cond_body, test_reg, rest, outer_cont} | _] ->
         if Value.truthy?(elem(regs, test_reg)) do
           # Condition true = exit loop (repeat UNTIL)
-          do_execute(rest, regs, upvalues, proto, state, outer_cont, frames, line, steps)
+          do_execute(rest, regs, upvalues, proto, state, outer_cont, frames, line, instruction_count)
         else
           # Condition false = repeat body
-          steps = State.tick!(state, steps)
+          instruction_count = State.tick!(state, instruction_count)
           loop_exit_cont = [{:loop_exit, rest} | outer_cont]
           body_done = {:cps_repeat_body, loop_body, cond_body, test_reg, rest, outer_cont}
-          do_execute(loop_body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, steps)
+
+          do_execute(
+            loop_body,
+            regs,
+            upvalues,
+            proto,
+            state,
+            [body_done | loop_exit_cont],
+            frames,
+            line,
+            instruction_count
+          )
         end
 
       # After numeric_for body — increment counter and re-check
@@ -747,16 +811,16 @@ defmodule Lua.VM.Executor do
         should_continue = if step > 0, do: new_counter <= limit, else: new_counter >= limit
 
         if should_continue do
-          steps = State.tick!(state, steps)
+          instruction_count = State.tick!(state, instruction_count)
           regs = put_elem(regs, loop_var, new_counter)
 
           state = close_open_upvalues_at_or_above(state, loop_var)
 
           loop_exit_cont = [{:loop_exit, rest} | outer_cont]
           body_done = {:cps_numeric_for, base, loop_var, body, rest, outer_cont}
-          do_execute(body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, steps)
+          do_execute(body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, instruction_count)
         else
-          do_execute(rest, regs, upvalues, proto, state, outer_cont, frames, line, steps)
+          do_execute(rest, regs, upvalues, proto, state, outer_cont, frames, line, instruction_count)
         end
 
       # After generic_for body — call iterator and re-check
@@ -765,15 +829,15 @@ defmodule Lua.VM.Executor do
         invariant_state = elem(regs, base + 1)
         control = elem(regs, base + 2)
 
-        state = %{state | steps: steps}
+        state = %{state | instruction_count: instruction_count}
         {results, state} = call_value(iter_func, [invariant_state, control], proto, state, line)
-        steps = state.steps
+        instruction_count = state.instruction_count
         first_result = List.first(results)
 
         if first_result == nil do
-          do_execute(rest, regs, upvalues, proto, state, outer_cont, frames, line, steps)
+          do_execute(rest, regs, upvalues, proto, state, outer_cont, frames, line, instruction_count)
         else
-          steps = State.tick!(state, steps)
+          instruction_count = State.tick!(state, instruction_count)
           regs = put_elem(regs, base + 2, first_result)
 
           regs =
@@ -786,41 +850,61 @@ defmodule Lua.VM.Executor do
 
           loop_exit_cont = [{:loop_exit, rest} | outer_cont]
           body_done = {:cps_generic_for, base, var_regs, body, rest, outer_cont}
-          do_execute(body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, steps)
+          do_execute(body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, instruction_count)
         end
 
       # Continuation stack exhausted — check frames for pending function return
       [] ->
         case frames do
           [] ->
-            {[], regs, finish_steps(state, steps)}
+            {[], regs, finish_instructions(state, instruction_count)}
 
           [frame | rest_frames] ->
-            do_frame_return([], regs, state, frame, rest_frames, line, steps)
+            do_frame_return([], regs, state, frame, rest_frames, line, instruction_count)
         end
     end
   end
 
   # ── load_constant ──────────────────────────────────────────────────────────
 
-  defp do_execute([{:load_constant, dest, value} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:load_constant, dest, value} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── load_boolean ───────────────────────────────────────────────────────────
 
-  defp do_execute([{:load_boolean, dest, value} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:load_boolean, dest, value} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── get_global ─────────────────────────────────────────────────────────────
 
-  defp do_execute([{:get_global, dest, name} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:get_global, dest, name} | rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     value = State.get_global(state, name)
     regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── load_env ───────────────────────────────────────────────────────────────
@@ -830,9 +914,9 @@ defmodule Lua.VM.Executor do
   # environment carries it in upvalue slot 0 (see `Stdlib.compile_loaded_chunk`);
   # otherwise `_ENV` defaults to the global table `_G`.
 
-  defp do_execute([{:load_env, dest} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:load_env, dest} | rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     regs = put_elem(regs, dest, load_env_value(upvalues, state))
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── get_upvalue / set_upvalue ──────────────────────────────────────────────
@@ -853,20 +937,40 @@ defmodule Lua.VM.Executor do
   # same cell. `Map.get/2` keeps the nil-for-dangling-cell semantics the
   # dispatcher mirrors.
 
-  defp do_execute([{:get_upvalue, dest, index} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:get_upvalue, dest, index} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     cell_ref = elem(upvalues, index)
     value = Map.get(state.upvalue_cells, cell_ref)
     regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── set_upvalue ────────────────────────────────────────────────────────────
 
-  defp do_execute([{:set_upvalue, index, source} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:set_upvalue, index, source} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     cell_ref = elem(upvalues, index)
     value = elem(regs, source)
     state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── get_open_upvalue ───────────────────────────────────────────────────────
@@ -875,7 +979,17 @@ defmodule Lua.VM.Executor do
   # If no cell has been created yet (no closure has captured this register),
   # the register itself is the source of truth -- the next closure that
   # captures the register will create a cell from the current register value.
-  defp do_execute([{:get_open_upvalue, dest, reg} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:get_open_upvalue, dest, reg} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     value =
       case Map.get(state.open_upvalues, reg) do
         nil -> elem(regs, reg)
@@ -883,7 +997,7 @@ defmodule Lua.VM.Executor do
       end
 
     regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── close_upvalues ─────────────────────────────────────────────────────────
@@ -895,9 +1009,19 @@ defmodule Lua.VM.Executor do
   # slots does not read or overwrite the stale cell. Loop bodies do this on
   # each iteration boundary in the continuation handlers above; this is the
   # same operation for non-loop block exits.
-  defp do_execute([{:close_upvalues, threshold} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:close_upvalues, threshold} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     state = close_open_upvalues_at_or_above(state, threshold)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── set_open_upvalue ───────────────────────────────────────────────────────
@@ -907,7 +1031,17 @@ defmodule Lua.VM.Executor do
   # holds the value (codegen always emits a move into the register before
   # set_open_upvalue), and the next closure that captures the register will
   # create a cell from the current register value.
-  defp do_execute([{:set_open_upvalue, reg, source} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:set_open_upvalue, reg, source} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     state =
       case Map.get(state.open_upvalues, reg) do
         nil ->
@@ -918,53 +1052,93 @@ defmodule Lua.VM.Executor do
           %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
       end
 
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── source_line — Target A: update line param only, no State struct copy ───
 
-  defp do_execute([{:source_line, new_line, _file} | rest], regs, upvalues, proto, state, cont, frames, _line, steps) do
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, new_line, steps)
+  defp do_execute(
+         [{:source_line, new_line, _file} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         _line,
+         instruction_count
+       ) do
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, new_line, instruction_count)
   end
 
   # ── move ───────────────────────────────────────────────────────────────────
 
-  defp do_execute([{:move, dest, source} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:move, dest, source} | rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     value = elem(regs, source)
     regs = put_elem(regs, dest, value)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── test — push rest as continuation, tail-call body ──────────────────────
 
-  defp do_execute([{:test, reg, then_body, else_body} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:test, reg, then_body, else_body} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     body = if Value.truthy?(elem(regs, reg)), do: then_body, else: else_body
-    do_execute(body, regs, upvalues, proto, state, [rest | cont], frames, line, steps)
+    do_execute(body, regs, upvalues, proto, state, [rest | cont], frames, line, instruction_count)
   end
 
   # ── test_and — short-circuit AND, push rest as continuation ───────────────
 
-  defp do_execute([{:test_and, dest, source, rest_body} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:test_and, dest, source, rest_body} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     value = elem(regs, source)
 
     if Value.truthy?(value) do
-      do_execute(rest_body, regs, upvalues, proto, state, [rest | cont], frames, line, steps)
+      do_execute(rest_body, regs, upvalues, proto, state, [rest | cont], frames, line, instruction_count)
     else
       regs = put_elem(regs, dest, value)
-      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
     end
   end
 
   # ── test_or — short-circuit OR, push rest as continuation ─────────────────
 
-  defp do_execute([{:test_or, dest, source, rest_body} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:test_or, dest, source, rest_body} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     value = elem(regs, source)
 
     if Value.truthy?(value) do
       regs = put_elem(regs, dest, value)
-      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
     else
-      do_execute(rest_body, regs, upvalues, proto, state, [rest | cont], frames, line, steps)
+      do_execute(rest_body, regs, upvalues, proto, state, [rest | cont], frames, line, instruction_count)
     end
   end
 
@@ -979,11 +1153,11 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     loop_exit_cont = [{:loop_exit, rest} | cont]
     cond_check = {:cps_while_test, test_reg, loop_body, cond_body, rest, cont}
-    do_execute(cond_body, regs, upvalues, proto, state, [cond_check | loop_exit_cont], frames, line, steps)
+    do_execute(cond_body, regs, upvalues, proto, state, [cond_check | loop_exit_cont], frames, line, instruction_count)
   end
 
   # ── repeat_loop — CPS: body → condition → check → restart ────────────────
@@ -997,16 +1171,26 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     loop_exit_cont = [{:loop_exit, rest} | cont]
     body_done = {:cps_repeat_body, loop_body, cond_body, test_reg, rest, cont}
-    do_execute(loop_body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, steps)
+    do_execute(loop_body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, instruction_count)
   end
 
   # ── numeric_for — CPS ─────────────────────────────────────────────────────
 
-  defp do_execute([{:numeric_for, base, loop_var, body} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:numeric_for, base, loop_var, body} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     # Lua 5.3 §3.3.5: the three control values are coerced to numbers using
     # the same rules as arithmetic operators. If both initial value and step
     # are integers (after coercion), the loop is done with integers; if
@@ -1036,26 +1220,36 @@ defmodule Lua.VM.Executor do
 
       loop_exit_cont = [{:loop_exit, rest} | cont]
       body_done = {:cps_numeric_for, base, loop_var, body, rest, cont}
-      do_execute(body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, steps)
+      do_execute(body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, instruction_count)
     else
-      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
     end
   end
 
   # ── generic_for — CPS ─────────────────────────────────────────────────────
 
-  defp do_execute([{:generic_for, base, var_regs, body} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:generic_for, base, var_regs, body} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     iter_func = elem(regs, base)
     invariant_state = elem(regs, base + 1)
     control = elem(regs, base + 2)
 
-    state = %{state | steps: steps}
+    state = %{state | instruction_count: instruction_count}
     {results, state} = call_value(iter_func, [invariant_state, control], proto, state, line)
-    steps = state.steps
+    instruction_count = state.instruction_count
     first_result = List.first(results)
 
     if first_result == nil do
-      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
     else
       regs = put_elem(regs, base + 2, first_result)
 
@@ -1071,13 +1265,23 @@ defmodule Lua.VM.Executor do
 
       loop_exit_cont = [{:loop_exit, rest} | cont]
       body_done = {:cps_generic_for, base, var_regs, body, rest, cont}
-      do_execute(body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, steps)
+      do_execute(body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, instruction_count)
     end
   end
 
   # ── closure ────────────────────────────────────────────────────────────────
 
-  defp do_execute([{:closure, dest, proto_index} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:closure, dest, proto_index} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     nested_proto = Enum.at(proto.prototypes, proto_index)
 
     {captured_upvalues_reversed, state} =
@@ -1119,7 +1323,7 @@ defmodule Lua.VM.Executor do
       end
 
     regs = put_elem(regs, dest, closure)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── call — Lua closures via CPS frames; native functions inline ────────────
@@ -1133,7 +1337,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     func_value = elem(regs, base)
 
@@ -1161,16 +1365,36 @@ defmodule Lua.VM.Executor do
         # without going through this branch.
         args = collect_args(regs, base + 1, total_args)
         call_info = {proto.source, line, name_hint}
-        steps = State.tick!(state, steps)
+        instruction_count = State.tick!(state, instruction_count)
         State.check_call_depth!(state)
         # Carry the tally into the dispatcher so the budget spans the
-        # boundary; `Dispatcher.execute/4` seeds from `state.steps` and
+        # boundary; `Dispatcher.execute/4` seeds from `state.instruction_count` and
         # writes its final tally back there.
-        state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
+        state = %{
+          state
+          | call_stack: [call_info | state.call_stack],
+            call_depth: state.call_depth + 1,
+            instruction_count: instruction_count
+        }
+
         {results, state} = Dispatcher.execute(callee_proto, args, callee_upvalues, state)
-        steps = state.steps
+        instruction_count = state.instruction_count
         state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
-        continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, steps, base, result_count)
+
+        continue_after_call(
+          results,
+          regs,
+          rest,
+          upvalues,
+          proto,
+          state,
+          cont,
+          frames,
+          line,
+          instruction_count,
+          base,
+          result_count
+        )
 
       {:lua_closure, callee_proto, callee_upvalues} ->
         param_count = callee_proto.param_count
@@ -1209,7 +1433,7 @@ defmodule Lua.VM.Executor do
 
         call_info = {proto.source, line, name_hint}
 
-        steps = State.tick!(state, steps)
+        instruction_count = State.tick!(state, instruction_count)
         State.check_call_depth!(state)
 
         state = %{
@@ -1229,7 +1453,7 @@ defmodule Lua.VM.Executor do
           [],
           [frame | frames],
           line,
-          steps
+          instruction_count
         )
 
       {:native_func, fun} ->
@@ -1248,7 +1472,7 @@ defmodule Lua.VM.Executor do
         # Carry the tally into the native callback so a callback that
         # re-enters Lua (pcall, a sort comparator, a gsub function) keeps
         # accumulating against the same budget instead of restarting it.
-        state = %{state | steps: steps}
+        state = %{state | instruction_count: instruction_count}
 
         {results, state} =
           try do
@@ -1269,9 +1493,22 @@ defmodule Lua.VM.Executor do
             restore_position(prev_pos)
           end
 
-        steps = state.steps
+        instruction_count = state.instruction_count
 
-        continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, steps, base, result_count)
+        continue_after_call(
+          results,
+          regs,
+          rest,
+          upvalues,
+          proto,
+          state,
+          cont,
+          frames,
+          line,
+          instruction_count,
+          base,
+          result_count
+        )
 
       nil ->
         raise TypeError,
@@ -1311,9 +1548,9 @@ defmodule Lua.VM.Executor do
 
               call_mm ->
                 args = collect_args(regs, base + 1, total_args)
-                state = %{state | steps: steps}
+                state = %{state | instruction_count: instruction_count}
                 {results, state} = call_function(call_mm, [other | args], state)
-                steps = state.steps
+                instruction_count = state.instruction_count
 
                 continue_after_call(
                   results,
@@ -1325,7 +1562,7 @@ defmodule Lua.VM.Executor do
                   cont,
                   frames,
                   line,
-                  steps,
+                  instruction_count,
                   base,
                   result_count
                 )
@@ -1336,7 +1573,7 @@ defmodule Lua.VM.Executor do
 
   # ── vararg ─────────────────────────────────────────────────────────────────
 
-  defp do_execute([{:vararg, base, count} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:vararg, base, count} | rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     varargs = Map.get(proto, :varargs, [])
 
     {regs, state} =
@@ -1363,17 +1600,17 @@ defmodule Lua.VM.Executor do
         {regs, state}
       end
 
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── return_vararg ──────────────────────────────────────────────────────────
 
-  defp do_execute([{:return_vararg} | _rest], regs, _upvalues, proto, state, _cont, frames, line, steps) do
+  defp do_execute([{:return_vararg} | _rest], regs, _upvalues, proto, state, _cont, frames, line, instruction_count) do
     varargs = Map.get(proto, :varargs, [])
 
     case frames do
-      [] -> {varargs, regs, finish_steps(state, steps)}
-      [frame | rest_frames] -> do_frame_return(varargs, regs, state, frame, rest_frames, line, steps)
+      [] -> {varargs, regs, finish_instructions(state, instruction_count)}
+      [frame | rest_frames] -> do_frame_return(varargs, regs, state, frame, rest_frames, line, instruction_count)
     end
   end
 
@@ -1388,14 +1625,14 @@ defmodule Lua.VM.Executor do
          _cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     total = fixed_count + state.multi_return_count
     results = if total > 0, do: for(i <- 0..(total - 1), do: elem(regs, base + i)), else: []
 
     case frames do
-      [] -> {results, regs, finish_steps(state, steps)}
-      [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, steps)
+      [] -> {results, regs, finish_instructions(state, instruction_count)}
+      [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, instruction_count)
     end
   end
 
@@ -1404,16 +1641,26 @@ defmodule Lua.VM.Executor do
   # Fast path: single-value return is by far the most common return shape
   # (every fib/factorial style recursion hits this every call). Avoid the
   # comprehension and Range allocation; just read one element.
-  defp do_execute([{:return, base, 1} | _rest], regs, _upvalues, _proto, state, _cont, frames, line, steps) do
+  defp do_execute([{:return, base, 1} | _rest], regs, _upvalues, _proto, state, _cont, frames, line, instruction_count) do
     results = [elem(regs, base)]
 
     case frames do
-      [] -> {results, regs, finish_steps(state, steps)}
-      [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, steps)
+      [] -> {results, regs, finish_instructions(state, instruction_count)}
+      [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, instruction_count)
     end
   end
 
-  defp do_execute([{:return, base, count} | _rest], regs, _upvalues, _proto, state, _cont, frames, line, steps) do
+  defp do_execute(
+         [{:return, base, count} | _rest],
+         regs,
+         _upvalues,
+         _proto,
+         state,
+         _cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     results =
       cond do
         count == 0 ->
@@ -1429,8 +1676,8 @@ defmodule Lua.VM.Executor do
       end
 
     case frames do
-      [] -> {results, regs, finish_steps(state, steps)}
-      [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, steps)
+      [] -> {results, regs, finish_instructions(state, instruction_count)}
+      [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, instruction_count)
     end
   end
 
@@ -1443,20 +1690,40 @@ defmodule Lua.VM.Executor do
   # for Lua 5.3 §3.4.1 wrap-around; mixed and float-only fall through to
   # native `+`/`-`/`*`.
 
-  defp do_execute([{:add, dest, a, b, _hint_a, _hint_b} | rest], regs, upvalues, proto, state, cont, frames, line, steps)
+  defp do_execute(
+         [{:add, dest, a, b, _hint_a, _hint_b} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       )
        when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
     sum = :erlang.element(a + 1, regs) + :erlang.element(b + 1, regs)
     regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(sum))
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
-  defp do_execute([{:add, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:add, dest, a, b, hint_a, hint_b} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
     if is_number(val_a) and is_number(val_b) do
       regs = put_elem(regs, dest, val_a + val_b)
-      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
     else
       src = proto.source
 
@@ -1466,7 +1733,7 @@ defmodule Lua.VM.Executor do
         end)
 
       regs = put_elem(regs, dest, result)
-      do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+      do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
     end
   end
 
@@ -1479,12 +1746,12 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        )
        when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
     diff = :erlang.element(a + 1, regs) - :erlang.element(b + 1, regs)
     regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(diff))
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   defp do_execute(
@@ -1496,14 +1763,14 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
     if is_number(val_a) and is_number(val_b) do
       regs = put_elem(regs, dest, val_a - val_b)
-      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
     else
       src = proto.source
 
@@ -1513,7 +1780,7 @@ defmodule Lua.VM.Executor do
         end)
 
       regs = put_elem(regs, dest, result)
-      do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+      do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
     end
   end
 
@@ -1526,12 +1793,12 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        )
        when is_integer(:erlang.element(a + 1, regs)) and is_integer(:erlang.element(b + 1, regs)) do
     prod = :erlang.element(a + 1, regs) * :erlang.element(b + 1, regs)
     regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(prod))
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   defp do_execute(
@@ -1543,14 +1810,14 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
     if is_number(val_a) and is_number(val_b) do
       regs = put_elem(regs, dest, val_a * val_b)
-      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+      do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
     else
       src = proto.source
 
@@ -1560,11 +1827,21 @@ defmodule Lua.VM.Executor do
         end)
 
       regs = put_elem(regs, dest, result)
-      do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+      do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
     end
   end
 
-  defp do_execute([{:divide, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:divide, dest, a, b, hint_a, hint_b} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
@@ -1575,7 +1852,7 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
   defp do_execute(
@@ -1587,7 +1864,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
@@ -1599,10 +1876,20 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
-  defp do_execute([{:modulo, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:modulo, dest, a, b, hint_a, hint_b} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
@@ -1613,10 +1900,20 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
-  defp do_execute([{:power, dest, a, b, hint_a, hint_b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:power, dest, a, b, hint_a, hint_b} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
     src = proto.source
@@ -1627,12 +1924,22 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
   # ── String concatenation ───────────────────────────────────────────────────
 
-  defp do_execute([{:concatenate, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:concatenate, dest, a, b} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     left = elem(regs, a)
     right = elem(regs, b)
 
@@ -1644,13 +1951,13 @@ defmodule Lua.VM.Executor do
     cond do
       is_binary(left) and is_binary(right) ->
         regs = put_elem(regs, dest, concat_checked(left, right, state))
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       (is_binary(left) or is_number(left)) and (is_binary(right) or is_number(right)) ->
         src = proto.source
         result = concat_checked(concat_coerce(left, line, src, state), concat_coerce(right, line, src, state), state)
         regs = put_elem(regs, dest, result)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       true ->
         src = proto.source
@@ -1661,7 +1968,7 @@ defmodule Lua.VM.Executor do
           end)
 
         regs = put_elem(regs, dest, result)
-        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
     end
   end
 
@@ -1676,7 +1983,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
@@ -1690,7 +1997,7 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
   defp do_execute(
@@ -1702,7 +2009,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
@@ -1716,7 +2023,7 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
   defp do_execute(
@@ -1728,7 +2035,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
@@ -1742,7 +2049,7 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
   defp do_execute(
@@ -1754,7 +2061,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
@@ -1766,7 +2073,7 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
   defp do_execute(
@@ -1778,7 +2085,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
@@ -1790,10 +2097,20 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
-  defp do_execute([{:bitwise_not, dest, source, hint} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:bitwise_not, dest, source, hint} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     val = elem(regs, source)
     src = proto.source
 
@@ -1803,7 +2120,7 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
   # ── Comparison operations ──────────────────────────────────────────────────
@@ -1811,40 +2128,40 @@ defmodule Lua.VM.Executor do
   # Comparison fast paths: number-vs-number and string-vs-string skip the
   # metamethod machinery — neither primitive type can carry __eq/__lt/__le.
 
-  defp do_execute([{:equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
     cond do
       is_number(val_a) and is_number(val_b) ->
         regs = put_elem(regs, dest, val_a == val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       is_binary(val_a) and is_binary(val_b) ->
         regs = put_elem(regs, dest, val_a == val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       true ->
         {result, new_state} =
           try_equality_metamethod(val_a, val_b, state, fn -> lua_equal(val_a, val_b) end)
 
         regs = put_elem(regs, dest, result)
-        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
     end
   end
 
-  defp do_execute([{:less_than, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:less_than, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
     cond do
       is_number(val_a) and is_number(val_b) ->
         regs = put_elem(regs, dest, val_a < val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       is_binary(val_a) and is_binary(val_b) ->
         regs = put_elem(regs, dest, val_a < val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       true ->
         src = proto.source
@@ -1853,43 +2170,53 @@ defmodule Lua.VM.Executor do
           try_binary_metamethod("__lt", val_a, val_b, state, fn -> safe_compare_lt(val_a, val_b, line, src, state) end)
 
         regs = put_elem(regs, dest, result)
-        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
     end
   end
 
-  defp do_execute([{:less_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:less_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
     cond do
       is_number(val_a) and is_number(val_b) ->
         regs = put_elem(regs, dest, val_a <= val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       is_binary(val_a) and is_binary(val_b) ->
         regs = put_elem(regs, dest, val_a <= val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       true ->
         {result, new_state} = compare_le(val_a, val_b, state, line, proto.source)
 
         regs = put_elem(regs, dest, result)
-        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
     end
   end
 
-  defp do_execute([{:greater_than, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:greater_than, dest, a, b} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
     cond do
       is_number(val_a) and is_number(val_b) ->
         regs = put_elem(regs, dest, val_a > val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       is_binary(val_a) and is_binary(val_b) ->
         regs = put_elem(regs, dest, val_a > val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       true ->
         src = proto.source
@@ -1899,71 +2226,91 @@ defmodule Lua.VM.Executor do
           try_binary_metamethod("__lt", val_b, val_a, state, fn -> safe_compare_lt(val_b, val_a, line, src, state) end)
 
         regs = put_elem(regs, dest, result)
-        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
     end
   end
 
-  defp do_execute([{:greater_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:greater_equal, dest, a, b} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
     cond do
       is_number(val_a) and is_number(val_b) ->
         regs = put_elem(regs, dest, val_a >= val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       is_binary(val_a) and is_binary(val_b) ->
         regs = put_elem(regs, dest, val_a >= val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       true ->
         # Lua 5.3 §3.4.4: a >= b is translated to b <= a.
         {result, new_state} = compare_le(val_b, val_a, state, line, proto.source)
 
         regs = put_elem(regs, dest, result)
-        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
     end
   end
 
-  defp do_execute([{:not_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:not_equal, dest, a, b} | rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     val_a = elem(regs, a)
     val_b = elem(regs, b)
 
     cond do
       is_number(val_a) and is_number(val_b) ->
         regs = put_elem(regs, dest, val_a != val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       is_binary(val_a) and is_binary(val_b) ->
         regs = put_elem(regs, dest, val_a != val_b)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       true ->
         {eq_result, new_state} =
           try_equality_metamethod(val_a, val_b, state, fn -> lua_equal(val_a, val_b) end)
 
         regs = put_elem(regs, dest, not eq_result)
-        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
     end
   end
 
   # ── Unary operations ───────────────────────────────────────────────────────
 
-  defp do_execute([{:negate, dest, source, hint} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute(
+         [{:negate, dest, source, hint} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
     val = elem(regs, source)
     src = proto.source
     {result, new_state} = try_unary_metamethod("__unm", val, state, fn -> safe_negate(val, line, src, hint, state) end)
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
-  defp do_execute([{:not, dest, source} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:not, dest, source} | rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     result = not Value.truthy?(elem(regs, source))
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
-  defp do_execute([{:length, dest, source} | rest], regs, upvalues, proto, state, cont, frames, line, steps) do
+  defp do_execute([{:length, dest, source} | rest], regs, upvalues, proto, state, cont, frames, line, instruction_count) do
     value = elem(regs, source)
 
     {result, new_state} =
@@ -1985,7 +2332,7 @@ defmodule Lua.VM.Executor do
       end)
 
     regs = put_elem(regs, dest, result)
-    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, new_state, cont, frames, line, instruction_count)
   end
 
   # ── new_table ──────────────────────────────────────────────────────────────
@@ -1999,11 +2346,11 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     {tref, state} = State.alloc_table(state)
     regs = put_elem(regs, dest, tref)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── get_table ──────────────────────────────────────────────────────────────
@@ -2017,7 +2364,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     table_val = elem(regs, table_reg)
     key = elem(regs, key_reg)
@@ -2032,17 +2379,17 @@ defmodule Lua.VM.Executor do
             case :erlang.map_get(:metatable, table) do
               nil ->
                 regs = put_elem(regs, dest, nil)
-                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
               _ ->
                 {value, state} = index_value(table_val, key, state, line, proto.source, name_hint)
                 regs = put_elem(regs, dest, value)
-                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
             end
 
           value ->
             regs = put_elem(regs, dest, value)
-            do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+            do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
         end
 
       {:tref, id} when is_integer(key) or is_binary(key) ->
@@ -2052,25 +2399,25 @@ defmodule Lua.VM.Executor do
         case :erlang.map_get(:data, table) do
           %{^key => value} ->
             regs = put_elem(regs, dest, value)
-            do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+            do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
           _data ->
             case :erlang.map_get(:metatable, table) do
               nil ->
                 regs = put_elem(regs, dest, nil)
-                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
               _ ->
                 {value, state} = index_value(table_val, key, state, line, proto.source, name_hint)
                 regs = put_elem(regs, dest, value)
-                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
             end
         end
 
       _ ->
         {value, state} = index_value(table_val, key, state, line, proto.source, name_hint)
         regs = put_elem(regs, dest, value)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
     end
   end
 
@@ -2085,7 +2432,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     table_val = elem(regs, table_reg)
 
@@ -2094,7 +2441,7 @@ defmodule Lua.VM.Executor do
         key = elem(regs, key_reg)
         value = elem(regs, value_reg)
         state = table_newindex(table_val, key, value, state)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       _ ->
         raise_index_type_error(table_val, line, proto.source, name_hint, state)
@@ -2112,7 +2459,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     table_val = elem(regs, table_reg)
 
@@ -2128,25 +2475,25 @@ defmodule Lua.VM.Executor do
         case :erlang.map_get(:data, table) do
           %{^name => value} ->
             regs = put_elem(regs, dest, value)
-            do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+            do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
           _data ->
             case :erlang.map_get(:metatable, table) do
               nil ->
                 regs = put_elem(regs, dest, nil)
-                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
               _ ->
                 {value, state} = index_value(table_val, name, state, line, proto.source, name_hint)
                 regs = put_elem(regs, dest, value)
-                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+                do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
             end
         end
 
       _ ->
         {value, state} = index_value(table_val, name, state, line, proto.source, name_hint)
         regs = put_elem(regs, dest, value)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
     end
   end
 
@@ -2161,7 +2508,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     table_val = elem(regs, table_reg)
 
@@ -2169,7 +2516,7 @@ defmodule Lua.VM.Executor do
       {:tref, _} ->
         value = elem(regs, value_reg)
         state = table_newindex(table_val, name, value, state)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       _ ->
         raise_index_type_error(table_val, line, proto.source, name_hint, state)
@@ -2187,7 +2534,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     {:tref, id} = elem(regs, table_reg)
     total = init_count + state.multi_return_count
@@ -2197,7 +2544,7 @@ defmodule Lua.VM.Executor do
         Table.put_many(table, set_list_pairs(regs, start, total, offset))
       end)
 
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── set_list ───────────────────────────────────────────────────────────────
@@ -2211,7 +2558,7 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     {:tref, id} = elem(regs, table_reg)
     total = if count == 0, do: state.multi_return_count, else: count
@@ -2221,7 +2568,7 @@ defmodule Lua.VM.Executor do
         Table.put_many(table, set_list_pairs(regs, start, total, offset))
       end)
 
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── self ───────────────────────────────────────────────────────────────────
@@ -2235,19 +2582,19 @@ defmodule Lua.VM.Executor do
          cont,
          frames,
          line,
-         steps
+         instruction_count
        ) do
     obj = elem(regs, obj_reg)
     {func, state} = index_value(obj, method_name, state, line, proto.source, name_hint)
 
     regs = put_elem(regs, base + 1, obj)
     regs = put_elem(regs, base, func)
-    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+    do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
   # ── Catch-all for unimplemented instructions ───────────────────────────────
 
-  defp do_execute([instr | _rest], _regs, _upvalues, _proto, _state, _cont, _frames, _line, _steps) do
+  defp do_execute([instr | _rest], _regs, _upvalues, _proto, _state, _cont, _frames, _line, _instruction_count) do
     raise InternalError, value: "unimplemented instruction: #{inspect(instr)}"
   end
 
@@ -2276,9 +2623,9 @@ defmodule Lua.VM.Executor do
   # is unwinding — never per intra-evaluation return, so the default
   # `:infinity` path pays only at boundaries, exactly like the call-frame
   # bookkeeping it sits beside.
-  defp finish_steps(state, steps), do: %{state | steps: steps}
+  defp finish_instructions(state, instruction_count), do: %{state | instruction_count: instruction_count}
 
-  defp do_frame_return(results, _callee_regs, state, frame, rest_frames, line, steps) do
+  defp do_frame_return(results, _callee_regs, state, frame, rest_frames, line, instruction_count) do
     %{
       rest: rest,
       cont: caller_cont,
@@ -2302,10 +2649,10 @@ defmodule Lua.VM.Executor do
         # Return-position call (return f()): pass results to the caller's caller
         case rest_frames do
           [] ->
-            {results, caller_regs, finish_steps(state, steps)}
+            {results, caller_regs, finish_instructions(state, instruction_count)}
 
           [outer_frame | outer_rest_frames] ->
-            do_frame_return(results, caller_regs, state, outer_frame, outer_rest_frames, line, steps)
+            do_frame_return(results, caller_regs, state, outer_frame, outer_rest_frames, line, instruction_count)
         end
 
       -2 ->
@@ -2316,11 +2663,32 @@ defmodule Lua.VM.Executor do
         caller_regs = write_list_to_regs(caller_regs, base, results_list)
 
         state = %{state | multi_return_count: count}
-        do_execute(rest, caller_regs, caller_upvalues, caller_proto, state, caller_cont, rest_frames, line, steps)
+
+        do_execute(
+          rest,
+          caller_regs,
+          caller_upvalues,
+          caller_proto,
+          state,
+          caller_cont,
+          rest_frames,
+          line,
+          instruction_count
+        )
 
       0 ->
         # No results captured
-        do_execute(rest, caller_regs, caller_upvalues, caller_proto, state, caller_cont, rest_frames, line, steps)
+        do_execute(
+          rest,
+          caller_regs,
+          caller_upvalues,
+          caller_proto,
+          state,
+          caller_cont,
+          rest_frames,
+          line,
+          instruction_count
+        )
 
       1 ->
         # Fast path: single-result return (the overwhelmingly common case,
@@ -2336,7 +2704,18 @@ defmodule Lua.VM.Executor do
 
         caller_regs = ensure_regs_capacity(caller_regs, base + 1)
         caller_regs = :erlang.setelement(base + 1, caller_regs, first)
-        do_execute(rest, caller_regs, caller_upvalues, caller_proto, state, caller_cont, rest_frames, line, steps)
+
+        do_execute(
+          rest,
+          caller_regs,
+          caller_upvalues,
+          caller_proto,
+          state,
+          caller_cont,
+          rest_frames,
+          line,
+          instruction_count
+        )
 
       n when n > 0 ->
         # Fixed count: place first n results into caller regs from base
@@ -2344,19 +2723,42 @@ defmodule Lua.VM.Executor do
         caller_regs = ensure_regs_capacity(caller_regs, base + n)
         caller_regs = write_list_to_regs_n(caller_regs, base, results_list, n)
 
-        do_execute(rest, caller_regs, caller_upvalues, caller_proto, state, caller_cont, rest_frames, line, steps)
+        do_execute(
+          rest,
+          caller_regs,
+          caller_upvalues,
+          caller_proto,
+          state,
+          caller_cont,
+          rest_frames,
+          line,
+          instruction_count
+        )
     end
   end
 
   # ── continue_after_call — place results for native/metamethod calls ─────────
 
-  defp continue_after_call(results, regs, rest, upvalues, proto, state, cont, frames, line, steps, base, result_count) do
+  defp continue_after_call(
+         results,
+         regs,
+         rest,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count,
+         base,
+         result_count
+       ) do
     case result_count do
       -1 ->
         # Results from this native call become the return from the current function
         case frames do
-          [] -> {results, regs, finish_steps(state, steps)}
-          [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, steps)
+          [] -> {results, regs, finish_instructions(state, instruction_count)}
+          [frame | rest_frames] -> do_frame_return(results, regs, state, frame, rest_frames, line, instruction_count)
         end
 
       -2 ->
@@ -2366,10 +2768,10 @@ defmodule Lua.VM.Executor do
         regs = write_list_to_regs(regs, base, results_list)
 
         state = %{state | multi_return_count: count}
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       0 ->
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       1 ->
         first =
@@ -2381,14 +2783,14 @@ defmodule Lua.VM.Executor do
 
         regs = ensure_regs_capacity(regs, base + 1)
         regs = :erlang.setelement(base + 1, regs, first)
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
 
       n when n > 0 ->
         results_list = List.wrap(results)
         regs = ensure_regs_capacity(regs, base + n)
         regs = write_list_to_regs_n(regs, base, results_list, n)
 
-        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, steps)
+        do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
     end
   end
 
@@ -2450,7 +2852,17 @@ defmodule Lua.VM.Executor do
 
       # Seed/recover the cross-boundary budget tally (see `call_function/3`).
       {results, _callee_regs, state} =
-        do_execute(callee_proto.instructions, callee_regs, callee_upvalues, callee_proto, state, [], [], 0, state.steps)
+        do_execute(
+          callee_proto.instructions,
+          callee_regs,
+          callee_upvalues,
+          callee_proto,
+          state,
+          [],
+          [],
+          0,
+          state.instruction_count
+        )
 
       state = %{state | open_upvalues: saved_open_upvalues}
       {results, state}

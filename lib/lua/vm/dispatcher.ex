@@ -162,8 +162,8 @@ defmodule Lua.VM.Dispatcher do
       # Seed the dispatcher tally from the budget carried across the boundary
       # so an alternating-engine call chain accumulates against one budget
       # instead of resetting here; the terminals stamp the final tally back
-      # into `state.steps`.
-      {results, state} = dispatch(proto.bytecode, 1, regs, upvalues, proto, state, [], [], state.steps)
+      # into `state.instruction_count`.
+      {results, state} = dispatch(proto.bytecode, 1, regs, upvalues, proto, state, [], [], state.instruction_count)
 
       state = %{state | open_upvalues: saved_open}
       {results, state}
@@ -215,28 +215,28 @@ defmodule Lua.VM.Dispatcher do
   # `Executor.call_function/3` instead, paying one Erlang stack frame
   # at the boundary.
 
-  defp dispatch(code, pc, regs, upvalues, proto, state, cont, frames, steps) when pc > tuple_size(code) do
-    finish_body(regs, upvalues, proto, state, cont, frames, steps)
+  defp dispatch(code, pc, regs, upvalues, proto, state, cont, frames, instruction_count) when pc > tuple_size(code) do
+    finish_body(regs, upvalues, proto, state, cont, frames, instruction_count)
   end
 
-  defp dispatch(code, pc, regs, upvalues, proto, state, cont, frames, steps) do
+  defp dispatch(code, pc, regs, upvalues, proto, state, cont, frames, instruction_count) do
     case :erlang.element(pc, code) do
       {@op_load_constant, dest, value} ->
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_load_boolean, dest, value} ->
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_load_nil, dest, count} ->
         regs = clear_nils(regs, dest, count + 1)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_move, dest, src} ->
         v = :erlang.element(src + 1, regs)
         regs = :erlang.setelement(dest + 1, regs, v)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_load_env, dest} ->
         env =
@@ -247,7 +247,7 @@ defmodule Lua.VM.Dispatcher do
           end
 
         regs = :erlang.setelement(dest + 1, regs, env)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_get_upvalue, dest, index} ->
         cell_ref = :erlang.element(index + 1, upvalues)
@@ -258,12 +258,12 @@ defmodule Lua.VM.Dispatcher do
         # has to match where it does fire.
         v = Map.get(state.upvalue_cells, cell_ref)
         regs = :erlang.setelement(dest + 1, regs, v)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_get_global, dest, name} ->
         v = State.get_global(state, name)
         regs = :erlang.setelement(dest + 1, regs, v)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_get_field, dest, table_reg, name, name_hint} ->
         table_val = :erlang.element(table_reg + 1, regs)
@@ -279,20 +279,20 @@ defmodule Lua.VM.Dispatcher do
             case data do
               %{^name => value} ->
                 regs = :erlang.setelement(dest + 1, regs, value)
-                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
               _ ->
                 case :erlang.map_get(:metatable, table) do
                   nil ->
                     regs = :erlang.setelement(dest + 1, regs, nil)
-                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
                   _ ->
                     {value, state} =
                       Executor.dispatcher_get_field(table_val, name, state, proto, name_hint)
 
                     regs = :erlang.setelement(dest + 1, regs, value)
-                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
                 end
             end
 
@@ -301,7 +301,7 @@ defmodule Lua.VM.Dispatcher do
               Executor.dispatcher_get_field(table_val, name, state, proto, name_hint)
 
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       # ── Arithmetic ──────────────────────────────────────────────────
@@ -320,16 +320,16 @@ defmodule Lua.VM.Dispatcher do
             sum = va + vb
             wrapped = if sum >= @min_int and sum <= @max_int, do: sum, else: Numeric.to_signed_int64(sum)
             regs = :erlang.setelement(dest + 1, regs, wrapped)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           is_number(va) and is_number(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va + vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           true ->
             {value, state} = Executor.dispatcher_binop(:add, va, vb, state, proto, hint_a, hint_b)
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_subtract, dest, a, b, hint_a, hint_b} ->
@@ -341,16 +341,16 @@ defmodule Lua.VM.Dispatcher do
             diff = va - vb
             wrapped = if diff >= @min_int and diff <= @max_int, do: diff, else: Numeric.to_signed_int64(diff)
             regs = :erlang.setelement(dest + 1, regs, wrapped)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           is_number(va) and is_number(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va - vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           true ->
             {value, state} = Executor.dispatcher_binop(:subtract, va, vb, state, proto, hint_a, hint_b)
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_multiply, dest, a, b, hint_a, hint_b} ->
@@ -362,16 +362,16 @@ defmodule Lua.VM.Dispatcher do
             prod = va * vb
             wrapped = if prod >= @min_int and prod <= @max_int, do: prod, else: Numeric.to_signed_int64(prod)
             regs = :erlang.setelement(dest + 1, regs, wrapped)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           is_number(va) and is_number(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va * vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           true ->
             {value, state} = Executor.dispatcher_binop(:multiply, va, vb, state, proto, hint_a, hint_b)
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_divide, dest, a, b, hint_a, hint_b} ->
@@ -387,7 +387,7 @@ defmodule Lua.VM.Dispatcher do
           )
 
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_floor_divide, dest, a, b, hint_a, hint_b} ->
         {value, state} =
@@ -402,7 +402,7 @@ defmodule Lua.VM.Dispatcher do
           )
 
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_modulo, dest, a, b, hint_a, hint_b} ->
         {value, state} =
@@ -417,7 +417,7 @@ defmodule Lua.VM.Dispatcher do
           )
 
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_power, dest, a, b, hint_a, hint_b} ->
         {value, state} =
@@ -432,14 +432,14 @@ defmodule Lua.VM.Dispatcher do
           )
 
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_negate, dest, src, hint} ->
         {value, state} =
           Executor.dispatcher_unop(:negate, :erlang.element(src + 1, regs), state, proto, hint)
 
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       # ── Bitwise ─────────────────────────────────────────────────────
       #
@@ -463,11 +463,11 @@ defmodule Lua.VM.Dispatcher do
 
         if is_integer(va) and is_integer(vb) do
           regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(Bitwise.band(va, vb)))
-          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         else
           {value, state} = Executor.dispatcher_bitwise(:band, va, vb, state, proto, hint_a, hint_b)
           regs = :erlang.setelement(dest + 1, regs, value)
-          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_bitwise_or, dest, a, b, hint_a, hint_b} ->
@@ -476,11 +476,11 @@ defmodule Lua.VM.Dispatcher do
 
         if is_integer(va) and is_integer(vb) do
           regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(Bitwise.bor(va, vb)))
-          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         else
           {value, state} = Executor.dispatcher_bitwise(:bor, va, vb, state, proto, hint_a, hint_b)
           regs = :erlang.setelement(dest + 1, regs, value)
-          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_bitwise_xor, dest, a, b, hint_a, hint_b} ->
@@ -489,11 +489,11 @@ defmodule Lua.VM.Dispatcher do
 
         if is_integer(va) and is_integer(vb) do
           regs = :erlang.setelement(dest + 1, regs, Numeric.to_signed_int64(Bitwise.bxor(va, vb)))
-          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         else
           {value, state} = Executor.dispatcher_bitwise(:bxor, va, vb, state, proto, hint_a, hint_b)
           regs = :erlang.setelement(dest + 1, regs, value)
-          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_shift_left, dest, a, b, hint_a, hint_b} ->
@@ -501,20 +501,20 @@ defmodule Lua.VM.Dispatcher do
         vb = :erlang.element(b + 1, regs)
         {value, state} = Executor.dispatcher_bitwise(:shl, va, vb, state, proto, hint_a, hint_b)
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_shift_right, dest, a, b, hint_a, hint_b} ->
         va = :erlang.element(a + 1, regs)
         vb = :erlang.element(b + 1, regs)
         {value, state} = Executor.dispatcher_bitwise(:shr, va, vb, state, proto, hint_a, hint_b)
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_bitwise_not, dest, src, hint} ->
         val = :erlang.element(src + 1, regs)
         {value, state} = Executor.dispatcher_bnot(val, state, proto, hint)
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       # ── Comparisons ─────────────────────────────────────────────────
 
@@ -525,16 +525,16 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_number(va) and is_number(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va < vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           is_binary(va) and is_binary(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va < vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           true ->
             {value, state} = Executor.dispatcher_cmp(:less_than, va, vb, state, proto)
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_less_equal, dest, a, b} ->
@@ -544,16 +544,16 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_number(va) and is_number(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va <= vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           is_binary(va) and is_binary(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va <= vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           true ->
             {value, state} = Executor.dispatcher_cmp(:less_equal, va, vb, state, proto)
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_greater_than, dest, a, b} ->
@@ -563,16 +563,16 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_number(va) and is_number(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va > vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           is_binary(va) and is_binary(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va > vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           true ->
             {value, state} = Executor.dispatcher_cmp(:greater_than, va, vb, state, proto)
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_greater_equal, dest, a, b} ->
@@ -582,16 +582,16 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_number(va) and is_number(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va >= vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           is_binary(va) and is_binary(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va >= vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           true ->
             {value, state} = Executor.dispatcher_cmp(:greater_equal, va, vb, state, proto)
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_equal, dest, a, b} ->
@@ -601,16 +601,16 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_number(va) and is_number(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va == vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           is_binary(va) and is_binary(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va == vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           true ->
             {value, state} = Executor.dispatcher_cmp(:equal, va, vb, state, proto)
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_not_equal, dest, a, b} ->
@@ -620,16 +620,16 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_number(va) and is_number(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va != vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           is_binary(va) and is_binary(vb) ->
             regs = :erlang.setelement(dest + 1, regs, va != vb)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           true ->
             {value, state} = Executor.dispatcher_cmp(:not_equal, va, vb, state, proto)
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_not, dest, src} ->
@@ -638,7 +638,7 @@ defmodule Lua.VM.Dispatcher do
         # values. Saves a function call per `:not` opcode.
         result = v === nil or v === false
         regs = :erlang.setelement(dest + 1, regs, result)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       # ── Conditional branching ───────────────────────────────────────
       #
@@ -657,7 +657,7 @@ defmodule Lua.VM.Dispatcher do
             _ -> then_bc
           end
 
-        dispatch(branch, 1, regs, upvalues, proto, state, [{code, pc + 1} | cont], frames, steps)
+        dispatch(branch, 1, regs, upvalues, proto, state, [{code, pc + 1} | cont], frames, instruction_count)
 
       # ── Calls ───────────────────────────────────────────────────────
       #
@@ -688,7 +688,7 @@ defmodule Lua.VM.Dispatcher do
               {code, pc + 1, regs, upvalues, proto, cont, :discard, state.open_upvalues}
 
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = State.tick!(state, steps)
+            instruction_count = State.tick!(state, instruction_count)
             State.check_call_depth!(state)
 
             state = %{
@@ -707,31 +707,38 @@ defmodule Lua.VM.Dispatcher do
               state,
               [],
               [frame | frames],
-              steps
+              instruction_count
             )
 
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, arg_count)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = State.tick!(state, steps)
+            instruction_count = State.tick!(state, instruction_count)
             State.check_call_depth!(state)
-            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
+
+            state = %{
+              state
+              | call_stack: [call_info | state.call_stack],
+                call_depth: state.call_depth + 1,
+                instruction_count: instruction_count
+            }
+
             {_results, state} = Executor.call_function(closure, args, state)
-            steps = state.steps
+            instruction_count = state.instruction_count
             state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           _ ->
             args = collect_args(regs, base + 1, arg_count)
 
-            state = %{state | steps: steps}
+            state = %{state | instruction_count: instruction_count}
 
             {_results, state} =
               Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
 
-            steps = state.steps
+            instruction_count = state.instruction_count
 
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_call_one, base, arg_count, name_hint, line} ->
@@ -749,7 +756,7 @@ defmodule Lua.VM.Dispatcher do
               {code, pc + 1, regs, upvalues, proto, cont, base, state.open_upvalues}
 
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = State.tick!(state, steps)
+            instruction_count = State.tick!(state, instruction_count)
             State.check_call_depth!(state)
 
             state = %{
@@ -768,17 +775,24 @@ defmodule Lua.VM.Dispatcher do
               state,
               [],
               [frame | frames],
-              steps
+              instruction_count
             )
 
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, arg_count)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = State.tick!(state, steps)
+            instruction_count = State.tick!(state, instruction_count)
             State.check_call_depth!(state)
-            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
+
+            state = %{
+              state
+              | call_stack: [call_info | state.call_stack],
+                call_depth: state.call_depth + 1,
+                instruction_count: instruction_count
+            }
+
             {results, state} = Executor.call_function(closure, args, state)
-            steps = state.steps
+            instruction_count = state.instruction_count
             state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
 
             first =
@@ -788,17 +802,17 @@ defmodule Lua.VM.Dispatcher do
               end
 
             regs = :erlang.setelement(base + 1, regs, first)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           _ ->
             args = collect_args(regs, base + 1, arg_count)
 
-            state = %{state | steps: steps}
+            state = %{state | instruction_count: instruction_count}
 
             {results, state} =
               Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
 
-            steps = state.steps
+            instruction_count = state.instruction_count
 
             first =
               case results do
@@ -807,7 +821,7 @@ defmodule Lua.VM.Dispatcher do
               end
 
             regs = :erlang.setelement(base + 1, regs, first)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       # ── Returns ─────────────────────────────────────────────────────
@@ -820,10 +834,10 @@ defmodule Lua.VM.Dispatcher do
       # `call_function/3` contract.
 
       {@op_return_one, base} ->
-        return_one(:erlang.element(base + 1, regs), state, frames, steps)
+        return_one(:erlang.element(base + 1, regs), state, frames, instruction_count)
 
       {@op_return_zero} ->
-        return_one(nil, state, frames, steps)
+        return_one(nil, state, frames, instruction_count)
 
       # ── Table opcodes ───────────────────────────────────────────────
       #
@@ -835,7 +849,7 @@ defmodule Lua.VM.Dispatcher do
       {@op_new_table, dest} ->
         {tref, state} = State.alloc_table(state)
         regs = :erlang.setelement(dest + 1, regs, tref)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_get_table, dest, table_reg, key_reg, name_hint} ->
         table_val = :erlang.element(table_reg + 1, regs)
@@ -850,19 +864,19 @@ defmodule Lua.VM.Dispatcher do
                 case :erlang.map_get(:metatable, table) do
                   nil ->
                     regs = :erlang.setelement(dest + 1, regs, nil)
-                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
                   _ ->
                     {value, state} =
                       Executor.dispatcher_get_table(table_val, key, state, proto, name_hint)
 
                     regs = :erlang.setelement(dest + 1, regs, value)
-                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
                 end
 
               value ->
                 regs = :erlang.setelement(dest + 1, regs, value)
-                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
             end
 
           {:tref, id} when is_integer(key) or is_binary(key) ->
@@ -872,20 +886,20 @@ defmodule Lua.VM.Dispatcher do
             case data do
               %{^key => value} ->
                 regs = :erlang.setelement(dest + 1, regs, value)
-                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
               _ ->
                 case :erlang.map_get(:metatable, table) do
                   nil ->
                     regs = :erlang.setelement(dest + 1, regs, nil)
-                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
                   _ ->
                     {value, state} =
                       Executor.dispatcher_get_table(table_val, key, state, proto, name_hint)
 
                     regs = :erlang.setelement(dest + 1, regs, value)
-                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
                 end
             end
 
@@ -894,7 +908,7 @@ defmodule Lua.VM.Dispatcher do
               Executor.dispatcher_get_table(table_val, key, state, proto, name_hint)
 
             regs = :erlang.setelement(dest + 1, regs, value)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       {@op_set_table, table_reg, key_reg, value_reg, name_hint} ->
@@ -902,13 +916,13 @@ defmodule Lua.VM.Dispatcher do
         key = :erlang.element(key_reg + 1, regs)
         value = :erlang.element(value_reg + 1, regs)
         state = Executor.dispatcher_set_table(table_val, key, value, state, proto, name_hint)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_set_field, table_reg, name, value_reg, name_hint} ->
         table_val = :erlang.element(table_reg + 1, regs)
         value = :erlang.element(value_reg + 1, regs)
         state = Executor.dispatcher_set_field(table_val, name, value, state, proto, name_hint)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       # `:set_list` with a positive integer count is the table-constructor
       # form. The `count == 0` sentinel was filtered upstream and never
@@ -921,7 +935,7 @@ defmodule Lua.VM.Dispatcher do
             set_list_into_table(table, regs, start, count, offset, 0)
           end)
 
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       # `:set_list` multi-return tail (`{f(), 1}`): fold the static prefix
       # `init_count` with the trailing values count the last multi-return
@@ -936,7 +950,7 @@ defmodule Lua.VM.Dispatcher do
             set_list_into_table(table, regs, start, total, offset, 0)
           end)
 
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_length, dest, source} ->
         value = :erlang.element(source + 1, regs)
@@ -951,22 +965,22 @@ defmodule Lua.VM.Dispatcher do
                 # without __len is the border length of the data map.
                 len = Table.length(table)
                 regs = :erlang.setelement(dest + 1, regs, len)
-                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
               _ ->
                 {len, state} = Executor.dispatcher_length(value, state, proto)
                 regs = :erlang.setelement(dest + 1, regs, len)
-                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
             end
 
           v when is_binary(v) ->
             regs = :erlang.setelement(dest + 1, regs, byte_size(v))
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           _ ->
             {len, state} = Executor.dispatcher_length(value, state, proto)
             regs = :erlang.setelement(dest + 1, regs, len)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       # ── numeric_for ─────────────────────────────────────────────────
@@ -998,9 +1012,9 @@ defmodule Lua.VM.Dispatcher do
           state = Executor.dispatcher_close_open_upvalues_at_or_above(state, loop_var)
           marker = {:cps_for, base, loop_var, body_bc, code, pc + 1}
           loop_exit = {:loop_exit, code, pc + 1}
-          dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | cont], frames, steps)
+          dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | cont], frames, instruction_count)
         else
-          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
 
       # ── while_loop / repeat_loop / generic_for ─────────────────────
@@ -1013,12 +1027,12 @@ defmodule Lua.VM.Dispatcher do
       {@op_while_loop, test_reg, cond_bc, body_bc} ->
         cps = {:cps_while_test, test_reg, cond_bc, body_bc, code, pc + 1}
         loop_exit = {:loop_exit, code, pc + 1}
-        dispatch(cond_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | cont], frames, steps)
+        dispatch(cond_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | cont], frames, instruction_count)
 
       {@op_repeat_loop, test_reg, body_bc, cond_bc} ->
         cps = {:cps_repeat_body, test_reg, body_bc, cond_bc, code, pc + 1}
         loop_exit = {:loop_exit, code, pc + 1}
-        dispatch(body_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | cont], frames, steps)
+        dispatch(body_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | cont], frames, instruction_count)
 
       {@op_generic_for, base, var_regs, body_bc, line} ->
         # Iterator call follows the same shape as the executor:
@@ -1031,19 +1045,19 @@ defmodule Lua.VM.Dispatcher do
         invariant_state = :erlang.element(base + 2, regs)
         control = :erlang.element(base + 3, regs)
 
-        state = %{state | steps: steps}
+        state = %{state | instruction_count: instruction_count}
 
         {results, state} =
           Executor.dispatcher_call_value(iter_func, [invariant_state, control], proto, state, line)
 
-        steps = state.steps
+        instruction_count = state.instruction_count
 
         case results do
           [nil | _] ->
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           [] ->
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
           [first | _] ->
             regs = :erlang.setelement(base + 3, regs, first)
@@ -1052,7 +1066,7 @@ defmodule Lua.VM.Dispatcher do
             state = Executor.dispatcher_close_open_upvalues_at_or_above(state, first_var_reg)
             marker = {:cps_generic_for, base, var_regs, body_bc, line, code, pc + 1}
             loop_exit = {:loop_exit, code, pc + 1}
-            dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | cont], frames, steps)
+            dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | cont], frames, instruction_count)
         end
 
       # ── break ─────────────────────────────────────────────────────
@@ -1063,7 +1077,7 @@ defmodule Lua.VM.Dispatcher do
 
       {@op_break} ->
         {exit_code, exit_pc, rest_cont} = find_loop_exit(cont)
-        dispatch(exit_code, exit_pc, regs, upvalues, proto, state, rest_cont, frames, steps)
+        dispatch(exit_code, exit_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
 
       # ── label / goto ──────────────────────────────────────────────
       #
@@ -1075,16 +1089,16 @@ defmodule Lua.VM.Dispatcher do
       # enclosing `code` recorded on the unwound markers.
 
       {@op_label, _name, _level} ->
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_goto, 0, target_pc, level} ->
         state = Executor.dispatcher_close_open_upvalues_at_or_above(state, level)
-        dispatch(code, target_pc, regs, upvalues, proto, state, cont, frames)
+        dispatch(code, target_pc, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_goto, depth, target_pc, level} ->
         state = Executor.dispatcher_close_open_upvalues_at_or_above(state, level)
         {dest_code, rest_cont} = unwind_goto(cont, depth)
-        dispatch(dest_code, target_pc, regs, upvalues, proto, state, rest_cont, frames)
+        dispatch(dest_code, target_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
 
       # ── Closure construction ──────────────────────────────────────
       #
@@ -1110,7 +1124,7 @@ defmodule Lua.VM.Dispatcher do
           end
 
         regs = :erlang.setelement(dest + 1, regs, closure)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       # ── Upvalue access ────────────────────────────────────────────
       #
@@ -1125,7 +1139,7 @@ defmodule Lua.VM.Dispatcher do
         cell_ref = :erlang.element(index + 1, upvalues)
         value = :erlang.element(source + 1, regs)
         state = %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_get_open_upvalue, dest, reg} ->
         value =
@@ -1135,7 +1149,7 @@ defmodule Lua.VM.Dispatcher do
           end
 
         regs = :erlang.setelement(dest + 1, regs, value)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_set_open_upvalue, reg, source} ->
         state =
@@ -1148,11 +1162,11 @@ defmodule Lua.VM.Dispatcher do
               %{state | upvalue_cells: Map.put(state.upvalue_cells, cell_ref, value)}
           end
 
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_close_upvalues, threshold} ->
         state = Executor.dispatcher_close_open_upvalues_at_or_above(state, threshold)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       # ── Vararg ────────────────────────────────────────────────────
       #
@@ -1167,25 +1181,25 @@ defmodule Lua.VM.Dispatcher do
         varargs = proto.varargs
         {regs, n} = write_varargs(regs, base, varargs, 0)
         state = %{state | multi_return_count: n}
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_vararg, base, count} ->
         regs = write_varargs_n(regs, base, proto.varargs, count)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       # ── Multi-return returns ──────────────────────────────────────
 
       {@op_return_proto_varargs} ->
-        return_multi(proto.varargs, state, frames, steps)
+        return_multi(proto.varargs, state, frames, instruction_count)
 
       {@op_return_collect, base, fixed} ->
         total = fixed + state.multi_return_count
         results = collect_args(regs, base, total)
-        return_multi(results, state, frames, steps)
+        return_multi(results, state, frames, instruction_count)
 
       {@op_return_multi, base, count} ->
         results = collect_args(regs, base, count)
-        return_multi(results, state, frames, steps)
+        return_multi(results, state, frames, instruction_count)
 
       # ── Multi-return calls ────────────────────────────────────────
       #
@@ -1227,7 +1241,7 @@ defmodule Lua.VM.Dispatcher do
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, dest, state.open_upvalues}
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = State.tick!(state, steps)
+            instruction_count = State.tick!(state, instruction_count)
             State.check_call_depth!(state)
 
             state = %{
@@ -1246,17 +1260,24 @@ defmodule Lua.VM.Dispatcher do
               state,
               [],
               [frame | frames],
-              steps
+              instruction_count
             )
 
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, total_args)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = State.tick!(state, steps)
+            instruction_count = State.tick!(state, instruction_count)
             State.check_call_depth!(state)
-            state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
+
+            state = %{
+              state
+              | call_stack: [call_info | state.call_stack],
+                call_depth: state.call_depth + 1,
+                instruction_count: instruction_count
+            }
+
             {results, state} = Executor.call_function(closure, args, state)
-            steps = state.steps
+            instruction_count = state.instruction_count
             state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
 
             apply_multi_call_result(
@@ -1271,18 +1292,18 @@ defmodule Lua.VM.Dispatcher do
               state,
               cont,
               frames,
-              steps
+              instruction_count
             )
 
           _ ->
             args = collect_args(regs, base + 1, total_args)
 
-            state = %{state | steps: steps}
+            state = %{state | instruction_count: instruction_count}
 
             {results, state} =
               Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
 
-            steps = state.steps
+            instruction_count = state.instruction_count
 
             apply_multi_call_result(
               result_count,
@@ -1296,7 +1317,7 @@ defmodule Lua.VM.Dispatcher do
               state,
               cont,
               frames,
-              steps
+              instruction_count
             )
         end
 
@@ -1313,7 +1334,7 @@ defmodule Lua.VM.Dispatcher do
         {func, state} = Executor.dispatcher_index_method_target(obj, method_name, state, proto, name_hint)
         regs = :erlang.setelement(base + 2, regs, obj)
         regs = :erlang.setelement(base + 1, regs, func)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       # ── Concatenation ─────────────────────────────────────────────
       #
@@ -1331,19 +1352,19 @@ defmodule Lua.VM.Dispatcher do
           end
 
           regs = :erlang.setelement(dest + 1, regs, left <> right)
-          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         else
           {result, state} = Executor.dispatcher_concat(left, right, state, proto)
           regs = :erlang.setelement(dest + 1, regs, result)
-          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, steps)
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
         end
     end
   end
 
   # ── End-of-body handling ────────────────────────────────────────────────
 
-  defp finish_body(regs, upvalues, proto, state, [{next_code, next_pc} | rest_cont], frames, steps) do
-    dispatch(next_code, next_pc, regs, upvalues, proto, state, rest_cont, frames, steps)
+  defp finish_body(regs, upvalues, proto, state, [{next_code, next_pc} | rest_cont], frames, instruction_count) do
+    dispatch(next_code, next_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
   end
 
   # `:numeric_for` body ran to completion. Increment the counter, re-test,
@@ -1360,7 +1381,7 @@ defmodule Lua.VM.Dispatcher do
          state,
          [{:cps_for, base, loop_var, body_bc, outer_code, outer_pc} = marker, {:loop_exit, _, _} = loop_exit | rest_cont],
          frames,
-         steps
+         instruction_count
        ) do
     counter = :erlang.element(base + 1, regs)
     step = :erlang.element(base + 3, regs)
@@ -1370,12 +1391,12 @@ defmodule Lua.VM.Dispatcher do
     should_continue = if step > 0, do: new_counter <= limit, else: new_counter >= limit
 
     if should_continue do
-      steps = State.tick!(state, steps)
+      instruction_count = State.tick!(state, instruction_count)
       regs = :erlang.setelement(loop_var + 1, regs, new_counter)
       state = Executor.dispatcher_close_open_upvalues_at_or_above(state, loop_var)
-      dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | rest_cont], frames, steps)
+      dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | rest_cont], frames, instruction_count)
     else
-      dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, steps)
+      dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
     end
   end
 
@@ -1391,15 +1412,15 @@ defmodule Lua.VM.Dispatcher do
            {:loop_exit, _, _} = loop_exit | rest_cont
          ],
          frames,
-         steps
+         instruction_count
        ) do
     case :erlang.element(test_reg + 1, regs) do
       v when v === nil or v === false ->
-        dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, steps)
+        dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
 
       _ ->
         cps = {:cps_while_body, test_reg, cond_bc, body_bc, outer_code, outer_pc}
-        dispatch(body_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, steps)
+        dispatch(body_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, instruction_count)
     end
   end
 
@@ -1415,11 +1436,11 @@ defmodule Lua.VM.Dispatcher do
            {:loop_exit, _, _} = loop_exit | rest_cont
          ],
          frames,
-         steps
+         instruction_count
        ) do
-    steps = State.tick!(state, steps)
+    instruction_count = State.tick!(state, instruction_count)
     cps = {:cps_while_test, test_reg, cond_bc, body_bc, outer_code, outer_pc}
-    dispatch(cond_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, steps)
+    dispatch(cond_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, instruction_count)
   end
 
   # `:repeat_loop`: body just finished. Run the condition next.
@@ -1433,10 +1454,10 @@ defmodule Lua.VM.Dispatcher do
            {:loop_exit, _, _} = loop_exit | rest_cont
          ],
          frames,
-         steps
+         instruction_count
        ) do
     cps = {:cps_repeat_cond, test_reg, body_bc, cond_bc, outer_code, outer_pc}
-    dispatch(cond_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, steps)
+    dispatch(cond_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, instruction_count)
   end
 
   # `:repeat_loop`: condition just finished. test_reg truthy = exit (Lua's
@@ -1451,16 +1472,16 @@ defmodule Lua.VM.Dispatcher do
            {:loop_exit, _, _} = loop_exit | rest_cont
          ],
          frames,
-         steps
+         instruction_count
        ) do
     case :erlang.element(test_reg + 1, regs) do
       v when v === nil or v === false ->
-        steps = State.tick!(state, steps)
+        instruction_count = State.tick!(state, instruction_count)
         cps = {:cps_repeat_body, test_reg, body_bc, cond_bc, outer_code, outer_pc}
-        dispatch(body_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, steps)
+        dispatch(body_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, instruction_count)
 
       _ ->
-        dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, steps)
+        dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
     end
   end
 
@@ -1475,33 +1496,33 @@ defmodule Lua.VM.Dispatcher do
            {:loop_exit, _, _} = loop_exit | rest_cont
          ],
          frames,
-         steps
+         instruction_count
        ) do
     iter_func = :erlang.element(base + 1, regs)
     invariant_state = :erlang.element(base + 2, regs)
     control = :erlang.element(base + 3, regs)
 
-    state = %{state | steps: steps}
+    state = %{state | instruction_count: instruction_count}
 
     {results, state} =
       Executor.dispatcher_call_value(iter_func, [invariant_state, control], proto, state, line)
 
-    steps = state.steps
+    instruction_count = state.instruction_count
 
     case results do
       [nil | _] ->
-        dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, steps)
+        dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
 
       [] ->
-        dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, steps)
+        dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
 
       [first | _] ->
-        steps = State.tick!(state, steps)
+        instruction_count = State.tick!(state, instruction_count)
         regs = :erlang.setelement(base + 3, regs, first)
         regs = assign_iter_results(regs, var_regs, results, 0)
         first_var_reg = :erlang.element(1, var_regs)
         state = Executor.dispatcher_close_open_upvalues_at_or_above(state, first_var_reg)
-        dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | rest_cont], frames, steps)
+        dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | rest_cont], frames, instruction_count)
     end
   end
 
@@ -1509,8 +1530,8 @@ defmodule Lua.VM.Dispatcher do
   # body ran past its last instruction with the loop_exit still on top).
   # Drop the loop_exit and let the next iteration of finish_body see the
   # cont below it.
-  defp finish_body(regs, upvalues, proto, state, [{:loop_exit, _, _} | rest_cont], frames, steps) do
-    finish_body(regs, upvalues, proto, state, rest_cont, frames, steps)
+  defp finish_body(regs, upvalues, proto, state, [{:loop_exit, _, _} | rest_cont], frames, instruction_count) do
+    finish_body(regs, upvalues, proto, state, rest_cont, frames, instruction_count)
   end
 
   # Body exhausted with no continuation: prototype ran off the end. Lua
@@ -1518,8 +1539,8 @@ defmodule Lua.VM.Dispatcher do
   # values when control falls off the end, not a single `nil` — the
   # caller's `result_count` decides how that's projected (nil for a
   # single-value site, empty slot for a multi-return one).
-  defp finish_body(_regs, _upvalues, _proto, state, [], frames, steps) do
-    return_multi([], state, frames, steps)
+  defp finish_body(_regs, _upvalues, _proto, state, [], frames, instruction_count) do
+    return_multi([], state, frames, instruction_count)
   end
 
   # ── Return propagation through frames ───────────────────────────────────
@@ -1538,13 +1559,13 @@ defmodule Lua.VM.Dispatcher do
   #   {:multi, B, -2} → expand all into regs[B..], set multi_return_count.
   #   {:multi, B, n>1} → write n results into regs[B..], pad nil.
 
-  defp return_one(value, state, [], steps) do
+  defp return_one(value, state, [], instruction_count) do
     # Top of this dispatcher sub-evaluation: stamp the tally back into the
     # state so a caller in the other engine can resume the same budget.
-    {[value], %{state | steps: steps}}
+    {[value], %{state | instruction_count: instruction_count}}
   end
 
-  defp return_one(value, state, [frame | rest_frames], steps) do
+  defp return_one(value, state, [frame | rest_frames], instruction_count) do
     {code, pc, regs, upvalues, proto, cont, dest, saved_open} = frame
     # Every dispatcher frame corresponds to a Lua-level call that pushed a
     # call_stack entry. Pop it on the way out — the interpreter's
@@ -1553,14 +1574,14 @@ defmodule Lua.VM.Dispatcher do
 
     case dest do
       :discard ->
-        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, steps)
+        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, instruction_count)
 
       n when is_integer(n) ->
         regs = :erlang.setelement(n + 1, regs, value)
-        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, steps)
+        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, instruction_count)
 
       {:multi, _, -1} ->
-        return_one(value, state, rest_frames, steps)
+        return_one(value, state, rest_frames, instruction_count)
 
       {:multi, base, -2} ->
         # The expansion dest may sit past the statically reserved register
@@ -1570,13 +1591,13 @@ defmodule Lua.VM.Dispatcher do
         regs = grow_regs(regs, base + 1)
         regs = :erlang.setelement(base + 1, regs, value)
         state = %{state | multi_return_count: 1}
-        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, steps)
+        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, instruction_count)
 
       {:multi, base, n} when is_integer(n) and n > 1 ->
         regs = grow_regs(regs, base + n)
         regs = :erlang.setelement(base + 1, regs, value)
         regs = pad_nils(regs, base + 1, n - 1)
-        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, steps)
+        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, instruction_count)
     end
   end
 
@@ -1584,17 +1605,17 @@ defmodule Lua.VM.Dispatcher do
   # `:return_proto_varargs`, and the non-compiled-callee branch of
   # `:call_multi`. Mirrors `return_one/3`'s frame-variant handling.
 
-  defp return_multi(results, state, [], steps) do
-    {results, %{state | steps: steps}}
+  defp return_multi(results, state, [], instruction_count) do
+    {results, %{state | instruction_count: instruction_count}}
   end
 
-  defp return_multi(results, state, [frame | rest_frames], steps) do
+  defp return_multi(results, state, [frame | rest_frames], instruction_count) do
     {code, pc, regs, upvalues, proto, cont, dest, saved_open} = frame
     state = %{state | open_upvalues: saved_open, call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
 
     case dest do
       :discard ->
-        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, steps)
+        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, instruction_count)
 
       n when is_integer(n) ->
         v =
@@ -1604,19 +1625,19 @@ defmodule Lua.VM.Dispatcher do
           end
 
         regs = :erlang.setelement(n + 1, regs, v)
-        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, steps)
+        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, instruction_count)
 
       {:multi, _, -1} ->
-        return_multi(results, state, rest_frames, steps)
+        return_multi(results, state, rest_frames, instruction_count)
 
       {:multi, base, -2} ->
         regs = write_results(regs, base, results)
         state = %{state | multi_return_count: length(results)}
-        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, steps)
+        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, instruction_count)
 
       {:multi, base, n} when is_integer(n) and n > 1 ->
         regs = write_results_n(regs, base, results, n)
-        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, steps)
+        dispatch(code, pc, regs, upvalues, proto, state, cont, rest_frames, instruction_count)
     end
   end
 
@@ -1858,11 +1879,24 @@ defmodule Lua.VM.Dispatcher do
   # and unwinds via `return_multi/3`; this helper is for the synchronous
   # post-call shape (native, __call metamethod, lua_closure via
   # call_function). Mirrors `Executor.continue_after_call/11` shape.
-  defp apply_multi_call_result(0, _base, _results, code, pc, regs, upvalues, proto, state, cont, frames, steps) do
-    dispatch(code, pc, regs, upvalues, proto, state, cont, frames, steps)
+  defp apply_multi_call_result(
+         0,
+         _base,
+         _results,
+         code,
+         pc,
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         instruction_count
+       ) do
+    dispatch(code, pc, regs, upvalues, proto, state, cont, frames, instruction_count)
   end
 
-  defp apply_multi_call_result(1, base, results, code, pc, regs, upvalues, proto, state, cont, frames, steps) do
+  defp apply_multi_call_result(1, base, results, code, pc, regs, upvalues, proto, state, cont, frames, instruction_count) do
     first =
       case results do
         [v | _] -> v
@@ -1870,23 +1904,36 @@ defmodule Lua.VM.Dispatcher do
       end
 
     regs = :erlang.setelement(base + 1, regs, first)
-    dispatch(code, pc, regs, upvalues, proto, state, cont, frames, steps)
+    dispatch(code, pc, regs, upvalues, proto, state, cont, frames, instruction_count)
   end
 
-  defp apply_multi_call_result(-1, _base, results, _code, _pc, _regs, _upvalues, _proto, state, _cont, frames, steps) do
-    return_multi(results, state, frames, steps)
+  defp apply_multi_call_result(
+         -1,
+         _base,
+         results,
+         _code,
+         _pc,
+         _regs,
+         _upvalues,
+         _proto,
+         state,
+         _cont,
+         frames,
+         instruction_count
+       ) do
+    return_multi(results, state, frames, instruction_count)
   end
 
-  defp apply_multi_call_result(-2, base, results, code, pc, regs, upvalues, proto, state, cont, frames, steps) do
+  defp apply_multi_call_result(-2, base, results, code, pc, regs, upvalues, proto, state, cont, frames, instruction_count) do
     regs = write_results(regs, base, results)
     state = %{state | multi_return_count: length(results)}
-    dispatch(code, pc, regs, upvalues, proto, state, cont, frames, steps)
+    dispatch(code, pc, regs, upvalues, proto, state, cont, frames, instruction_count)
   end
 
-  defp apply_multi_call_result(n, base, results, code, pc, regs, upvalues, proto, state, cont, frames, steps)
+  defp apply_multi_call_result(n, base, results, code, pc, regs, upvalues, proto, state, cont, frames, instruction_count)
        when is_integer(n) and n > 1 do
     regs = write_results_n(regs, base, results, n)
-    dispatch(code, pc, regs, upvalues, proto, state, cont, frames, steps)
+    dispatch(code, pc, regs, upvalues, proto, state, cont, frames, instruction_count)
   end
 
   # Lazy regs-tuple growth. Used at the points where multi-return

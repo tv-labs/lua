@@ -340,7 +340,7 @@ defmodule Lua.VM.Stdlib do
     table = Map.fetch!(state.tables, id)
 
     # Eagerly flush any deferred-append `order_tail` and build the O(1)
-    # iteration memo so subsequent steps are index lookups rather than
+    # iteration memo so subsequent instruction_count are index lookups rather than
     # linear scans. The first call to `lua_next` for a given iteration
     # pays the cost once; the rest see a clean `order` and a live memo.
     {table, state} =
@@ -764,8 +764,8 @@ defmodule Lua.VM.Stdlib do
          {:ok, proto} <- Lua.Compiler.compile(ast),
          # `require` runs mid-evaluation: inherit the caller's instruction
          # budget instead of resetting it, so a looping module body counts
-         # against the same `:max_steps` and the pre-require work is preserved.
-         {:ok, results, state} <- Lua.VM.execute(proto, state, reset_steps: false) do
+         # against the same `:max_instructions` and the pre-require work is preserved.
+         {:ok, results, state} <- Lua.VM.execute(proto, state, reset_instructions: false) do
       # Get the return value (or true if no return value)
       result =
         case results do

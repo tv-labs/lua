@@ -117,7 +117,7 @@ defmodule Lua do
       iex> message =~ "resulting string too large"
       true
 
-  * `:max_steps` - (default `:infinity`) caps the number of VM instructions a single
+  * `:max_instructions` - (default `:infinity`) caps the number of VM instructions a single
     evaluation may execute. When a script exceeds this budget, a catchable
     `"instruction budget exceeded"` runtime error is raised, giving library consumers a
     deterministic CPU bound without wrapping each call in a host `Task` + wall-clock timeout.
@@ -125,7 +125,7 @@ defmodule Lua do
     back-edges and call boundaries, so the default `:infinity` path carries no per-instruction
     cost. The budget is fresh per top-level evaluation and recoverable via `pcall`.
 
-      iex> lua = Lua.new(max_steps: 1000)
+      iex> lua = Lua.new(max_instructions: 1000)
       iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(function() while true do end end)")
       iex> message =~ "instruction budget exceeded"
       true
@@ -139,20 +139,20 @@ defmodule Lua do
         debug: false,
         max_call_depth: :infinity,
         max_string_bytes: Lua.VM.Limits.max_string_bytes(),
-        max_steps: :infinity
+        max_instructions: :infinity
       )
 
     exclude = Keyword.fetch!(opts, :exclude)
     debug = Keyword.fetch!(opts, :debug)
     max_call_depth = validate_max_call_depth!(Keyword.fetch!(opts, :max_call_depth))
     max_string_bytes = validate_max_string_bytes!(Keyword.fetch!(opts, :max_string_bytes))
-    max_steps = validate_max_steps!(Keyword.fetch!(opts, :max_steps))
+    max_instructions = validate_max_instructions!(Keyword.fetch!(opts, :max_instructions))
 
     state = %{
       Lua.VM.Stdlib.install(State.new())
       | max_call_depth: max_call_depth,
         max_string_bytes: max_string_bytes,
-        max_steps: max_steps
+        max_instructions: max_instructions
     }
 
     opts
@@ -176,12 +176,14 @@ defmodule Lua do
           ":max_string_bytes must be a positive integer, got: #{inspect(other)}"
   end
 
-  defp validate_max_steps!(:infinity), do: :infinity
-  defp validate_max_steps!(steps) when is_integer(steps) and steps > 0, do: steps
+  defp validate_max_instructions!(:infinity), do: :infinity
 
-  defp validate_max_steps!(other) do
+  defp validate_max_instructions!(instruction_count) when is_integer(instruction_count) and instruction_count > 0,
+    do: instruction_count
+
+  defp validate_max_instructions!(other) do
     raise ArgumentError,
-          ":max_steps must be a positive integer or :infinity, got: #{inspect(other)}"
+          ":max_instructions must be a positive integer or :infinity, got: #{inspect(other)}"
   end
 
   @doc """

@@ -83,14 +83,14 @@ instead of letting the recursion exhaust the host process. The default is
 
 ### Instruction budget
 
-`Lua.new(max_steps: n)` caps the number of VM instructions a single
+`Lua.new(max_instructions: n)` caps the number of VM instructions a single
 evaluation may execute. When a script exceeds the budget it raises a
 catchable `"instruction budget exceeded"` runtime error — so a runaway loop
 terminates deterministically inside the VM:
 
 ```elixir
 {[ok?, message], _lua} =
-  Lua.eval!(Lua.new(max_steps: 1000), ~S[return pcall(function() while true do end end)])
+  Lua.eval!(Lua.new(max_instructions: 1000), ~S[return pcall(function() while true do end end)])
 
 {ok?, message}
 ```

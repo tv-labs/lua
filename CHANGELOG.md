@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
-- `Lua.new/1` accepts `:max_steps` (default `:infinity`), bounding the
+- `Lua.new/1` accepts `:max_instructions` (default `:infinity`), bounding the
   number of VM instructions a single evaluation may execute. Exceeding the
   budget raises a catchable `"instruction budget exceeded"` runtime error,
   giving a deterministic CPU bound without wrapping each call in a host
