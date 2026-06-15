@@ -219,11 +219,14 @@ defmodule Lua.VM.MaxStepsTest do
       # tally into `state.steps` like every other terminal. If it returns a
       # bare state, a compiled caller that reads `steps = state.steps` after the
       # interpreted callee returns under-counts, so work done in `return ...`
-      # passthroughs vanishes from the budget.
+      # passthroughs vanishes from the budget. A finite budget keeps the tally
+      # live (the default `:infinity` path charges nothing, so accrual is only
+      # observable under a budget) while staying well clear of tripping it.
       run = fn src ->
         {:ok, ast} = Parser.parse(src)
         {:ok, proto} = Compiler.compile(ast, source: "test.lua")
-        {:ok, _results, state} = Lua.VM.execute(proto, Stdlib.install(State.new()))
+        state = %{Stdlib.install(State.new()) | max_steps: 1_000_000}
+        {:ok, _results, state} = Lua.VM.execute(proto, state)
         state.steps
       end
 

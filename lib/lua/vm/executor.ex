@@ -713,8 +713,7 @@ defmodule Lua.VM.Executor do
 
       # After while loop body — restart condition
       [{:cps_while_body, test_reg, loop_body, cond_body, rest, outer_cont} | _] ->
-        steps = steps + 1
-        State.check_steps!(state, steps)
+        steps = State.tick!(state, steps)
         loop_exit_cont = [{:loop_exit, rest} | outer_cont]
         cond_check = {:cps_while_test, test_reg, loop_body, cond_body, rest, outer_cont}
         do_execute(cond_body, regs, upvalues, proto, state, [cond_check | loop_exit_cont], frames, line, steps)
@@ -732,8 +731,7 @@ defmodule Lua.VM.Executor do
           do_execute(rest, regs, upvalues, proto, state, outer_cont, frames, line, steps)
         else
           # Condition false = repeat body
-          steps = steps + 1
-          State.check_steps!(state, steps)
+          steps = State.tick!(state, steps)
           loop_exit_cont = [{:loop_exit, rest} | outer_cont]
           body_done = {:cps_repeat_body, loop_body, cond_body, test_reg, rest, outer_cont}
           do_execute(loop_body, regs, upvalues, proto, state, [body_done | loop_exit_cont], frames, line, steps)
@@ -749,8 +747,7 @@ defmodule Lua.VM.Executor do
         should_continue = if step > 0, do: new_counter <= limit, else: new_counter >= limit
 
         if should_continue do
-          steps = steps + 1
-          State.check_steps!(state, steps)
+          steps = State.tick!(state, steps)
           regs = put_elem(regs, loop_var, new_counter)
 
           state = close_open_upvalues_at_or_above(state, loop_var)
@@ -776,8 +773,7 @@ defmodule Lua.VM.Executor do
         if first_result == nil do
           do_execute(rest, regs, upvalues, proto, state, outer_cont, frames, line, steps)
         else
-          steps = steps + 1
-          State.check_steps!(state, steps)
+          steps = State.tick!(state, steps)
           regs = put_elem(regs, base + 2, first_result)
 
           regs =
@@ -1165,8 +1161,7 @@ defmodule Lua.VM.Executor do
         # without going through this branch.
         args = collect_args(regs, base + 1, total_args)
         call_info = {proto.source, line, name_hint}
-        steps = steps + 1
-        State.check_steps!(state, steps)
+        steps = State.tick!(state, steps)
         State.check_call_depth!(state)
         # Carry the tally into the dispatcher so the budget spans the
         # boundary; `Dispatcher.execute/4` seeds from `state.steps` and
@@ -1214,8 +1209,7 @@ defmodule Lua.VM.Executor do
 
         call_info = {proto.source, line, name_hint}
 
-        steps = steps + 1
-        State.check_steps!(state, steps)
+        steps = State.tick!(state, steps)
         State.check_call_depth!(state)
 
         state = %{

@@ -688,8 +688,7 @@ defmodule Lua.VM.Dispatcher do
               {code, pc + 1, regs, upvalues, proto, cont, :discard, state.open_upvalues}
 
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = steps + 1
-            State.check_steps!(state, steps)
+            steps = State.tick!(state, steps)
             State.check_call_depth!(state)
 
             state = %{
@@ -714,8 +713,7 @@ defmodule Lua.VM.Dispatcher do
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, arg_count)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = steps + 1
-            State.check_steps!(state, steps)
+            steps = State.tick!(state, steps)
             State.check_call_depth!(state)
             state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
             {_results, state} = Executor.call_function(closure, args, state)
@@ -751,8 +749,7 @@ defmodule Lua.VM.Dispatcher do
               {code, pc + 1, regs, upvalues, proto, cont, base, state.open_upvalues}
 
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = steps + 1
-            State.check_steps!(state, steps)
+            steps = State.tick!(state, steps)
             State.check_call_depth!(state)
 
             state = %{
@@ -777,8 +774,7 @@ defmodule Lua.VM.Dispatcher do
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, arg_count)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = steps + 1
-            State.check_steps!(state, steps)
+            steps = State.tick!(state, steps)
             State.check_call_depth!(state)
             state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
             {results, state} = Executor.call_function(closure, args, state)
@@ -1231,8 +1227,7 @@ defmodule Lua.VM.Dispatcher do
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, dest, state.open_upvalues}
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = steps + 1
-            State.check_steps!(state, steps)
+            steps = State.tick!(state, steps)
             State.check_call_depth!(state)
 
             state = %{
@@ -1257,8 +1252,7 @@ defmodule Lua.VM.Dispatcher do
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, total_args)
             call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            steps = steps + 1
-            State.check_steps!(state, steps)
+            steps = State.tick!(state, steps)
             State.check_call_depth!(state)
             state = %{state | call_stack: [call_info | state.call_stack], call_depth: state.call_depth + 1, steps: steps}
             {results, state} = Executor.call_function(closure, args, state)
@@ -1376,8 +1370,7 @@ defmodule Lua.VM.Dispatcher do
     should_continue = if step > 0, do: new_counter <= limit, else: new_counter >= limit
 
     if should_continue do
-      steps = steps + 1
-      State.check_steps!(state, steps)
+      steps = State.tick!(state, steps)
       regs = :erlang.setelement(loop_var + 1, regs, new_counter)
       state = Executor.dispatcher_close_open_upvalues_at_or_above(state, loop_var)
       dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | rest_cont], frames, steps)
@@ -1424,8 +1417,7 @@ defmodule Lua.VM.Dispatcher do
          frames,
          steps
        ) do
-    steps = steps + 1
-    State.check_steps!(state, steps)
+    steps = State.tick!(state, steps)
     cps = {:cps_while_test, test_reg, cond_bc, body_bc, outer_code, outer_pc}
     dispatch(cond_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, steps)
   end
@@ -1463,8 +1455,7 @@ defmodule Lua.VM.Dispatcher do
        ) do
     case :erlang.element(test_reg + 1, regs) do
       v when v === nil or v === false ->
-        steps = steps + 1
-        State.check_steps!(state, steps)
+        steps = State.tick!(state, steps)
         cps = {:cps_repeat_body, test_reg, body_bc, cond_bc, outer_code, outer_pc}
         dispatch(body_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, steps)
 
@@ -1505,8 +1496,7 @@ defmodule Lua.VM.Dispatcher do
         dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, steps)
 
       [first | _] ->
-        steps = steps + 1
-        State.check_steps!(state, steps)
+        steps = State.tick!(state, steps)
         regs = :erlang.setelement(base + 3, regs, first)
         regs = assign_iter_results(regs, var_regs, results, 0)
         first_var_reg = :erlang.element(1, var_regs)

@@ -13,9 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   budget raises a catchable `"instruction budget exceeded"` runtime error,
   giving a deterministic CPU bound without wrapping each call in a host
   `Task` plus wall-clock timeout. Enforced at loop back-edges and call
-  boundaries on both the interpreter and compiled-dispatcher paths, so the
-  default `:infinity` carries no per-instruction cost; the budget is fresh
-  per top-level evaluation and recoverable via `pcall` (#320).
+  boundaries on both the interpreter and compiled-dispatcher paths via a
+  single `Lua.VM.State.tick!/2` call that is a true no-op at `:infinity`
+  (no increment, no struct rebuild), so the default `:infinity` carries no
+  per-opcode cost; the budget is fresh per top-level evaluation and
+  recoverable via `pcall` (#320).
 
 ### Performance
 

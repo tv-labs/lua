@@ -26,7 +26,7 @@ defmodule Lua.VM.State do
             # here on the per-opcode hot path — it is threaded as a parameter
             # through the executor / dispatcher loops, mirroring the
             # `line`-off-State discipline so the default `:infinity` path
-            # carries no per-instruction struct rebuild. See `check_steps!/2`.
+            # carries no per-instruction struct rebuild. See `tick!/2`.
             max_steps: :infinity,
             # `steps` carries the running tally ACROSS engine boundaries
             # only. The interpreter and dispatcher each thread their tally as
@@ -101,29 +101,38 @@ defmodule Lua.VM.State do
   end
 
   @doc """
-  Guards against unbounded CPU work within a single evaluation.
+  Charges one instruction against the budget and returns the new tally.
 
-  Raises a catchable Lua `"instruction budget exceeded"` runtime error when
-  the running instruction tally `steps` has reached `max_steps`. Call it at
-  loop back-edges and call boundaries — never per opcode — so the default
-  `:infinity` path stays free of per-instruction cost.
+  Guards against unbounded CPU work within a single evaluation by folding
+  the running-tally increment and the budget check into one call. Call it
+  at loop back-edges and call boundaries — never per opcode — so the
+  default `:infinity` path stays free of per-instruction cost.
 
-  The tally is threaded as a parameter, not stored in `%State{}`. No-op when
-  the tally is under the limit or when `max_steps` is `:infinity` (the
-  default). The clauses are ordered so both common cases resolve in a single
-  function-head match with no struct rebuild.
+  The tally is threaded as a parameter, not stored in `%State{}`. When
+  `max_steps` is `:infinity` (the default) this is a true no-op: it returns
+  the tally unchanged in a single function-head match, doing no arithmetic
+  and rebuilding no struct, so the default path's only per-boundary cost is
+  this one call. When a finite budget is set it increments the tally and,
+  once the new tally reaches `max_steps`, raises a catchable Lua
+  `"instruction budget exceeded"` runtime error. The clauses are ordered so
+  both the `:infinity` and under-budget cases resolve in a single
+  function-head match.
 
-  Raises the same `Lua.VM.RuntimeError` used by `"stack overflow"`, carrying
-  the raise-time `state:` so `pcall`/`xpcall` recover heap effects for free.
-  The live tally is stamped into that `state:` (the threaded `steps` is not
-  otherwise in `%State{}`), so `unwind_to/2` can carry it forward and a caught
-  budget error stays spent — a protected call cannot refund the work it burned.
+  The raise reuses the same `Lua.VM.RuntimeError` used by `"stack
+  overflow"`, carrying the raise-time `state:` so `pcall`/`xpcall` recover
+  heap effects for free. The live tally is stamped into that `state:` (the
+  threaded `steps` is not otherwise in `%State{}`), so `unwind_to/2` can
+  carry it forward and a caught budget error stays spent — a protected call
+  cannot refund the work it burned.
   """
-  @spec check_steps!(t(), non_neg_integer()) :: :ok
-  def check_steps!(%__MODULE__{max_steps: :infinity}, _steps), do: :ok
-  def check_steps!(%__MODULE__{max_steps: max}, steps) when steps < max, do: :ok
+  @spec tick!(t(), non_neg_integer()) :: non_neg_integer()
+  def tick!(%__MODULE__{max_steps: :infinity}, steps), do: steps
 
-  def check_steps!(%__MODULE__{call_stack: call_stack} = state, steps) do
+  def tick!(%__MODULE__{max_steps: max}, steps) when steps + 1 < max, do: steps + 1
+
+  def tick!(%__MODULE__{call_stack: call_stack} = state, steps) do
+    steps = steps + 1
+
     raise RuntimeError,
       value: "instruction budget exceeded",
       call_stack: call_stack,
