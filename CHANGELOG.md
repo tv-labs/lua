@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v1.0.0-rc.3] - 2026-06-15
+
+The fourth release candidate for `1.0.0`. It builds on rc.2 with a
+structured parse-error API for tooling, conformant `goto`/`label` on
+both VM engines, several order-of-magnitude performance wins on the
+table and recursive-call paths, and a batch of parser error-location
+and protected-call error-value fixes. All public API changes are
+additive — nothing from rc.2 is broken.
+
 ### Added
+- `Lua.Parser.parse_structured/1` returns `{:ok, Chunk.t()} | {:error,
+  [%Lua.Parser.Error{}]}`, exposing the parser's rich structured error
+  data directly instead of as a pre-formatted ANSI string — a stable
+  contract for editors, LSPs, and web frontends that render parse errors
+  in their own UI. `Lua.Parser.Error.to_map/1,2` emits a
+  JSON-serializable map with the **same wire shape** as
+  `Lua.VM.ErrorFormatter.to_map/3` (`type`, `message`, `source`, `line`,
+  `call_stack`, `source_context`, `suggestion`, `error_kind`), so parse
+  and runtime errors can flow through a single renderer; the `^` pointer
+  column now lands on the real offending token (#363).
 - `Lua.new/1` accepts `:max_instructions` (default `:infinity`), bounding the
   number of VM instructions a single evaluation may execute. Exceeding the
   budget raises a catchable `"instruction budget exceeded"` runtime error,
@@ -38,9 +57,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on `fib(25)` (closing the dispatcher–interpreter gap to ~1.02×), and
   `fib(30)` on the dispatcher improves from ~1.32× slower than Luerl to
   ~1.11× (Apple M-series, drift-controlled), with no other workload slower.
+- **Recursive-call path closes the fibonacci gap with Luerl (#360).**
+  Two profiler-driven fixes: call frames defer name decoding (a flat
+  3-tuple `{source, line, name_hint}` decoded lazily at the cold
+  traceback/`debug.getinfo` readers instead of an eager 4-key map per
+  call), and codegen reclaims the register window after single-result
+  calls so sibling calls reuse freed registers (`fib` drops from
+  `max_registers = 10` to `6`, shrinking every per-frame `setelement`).
+  `fib(30)` goes from ~1.18× slower than Luerl to ~1.03× (within run-to-run
+  noise) and total allocations fall ~26%.
+- **`#t` is now O(1) on tables with no holes (#350).** Lua tables cache
+  their array-sequence border, so the length operator no longer rescans
+  the array part on every read. Append loops (`t[#t+1]=v`,
+  `table.insert(t, v)`) collapse from O(n²) to O(n) — **−98%** at n=2000
+  (21.96 ms → 0.44 ms). The cache is only re-established when `1..n` is
+  provably dense, so holey tables fall back to a correct scan.
+- **`pairs` over hash-keyed tables is O(n), not O(n²) (#349).**
+  `lua_next` memoizes the hash-key iteration order on the first step of
+  an iteration, making each subsequent `next` O(1) instead of rescanning
+  from the front. Iterating a large string-keyed table improves **−92.5%**
+  at n=2000 (11.43 ms → 0.86 ms), with the gap widening as n grows.
+- **Bitwise opcodes (`band`/`bor`/`bxor`/`shl`/`shr`) and `set_list`
+  multi-return tails now compile on the dispatcher (#347)** instead of
+  falling back to the interpreter, closing dispatcher coverage gaps. The
+  micro-benchmark delta is noise-dominated; this is a coverage fix, not a
+  measurable speedup.
 
 ### Fixed
-
+- **`goto`/`label` are conformant on both VM engines (#364).** The
+  interpreter previously resolved labels with a forward-only scan, so
+  backward jumps (manual loops), `continue`-style jumps out of an `if`,
+  and break-style jumps out of a loop all raised "goto target not found".
+  Labels are now resolved ahead of execution on both the interpreter
+  (`Lua.Compiler.GotoResolution`) and the compiled dispatcher
+  (`Bytecode.resolve_gotos/2`), closing open upvalues at the block-exit
+  level per Lua 5.3 §3.3.4. (One dispatcher gap remains: short-circuit
+  `and`/`or` still falls back to the interpreter.)
+- **Parse errors are reported at the real offending token (#357, #365,
+  #366).** A syntax error deep inside a function-call argument list — e.g.
+  an unclosed `(` several lines down — was blamed at the call's opening
+  line instead of where the mistake actually is. The parser no longer
+  swallows a committed deep error to "recover" a partial argument list,
+  and position-independent error shapes (`bare_expression`,
+  `invalid_assign_target`, `unclosed_delimiter`, `unexpected_end`) always
+  propagate. Unclosed tables and empty bracket lists now blame the opening
+  delimiter with an "add a closing X" suggestion, matching the convention
+  calls and indexes already followed.
+- **`Lua.call_function/3` returns the terse Lua error value for
+  `ArgumentError` (#354).** A missing `error_value/1` clause let
+  `ArgumentError` fall through to `Exception.message/1`, embedding ANSI
+  codes and the `at <source>:<line>:` header in the reason returned by
+  `call_function/3` and `pcall`/`xpcall`. It now returns the §6.1-faithful
+  terse string (e.g. `"bad argument #1 to 'pairs' (table expected, got
+  string)"`); `call_function!/3` remains the escape hatch carrying the
+  structured exception.
+- **Compiled-chunk errors attribute the correct source line (#355).** The
+  dispatcher baked per-call source lines into the call opcodes, so native
+  raise sites (`pairs("asdf")`, `error("boom")`) in compiled chunks now
+  include the line in their §6.1 prefix instead of omitting it. The hot
+  path is unchanged (same single tuple-read per call).
+- **Freshly `require`d modules now appear in `pairs(package.loaded)`
+  (#356).** `cache_module_result/3` wrote `Table.data` directly, bypassing
+  the iteration-order bookkeeping, so a required module was reachable by
+  direct index but never enumerated. Routing the write through
+  `Table.put/3` fixes the enumeration.
 - **`tostring` on a function now returns a `function: 0x...` address**
   instead of the bare string `"function"`, matching PUC-Lua's
   `tostring(print)`-style output (builtins render as
