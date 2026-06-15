@@ -164,17 +164,13 @@ defmodule Lua.SuiteRunner do
         # Mirror PUC `load`: on a lexer/parser/compile failure return
         # `nil, message` rather than raising, so callers can pattern-match the
         # error (the suite's `errmsg` helper does `string.find(msg, ...)`).
+        # Both `Lua.Parser.parse/1` and the compiler's goto-legality pass
+        # return a plain string message.
         {:error, message} ->
-          {[nil, format_load_error(message)], lua}
+          {[nil, message], lua}
       end
     end)
   end
-
-  # The goto legality pass returns a plain string message; the parser returns
-  # a richer error term. Render either as a single string for `load`'s second
-  # return value.
-  defp format_load_error(message) when is_binary(message), do: message
-  defp format_load_error(error), do: "parse error: #{inspect(error)}"
 
   defp install_checkerr(lua) do
     Lua.set!(lua, ["checkerr"], fn [pattern, func | _], state ->
