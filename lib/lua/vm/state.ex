@@ -4,6 +4,7 @@ defmodule Lua.VM.State do
   """
 
   alias Lua.VM.Limits
+  alias Lua.VM.RuntimeError
   alias Lua.VM.Table
 
   defstruct call_stack: [],
@@ -20,6 +21,21 @@ defmodule Lua.VM.State do
             # cap so an allocation bomb is refused deterministically instead
             # of racing the GC-time heap check.
             max_string_bytes: Limits.max_string_bytes(),
+            # `max_instructions` is the configured instruction ceiling; `:infinity`
+            # (the default) means no limit. The running tally is NOT stored
+            # here on the per-opcode hot path — it is threaded as a parameter
+            # through the executor / dispatcher loops, mirroring the
+            # `line`-off-State discipline so the default `:infinity` path
+            # carries no per-instruction struct rebuild. See `tick!/2`.
+            max_instructions: :infinity,
+            # `instruction_count` carries the running tally ACROSS engine boundaries
+            # only. The interpreter and dispatcher each thread their tally as
+            # a loop parameter; at an `Executor`↔`Dispatcher` hand-off (where
+            # the struct is already rebuilt to push a call frame) the crossing
+            # engine writes its tally here and the entered engine seeds from
+            # it, so the budget spans a chain that alternates engines instead
+            # of resetting at each boundary. Never written per opcode.
+            instruction_count: 0,
             metatables: %{},
             upvalue_cells: %{},
             open_upvalues: %{},
@@ -40,6 +56,8 @@ defmodule Lua.VM.State do
           call_depth: non_neg_integer(),
           max_call_depth: pos_integer() | :infinity,
           max_string_bytes: pos_integer(),
+          max_instructions: pos_integer() | :infinity,
+          instruction_count: non_neg_integer(),
           metatables: map(),
           upvalue_cells: map(),
           tables: %{optional(non_neg_integer()) => Table.t()},
@@ -79,7 +97,47 @@ defmodule Lua.VM.State do
   def check_call_depth!(%__MODULE__{call_depth: depth, max_call_depth: max}) when depth < max, do: :ok
 
   def check_call_depth!(%__MODULE__{call_stack: call_stack} = state) do
-    raise Lua.VM.RuntimeError, value: "stack overflow", call_stack: call_stack, state: state
+    raise RuntimeError, value: "stack overflow", call_stack: call_stack, state: state
+  end
+
+  @doc """
+  Charges one instruction against the budget and returns the new tally.
+
+  Guards against unbounded CPU work within a single evaluation by folding
+  the running-tally increment and the budget check into one call. Call it
+  at loop back-edges and call boundaries — never per opcode — so the
+  default `:infinity` path stays free of per-instruction cost.
+
+  The tally is threaded as a parameter, not stored in `%State{}`. When
+  `max_instructions` is `:infinity` (the default) this is a true no-op: it returns
+  the tally unchanged in a single function-head match, doing no arithmetic
+  and rebuilding no struct, so the default path's only per-boundary cost is
+  this one call. When a finite budget is set it increments the tally and,
+  once the new tally reaches `max_instructions`, raises a catchable Lua
+  `"instruction budget exceeded"` runtime error. The clauses are ordered so
+  both the `:infinity` and under-budget cases resolve in a single
+  function-head match.
+
+  The raise reuses the same `Lua.VM.RuntimeError` used by `"stack
+  overflow"`, carrying the raise-time `state:` so `pcall`/`xpcall` recover
+  heap effects for free. The live tally is stamped into that `state:` (the
+  threaded `instruction_count` is not otherwise in `%State{}`), so `unwind_to/2` can
+  carry it forward and a caught budget error stays spent — a protected call
+  cannot refund the work it burned.
+  """
+  @spec tick!(t(), non_neg_integer()) :: non_neg_integer()
+  def tick!(%__MODULE__{max_instructions: :infinity}, instruction_count), do: instruction_count
+
+  def tick!(%__MODULE__{max_instructions: max}, instruction_count) when instruction_count + 1 < max,
+    do: instruction_count + 1
+
+  def tick!(%__MODULE__{call_stack: call_stack} = state, instruction_count) do
+    instruction_count = instruction_count + 1
+
+    raise RuntimeError,
+      value: "instruction budget exceeded",
+      call_stack: call_stack,
+      state: %{state | instruction_count: instruction_count}
   end
 
   @doc """
@@ -98,6 +156,11 @@ defmodule Lua.VM.State do
   | `tables`, `table_next_id`              | `call_stack`, `call_depth`      |
   | `userdata`, `userdata_next_id`         | `open_upvalues`                 |
   | `metatables`, `upvalue_cells`, `private` | `multi_return_count`          |
+
+  The instruction tally `instruction_count` is also carried forward (monotonic max), not
+  reset to the entry value: the work a protected call burned must still count
+  against the one per-evaluation `:max_instructions` budget, so wrapping heavy work in
+  `pcall` (or looping over `pcall`) cannot escape the cap.
 
   Keeping `upvalue_cells` while restoring `open_upvalues` matches reference
   upvalue semantics: cells captured before the protected call keep their
@@ -119,7 +182,8 @@ defmodule Lua.VM.State do
         userdata_next_id: raised.userdata_next_id,
         metatables: raised.metatables,
         upvalue_cells: raised.upvalue_cells,
-        private: raised.private
+        private: raised.private,
+        instruction_count: max(entry.instruction_count, raised.instruction_count)
     }
   end
 

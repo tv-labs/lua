@@ -72,7 +72,7 @@ lua = Lua.new(sandboxed: [])
 ### Sandboxing a single path
 
 `Lua.sandbox/2` sandboxes one path on an existing VM, which is handy when
-building a configuration up in steps:
+building a configuration up in instruction_count:
 
 ```elixir
 lua =

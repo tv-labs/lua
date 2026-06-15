@@ -66,3 +66,43 @@ false
 `Lua.new(sandboxed: [...])` replaces the whole sandbox list, and
 `Lua.new(sandboxed: [])` disables sandboxing entirely. Reach for these only
 when you fully trust the script you are running.
+
+## Bounding CPU work
+
+Sandboxing controls *which* functions a script may call, but it does not
+stop a script from spinning forever (`while true do end`) or recursing
+without bound. Two options give you deterministic limits without wrapping
+each evaluation in a host `Task` plus a wall-clock timeout.
+
+### Call depth
+
+`Lua.new(max_call_depth: n)` caps the depth of nested function calls.
+Recursing past the cap raises a catchable `"stack overflow"` runtime error
+instead of letting the recursion exhaust the host process. The default is
+`:infinity` (no limit).
+
+### Instruction budget
+
+`Lua.new(max_instructions: n)` caps the number of VM instructions a single
+evaluation may execute. When a script exceeds the budget it raises a
+catchable `"instruction budget exceeded"` runtime error — so a runaway loop
+terminates deterministically inside the VM:
+
+```elixir
+{[ok?, message], _lua} =
+  Lua.eval!(Lua.new(max_instructions: 1000), ~S[return pcall(function() while true do end end)])
+
+{ok?, message}
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{false, "instruction budget exceeded"}
+```
+
+The budget is enforced at loop back-edges and call boundaries, so the
+default `:infinity` carries no per-instruction cost, and it applies to both
+the interpreter and the compiled-dispatcher execution paths. Each
+top-level evaluation gets a fresh budget, and because the error is an
+ordinary runtime error, `pcall` recovers from it in-band like any other.

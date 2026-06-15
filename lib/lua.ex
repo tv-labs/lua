@@ -116,6 +116,19 @@ defmodule Lua do
       iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(string.rep, \\"x\\", 2048)")
       iex> message =~ "resulting string too large"
       true
+
+  * `:max_instructions` - (default `:infinity`) caps the number of VM instructions a single
+    evaluation may execute. When a script exceeds this budget, a catchable
+    `"instruction budget exceeded"` runtime error is raised, giving library consumers a
+    deterministic CPU bound without wrapping each call in a host `Task` + wall-clock timeout.
+    Accepts a positive integer or `:infinity` for no limit. The budget is enforced at loop
+    back-edges and call boundaries, so the default `:infinity` path carries no per-instruction
+    cost. The budget is fresh per top-level evaluation and recoverable via `pcall`.
+
+      iex> lua = Lua.new(max_instructions: 1000)
+      iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(function() while true do end end)")
+      iex> message =~ "instruction budget exceeded"
+      true
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
@@ -125,18 +138,21 @@ defmodule Lua do
         exclude: [],
         debug: false,
         max_call_depth: :infinity,
-        max_string_bytes: Lua.VM.Limits.max_string_bytes()
+        max_string_bytes: Lua.VM.Limits.max_string_bytes(),
+        max_instructions: :infinity
       )
 
     exclude = Keyword.fetch!(opts, :exclude)
     debug = Keyword.fetch!(opts, :debug)
     max_call_depth = validate_max_call_depth!(Keyword.fetch!(opts, :max_call_depth))
     max_string_bytes = validate_max_string_bytes!(Keyword.fetch!(opts, :max_string_bytes))
+    max_instructions = validate_max_instructions!(Keyword.fetch!(opts, :max_instructions))
 
     state = %{
       Lua.VM.Stdlib.install(State.new())
       | max_call_depth: max_call_depth,
-        max_string_bytes: max_string_bytes
+        max_string_bytes: max_string_bytes,
+        max_instructions: max_instructions
     }
 
     opts
@@ -158,6 +174,16 @@ defmodule Lua do
   defp validate_max_string_bytes!(other) do
     raise ArgumentError,
           ":max_string_bytes must be a positive integer, got: #{inspect(other)}"
+  end
+
+  defp validate_max_instructions!(:infinity), do: :infinity
+
+  defp validate_max_instructions!(instruction_count) when is_integer(instruction_count) and instruction_count > 0,
+    do: instruction_count
+
+  defp validate_max_instructions!(other) do
+    raise ArgumentError,
+          ":max_instructions must be a positive integer or :infinity, got: #{inspect(other)}"
   end
 
   @doc """
