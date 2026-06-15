@@ -99,7 +99,13 @@ defmodule Lua.Parser.ErrorPositionTest do
     {"bad token in function inside function inside call",
      "outer(function()\n  inner(function()\n    x = +\n  end)\nend)\n", 3, 9, "Expected expression"},
     {"deep error in a return list", "function f()\n  return 1, 2, g(\nend\n", 3, 1, "Expected expression"},
-    {"stray statement after nested calls", "outer(mid(inner(\n)))\n.. bad\n", 3, 1, "bare"}
+    {"stray statement after nested calls", "outer(mid(inner(\n)))\n.. bad\n", 3, 1, "bare"},
+    # A bare-expression error deep inside a function argument must blame the
+    # inner statement, not the `function` keyword at the enclosing call's
+    # opener. Regression for a stray `)` reported against the wrong line.
+    {"bare expression in nested function argument",
+     ~s|w:step("a", "b", function(output)\n  device.doesntExist)\nend)\n|, 2, 3,
+     "bare table-access expression"}
   ]
 
   @statement_errors [

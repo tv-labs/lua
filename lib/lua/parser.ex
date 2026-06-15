@@ -1254,6 +1254,9 @@ defmodule Lua.Parser do
   end
 
   defp error_position({:unexpected_token, _type, pos, _message}), do: pos
+  defp error_position({:bare_expression, pos, _expr_struct}), do: pos
+  defp error_position({:invalid_assign_target, pos, _expr_struct}), do: pos
+  defp error_position({:unclosed_delimiter, _delimiter, open_pos}), do: open_pos
   defp error_position(_), do: nil
 
   defp parse_expr_list_until(tokens, terminator, delimiter, open_pos) do
