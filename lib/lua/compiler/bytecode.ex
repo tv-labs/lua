@@ -68,10 +68,10 @@ defmodule Lua.Compiler.Bytecode do
   @op_numeric_for 36
 
   # B5c-v2: closures, upvalues, varargs, multi-return, loops, self, concat.
-  # The bitwise family and the `:set_list` multi-return tail (below) since
-  # joined the covered set, so the only opcodes the encoder still rejects
-  # are `:goto` / `:label` (label-resolution semantics not yet ported to the
-  # dispatcher's flat tuple model).
+  # The bitwise family, the `:set_list` multi-return tail (below), and
+  # `:goto` / `:label` (resolved to `@op_goto` / `@op_label` by
+  # `resolve_gotos/2`) have all joined the covered set — the encoder no
+  # longer rejects any opcode current codegen emits.
   @op_closure 37
   @op_set_upvalue 38
   @op_get_open_upvalue 39
@@ -104,6 +104,14 @@ defmodule Lua.Compiler.Bytecode do
   @op_bitwise_not 58
   @op_set_list_multi 59
 
+  # `:label` is a no-op that anchors a `goto` target PC. `:goto` is resolved at
+  # encode time to `{@op_goto, depth, target_pc, level}` (see `resolve_gotos/2`):
+  # `depth` is the `cont` entries the dispatcher drops to reach the target's
+  # block, `target_pc` the label's index there, `level` the upvalue-close
+  # threshold. Mirrors `Lua.Compiler.GotoResolution` for the interpreter.
+  @op_label 60
+  @op_goto 61
+
   @doc """
   Compile a prototype, populating its `bytecode` field on success.
 
@@ -123,7 +131,8 @@ defmodule Lua.Compiler.Bytecode do
 
     case encode_list(proto.instructions, [], 0) do
       {:ok, encoded} ->
-        %{proto_with_children | bytecode: List.to_tuple(encoded)}
+        bytecode = encoded |> List.to_tuple() |> resolve_gotos([])
+        %{proto_with_children | bytecode: bytecode}
 
       :fallback ->
         proto_with_children
@@ -437,12 +446,133 @@ defmodule Lua.Compiler.Bytecode do
 
   defp encode(:break), do: {:ok, {@op_break}}
 
-  # Anything else — `:goto` / `:label` (label-resolution semantics not
-  # ported to the dispatcher's flat tuple model) — stays on the interpreter.
-  #
-  # `:source_line` is stripped upstream in `encode_list/2`, so it never
-  # reaches this clause table.
+  # `:label` keeps its name, scope `level`, and lexical block path so
+  # `resolve_gotos/2` can map goto targets to PCs, close levels, and check
+  # visibility; the path is dropped from the encoded output and at run time the
+  # label is a no-op. `:goto` is emitted as a placeholder carrying its own
+  # block path and rewritten by `resolve_gotos/2` once every block's label PCs
+  # are known.
+  defp encode({:label, name, level, block_path}), do: {:ok, {@op_label, name, level, block_path}}
+
+  defp encode({:goto, name, block_path}), do: {:ok, {:pending_goto, name, block_path}}
+
+  # Anything else stays on the interpreter. `:source_line` is stripped
+  # upstream in `encode_list/2`, so it never reaches this clause table.
   defp encode(_other), do: :fallback
+
+  # ── Goto resolution ─────────────────────────────────────────────────────
+  #
+  # Walk the encoded tuple tree, rewriting each `{:pending_goto, name}` to
+  # `{@op_goto, depth, target_pc, level}`. Mirrors `Lua.Compiler.GotoResolution`
+  # (interpreter) but over encoded tuples with PCs: `depth` counts the `cont`
+  # entries the dispatcher drops (a `:test` branch pushes one, a loop body
+  # two), `target_pc` is the `{@op_label, ...}` index in the destination
+  # tuple, `level` its scope close threshold. `ancestors` is a stack of
+  # `{labels, child_pc, weight}` from the innermost enclosing tuple outward.
+
+  # `cont` entries each construct pushes — must match the dispatcher.
+  @test_weight 1
+  @loop_weight 2
+
+  defp resolve_gotos(code, ancestors) do
+    entries = Tuple.to_list(code)
+    labels = collect_labels(entries)
+
+    entries
+    |> Enum.with_index(1)
+    |> Enum.map(fn {entry, pc} -> resolve_entry(entry, pc, labels, ancestors) end)
+    |> List.to_tuple()
+  end
+
+  defp collect_labels(entries) do
+    entries
+    |> Enum.with_index(1)
+    |> Enum.flat_map(fn
+      {{@op_label, name, level, block_path}, pc} -> [{name, pc, level, block_path}]
+      _ -> []
+    end)
+  end
+
+  # Labels carry their block path for goto resolution; the dispatcher only
+  # needs `{@op_label, name, level}`, so drop the path in the encoded output.
+  defp resolve_entry({@op_label, name, level, _block_path}, _pc, _labels, _ancestors) do
+    {@op_label, name, level}
+  end
+
+  defp resolve_entry({:pending_goto, name, block_path}, pc, labels, ancestors) do
+    # Illegal gotos (undefined / out-of-scope target) are rejected up front by
+    # `Lua.Compiler.GotoValidation` as a compile error, so resolution always
+    # succeeds here.
+    {:ok, depth, target_pc, level} = resolve_goto_target(name, block_path, labels, pc, ancestors)
+    {@op_goto, depth, target_pc, level}
+  end
+
+  defp resolve_entry({@op_test, reg, then_bc, else_bc}, pc, labels, ancestors) do
+    anc = [{labels, pc, @test_weight} | ancestors]
+    {@op_test, reg, resolve_gotos(then_bc, anc), resolve_gotos(else_bc, anc)}
+  end
+
+  defp resolve_entry({@op_numeric_for, base, loop_var, body_bc}, pc, labels, ancestors) do
+    {@op_numeric_for, base, loop_var, resolve_gotos(body_bc, [{labels, pc, @loop_weight} | ancestors])}
+  end
+
+  defp resolve_entry({@op_while_loop, test_reg, cond_bc, body_bc}, pc, labels, ancestors) do
+    {@op_while_loop, test_reg, cond_bc, resolve_gotos(body_bc, [{labels, pc, @loop_weight} | ancestors])}
+  end
+
+  defp resolve_entry({@op_repeat_loop, test_reg, body_bc, cond_bc}, pc, labels, ancestors) do
+    {@op_repeat_loop, test_reg, resolve_gotos(body_bc, [{labels, pc, @loop_weight} | ancestors]), cond_bc}
+  end
+
+  defp resolve_entry({@op_generic_for, base, var_regs, body_bc, line}, pc, labels, ancestors) do
+    {@op_generic_for, base, var_regs, resolve_gotos(body_bc, [{labels, pc, @loop_weight} | ancestors]), line}
+  end
+
+  defp resolve_entry(other, _pc, _labels, _ancestors), do: other
+
+  defp resolve_goto_target(name, goto_path, labels, from_pc, ancestors) do
+    case find_label(labels, name, goto_path, from_pc) do
+      {:ok, target_pc, level} -> {:ok, 0, target_pc, level}
+      :error -> resolve_in_ancestors(name, goto_path, ancestors, 0)
+    end
+  end
+
+  defp resolve_in_ancestors(_name, _goto_path, [], _depth), do: :error
+
+  defp resolve_in_ancestors(name, goto_path, [{labels, from_pc, weight} | rest], depth) do
+    depth = depth + weight
+
+    case find_label(labels, name, goto_path, from_pc) do
+      {:ok, target_pc, level} -> {:ok, depth, target_pc, level}
+      :error -> resolve_in_ancestors(name, goto_path, rest, depth)
+    end
+  end
+
+  # Nearest visible label after `from_pc`, else nearest before — matching the
+  # interpreter's `GotoResolution`. A label is visible when its block path is
+  # a prefix of the goto's, excluding nested and sibling `do` blocks flattened
+  # into the same tuple (Lua 5.3 §3.3.4).
+  defp find_label(labels, name, goto_path, from_pc) do
+    matching =
+      Enum.filter(labels, fn {n, _, _, label_path} -> n == name and visible?(label_path, goto_path) end)
+
+    after_label =
+      matching |> Enum.filter(fn {_, pc, _, _} -> pc > from_pc end) |> Enum.min_by(&elem(&1, 1), fn -> nil end)
+
+    before_label =
+      matching |> Enum.filter(fn {_, pc, _, _} -> pc < from_pc end) |> Enum.max_by(&elem(&1, 1), fn -> nil end)
+
+    case after_label || before_label do
+      {_name, pc, level, _path} -> {:ok, pc, level}
+      nil -> :error
+    end
+  end
+
+  # A label is visible to a goto when the label's block path is a prefix of
+  # the goto's — the label's block encloses (or equals) the goto's.
+  defp visible?([], _goto_path), do: true
+  defp visible?([h | label_rest], [h | goto_rest]), do: visible?(label_rest, goto_rest)
+  defp visible?(_label_path, _goto_path), do: false
 
   # ── Opcode tag accessors ────────────────────────────────────────────────
   #
@@ -510,4 +640,6 @@ defmodule Lua.Compiler.Bytecode do
   def op_shift_right, do: @op_shift_right
   def op_bitwise_not, do: @op_bitwise_not
   def op_set_list_multi, do: @op_set_list_multi
+  def op_label, do: @op_label
+  def op_goto, do: @op_goto
 end

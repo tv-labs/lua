@@ -176,18 +176,13 @@ defmodule Lua.Compiler.BytecodeTest do
       assert result.bytecode == nil
     end
 
-    test ":goto falls back (label-resolution semantics not ported)" do
-      # `:goto` / `:label` resolve via a runtime structural scan over the
-      # remaining instruction list; the dispatcher's flat-tuple model has
-      # no analogue yet, so the encoder forces fallback.
-      proto = %Prototype{
-        instructions: [{:label, :done}, {:goto, :done}, {:return, 0, 0}],
-        max_registers: 1,
-        source: "test-synthetic"
-      }
-
-      result = Bytecode.compile(proto)
-      assert result.bytecode == nil
+    test "short-circuit and/or falls back (test_and/test_or not covered)" do
+      # `:test_and` / `:test_or` carry a nested continuation body the encoder
+      # does not lower yet, so a function using short-circuit `and`/`or` keeps
+      # its prototype on the interpreter.
+      proto = compile!("function f(a, b) return a and b or 0 end")
+      [fn_proto] = proto.prototypes
+      assert fn_proto.bytecode == nil
     end
   end
 
@@ -210,15 +205,13 @@ defmodule Lua.Compiler.BytecodeTest do
 
   describe "cascade independence" do
     test "child prototype compiles even when sibling falls back" do
-      # `pure` is pure arithmetic (covered). `impure` uses a `goto`, which
-      # is not yet in dispatcher coverage (its own follow-up plan).
+      # `pure` is pure arithmetic (covered). `impure` uses short-circuit
+      # `and`/`or` (`:test_and` / `:test_or`), which the encoder does not yet
+      # cover, so it stays on the interpreter.
       proto =
         compile!("""
         function pure(a, b) return a + b end
-        function impure()
-          ::top::
-          goto top
-        end
+        function impure(a, b) return a and b or 0 end
         """)
 
       [pure_proto, impure_proto] = proto.prototypes
@@ -227,14 +220,13 @@ defmodule Lua.Compiler.BytecodeTest do
     end
 
     test "deeply-nested function compiles even when its parent falls back" do
-      # The outer `make` uses a `goto` (fallback), but the inner adder is a
-      # pure-arithmetic single-result function (compiles).
+      # The outer `make` uses short-circuit `and`/`or` (fallback), but the
+      # inner adder is a pure-arithmetic single-result function (compiles).
       proto =
         compile!("""
-        function make()
-          ::skip::
-          goto skip
-          local function add(a, b) return a + b end
+        function make(a, b)
+          local guard = a and b or 0
+          local function add(x, y) return x + y + guard end
           return add
         end
         """)
@@ -251,8 +243,13 @@ defmodule Lua.Compiler.BytecodeTest do
     # A representative corpus exercising every covered opcode family. Each
     # program must compile end-to-end — root chunk and every nested function —
     # so the dispatcher never silently falls back to the interpreter. The only
-    # documented exception is `:goto` / `:label` (asserted separately below).
+    # documented exception is short-circuit `and`/`or` (`:test_and` /
+    # `:test_or`), asserted separately below.
     @corpus [
+      {"goto forward", "local x = 1 goto skip x = 99 ::skip:: return x"},
+      {"goto backward loop", "local i = 0 ::top:: i = i + 1 if i < 5 then goto top end return i"},
+      {"goto continue out of if", "local s = 0 for i = 1, 5 do if i == 3 then goto c end s = s + i ::c:: end return s"},
+      {"goto break out of loop", "local i = 0 while true do i = i + 1 if i == 3 then goto d end end ::d:: return i"},
       {"arithmetic", "function f(a, b) return a + b * 2 - 1 end return f(3, 4)"},
       {"comparison + branch", "function f(n) if n < 0 then return -n end return n end return f(-5)"},
       {"recursion", "function fib(n) if n < 2 then return n end return fib(n-1)+fib(n-2) end return fib(10)"},
@@ -276,11 +273,12 @@ defmodule Lua.Compiler.BytecodeTest do
       end
     end
 
-    test "goto/label is the one documented exception (not yet covered)" do
-      # Until the goto/label port lands, a program using `goto` is expected to
-      # fall back. This is the only construct codegen emits that the dispatcher
-      # does not yet cover; when it lands this assertion flips.
-      refute Bytecode.fully_compiled?(compile!("local i = 0 ::top:: i = i + 1 if i < 3 then goto top end return i"))
+    test "short-circuit and/or is the remaining documented exception" do
+      # `:test_and` / `:test_or` (short-circuit `and`/`or`) are the only
+      # opcodes current codegen emits that the dispatcher does not yet cover,
+      # so a function using them still falls back to the interpreter. (goto /
+      # label are now covered — see the corpus above.)
+      refute Bytecode.fully_compiled?(compile!("local function f(a, b) return a and b or 0 end return f(1, 2)"))
     end
   end
 
@@ -337,14 +335,13 @@ defmodule Lua.Compiler.BytecodeTest do
     end
 
     test "fallback returns a Prototype with bytecode: nil, never an error" do
-      # The encoder must not crash on any well-formed prototype. `goto`
-      # stays on the interpreter (label-resolution semantics not ported),
-      # so use one to exercise the fallback path.
+      # The encoder must not crash on any well-formed prototype. Short-circuit
+      # `and`/`or` (`:test_and` / `:test_or`) stays on the interpreter, so use
+      # it to exercise the fallback path.
       proto =
         compile!("""
-        function f()
-          ::top::
-          goto top
+        function f(a, b)
+          return a and b or 0
         end
         """)
 

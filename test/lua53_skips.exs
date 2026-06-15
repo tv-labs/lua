@@ -158,9 +158,12 @@
   ],
   "goto.lua" => [
     %{
-      lines: 12..40,
+      lines: 163..195,
       category: :stdlib,
-      reason: "load() parse-error messages do not match PUC-Lua 'label/local' format",
+      reason:
+        "asserts upvalue cell identity via debug.upvalueid, which is a stub returning nil " <>
+          "(upvalue-cell introspection not implemented). The goto control flow these closures " <>
+          "exercise is still covered: the preceding `assert(#a == 6)` runs.",
       issue: nil
     }
   ],

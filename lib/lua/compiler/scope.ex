@@ -48,7 +48,9 @@ defmodule Lua.Compiler.Scope do
               next_register: 0,
               locals: %{},
               parent_scopes: [],
-              captured_locals: MapSet.new()
+              captured_locals: MapSet.new(),
+              block_path: [],
+              block_counter: 0
 
     @type t :: %__MODULE__{
             var_map: %{optional(term()) => Lua.Compiler.Scope.var_ref()},
@@ -57,7 +59,9 @@ defmodule Lua.Compiler.Scope do
             next_register: non_neg_integer(),
             locals: %{optional(binary()) => non_neg_integer()},
             parent_scopes: [%{locals: map(), function: term()}],
-            captured_locals: MapSet.t()
+            captured_locals: MapSet.t(),
+            block_path: [non_neg_integer()],
+            block_counter: non_neg_integer()
           }
   end
 
@@ -220,6 +224,7 @@ defmodule Lua.Compiler.Scope do
     saved_next_register = state.next_register
 
     state = %{state | var_map: Map.put(state.var_map, {:block_close_threshold, body}, saved_next_register)}
+
     state = resolve_block(body, state)
     state = resolve_expr(condition, state)
 
@@ -382,7 +387,18 @@ defmodule Lua.Compiler.Scope do
     saved_locals = state.locals
     saved_next_register = state.next_register
 
+    # Codegen flat-inlines a `do` block into its parent's instruction list, so
+    # its labels and gotos share that list with the enclosing block's. Tag the
+    # block with a unique id pushed onto `block_path` so goto resolution can
+    # tell a label in this nested block apart from one in the enclosing or a
+    # sibling block (Lua 5.3 §3.3.4). The path is innermost-last; a label is
+    # visible to a goto only when the label's path is a prefix of the goto's.
+    saved_block_path = state.block_path
+    block_id = state.block_counter
+    state = %{state | block_counter: block_id + 1, block_path: saved_block_path ++ [block_id]}
+
     state = resolve_block(body, state)
+    state = %{state | block_path: saved_block_path}
 
     # Stash the pre-block register watermark so codegen can emit a
     # `:close_upvalues` at block exit. Per Lua 5.3 §3.4.10 any open-upvalue
@@ -393,6 +409,28 @@ defmodule Lua.Compiler.Scope do
 
     # Restore outer scope (inner locals don't leak out)
     %{state | locals: saved_locals, next_register: saved_next_register}
+  end
+
+  # Record the live-local register watermark at each label. A `goto` to this
+  # label closes any open-upvalue cell at or above this register, so locals
+  # declared deeper in the blocks it leaves or re-enters get fresh cells
+  # (Lua 5.3 §3.3.4). `next_register` counts locals only (not codegen temps),
+  # which is exactly the close threshold. Keyed by the label node, which is
+  # unique per position, so reused names across sibling blocks stay distinct.
+  defp resolve_statement(%Statement.Label{} = label, state) do
+    var_map =
+      state.var_map
+      |> Map.put({:label_level, label}, state.next_register)
+      |> Map.put({:label_block, label}, state.block_path)
+
+    %{state | var_map: var_map}
+  end
+
+  # Record the lexical block path of each `goto` so codegen can tag the
+  # emitted instruction and goto resolution can match it only against labels
+  # visible from this block or an enclosing one (Lua 5.3 §3.3.4).
+  defp resolve_statement(%Statement.Goto{} = goto, state) do
+    %{state | var_map: Map.put(state.var_map, {:goto_block, goto}, state.block_path)}
   end
 
   # For now, stub out other statement types - we'll implement them incrementally
@@ -651,13 +689,19 @@ defmodule Lua.Compiler.Scope do
         {Map.put(locals, param, index), index + 1}
       end)
 
+    # A nested function body is its own instruction list; gotos never cross a
+    # function boundary, so its `block_path` starts fresh. `block_counter`
+    # stays monotonic across the boundary for global uniqueness.
+    saved_block_path = state.block_path
+
     state = %{
       state
       | locals: param_locals,
         next_register: next_param_reg,
         current_function: func_key,
         parent_scopes: [parent_scope_entry | state.parent_scopes],
-        captured_locals: MapSet.new()
+        captured_locals: MapSet.new(),
+        block_path: []
     }
 
     func_scope = %FunctionScope{
@@ -720,7 +764,8 @@ defmodule Lua.Compiler.Scope do
         next_register: saved_next_register,
         current_function: saved_function,
         parent_scopes: saved_parent_scopes,
-        captured_locals: MapSet.union(saved_captured_locals, newly_captured)
+        captured_locals: MapSet.union(saved_captured_locals, newly_captured),
+        block_path: saved_block_path
     }
   end
 end

@@ -117,6 +117,13 @@ defmodule Lua.VM.Dispatcher do
   @op_bitwise_not 58
   @op_set_list_multi 59
 
+  # `@op_label` is a no-op anchoring a goto target. `@op_goto` carries
+  # `{depth, target_pc, level}`: close open upvalues at or above `level`, drop
+  # `depth` `cont` entries to leave the intervening blocks, then dispatch the
+  # destination tuple (recovered from the unwound markers) at `target_pc`.
+  @op_label 60
+  @op_goto 61
+
   @doc """
   Execute a compiled prototype against `args` and `state`.
   """
@@ -1034,6 +1041,27 @@ defmodule Lua.VM.Dispatcher do
         {exit_code, exit_pc, rest_cont} = find_loop_exit(cont)
         dispatch(exit_code, exit_pc, regs, upvalues, proto, state, rest_cont, frames)
 
+      # ── label / goto ──────────────────────────────────────────────
+      #
+      # `:label` is a no-op. `:goto` closes upvalue cells at or above the
+      # target's scope `level`, drops `depth` `cont` entries (a `:test`
+      # branch pushed one, a loop body two), and resumes the destination
+      # tuple at `target_pc`. `depth == 0` is a jump within the current
+      # tuple (forward or backward); otherwise the destination tuple is the
+      # enclosing `code` recorded on the unwound markers.
+
+      {@op_label, _name, _level} ->
+        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames)
+
+      {@op_goto, 0, target_pc, level} ->
+        state = Executor.dispatcher_close_open_upvalues_at_or_above(state, level)
+        dispatch(code, target_pc, regs, upvalues, proto, state, cont, frames)
+
+      {@op_goto, depth, target_pc, level} ->
+        state = Executor.dispatcher_close_open_upvalues_at_or_above(state, level)
+        {dest_code, rest_cont} = unwind_goto(cont, depth)
+        dispatch(dest_code, target_pc, regs, upvalues, proto, state, rest_cont, frames)
+
       # ── Closure construction ──────────────────────────────────────
       #
       # Walks `nested_proto.upvalue_descriptors`, allocating a new cell
@@ -1584,6 +1612,29 @@ defmodule Lua.VM.Dispatcher do
   defp find_loop_exit([_other | rest_cont]), do: find_loop_exit(rest_cont)
 
   defp find_loop_exit([]), do: raise(InternalError, value: "break outside loop")
+
+  # `:goto` unwind. Drops exactly `depth` `cont` entries (counted to match the
+  # encoder: a `:test` branch is one, a loop body two) and returns the
+  # enclosing `code` tuple recorded on the last entry dropped, into which the
+  # goto's `target_pc` indexes. `depth >= 1` here (`depth == 0` is handled
+  # without unwinding).
+  defp unwind_goto(cont, depth), do: unwind_goto(cont, depth, nil)
+
+  defp unwind_goto(cont, 0, dest_code), do: {dest_code, cont}
+
+  defp unwind_goto([entry | rest], depth, _dest_code) do
+    unwind_goto(rest, depth - 1, cont_entry_code(entry))
+  end
+
+  # The enclosing `code` tuple carried by a `cont` entry: a `:test` resume is
+  # `{code, pc}` (code first); every loop marker (`:loop_exit`, `:cps_*`) is a
+  # tagged tuple carrying `code` as its second-to-last element.
+  defp cont_entry_code(entry) do
+    case :erlang.element(1, entry) do
+      tag when is_atom(tag) -> :erlang.element(tuple_size(entry) - 1, entry)
+      _ -> :erlang.element(1, entry)
+    end
+  end
 
   # Vararg setup at the call boundary. Mirrors the executor's per-call
   # behaviour: when calling a vararg function, regs[param_count..total_args)

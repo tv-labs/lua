@@ -22,7 +22,10 @@ defmodule Lua.Compiler.Prototype do
           max_registers: non_neg_integer(),
           source: binary(),
           lines: {non_neg_integer(), non_neg_integer()},
-          bytecode: tuple() | nil
+          bytecode: tuple() | nil,
+          goto_targets: %{
+            non_neg_integer() => {non_neg_integer(), non_neg_integer(), [instruction()]}
+          }
         }
 
   # `bytecode` is an optional dense encoding produced by `Lua.Compiler.Bytecode`.
@@ -49,7 +52,8 @@ defmodule Lua.Compiler.Prototype do
             source: <<"-no-source-">>,
             lines: {0, 0},
             varargs: [],
-            bytecode: nil
+            bytecode: nil,
+            goto_targets: %{}
 
   @doc """
   Creates a new prototype with the given options.
