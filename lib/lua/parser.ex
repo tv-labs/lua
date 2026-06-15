@@ -1046,9 +1046,6 @@ defmodule Lua.Parser do
       {:eof, _} ->
         {:error, {:unclosed_delimiter, :lbrace, open_pos}}
 
-      nil ->
-        {:error, {:unclosed_delimiter, :lbrace, open_pos}}
-
       _ ->
         case parse_table_field(tokens) do
           {:ok, field, rest} ->
@@ -1271,9 +1268,6 @@ defmodule Lua.Parser do
       # Blame the opener, matching the args-then-EOF case below, instead
       # of a bare "Expected expression" pinned to the end of the file.
       {:eof, _} ->
-        {:error, {:unclosed_delimiter, delimiter, open_pos}}
-
-      nil ->
         {:error, {:unclosed_delimiter, delimiter, open_pos}}
 
       _ ->
