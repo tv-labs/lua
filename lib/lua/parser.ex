@@ -1253,9 +1253,17 @@ defmodule Lua.Parser do
   # represent a clean list terminator, so they propagate even when their
   # position is absent (e.g. an invalid-assign target on a `meta: nil`
   # postfix node, whose `target_position/1` is `nil`).
+  #
+  # `:unclosed_delimiter` joins them: an opened-but-unclosed delimiter has by
+  # construction consumed an opener and its content, so it can never be a clean
+  # list terminator. Gating it on position would make blame depend on whether
+  # the opener happens to be the argument's first token (`open_pos ==
+  # start_offset`) — the begins-a-non-first-argument case — versus opened
+  # mid-element. Always committing it blames the inner opener uniformly.
   defp committed?({:unexpected_end, _message, _pos}, _tokens), do: true
   defp committed?({:bare_expression, _pos, _expr_struct}, _tokens), do: true
   defp committed?({:invalid_assign_target, _pos, _expr_struct}, _tokens), do: true
+  defp committed?({:unclosed_delimiter, _delimiter, _open_pos}, _tokens), do: true
 
   defp committed?(reason, tokens) do
     with %{byte_offset: error_offset} <- error_position(reason),
@@ -1266,12 +1274,7 @@ defmodule Lua.Parser do
     end
   end
 
-  # `:unclosed_delimiter` stays position-based (via its opener): a delimiter
-  # that *begins* an argument has `open_pos == start_offset`, so the list
-  # still recovers at the outer boundary, while a delimiter opened mid-element
-  # propagates as the genuine deep error.
   defp error_position({:unexpected_token, _type, pos, _message}), do: pos
-  defp error_position({:unclosed_delimiter, _delimiter, open_pos}), do: open_pos
   defp error_position(_), do: nil
 
   defp parse_expr_list_until(tokens, terminator, delimiter, open_pos) do

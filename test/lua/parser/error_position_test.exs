@@ -112,7 +112,12 @@ defmodule Lua.Parser.ErrorPositionTest do
      "syntax error near '='"},
     # An unclosed delimiter opened inside a non-first argument propagates as
     # the genuine deep error rather than being swallowed at the outer boundary.
-    {"unclosed delimiter in non-first call argument", "outer(1, inner(\n", 1, 15, "Unclosed opening parenthesis"}
+    {"unclosed delimiter in non-first call argument", "outer(1, inner(\n", 1, 15, "Unclosed opening parenthesis"},
+    # An unclosed delimiter that *begins* a non-first argument is blamed at
+    # that opener too, matching the first-argument and mid-element cases —
+    # not at a misleading "Expected )" on the outer call boundary.
+    {"unclosed brace beginning a non-first call argument", "outer(1, {a = 1\n", 1, 10, "Unclosed opening brace"},
+    {"unclosed paren beginning a non-first call argument", "outer(1, (2 + 3\n", 1, 10, "Unclosed opening parenthesis"}
   ]
 
   @statement_errors [
