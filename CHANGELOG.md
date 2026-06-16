@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [v1.0.0-rc.3] - 2026-06-15
+## [1.0.0-rc.3] - 2026-06-15
 
 The fourth release candidate for `1.0.0`. It builds on rc.2 with a
 structured parse-error API for tooling, conformant `goto`/`label` on
@@ -128,7 +128,7 @@ additive — nothing from rc.2 is broken.
   per-value pseudo-pointer. Table rendering (`table: 0x...`) is
   unchanged. `type(f)` still returns `"function"`.
 
-## [v1.0.0-rc.2] - 2026-06-10
+## [1.0.0-rc.2] - 2026-06-10
 
 The third release candidate for `1.0.0`. It builds on rc.1 with a major
 table-storage performance win, two non-standard `os` epoch helpers, and
@@ -460,7 +460,9 @@ API is intended to be stable. Please report any regressions before final.
 - Upgrade to Luerl 1.4.1
 - Tables must now be explicitly decoded when receiving as arguments `deflua` and other Elixir callbacks
 
-[unreleased]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.1...HEAD
+[unreleased]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.3...HEAD
+[1.0.0-rc.3]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.2...v1.0.0-rc.3
+[1.0.0-rc.2]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.1...v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.0...v1.0.0-rc.1
 [1.0.0-rc.0]: https://github.com/tv-labs/lua/compare/v0.4.0...v1.0.0-rc.0
 [0.4.0]: https://github.com/tv-labs/lua/compare/v0.3.0...v0.4.0
