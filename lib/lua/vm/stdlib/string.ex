@@ -328,7 +328,10 @@ defmodule Lua.VM.Stdlib.String do
   # string.format(formatstring, ...) - formats strings with C-style format specifiers
   defp string_format([fmt | args], state) when is_binary(fmt) do
     {segments, state} = compiled_format(fmt, state)
-    {[render_format(segments, args, [])], state}
+    # `argn` is the 1-based position of the next value argument. The format
+    # string is arg #1, so the first conversion consumes arg #2; PUC reports a
+    # missing value against this index ("bad argument #2 ... (no value)").
+    {[render_format(segments, args, [], 2)], state}
   rescue
     e in Lua.VM.RuntimeError ->
       reraise e, __STACKTRACE__
@@ -404,22 +407,25 @@ defmodule Lua.VM.Stdlib.String do
   # Render compiled segments against the argument list. `acc` is an iolist
   # appended as `[acc, piece]` (O(1) per step), materialized exactly once via
   # `IO.iodata_to_binary/1` at the base case.
-  defp render_format([], _args, acc), do: IO.iodata_to_binary(acc)
+  defp render_format([], _args, acc, _argn), do: IO.iodata_to_binary(acc)
 
-  defp render_format([{:lit, literal} | rest], args, acc) do
-    render_format(rest, args, [acc, literal])
+  defp render_format([{:lit, literal} | rest], args, acc, argn) do
+    render_format(rest, args, [acc, literal], argn)
   end
 
-  defp render_format([{:bare, c} | rest], [arg | remaining_args], acc) do
-    render_format(rest, remaining_args, [acc, convert_raw(c, arg, nil, 0, nil)])
+  defp render_format([{:bare, c} | rest], [arg | remaining_args], acc, argn) do
+    render_format(rest, remaining_args, [acc, convert_raw(c, arg, nil, 0, nil)], argn + 1)
   end
 
-  defp render_format([{:spec, spec} | rest], [arg | remaining_args], acc) do
-    render_format(rest, remaining_args, [acc, apply_format_spec(spec, arg)])
+  defp render_format([{:spec, spec} | rest], [arg | remaining_args], acc, argn) do
+    render_format(rest, remaining_args, [acc, apply_format_spec(spec, arg)], argn + 1)
   end
 
-  defp render_format([_segment | _], [], _acc) do
-    raise ArgumentError, function_name: "string.format", details: "no value"
+  defp render_format([_segment | _], [], _acc, argn) do
+    raise ArgumentError,
+      function_name: "string.format",
+      arg_num: argn,
+      details: "no value"
   end
 
   # PUC-Lua's `scanformat` reads at most two width and two precision digits and
@@ -510,6 +516,16 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   # Apply a format spec to a value
+  #
+  # %q emits a self-describing Lua literal whose exact byte sequence the reader
+  # must parse back to the original value. C printf field-width padding would
+  # corrupt that literal, so %q never threads through the width/sign machinery
+  # (PUC-Lua likewise refuses to apply modifiers to %q). Every other conversion
+  # takes the padding pipeline below.
+  defp apply_format_spec({_flags, _width, _precision, ?q}, arg) do
+    format_quoted(arg)
+  end
+
   defp apply_format_spec({flags, width, precision, specifier}, arg) do
     specifier
     |> convert_raw(arg, precision, flags, width)
@@ -519,7 +535,7 @@ defmodule Lua.VM.Stdlib.String do
 
   # Render the raw (un-padded, un-signed) conversion for a specifier. Shared by
   # the full parse path above and the bare-specifier fast path in
-  # `format_directive/3`.
+  # `render_format/3`'s `{:bare, c}` clause.
   defp convert_raw(specifier, arg, precision, flags, width) do
     case specifier do
       ?d -> format_spec_integer(arg)
@@ -590,6 +606,11 @@ defmodule Lua.VM.Stdlib.String do
     raise ArgumentError, function_name: "string.format", expected: "number"
   end
 
+  # C printf/PUC-Lua case the NaN text by the conversion: "nan" for the
+  # lowercase specifiers (%e/%g/%a/%f) and "NAN" for the uppercase ones.
+  defp nan_string(:upper), do: "NAN"
+  defp nan_string(_), do: "nan"
+
   # Format a finite float to exactly `precision` fixed decimal places,
   # matching C printf/PUC-Lua %f (round-half-to-even, sign preserved).
   defp fixed_float(float_val, 0) do
@@ -603,11 +624,13 @@ defmodule Lua.VM.Stdlib.String do
   # Format a non-negative finite float to exactly `n` (>= 1) fixed decimal
   # places via exact bignum arithmetic on the IEEE-754 significand. The value
   # is `mant * 2^e2`, so `value * 10^n = mant * 5^n * 2^(e2 + n)` is an exact
-  # rational; round it (half away from zero, matching `:io_lib` / C printf on
-  # ties such as 0.125 -> 0.13) to an integer, then place the decimal point.
-  # This sidesteps `:io_lib.format/2`'s general-purpose digit machinery, which
-  # dominated the profile of format-heavy loops, while producing byte-identical
-  # output (verified against `:io_lib` over 300k random value/precision pairs).
+  # rational; round it half-to-even (matching C printf / PUC-Lua %f on ties
+  # such as 0.125 -> 0.12, and consistent with the p=0 path) to an integer,
+  # then place the decimal point. This prints the true IEEE-754 digits of the
+  # stored double, matching PUC-Lua/C and diverging from the old
+  # `:io_lib.format/2` output for large-magnitude floats (a conformance
+  # improvement). It also sidesteps `:io_lib`'s general-purpose digit
+  # machinery, which dominated the profile of format-heavy loops.
   defp fixed_decimal_digits(abs_val, n) do
     <<_sign::1, exp::11, frac::52>> = <<abs_val::float>>
 
@@ -625,7 +648,7 @@ defmodule Lua.VM.Stdlib.String do
       cond do
         mant == 0 -> 0
         p >= 0 -> scaled <<< p
-        true -> round_half_away(scaled, 1 <<< -p)
+        true -> round_half_even_int(scaled, 1 <<< -p)
       end
 
     place_decimal(Integer.to_string(rounded), n)
@@ -637,9 +660,18 @@ defmodule Lua.VM.Stdlib.String do
   defp pow5(n, acc, base) when (n &&& 1) == 1, do: pow5(n >>> 1, acc * base, base * base)
   defp pow5(n, acc, base), do: pow5(n >>> 1, acc, base * base)
 
-  defp round_half_away(num, den) do
+  # Round the exact rational `num / den` to the nearest integer, ties to even.
+  # `num` and `den` are always non-negative and `den = 1 <<< -p > 0`.
+  defp round_half_even_int(num, den) do
     q = div(num, den)
-    if rem(num, den) * 2 >= den, do: q + 1, else: q
+    r2 = rem(num, den) * 2
+
+    cond do
+      r2 > den -> q + 1
+      r2 < den -> q
+      (q &&& 1) == 0 -> q
+      true -> q + 1
+    end
   end
 
   # `digits` is always ASCII (`Integer.to_string/1`), so pad by bytes — avoids
@@ -678,6 +710,9 @@ defmodule Lua.VM.Stdlib.String do
       true -> floor + 1
     end
   end
+
+  # 0/0 surfaces as :nan; C printf/PUC-Lua print "nan"/"NAN" by letter case.
+  defp format_spec_scientific(:nan, _precision, case_style), do: nan_string(case_style)
 
   defp format_spec_scientific(val, precision, case_style) when is_number(val) do
     str = format_scientific_str(val / 1, precision)
@@ -719,6 +754,8 @@ defmodule Lua.VM.Stdlib.String do
       {str, exp}
     end
   end
+
+  defp format_spec_general(:nan, _precision, case_style), do: nan_string(case_style)
 
   defp format_spec_general(val, precision, case_style) when is_number(val) do
     float_val = val / 1
@@ -813,7 +850,7 @@ defmodule Lua.VM.Stdlib.String do
       details: "precision not supported for %a"
   end
 
-  defp format_spec_hexfloat(:nan, _precision, _case_style), do: "nan"
+  defp format_spec_hexfloat(:nan, _precision, case_style), do: nan_string(case_style)
 
   defp format_spec_hexfloat(arg, _precision, case_style) when is_number(arg) do
     str = float_to_hexfloat(arg / 1)
@@ -1122,18 +1159,27 @@ defmodule Lua.VM.Stdlib.String do
       pad = String.duplicate(pad_char, deficit)
 
       # Return an iolist rather than concatenating with `<>`: the padded
-      # result threads through the `[acc, str]` accumulator in
-      # `format_directive/3` and is materialised exactly once at the
-      # `format_string/3` base case via `IO.iodata_to_binary/1`, so each
-      # width-flagged specifier no longer allocates a fresh padded binary.
+      # result threads through the `[acc, piece]` accumulator in
+      # `render_format/3` and is materialised exactly once at that function's
+      # base case via `IO.iodata_to_binary/1`, so each width-flagged specifier
+      # no longer allocates a fresh padded binary.
       if minus? do
         # Left justify
         [str, pad]
       else
         # Right justify (default)
-        # Handle zero-padding with sign — the sign (-, + or a reserved space)
-        # must stay leftmost, ahead of the zero fill.
+        # Handle zero-padding with sign and the %a/%A "0x" prefix — both must
+        # stay leftmost, ahead of the zero fill. C printf places the zero fill
+        # after a sign and after the "0x"/"0X" radix prefix, never before them
+        # (e.g. "%08a" of 1.0 -> "0x001p+0", not "000x1p+0").
         case str do
+          <<sign, ?0, x, body::binary>>
+          when pad_char == "0" and sign in [?-, ?+, ?\s] and x in [?x, ?X] ->
+            [<<sign, ?0, x>>, pad, body]
+
+          <<?0, x, body::binary>> when pad_char == "0" and x in [?x, ?X] ->
+            [<<?0, x>>, pad, body]
+
           <<sign, body::binary>> when pad_char == "0" and sign in [?-, ?+, ?\s] ->
             [<<sign>>, pad, body]
 

@@ -316,6 +316,16 @@ defmodule Lua.VM.StringTest do
       %{state: Stdlib.install(State.new())}
     end
 
+    # A field width must not pad %q: the result is a Lua literal whose exact
+    # bytes the reader parses back, so leading spaces would corrupt it. Unlike
+    # %s, "%5q" yields the bare quoted literal with no padding.
+    test "field width does not pad the %q literal", %{state: state} do
+      code = ~s{return string.format("%5q", "x") .. "|" .. string.format("%5s", "x")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, [~s{"x"|    x}], _state} = VM.execute(proto, state)
+    end
+
     test "control bytes use decimal escapes, padded only before a digit", %{state: state} do
       code = ~s{return string.format("%q", "\\0") .. "|" .. string.format("%q", "\\0009")}
       assert {:ok, ast} = Parser.parse(code)
@@ -405,7 +415,10 @@ defmodule Lua.VM.StringTest do
       for {code, fragment} <- [
             {~s{return string.format("%100.3d", 10)}, ~r/too long/},
             {~s{return string.format("%000000d", 10)}, ~r/repeated flags/},
-            {~s{return string.format("%d %d", 10)}, ~r/no value/}
+            # PUC names the missing value by its 1-based arg index (fmt is
+            # #1, so the second conversion's missing value is #3).
+            {~s{return string.format("%d %d", 10)}, ~r/#3 to 'string.format' \(no value\)/},
+            {~s{return string.format("%d")}, ~r/#2 to 'string.format' \(no value\)/}
           ] do
         assert {:ok, ast} = Parser.parse(code)
         assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
@@ -580,6 +593,15 @@ defmodule Lua.VM.StringTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       assert {:ok, ["0a"], _state} = VM.execute(proto, state)
     end
+
+    # C printf places zero fill AFTER the "0x" radix prefix, not before it.
+    # Reference: /opt/homebrew/bin/lua string.format("%08a", 1.0) -> "0x001p+0".
+    test "%0Na zero-fills after the 0x prefix", %{state: state} do
+      code = ~s{return string.format("%08a", 1.0)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["0x001p+0"], _state} = VM.execute(proto, state)
+    end
   end
 
   describe "string.format float rounding and non-finite values" do
@@ -622,6 +644,27 @@ defmodule Lua.VM.StringTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       assert {:ok, ["nan"], _state} = VM.execute(proto, state)
+    end
+
+    # C printf/PUC-Lua case the NaN text by the conversion: lowercase
+    # specifiers print "nan", uppercase print "NAN".
+    # Reference: /opt/homebrew/bin/lua string.format(spec, 0/0).
+    test "NaN cases by specifier letter case", %{state: state} do
+      cases = [
+        {~s{string.format("%e", 0/0)}, "nan"},
+        {~s{string.format("%E", 0/0)}, "NAN"},
+        {~s{string.format("%g", 0/0)}, "nan"},
+        {~s{string.format("%G", 0/0)}, "NAN"},
+        {~s{string.format("%a", 0/0)}, "nan"},
+        {~s{string.format("%A", 0/0)}, "NAN"}
+      ]
+
+      for {expr, expected} <- cases do
+        code = "return #{expr}"
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+        assert {:ok, [^expected], _state} = VM.execute(proto, state), "for #{expr}"
+      end
     end
 
     # IEEE-754 distinguishes -0.0 from +0.0; C printf/PUC-Lua preserve the sign
@@ -1778,9 +1821,10 @@ defmodule Lua.VM.StringTest do
       %{state: Stdlib.install(State.new())}
     end
 
-    test "rounds half away from zero on exact binary ties", %{state: state} do
-      # 0.125 is exactly representable; the tie rounds up, matching C/io_lib.
-      assert run_format("return string.format(\"%.2f\", 0.125)", state) == "0.13"
+    test "rounds half to even on exact binary ties", %{state: state} do
+      # 0.125 is an exact binary tie; it rounds to the even neighbour "0.12",
+      # matching C printf / PUC-Lua %f (not "0.13" / half away from zero).
+      assert run_format("return string.format(\"%.2f\", 0.125)", state) == "0.12"
     end
 
     test "rounds on the true binary value, not the decimal literal", %{state: state} do
