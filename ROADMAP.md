@@ -28,9 +28,9 @@ not add new public surface in the release that freezes the surface.
   rewrite already meets or beats Luerl where it counts (native VM,
   structured errors, `parse_structured/1`, `:max_instructions`, O(1)
   `#t`/`pairs`); the dimensions we trail (coroutines, full `io`,
-  gc/weak-tables) are documented deliberate non-goals, not gaps. Five
+  gc/weak-tables) are documented deliberate non-goals, not gaps. Four
   milestone issues were already satisfied by rc.3 and closed (#77, #89,
-  #92, #87 moot post-Luerl, and the bulk of #76).
+  #92, and #87, the latter moot post-Luerl).
 - **1.1.0** — additive DX + virtualization plumbing on the frozen API:
   the `Lua.Encoder` protocol + `deflua` auto-marshalling (#341), and the
   VFS plumbing that routes `os`/`require` IO through an in-memory virtual
