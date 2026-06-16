@@ -288,7 +288,9 @@ defmodule Lua.VM.StringTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = Stdlib.install(State.new())
       assert {:ok, [result], _state} = VM.execute(proto, state)
-      assert result == "Quoted: \"hello\\nworld\""
+      # %q escapes a newline as a backslash before a literal newline byte (the
+      # form the Lua reader parses back), not the "\\n" mnemonic.
+      assert result == "Quoted: \"hello\\\nworld\""
     end
 
     test "string.format with %% escapes percent" do
@@ -305,6 +307,126 @@ defmodule Lua.VM.StringTest do
       assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = Stdlib.install(State.new())
       assert {:ok, ["Value: 255 (ff)"], _state} = VM.execute(proto, state)
+    end
+  end
+
+  # Regression tests for Lua 5.3 suite: strings.lua (string.format conformance)
+  describe "string.format %q literal form" do
+    setup do
+      %{state: Stdlib.install(State.new())}
+    end
+
+    test "control bytes use decimal escapes, padded only before a digit", %{state: state} do
+      code = ~s{return string.format("%q", "\\0") .. "|" .. string.format("%q", "\\0009")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      # "\0" alone -> \0 (next byte is the closing quote); "\0" before '9' ->
+      # \000 so the reader cannot fold the digit into the escape.
+      assert {:ok, [~S{"\0"|"\0009"}], _state} = VM.execute(proto, state)
+    end
+
+    test "backslash, quote and newline take a backslash before a literal byte", %{state: state} do
+      code = ~s{return string.format("%q", "\\\\\\"\\n")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, [result], _state} = VM.execute(proto, state)
+      assert result == "\"\\\\\\\"\\\n\""
+    end
+
+    test "integers render as decimal, math.mininteger as a hex literal", %{state: state} do
+      code = ~s{return string.format("%q", 42) .. "|" .. string.format("%q", math.mininteger)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["42|0x8000000000000000"], _state} = VM.execute(proto, state)
+    end
+
+    test "floats render as round-trippable hex floats", %{state: state} do
+      code = ~s{return string.format("%q", 0.1) .. "|" .. string.format("%q", 1.0)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["0x1.999999999999ap-4|0x1p+0"], _state} = VM.execute(proto, state)
+    end
+
+    test "nil and booleans render as keywords", %{state: state} do
+      code = ~s{return string.format("%q %q %q", nil, true, false)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["nil true false"], _state} = VM.execute(proto, state)
+    end
+
+    test "a value with no literal form errors", %{state: state} do
+      code = ~s|return string.format("%q", {})|
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+      assert_raise ArgumentError, ~r/no literal form/, fn ->
+        VM.execute(proto, state)
+      end
+    end
+  end
+
+  describe "string.format conversions and flags" do
+    setup do
+      %{state: Stdlib.install(State.new())}
+    end
+
+    test "%a renders a C99 hex float", %{state: state} do
+      code = ~s{return string.format("%a", 1.0) .. "|" .. string.format("%A", 0.5)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["0x1p+0|0X1P-1"], _state} = VM.execute(proto, state)
+    end
+
+    test "%x/%o read a negative integer as unsigned 64-bit", %{state: state} do
+      code = ~s{return string.format("%x", -1) .. "|" .. string.format("%o", -1)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["ffffffffffffffff|1777777777777777777777"], _state} = VM.execute(proto, state)
+    end
+
+    test "the + flag forces a sign and stays left of zero padding", %{state: state} do
+      code = ~s{return string.format("%+08d", 31501) .. "|" .. string.format("% d", 7)}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["+0031501| 7"], _state} = VM.execute(proto, state)
+    end
+
+    test "a modified %s rejects an embedded zero byte", %{state: state} do
+      code = ~s{return string.format("%10s", "\\0")}
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+      assert_raise ArgumentError, ~r/string contains zeros/, fn ->
+        VM.execute(proto, state)
+      end
+    end
+
+    test "format errors name the specific cause", %{state: state} do
+      for {code, fragment} <- [
+            {~s{return string.format("%100.3d", 10)}, ~r/too long/},
+            {~s{return string.format("%000000d", 10)}, ~r/repeated flags/},
+            {~s{return string.format("%d %d", 10)}, ~r/no value/}
+          ] do
+        assert {:ok, ast} = Parser.parse(code)
+        assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+        assert_raise ArgumentError, fragment, fn ->
+          VM.execute(proto, state)
+        end
+      end
+    end
+  end
+
+  describe "string literal line continuation" do
+    setup do
+      %{state: Stdlib.install(State.new())}
+    end
+
+    test "a backslash before a newline collapses to a single newline", %{state: state} do
+      code = "return \"a\\\nb\""
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, ["a\nb"], _state} = VM.execute(proto, state)
     end
   end
 

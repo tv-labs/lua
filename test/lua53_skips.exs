@@ -271,10 +271,23 @@
   ],
   "strings.lua" => [
     %{
-      lines: :all,
+      lines: 199..206,
       category: :stdlib,
       reason:
-        "triage candidate: tostring(function) now prints `function: 0x...` (was bare `function`), clearing line 126. Next blocker is `string.format('%q', ...)` escaping at line 153; later string.rep sections may also need range skips. A format chain, not a one-shot.",
+        "string.format %s/%q does not dispatch the __tostring/__name metamethods (no per-arg tostring), so a table argument cannot be coerced to its literal form.",
+      issue: nil
+    },
+    %{
+      lines: 275..280,
+      category: :semantic,
+      reason:
+        "%a/%A of 1/0 and 0/0 expect 'inf'/'nan', but the VM clamps division by zero to a finite 1.0e308 instead of an IEEE infinity.",
+      issue: nil
+    },
+    %{
+      lines: 371..376,
+      category: :unimplemented,
+      reason: "coroutine library is not implemented (coroutine.wrap).",
       issue: nil
     }
   ]

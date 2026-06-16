@@ -400,6 +400,21 @@ defmodule Lua.Lexer do
     end
   end
 
+  # \<newline> line continuation: a backslash before a real end-of-line yields a
+  # single \n byte and advances one line. All four line endings (\n, \r, \r\n,
+  # \n\r) collapse to one newline, matching PUC-Lua's `read_string`.
+  defp scan_string(<<?\\, ?\r, ?\n, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
+    scan_string(rest, str_acc <> "\n", acc, advance_string_line(pos, 3), start_pos, quote)
+  end
+
+  defp scan_string(<<?\\, ?\n, ?\r, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
+    scan_string(rest, str_acc <> "\n", acc, advance_string_line(pos, 3), start_pos, quote)
+  end
+
+  defp scan_string(<<?\\, nl, rest::binary>>, str_acc, acc, pos, start_pos, quote) when nl in [?\n, ?\r] do
+    scan_string(rest, str_acc <> "\n", acc, advance_string_line(pos, 2), start_pos, quote)
+  end
+
   defp scan_string(<<?\\, esc, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
     # Escape sequence
     case escape_char(esc) do
@@ -835,5 +850,11 @@ defmodule Lua.Lexer do
   # Position tracking helpers
   defp advance_column(pos, n) do
     %{pos | column: pos.column + n, byte_offset: pos.byte_offset + n}
+  end
+
+  # Advance one source line, consuming `n` raw bytes (the backslash plus the
+  # one- or two-byte line ending of a \<newline> continuation).
+  defp advance_string_line(pos, n) do
+    %{line: pos.line + 1, column: 1, byte_offset: pos.byte_offset + n}
   end
 end

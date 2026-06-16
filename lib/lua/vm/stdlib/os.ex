@@ -16,7 +16,8 @@ defmodule Lua.VM.Stdlib.Os do
   - `os.difftime(t2, t1)` - Difference in seconds between two times.
   - `os.date([format [, time]])` - Formats a time as a string or table.
   - `os.getenv(name)` - Value of an environment variable, or nil.
-  - `os.setlocale([locale [, category]])` - No-op returning "C".
+  - `os.setlocale([locale [, category]])` - Only the "C" locale is available;
+    returns "C" for a query or a "C"/"" request and nil for any other locale.
   - `os.tmpname()` - A name usable for a temporary file.
   - `os.exit([code [, close]])` - Raises to unwind; sandbox cannot exit.
   """
@@ -168,8 +169,14 @@ defmodule Lua.VM.Stdlib.Os do
     raise ArgumentError.value_expected("os.getenv", 1)
   end
 
-  # os.setlocale([locale [, category]]) — no locale support in the
-  # sandbox; report the "C" locale as active.
+  # os.setlocale([locale [, category]]) — the sandbox only carries the default
+  # "C" locale. A query (nil locale) and a request for "C" or "" all report
+  # "C"; any other named locale is unavailable, so return nil like a C runtime
+  # whose locale data is missing.
+  defp os_setlocale([locale | _], state) when locale not in [nil, "C", ""] do
+    {[nil], state}
+  end
+
   defp os_setlocale(_args, state), do: {["C"], state}
 
   # os.tmpname() — a name usable for a temporary file.
