@@ -67,7 +67,7 @@ defmodule Lua.VM.Stdlib.PackageTest do
     end
 
     defp eval_with_path(code, tmp_dir) do
-      lua = Lua.new(exclude: [[:package], [:require]])
+      lua = Lua.new(sandbox: false)
       lua = Lua.set_lua_paths(lua, [Path.join(tmp_dir, "?.lua")])
       Lua.eval!(lua, code)
     end

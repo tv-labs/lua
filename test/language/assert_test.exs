@@ -2,7 +2,7 @@ defmodule Lua.Language.AssertTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "assert returns all arguments", %{lua: lua} do

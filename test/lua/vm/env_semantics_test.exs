@@ -17,7 +17,7 @@ defmodule Lua.VM.EnvSemanticsTest do
   # has access regardless of which free names it references.
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   describe "_ENV reassignment redirects global access" do

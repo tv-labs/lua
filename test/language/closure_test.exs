@@ -2,7 +2,7 @@ defmodule Lua.Language.ClosureTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "closure upvalue mutation", %{lua: lua} do

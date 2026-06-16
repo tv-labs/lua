@@ -27,32 +27,58 @@ defmodule Lua.VM.Stdlib.Os do
   alias Lua.VM.ArgumentError
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
+  alias Lua.VM.Stdlib.Sandbox
   alias Lua.VM.Stdlib.Util
 
   @impl true
   def lib_name, do: "os"
 
   @impl true
-  def install(state) do
+  def install(%{sandboxed?: sandboxed?} = state) do
     # Seed the monotonic origin at install time so os.clock() measures from a
     # stable startup point rather than from whenever it is first called.
     boot_offset()
 
-    os_table = %{
+    {tref, state} = State.alloc_table(state, os_table(sandboxed?))
+    State.set_global(state, "os", tref)
+  end
+
+  # Mode-independent functions are installed identically in both modes; the
+  # filesystem/env/exec functions are swapped for their virtual or host
+  # implementation at install time, so there is no per-call mode branch.
+  defp os_table(sandboxed?) do
+    common = %{
       "clock" => {:native_func, &os_clock/2},
       "date" => {:native_func, &os_date/2},
       "difftime" => {:native_func, &os_difftime/2},
       "exit" => {:native_func, &os_exit/2},
-      "getenv" => {:native_func, &os_getenv/2},
       "setlocale" => {:native_func, &os_setlocale/2},
       "time" => {:native_func, &os_time/2},
       "time_ms" => {:native_func, &os_time_ms/2},
-      "time_us" => {:native_func, &os_time_us/2},
-      "tmpname" => {:native_func, &os_tmpname/2}
+      "time_us" => {:native_func, &os_time_us/2}
     }
 
-    {tref, state} = State.alloc_table(state, os_table)
-    State.set_global(state, "os", tref)
+    Map.merge(common, mode_table(sandboxed?))
+  end
+
+  defp mode_table(true) do
+    %{
+      "getenv" => {:native_func, &os_getenv_virtual/2},
+      "tmpname" => {:native_func, &os_tmpname_virtual/2},
+      "remove" => {:native_func, &os_remove_virtual/2},
+      "rename" => {:native_func, &os_rename_virtual/2},
+      "execute" => Sandbox.stub([:os, :execute])
+    }
+  end
+
+  defp mode_table(false) do
+    %{
+      "getenv" => {:native_func, &os_getenv_host/2},
+      "tmpname" => {:native_func, &os_tmpname_host/2},
+      "remove" => {:native_func, &os_remove_host/2},
+      "rename" => {:native_func, &os_rename_host/2},
+      "execute" => {:native_func, &os_execute_host/2}
+    }
   end
 
   # os.clock() — approximate CPU/elapsed time used, in seconds. Reads the
@@ -157,15 +183,26 @@ defmodule Lua.VM.Stdlib.Os do
   end
 
   # os.getenv(name) — value of an environment variable, or nil.
-  defp os_getenv([name | _], state) when is_binary(name) do
+  #
+  # Sandboxed: reads only the env injected via `Lua.new(env: ...)`, never the
+  # host environment. Host: reads the real process environment.
+  defp os_getenv_virtual([name | _], %{env: env} = state) when is_binary(name) do
+    {[Map.get(env, name)], state}
+  end
+
+  defp os_getenv_virtual(args, _state), do: os_getenv_bad_arg(args)
+
+  defp os_getenv_host([name | _], state) when is_binary(name) do
     {[System.get_env(name)], state}
   end
 
-  defp os_getenv([name | _], _state) do
+  defp os_getenv_host(args, _state), do: os_getenv_bad_arg(args)
+
+  defp os_getenv_bad_arg([name | _]) do
     raise ArgumentError.type_error("os.getenv", 1, "string", Util.typeof(name))
   end
 
-  defp os_getenv([], _state) do
+  defp os_getenv_bad_arg([]) do
     raise ArgumentError.value_expected("os.getenv", 1)
   end
 
@@ -181,13 +218,99 @@ defmodule Lua.VM.Stdlib.Os do
 
   # os.tmpname() — a name usable for a temporary file.
   #
-  # FUTURE: this leans on the host filesystem via System.tmp_dir/0. Once the
-  # VFS layer lands we want tmpname to resolve against the sandboxed virtual
-  # filesystem instead of the real host, so the VM never touches host paths.
-  defp os_tmpname(_args, state) do
+  # Sandboxed: a virtual path under `/tmp`, never touching the host. Host:
+  # a name under the real temp directory.
+  defp os_tmpname_virtual(_args, state) do
+    {["/tmp/lua_#{:erlang.unique_integer([:positive])}"], state}
+  end
+
+  defp os_tmpname_host(_args, state) do
     name = Path.join(System.tmp_dir() || "/tmp", "lua_#{:erlang.unique_integer([:positive])}")
     {[name], state}
   end
+
+  # os.remove(filename) / os.rename(from, to) — Lua 5.3 returns `true` on
+  # success or `(nil, message, errno)` on failure. Sandboxed variants operate
+  # on the VFS; host variants touch the real disk.
+  defp os_remove_virtual([name | _], state) when is_binary(name) do
+    case State.vfs_rm(state, name) do
+      {:ok, state} -> {[true], state}
+      {:error, reason, state} -> {fs_failure(name, reason), state}
+    end
+  end
+
+  defp os_remove_virtual(args, _state), do: os_remove_bad_arg(args)
+
+  defp os_remove_host([name | _], state) when is_binary(name) do
+    case File.rm(name) do
+      :ok -> {[true], state}
+      {:error, reason} -> {fs_failure(name, reason), state}
+    end
+  end
+
+  defp os_remove_host(args, _state), do: os_remove_bad_arg(args)
+
+  defp os_remove_bad_arg([name | _]), do: raise(ArgumentError.type_error("os.remove", 1, "string", Util.typeof(name)))
+
+  defp os_remove_bad_arg([]), do: raise(ArgumentError.value_expected("os.remove", 1))
+
+  defp os_rename_virtual([from, to | _], state) when is_binary(from) and is_binary(to) do
+    with {:ok, contents} <- State.vfs_read(state, from),
+         {:ok, state} <- State.vfs_write(state, to, contents),
+         {:ok, state} <- State.vfs_rm(state, from) do
+      {[true], state}
+    else
+      {:error, reason} -> {fs_failure(from, reason), state}
+      {:error, reason, state} -> {fs_failure(from, reason), state}
+    end
+  end
+
+  defp os_rename_virtual(args, _state), do: os_rename_bad_arg(args)
+
+  defp os_rename_host([from, to | _], state) when is_binary(from) and is_binary(to) do
+    case File.rename(from, to) do
+      :ok -> {[true], state}
+      {:error, reason} -> {fs_failure(from, reason), state}
+    end
+  end
+
+  defp os_rename_host(args, _state), do: os_rename_bad_arg(args)
+
+  defp os_rename_bad_arg([from | _]) when not is_binary(from),
+    do: raise(ArgumentError.type_error("os.rename", 1, "string", Util.typeof(from)))
+
+  defp os_rename_bad_arg([_from | rest]) do
+    raise ArgumentError.type_error("os.rename", 2, "string", Util.typeof(List.first(rest)))
+  end
+
+  defp os_rename_bad_arg([]), do: raise(ArgumentError.value_expected("os.rename", 1))
+
+  # os.execute([command]) — host only. With no command, reports shell
+  # availability (true). With a command, runs it via the system shell and
+  # returns `(true|nil, "exit", code)` per Lua 5.3.
+  defp os_execute_host([], state), do: {[true], state}
+
+  defp os_execute_host([command | _], state) when is_binary(command) do
+    {_output, status} = System.cmd("sh", ["-c", command], stderr_to_stdout: true)
+    success = if status == 0, do: true
+    {[success, "exit", status], state}
+  end
+
+  defp os_execute_host([command | _], _state) do
+    raise ArgumentError.type_error("os.execute", 1, "string", Util.typeof(command))
+  end
+
+  # Map an errno atom to Lua's `(nil, "<path>: <reason>", errno)` failure shape.
+  defp fs_failure(path, reason) do
+    [nil, "#{path}: #{:file.format_error(reason)}", errno(reason)]
+  end
+
+  defp errno(:enoent), do: 2
+  defp errno(:eisdir), do: 21
+  defp errno(:einval), do: 22
+  defp errno(:eacces), do: 13
+  defp errno(:eexist), do: 17
+  defp errno(_), do: 1
 
   # os.exit([code [, close]]) — the sandbox cannot terminate the host, so
   # raise to unwind the current evaluation.

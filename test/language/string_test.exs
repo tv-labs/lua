@@ -2,7 +2,7 @@ defmodule Lua.Language.StringTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "string concat with shift operator priority", %{lua: lua} do

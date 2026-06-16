@@ -2,7 +2,7 @@ defmodule Lua.Language.VarargTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "simple varargs function", %{lua: lua} do

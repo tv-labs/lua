@@ -24,7 +24,7 @@ defmodule Lua.SuiteRunner do
   """
   @spec prepare(Path.t()) :: Lua.t()
   def prepare(test_dir) do
-    [exclude: [[:package], [:require]]]
+    [sandbox: false]
     |> Lua.new()
     |> add_test_paths(test_dir)
     |> install_helpers()

@@ -403,10 +403,10 @@ defmodule Lua.RuntimeExceptionTest do
     end
 
     test "RuntimeException is raised for sandboxed functions" do
-      lua = Lua.new(sandboxed: [[:os, :exit]])
+      lua = Lua.new()
 
       assert_raise RuntimeException, fn ->
-        Lua.eval!(lua, "os.exit()")
+        Lua.eval!(lua, ~S[os.execute("echo hi")])
       end
     end
 

@@ -58,7 +58,7 @@ defmodule Lua.VM.LeakRegressionTest do
   test "load() with unique sources does not grow atom table" do
     # `load` is sandboxed by default; allow it explicitly so we can
     # exercise the runtime-compile path.
-    lua = Lua.new(sandboxed: [])
+    lua = Lua.new(sandbox: false)
     # Warm-up call to settle any first-call atom interning.
     {_, _} = Lua.eval!(lua, "return 0")
 

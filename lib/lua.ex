@@ -27,36 +27,6 @@ defmodule Lua do
 
   defstruct [:state, debug: false]
 
-  @default_sandbox [
-    [:io, :stdin],
-    [:io, :stdout],
-    [:io, :stderr],
-    [:io, :read],
-    [:io, :write],
-    [:io, :open],
-    [:io, :close],
-    [:io, :lines],
-    [:io, :popen],
-    [:io, :tmpfile],
-    [:io, :output],
-    [:io, :input],
-    [:io, :flush],
-    [:io, :type],
-    [:file],
-    [:os, :execute],
-    [:os, :exit],
-    [:os, :getenv],
-    [:os, :remove],
-    [:os, :rename],
-    [:os, :tmpname],
-    [:package],
-    [:load],
-    [:loadfile],
-    [:require],
-    [:dofile],
-    [:loadstring]
-  ]
-
   defimpl Inspect do
     def inspect(_lua, _opts) do
       "#Lua<>"
@@ -64,27 +34,32 @@ defmodule Lua do
   end
 
   @doc """
-  Initializes a Lua VM sandbox
+  Initializes a Lua VM.
+
+  By default the VM is **virtual and sandboxed**: filesystem operations
+  (`require`, `loadfile`/`dofile`, `io`, the file-oriented `os` functions) run
+  against an in-memory virtual filesystem, `os.getenv` reads only injected
+  values, and process execution is denied. A sandboxed script never touches the
+  real machine.
 
       iex> Lua.new()
 
-  By default, the following Lua functions are sandboxed.
+  Seed the virtual filesystem and inject environment variables up front:
 
-  #{Enum.map_join(@default_sandbox, "\n", fn func -> "* `#{inspect(func)}`" end)}
+      iex> Lua.new(env: [{"HOME", "/app"}])
+      ...> |> Lua.write_file("/main.lua", "return 1")
 
-  To disable, use the `sandboxed` option, passing an empty list
+  Opt out into the host implementations (real filesystem, environment, and
+  process execution — behaves like normal non-sandboxed Lua):
 
-      iex> Lua.new(sandboxed: [])
-
-  Alternatively, you can pass your own list of functions to sandbox. This is equivalent to calling
-  `Lua.sandbox/2`.
-
-      iex> Lua.new(sandboxed: [[:os, :exit]])
-
+      iex> Lua.new(sandbox: false)
 
   ## Options
-  * `:sandboxed` - list of paths to be sandboxed, e.g. `sandboxed: [[:require], [:os, :exit]]`
-  * `:exclude` - list of paths to exclude from the sandbox, e.g. `exclude: [[:require], [:package]]`
+  * `:sandbox` - (default `true`) when `true`, install the virtual `os`/`io`/
+    loader implementations; when `false`, install the host implementations.
+  * `:env` - environment variables exposed to the sandboxed `os.getenv`, as a
+    list of `{name, value}` tuples or a map, e.g. `env: [{"HOME", "/app"}]`.
+    Ignored when `sandbox: false` (the real host environment is read instead).
   * `:debug` - (default `false`) when `true`, internal Lua VM frames are preserved in stack traces
     instead of being pruned. Useful when debugging library bugs.
   * `:max_call_depth` - (default `:infinity`) caps the depth of nested function calls. When a
@@ -133,33 +108,68 @@ defmodule Lua do
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     opts =
-      Keyword.validate!(opts,
-        sandboxed: @default_sandbox,
-        exclude: [],
+      opts
+      |> normalize_legacy_opts()
+      |> Keyword.validate!(
+        sandbox: true,
+        env: [],
         debug: false,
         max_call_depth: :infinity,
         max_string_bytes: Lua.VM.Limits.max_string_bytes(),
         max_instructions: :infinity
       )
 
-    exclude = Keyword.fetch!(opts, :exclude)
+    sandbox? = Keyword.fetch!(opts, :sandbox)
+    env = normalize_env(Keyword.fetch!(opts, :env))
     debug = Keyword.fetch!(opts, :debug)
     max_call_depth = validate_max_call_depth!(Keyword.fetch!(opts, :max_call_depth))
     max_string_bytes = validate_max_string_bytes!(Keyword.fetch!(opts, :max_string_bytes))
     max_instructions = validate_max_instructions!(Keyword.fetch!(opts, :max_instructions))
 
-    state = %{
-      Lua.VM.Stdlib.install(State.new())
-      | max_call_depth: max_call_depth,
-        max_string_bytes: max_string_bytes,
-        max_instructions: max_instructions
-    }
+    # `sandboxed?`/`env` are set before installing the stdlib so the install
+    # step picks the virtual or host implementations accordingly.
+    state =
+      Lua.VM.Stdlib.install(%{
+        State.new()
+        | sandboxed?: sandbox?,
+          env: env,
+          max_call_depth: max_call_depth,
+          max_string_bytes: max_string_bytes,
+          max_instructions: max_instructions
+      })
 
-    opts
-    |> Keyword.fetch!(:sandboxed)
-    |> Enum.reject(fn path -> path in exclude end)
-    |> Enum.reduce(%__MODULE__{state: state, debug: debug}, &sandbox(&2, &1))
+    %__MODULE__{state: state, debug: debug}
   end
+
+  # Bridge the removed `:sandboxed`/`:exclude` per-path options to the single
+  # `:sandbox` toggle for one minor release. An empty `:sandboxed` list (the
+  # historic "unrestricted" idiom) or any non-empty `:exclude` maps to
+  # `sandbox: false`; anything else stays sandboxed.
+  defp normalize_legacy_opts(opts) do
+    {legacy, opts} = Keyword.split(opts, [:sandboxed, :exclude])
+
+    if legacy == [] do
+      opts
+    else
+      IO.warn(
+        "Lua.new/1 :sandboxed and :exclude are deprecated and will be removed. " <>
+          "Use `sandbox: true | false` and `env:` instead."
+      )
+
+      Keyword.put_new(opts, :sandbox, legacy_sandbox?(legacy))
+    end
+  end
+
+  defp legacy_sandbox?(legacy) do
+    cond do
+      Keyword.get(legacy, :exclude, []) != [] -> false
+      Keyword.get(legacy, :sandboxed, [:_]) == [] -> false
+      true -> true
+    end
+  end
+
+  defp normalize_env(env) when is_map(env), do: env
+  defp normalize_env(env) when is_list(env), do: Map.new(env)
 
   defp validate_max_call_depth!(:infinity), do: :infinity
   defp validate_max_call_depth!(depth) when is_integer(depth) and depth > 0, do: depth
@@ -225,37 +235,63 @@ defmodule Lua do
   end
 
   @doc """
-  Sandboxes the given path, swapping out the implementation with
-  a function that raises when called
+  Writes a file into the VM's virtual filesystem.
 
-      iex> lua = Lua.new(sandboxed: [])
-      iex> Lua.sandbox(lua, [:os, :exit])
+  Sandboxed scripts read this via `require`, `loadfile`/`dofile`, and the `io`
+  library; the path must be absolute.
+
+      iex> Lua.new() |> Lua.write_file("/main.lua", "return 1")
 
   """
-  @spec sandbox(t(), [atom() | String.t()]) :: t()
-  def sandbox(lua, path) do
-    set!(lua, path, fn args ->
-      raise Lua.RuntimeException,
-            "#{Util.format_function(path, Enum.count(args))} is sandboxed"
-    end)
+  @spec write_file(t(), String.t(), String.t()) :: t()
+  def write_file(%__MODULE__{state: state} = lua, path, contents) when is_binary(path) and is_binary(contents) do
+    case State.vfs_write(state, path, contents) do
+      {:ok, state} -> %{lua | state: state}
+      {:error, reason, _state} -> raise ArgumentError, "could not write #{path}: #{reason}"
+    end
+  end
+
+  @doc """
+  Seeds a Lua dependency into the virtual filesystem under `/lua/deps`.
+
+  A convenience over `write_file/3` for the common case of making a module
+  loadable by `require`. Dotted names nest (`"a.b"` -> `/lua/deps/a/b.lua`).
+
+      iex> lua = Lua.new() |> Lua.put_dep("greet", "return 'hi'")
+      iex> {["hi"], _} = Lua.eval!(lua, "return require('greet')")
+
+  """
+  @spec put_dep(t(), String.t(), String.t()) :: t()
+  def put_dep(%__MODULE__{} = lua, modname, source) when is_binary(modname) and is_binary(source) do
+    path = "/lua/deps/" <> String.replace(modname, ".", "/") <> ".lua"
+    write_file(lua, path, source)
+  end
+
+  @doc """
+  Reads a file back out of the VM's virtual filesystem.
+
+  Returns `{:ok, contents}` or `{:error, reason}`. Useful for harvesting what
+  sandboxed code wrote (e.g. via `io.write`).
+  """
+  @spec read_file(t(), String.t()) :: {:ok, String.t()} | {:error, atom()}
+  def read_file(%__MODULE__{state: state}, path) when is_binary(path) do
+    State.vfs_read(state, path)
   end
 
   @doc """
   Sets the path patterns that the VM will look in when requiring Lua scripts. For example,
   if you store Lua files in your application's priv directory:
 
-      #iex> lua = Lua.new(exclude: [[:package], [:require]])
+      #iex> lua = Lua.new(sandbox: false)
       #iex> Lua.set_lua_paths(lua, ["myapp/priv/lua/?.lua", "myapp/lua/?/init.lua"])
 
   Now you can use the [Lua require](https://www.lua.org/pil/8.1.html) function to import
   these scripts
 
-  > #### Warning {: .warning}
-  > In order to use `Lua.set_lua_paths/2`, the following functions cannot be sandboxed:
-  > * `[:package]`
-  > * `[:require]`
-  >
-  > By default these are sandboxed, see the `:exclude` option in `Lua.new/1` to allow them.
+  > #### Note {: .info}
+  > The host search path is only consulted under `Lua.new(sandbox: false)`. A
+  > sandboxed VM resolves `require` against the virtual filesystem (see
+  > `put_dep/3` and `write_file/3`), never the host disk.
   """
   @spec set_lua_paths(t(), [String.t()] | String.t()) :: t()
   def set_lua_paths(%__MODULE__{} = lua, paths) when is_list(paths) do

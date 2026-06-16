@@ -2,7 +2,7 @@ defmodule Lua.Language.MathTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "priority: power vs multiply", %{lua: lua} do

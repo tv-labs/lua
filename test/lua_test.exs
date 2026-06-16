@@ -7,7 +7,7 @@ defmodule LuaTest do
 
   describe "basic tests" do
     setup do
-      %{lua: Lua.new(sandboxed: [])}
+      %{lua: Lua.new(sandbox: false)}
     end
 
     test "it can return basic values", %{lua: lua} do
@@ -371,11 +371,11 @@ defmodule LuaTest do
       # Original implementation used same message format
       lua = Lua.new()
 
-      message = "Lua runtime error: os.exit(_) is sandboxed"
+      message = "Lua runtime error: os.execute(_) is sandboxed"
 
       assert_raise Lua.RuntimeException, message, fn ->
         Lua.eval!(lua, """
-        os.exit(1)
+        os.execute("echo hi")
         """)
       end
     end
@@ -930,7 +930,7 @@ defmodule LuaTest do
       # """
       #
       # assert_raise Lua.RuntimeException, error, fn ->
-      #   lua = Lua.new(sandboxed: [])
+      #   lua = Lua.new(sandbox: false)
       #
       #   Lua.eval!(lua, """
       #   error("this is an error")
@@ -938,7 +938,7 @@ defmodule LuaTest do
       # end
 
       assert_raise Lua.RuntimeException, ~r/runtime error/, fn ->
-        lua = Lua.new(sandboxed: [])
+        lua = Lua.new(sandbox: false)
 
         Lua.eval!(lua, """
         error("this is an error")
@@ -1318,8 +1318,8 @@ defmodule LuaTest do
   end
 
   describe "require" do
-    test "it can find lua code when modifying package.path" do
-      lua = Lua.new(sandboxed: [])
+    test "it can find lua code when modifying package.path (host)" do
+      lua = Lua.new(sandbox: false)
 
       assert {["required file successfully"], _} =
                Lua.eval!(lua, """
@@ -1329,8 +1329,8 @@ defmodule LuaTest do
                """)
     end
 
-    test "we can use set_lua_paths/2 to add the paths" do
-      lua = Lua.new(sandboxed: [])
+    test "we can use set_lua_paths/2 to add the paths (host)" do
+      lua = Lua.new(sandbox: false)
 
       lua = Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
 
@@ -1340,14 +1340,16 @@ defmodule LuaTest do
                """)
     end
 
-    test "set_lua_paths/2 raises if package is sandboxed" do
-      lua = Lua.new()
+    test "require resolves from the virtual filesystem in the default sandbox" do
+      lua = Lua.put_dep(Lua.new(), "test_require", ~S[return "required file successfully"])
 
-      message = "Lua runtime error: invalid index \"package.path\""
+      assert {["required file successfully"], _} =
+               Lua.eval!(lua, ~S[return require("test_require")])
+    end
 
-      assert_raise Lua.RuntimeException, message, fn ->
-        Lua.set_lua_paths(lua, "./test/fixtures/?.lua")
-      end
+    test "set_lua_paths/2 sets package.path" do
+      lua = Lua.set_lua_paths(Lua.new(), "/lua/?.lua")
+      assert {["/lua/?.lua"], _} = Lua.eval!(lua, "return package.path")
     end
   end
 
@@ -1375,13 +1377,13 @@ defmodule LuaTest do
 
   describe "string metatable" do
     setup do
-      %{lua: Lua.new(sandboxed: [])}
+      %{lua: Lua.new(sandbox: false)}
     end
   end
 
   describe "module registration in package.loaded" do
     setup do
-      %{lua: Lua.new(sandboxed: [])}
+      %{lua: Lua.new(sandbox: false)}
     end
   end
 

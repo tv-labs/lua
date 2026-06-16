@@ -255,7 +255,7 @@ defmodule Lua.VM.MaxInstructionsTest do
       # a mid-eval reset the 700 pre-require instruction_count would be forgiven, leaving the
       # 700 post-require instruction_count under the 1000 budget so the eval would wrongly
       # succeed. With the budget preserved, pre + post exceed it and it trips.
-      lua = Lua.new(sandboxed: [], max_instructions: 1000)
+      lua = Lua.new(sandbox: false, max_instructions: 1000)
 
       code = ~S"""
       package.path = "./test/fixtures/?.lua"
@@ -275,7 +275,7 @@ defmodule Lua.VM.MaxInstructionsTest do
       # Sanity companion: requiring the trivial module under a comfortable
       # budget, with light surrounding work, must succeed (the fix must not
       # over-count and spuriously trip a legitimate require).
-      lua = Lua.new(sandboxed: [], max_instructions: 100_000)
+      lua = Lua.new(sandbox: false, max_instructions: 100_000)
 
       code = ~S"""
       package.path = "./test/fixtures/?.lua"

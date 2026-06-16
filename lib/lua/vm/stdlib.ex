@@ -43,6 +43,8 @@ defmodule Lua.VM.Stdlib do
     |> State.register_function("getmetatable", &lua_getmetatable/2)
     |> State.register_function("select", &lua_select/2)
     |> State.register_function("load", &lua_load/2)
+    |> State.register_function("loadstring", &lua_load/2)
+    |> State.register_function("loadfile", &lua_loadfile/2)
     |> State.register_function("require", &lua_require/2)
     |> State.register_function("collectgarbage", &lua_collectgarbage/2)
     |> State.register_function("dofile", &lua_dofile/2)
@@ -53,6 +55,7 @@ defmodule Lua.VM.Stdlib do
     |> install_library(Lua.VM.Stdlib.Table)
     |> install_library(Lua.VM.Stdlib.Utf8)
     |> install_library(Lua.VM.Stdlib.Os)
+    |> install_library(Lua.VM.Stdlib.Io)
     |> install_library(Lua.VM.Stdlib.Debug)
     |> preload_stdlib_modules()
     |> install_unpack_alias()
@@ -751,7 +754,7 @@ defmodule Lua.VM.Stdlib do
   defp load_module(modname, search_path, state) do
     patterns = String.split(search_path, ";", trim: true)
 
-    case find_module_file(modname, patterns) do
+    case find_module_file(modname, patterns, state) do
       {:ok, file_path, content} ->
         parse_and_execute_module(modname, file_path, content, state)
 
@@ -817,18 +820,41 @@ defmodule Lua.VM.Stdlib do
     end
   end
 
-  # Find a module file by searching the patterns
-  defp find_module_file(modname, patterns) do
+  # Find a module file by searching the patterns. Sandboxed VMs read the
+  # virtual filesystem (absolute patterns directly, relative patterns anchored
+  # under `/lua/deps`); host VMs read the real disk.
+  defp find_module_file(modname, patterns, state) do
     resolved = String.replace(modname, ".", "/")
 
     Enum.find_value(patterns, {:error, :not_found}, fn pattern ->
       file_path = String.replace(pattern, "?", resolved)
 
-      case File.read(file_path) do
+      case read_module_source(file_path, state) do
         {:ok, content} -> {:ok, file_path, content}
-        {:error, _} -> nil
+        :error -> nil
       end
     end)
+  end
+
+  # Fetch Lua source for a path, honoring the VM's sandbox mode. Returns
+  # `{:ok, content}` or `:error`. Shared by `require`, `loadfile`, and `dofile`.
+  defp read_module_source(file_path, %State{sandboxed?: true} = state) do
+    vfs_path =
+      if String.starts_with?(file_path, "/"),
+        do: file_path,
+        else: "/lua/deps/" <> file_path
+
+    case State.vfs_read(state, vfs_path) do
+      {:ok, content} -> {:ok, content}
+      {:error, _reason} -> :error
+    end
+  end
+
+  defp read_module_source(file_path, %State{sandboxed?: false}) do
+    case File.read(file_path) do
+      {:ok, content} -> {:ok, content}
+      {:error, _reason} -> :error
+    end
   end
 
   # Convert a value to string, checking for __tostring metamethod
@@ -877,9 +903,37 @@ defmodule Lua.VM.Stdlib do
     end
   end
 
-  # dofile stub — not supported in embedded mode
+  # loadfile([filename [, mode [, env]]]) — load a chunk from a file without
+  # running it. Reads from the VFS (sandboxed) or the host disk. Returns the
+  # compiled function, or `(nil, message)` on a read/parse error.
+  defp lua_loadfile([path | _], state) when is_binary(path) do
+    case read_module_source(path, state) do
+      {:ok, content} -> compile_loaded_chunk(content, State.g_ref(state), state)
+      :error -> {[nil, "cannot open #{path}"], state}
+    end
+  end
+
+  defp lua_loadfile(_args, state) do
+    {[nil, "loadfile from stdin is not supported"], state}
+  end
+
+  # dofile([filename]) — load and immediately run a chunk from a file. Unlike
+  # loadfile, a read/parse error is raised rather than returned.
+  defp lua_dofile([path | _], state) when is_binary(path) do
+    case read_module_source(path, state) do
+      {:ok, content} ->
+        case compile_loaded_chunk(content, State.g_ref(state), state) do
+          {[nil, msg], _state} -> raise RuntimeError, value: msg
+          {[closure], state} -> Executor.call_function(closure, [], state)
+        end
+
+      :error ->
+        raise RuntimeError, value: "cannot open #{path}"
+    end
+  end
+
   defp lua_dofile(_args, _state) do
-    raise RuntimeError, value: "dofile not supported in embedded mode"
+    raise RuntimeError, value: "dofile from stdin is not supported"
   end
 
   # Install global 'unpack' as alias for table.unpack

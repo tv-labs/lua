@@ -14,7 +14,7 @@ defmodule Lua.VM.ShortCircuitTest do
   # both are handled correctly.
 
   defp eval!(code) do
-    {results, _state} = Lua.eval!(Lua.new(sandboxed: []), code)
+    {results, _state} = Lua.eval!(Lua.new(sandbox: false), code)
     results
   end
 

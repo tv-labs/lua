@@ -21,7 +21,7 @@ defmodule Lua.Integration.LuassertTest do
   @lua_dir Path.expand("luassert/lua", __DIR__)
 
   defp new_lua do
-    [exclude: [[:require], [:package]]]
+    [sandbox: false]
     |> Lua.new()
     |> Lua.set_lua_paths([
       Path.join(@lua_dir, "?.lua"),
