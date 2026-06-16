@@ -30,10 +30,15 @@ defmodule Lua.VM.Stdlib.Table do
   alias Lua.VM.ArgumentError
   alias Lua.VM.Executor
   alias Lua.VM.Limits
+  alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
   alias Lua.VM.Table
+
+  # ltablib.c sort rejects arrays whose length reaches INT_MAX (2^31 - 1)
+  # with "array too big"; we match that ceiling exactly.
+  @max_sort_length 2_147_483_647
 
   @impl true
   def lib_name, do: "table"
@@ -275,6 +280,16 @@ defmodule Lua.VM.Stdlib.Table do
     # than mutating the raw table mid-sort.
     {len, state} = Executor.table_length(tref, state)
 
+    # Mirror ltablib.c sort: reject lengths at/above INT_MAX before
+    # touching the table, so a `__len` that returns a huge value raises
+    # "array too big" instead of materialising billions of slots.
+    if len > 1 and len >= @max_sort_length do
+      raise ArgumentError,
+        function_name: "table.sort",
+        arg_num: 1,
+        details: "array too big"
+    end
+
     table = Map.fetch!(state.tables, id)
 
     if table.metatable == nil do
@@ -509,30 +524,21 @@ defmodule Lua.VM.Stdlib.Table do
       if f > e do
         state
       else
-        Limits.check_range_count!(e - f + 1, "table.move")
-
-        # Read each src slot via __index on tref1, write to dst via
-        # __newindex on tref2. Aliasing (tref1 == tref2 with overlapping
-        # ranges) is handled by reading every value first, then writing
-        # — matching ltablib.c's tmove which preserves overlap-safety
-        # only when src and dst are distinct or t <= f.
-        {values, state} =
-          Enum.reduce(f..e//1, {[], state}, fn idx, {acc, st} ->
-            {v, st} = Executor.table_index(tref1, idx, st)
-            {[v | acc], st}
-          end)
-
-        values = Enum.reverse(values)
-
-        {final_state, _} =
-          Enum.reduce(values, {state, t}, fn v, {st, dst_idx} ->
-            {Executor.table_newindex(tref2, dst_idx, v, st), dst_idx + 1}
-          end)
-
-        final_state
+        move_range(tref1, tref2, f, e, t, state)
       end
 
     {[tref2], state}
+  end
+
+  # All of f, e, t are valid integers but arg1 is not a table. Mirrors
+  # ltablib.c tmove, which checks the indices (args 2-4) before the
+  # source table (arg 1): `table.move(1, 2, 3, 4)` blames arg #1.
+  defp table_move([tref1, f, e, t | _rest], _state) when is_integer(f) and is_integer(e) and is_integer(t) do
+    raise ArgumentError,
+      function_name: "table.move",
+      arg_num: 1,
+      expected: "table",
+      got: Util.typeof(tref1)
   end
 
   defp table_move([_tref1, f, e, t | _rest], _state) when is_integer(f) and is_integer(e) do
@@ -569,5 +575,68 @@ defmodule Lua.VM.Stdlib.Table do
 
   defp table_move([], _state) do
     raise ArgumentError.value_expected("table.move", 1)
+  end
+
+  # Mirrors ltablib.c tmove for a non-empty range (f <= e). First the two
+  # overflow argchecks PUC-Lua applies before touching either table, then
+  # an interleaved read-via-__index / write-via-__newindex loop. The
+  # interleaving (rather than reading the whole slice up front) is what
+  # lets a __newindex error abort after the first element — which the
+  # suite verifies for ranges as wide as 1..maxinteger.
+  defp move_range(tref1, tref2, f, e, t, state) do
+    max_int = Numeric.max_int()
+
+    # "too many elements to move": e - f + 1 must not overflow an int.
+    if !(f > 0 or e < max_int + f) do
+      raise ArgumentError,
+        function_name: "table.move",
+        arg_num: 3,
+        details: "too many elements to move"
+    end
+
+    n = e - f + 1
+
+    # "destination wrap around": t + n - 1 must not overflow an int.
+    if !(t <= max_int - n + 1) do
+      raise ArgumentError,
+        function_name: "table.move",
+        arg_num: 4,
+        details: "destination wrap around"
+    end
+
+    # Host-protection ceiling: when neither table has a metatable, no
+    # __index/__newindex can interrupt the loop, so a pathological count
+    # would build tens of millions of slots and exhaust the BEAM. Refuse
+    # those up front. Metatable-backed moves skip this — the suite drives
+    # ranges as wide as 1..maxinteger that abort on the first metamethod.
+    if plain_tables?(tref1, tref2, state) do
+      Limits.check_range_count!(n, "table.move")
+    end
+
+    # PUC chooses copy direction so an in-place overlapping move stays
+    # coherent: copy forward when the destination cannot clobber an
+    # un-read source slot (t > e || t <= f), otherwise copy backward.
+    indices =
+      if t > e or t <= f do
+        0..(n - 1)//1
+      else
+        (n - 1)..0//-1
+      end
+
+    Enum.reduce(indices, state, fn i, st ->
+      {v, st} = Executor.table_index(tref1, f + i, st)
+      Executor.table_newindex(tref2, t + i, v, st)
+    end)
+  end
+
+  defp plain_tables?({:tref, id1}, {:tref, id2}, state) do
+    no_metatable?(id1, state) and no_metatable?(id2, state)
+  end
+
+  defp no_metatable?(id, state) do
+    case Map.fetch(state.tables, id) do
+      {:ok, table} -> table.metatable == nil
+      :error -> true
+    end
   end
 end

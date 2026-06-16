@@ -300,4 +300,83 @@ defmodule Lua.VM.Stdlib.MathTest do
       assert r3 >= 5 and r3 <= 15
     end
   end
+
+  # Regression tests for Lua 5.3 suite: math.lua. Each pins a numeric-tower
+  # conformance fix uncovered while triaging that file.
+  describe "math.lua suite conformance" do
+    defp run!(code) do
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      assert {:ok, results, _state} = VM.execute(proto, Stdlib.install(State.new()))
+      results
+    end
+
+    test "math.abs(mininteger) wraps to mininteger (math.lua:579)" do
+      assert run!("return math.abs(math.mininteger) == math.mininteger") == [true]
+      assert run!("return math.type(math.abs(math.mininteger))") == ["integer"]
+    end
+
+    test "math.floor/ceil return integer args unchanged near the 64-bit limit (math.lua:608)" do
+      assert run!("return math.floor(math.maxinteger) == math.maxinteger") == [true]
+      assert run!("return math.ceil(math.maxinteger) == math.maxinteger") == [true]
+      assert run!("return math.floor(math.mininteger) == math.mininteger") == [true]
+    end
+
+    test "math.floor of a float beyond the 64-bit range stays a float (math.lua:614)" do
+      assert run!("return math.floor(1e50) == 1e50") == [true]
+      assert run!("return math.type(math.floor(1e50))") == ["float"]
+    end
+
+    test "math.tointeger coerces numeric strings and rejects out-of-range floats (math.lua:627)" do
+      assert run!(~s|return math.tointeger("34.0")|) == [34]
+      assert run!(~s|return math.tointeger(math.mininteger .. "") == math.mininteger|) == [true]
+      assert run!(~s|return math.tointeger("34.3")|) == [nil]
+      assert run!("return math.tointeger(math.huge)") == [nil]
+    end
+
+    test "math.deg and math.rad convert between degrees and radians (math.lua:577)" do
+      assert run!("return math.deg(math.pi)") == [180.0]
+      assert run!("return math.rad(180) == math.pi") == [true]
+    end
+
+    test "math.random raises on an interval that overflows the 64-bit range (math.lua:819)" do
+      assert run!("return not pcall(math.random, math.mininteger, 0)") == [true]
+      assert run!("return not pcall(math.random, -1, math.maxinteger)") == [true]
+    end
+
+    test "bitwise op on NaN reports no integer representation (math.lua:289)" do
+      code = "local ok, err = pcall(function() return (0/0) | 0 end) return ok, err"
+      assert [false, err] = run!(code)
+      assert err =~ "number has no integer representation"
+    end
+
+    test "decimal integer literal overflow becomes a float (math.lua:356)" do
+      assert run!("return math.type(10000000000000000000000)") == ["float"]
+      assert run!("return 10000000000000000000000.0 == 10000000000000000000000") == [true]
+      # -9223372036854775808 is unary minus on an overflowing literal, so float
+      assert run!("return math.type(-10000000000000000000000)") == ["float"]
+    end
+
+    test "tonumber overflow, sign, and dotted forms match Lua (math.lua:342, 376)" do
+      assert run!(~s|return math.type(tonumber("9223372036854775808"))|) == ["float"]
+      assert run!(~s|return tonumber("-9223372036854775808") == math.mininteger|) == [true]
+      assert run!(~s|return math.type(tonumber("-9223372036854775808"))|) == ["integer"]
+      assert run!(~s|return tonumber(".01")|) == [0.01]
+      assert run!(~s|return tonumber("-1.")|) == [-1.0]
+      assert run!(~s|return tonumber("+ 0.01")|) == [nil]
+      assert run!(~s|return tonumber(".e1")|) == [nil]
+    end
+
+    test "tonumber with a base handles whitespace and signs (math.lua:390)" do
+      assert run!(~s|return tonumber("  001010  ", 2)|) == [10]
+      assert run!(~s|return tonumber("  -1010  ", 2)|) == [-10]
+      assert run!(~s|return tonumber("  +1Z  ", 36)|) == [71]
+    end
+
+    test "hex float strings with leading or trailing dots parse (math.lua:491, 498)" do
+      assert run!(~s|return tonumber("0x1.")|) == [1.0]
+      assert run!(~s|return tonumber("0x.1")|) == [0.0625]
+      assert run!(~s|return tonumber("0x.")|) == [nil]
+    end
+  end
 end

@@ -3599,6 +3599,20 @@ defmodule Lua.VM.Executor do
 
   defp to_integer!(v, line, source, hint, state) when is_float(v), do: float_to_integer!(v, line, source, hint, state)
 
+  # The `:nan` sentinel stands in for an IEEE NaN float (e.g. `0/0`). Per Lua
+  # 5.3 §3.4.3 a float converts to integer for bitwise ops only when it has an
+  # exact integer value; NaN never does, so it raises like any other
+  # fractional/out-of-range float rather than as a non-number type.
+  defp to_integer!(:nan, line, source, hint, state) do
+    raise TypeError,
+      value: "number has no integer representation" <> format_target_hint(hint),
+      line: line,
+      source: source,
+      error_kind: :bitwise_on_non_integer,
+      value_type: :number,
+      state: state
+  end
+
   defp to_integer!(v, line, source, hint, state) when is_binary(v) do
     case Value.parse_number(v) do
       nil ->

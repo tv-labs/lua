@@ -208,10 +208,31 @@
   "locals.lua" => [],
   "math.lua" => [
     %{
-      lines: :all,
-      category: :stdlib,
+      lines: 409..422,
+      category: :unimplemented,
       reason:
-        "triage candidate: fails a checkerror near line 47. NB the prior `math.huge is a finite stand-in` reason was inaccurate — `math.huge + 1 == math.huge` and `1/0 == math.huge` both hold with the 1.0e308 value. Real first failure is unclassified; needs a triage pass.",
+        "very-long hex/decimal numerals (2^1200, 16^301) exceed the BEAM IEEE-754 float range (~2^1023), so tonumber and 2.0^exp overflow where PUC-Lua produces a finite or inf result",
+      issue: nil
+    },
+    %{
+      lines: 550..553,
+      category: :unimplemented,
+      reason:
+        "`math.huge % x` should be NaN, but math.huge is the finite 1.0e308 stand-in so the modulo returns a real remainder (no true IEEE infinity on the BEAM)",
+      issue: nil
+    },
+    %{
+      lines: 695..695,
+      category: :unimplemented,
+      reason:
+        "signed-zero division `1/-0.0` should yield -inf; the BEAM does not preserve the sign of zero through division and the inf stand-in is always positive",
+      issue: nil
+    },
+    %{
+      lines: 700..718,
+      category: :unimplemented,
+      reason:
+        "true-infinity arithmetic (math.huge*2+1, inf-inf=NaN) and NaN-keyed table rawset depend on IEEE infinity/NaN the BEAM lacks; math.huge is a finite 1.0e308 stand-in",
       issue: nil
     }
   ],
@@ -262,19 +283,39 @@
   ],
   "sort.lua" => [
     %{
-      lines: :all,
-      category: :stdlib,
+      lines: 201..209,
+      category: :semantic,
       reason:
-        "triage candidate: the first checkerror (line 19, table.insert arg count) passes; a later assertion fails. Also has O(n^2) table.sort / 2000-element unpack sections that may need range skips. Needs a triage pass.",
+        "table.sort with a deliberately-inconsistent comparator should raise 'invalid order function'; our insertion sort never detects it (PUC's quicksort-specific bounds check)",
+      issue: 262
+    },
+    %{
+      lines: 260..308,
+      category: :performance,
+      reason:
+        "50000-element table.sort timing block: the comparator path is O(n^2) and one comparator calls load() (excluded in the sandbox). The perm block above (lines 240-249) and test/lua/vm/stdlib/table_test.exs cover plain `<` ordering on numbers/strings and explicit-comparator dispatch (including a comparator that drives a __lt metamethod). The trailing `setmetatable(.., {__lt=..}); table.sort(a)` case is NOT covered: our default (no-comparator) sort compares only numbers and strings and never dispatches __lt, so a default sort over table elements raises 'attempt to compare table with table' instead of ordering through __lt.",
       issue: 262
     }
   ],
   "strings.lua" => [
     %{
-      lines: :all,
+      lines: 199..206,
       category: :stdlib,
       reason:
-        "triage candidate: tostring(function) now prints `function: 0x...` (was bare `function`), clearing line 126. Next blocker is `string.format('%q', ...)` escaping at line 153; later string.rep sections may also need range skips. A format chain, not a one-shot.",
+        "string.format %s/%q does not dispatch the __tostring/__name metamethods (no per-arg tostring), so a table argument cannot be coerced to its literal form.",
+      issue: nil
+    },
+    %{
+      lines: 275..280,
+      category: :semantic,
+      reason:
+        "%a/%A of 1/0 and 0/0 expect 'inf'/'nan', but the VM clamps division by zero to a finite 1.0e308 instead of an IEEE infinity.",
+      issue: nil
+    },
+    %{
+      lines: 371..376,
+      category: :unimplemented,
+      reason: "coroutine library is not implemented (coroutine.wrap).",
       issue: nil
     }
   ]

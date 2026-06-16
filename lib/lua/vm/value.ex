@@ -82,34 +82,62 @@ defmodule Lua.VM.Value do
   def parse_number(str) do
     str = String.trim(str)
 
+    # A sign must be adjacent to the numeral; Lua's `l_str2d` does not allow
+    # whitespace between the sign and the digits (`tonumber("+ 1")` is nil).
     {sign, body} =
       case str do
-        "-" <> rest -> {-1, String.trim_leading(rest)}
-        "+" <> rest -> {1, String.trim_leading(rest)}
+        "-" <> rest -> {-1, rest}
+        "+" <> rest -> {1, rest}
         _ -> {1, str}
       end
 
-    parsed =
-      if String.starts_with?(body, "0x") or String.starts_with?(body, "0X") do
-        parse_hex_number(String.slice(body, 2..-1//1))
-      else
-        case Integer.parse(body) do
-          {n, ""} ->
-            n
-
-          _ ->
-            case Float.parse(body) do
-              {f, ""} -> f
-              _ -> nil
-            end
-        end
+    if String.starts_with?(body, "0x") or String.starts_with?(body, "0X") do
+      # Hex literals wrap modulo 2^64 (Lua 5.3 §3.1); the sign is applied after
+      # wrapping the magnitude into the signed 64-bit range.
+      case parse_hex_number(String.slice(body, 2..-1//1)) do
+        nil -> nil
+        n when sign == 1 -> n
+        n when is_integer(n) -> Numeric.to_signed_int64(-n)
+        n when is_float(n) -> -n
       end
+    else
+      case Integer.parse(body) do
+        {n, ""} -> decimal_int(sign * n)
+        _ -> parse_float(sign, body)
+      end
+    end
+  end
 
-    case parsed do
-      nil -> nil
-      n when sign == 1 -> n
-      n when is_integer(n) -> Numeric.to_signed_int64(-n)
-      n when is_float(n) -> -n
+  # Lua 5.3.3 §3.1: a *decimal* integer literal converts to a float only when
+  # its signed value overflows the 64-bit range (unlike hex literals, which
+  # wrap). The sign is applied before the range check, so `-2^63` stays the
+  # integer `minint` while `2^63` and `-2^63 - 1` become floats.
+  defp decimal_int(n) when is_integer(n) do
+    if Numeric.signed?(n), do: n, else: n * 1.0
+  end
+
+  # Lua's `l_str2d` accepts leading-dot (`.01`) and trailing-dot (`1.`, `1.e2`)
+  # forms that Elixir's stricter `Float.parse` rejects. Normalise the numeral
+  # to a fully-formed decimal before delegating; a body with no digit at all
+  # (`.`, `.e1`) still fails to parse and yields nil.
+  defp parse_float(sign, body) do
+    # Reject numerals with no digit in the mantissa (`.`, `.e1`); after
+    # normalisation these would otherwise parse as 0.0. A digit appearing only
+    # in the exponent (`.e1`) does not count.
+    mantissa = body |> String.split(~r/[eE]/, parts: 2) |> hd()
+
+    if Regex.match?(~r/[0-9]/, mantissa) do
+      normalized =
+        body
+        # "1." → "1.0", "1.e2" → "1.0e2"
+        |> String.replace(~r/\.([eE]|$)/, ".0\\1")
+        # ".01" → "0.01"
+        |> then(fn b -> if String.starts_with?(b, "."), do: "0" <> b, else: b end)
+
+      case Float.parse(normalized) do
+        {f, ""} -> sign * f
+        _ -> nil
+      end
     end
   end
 
@@ -118,6 +146,13 @@ defmodule Lua.VM.Value do
   #   * fractional:     "FF.8"      → 255.5
   #   * exponent only:  "FFp4"      → 4080.0
   #   * fractional+exp: "1.8p3"     → 12.0
+  # `0x.` with no digit at all is not a number.
+  defp parse_hex_number("."), do: nil
+
+  # A leading dot (`.FF`, `.ABCDEFp+24`) is a valid hex float with no integer
+  # part, e.g. `tonumber("0x.1")`. Treat it as integer part 0.
+  defp parse_hex_number("." <> rest), do: parse_hex_frac(0, rest)
+
   defp parse_hex_number(body) do
     case parse_hex_int(body) do
       {int_val, ""} ->
@@ -136,6 +171,14 @@ defmodule Lua.VM.Value do
 
   defp parse_hex_int(""), do: :error
   defp parse_hex_int(body), do: Integer.parse(body, 16)
+
+  # A trailing dot with no fractional digits (`FF.`, `1.p3`) is still a valid
+  # hex float; the fractional part contributes 0.
+  defp parse_hex_frac(int_val, ""), do: int_val + 0.0
+
+  defp parse_hex_frac(int_val, <<p, exp_rest::binary>>) when p in [?p, ?P] do
+    parse_hex_exp(int_val + 0.0, exp_rest)
+  end
 
   defp parse_hex_frac(int_val, frac_and_rest) do
     case Integer.parse(frac_and_rest, 16) do

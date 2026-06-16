@@ -364,32 +364,49 @@ defmodule Lua.VM.Stdlib.String do
 
   defp format_directive(rest, args, acc) do
     {spec, rest2} = parse_format_spec(rest)
-    [arg | remaining_args] = args
-    str = apply_format_spec(spec, arg)
-    format_string(rest2, remaining_args, [acc, str])
+
+    case args do
+      [arg | remaining_args] ->
+        str = apply_format_spec(spec, arg)
+        format_string(rest2, remaining_args, [acc, str])
+
+      [] ->
+        raise ArgumentError, function_name: "string.format", details: "no value"
+    end
   end
 
-  # PUC-Lua copies at most two width and two precision digits into the
-  # conversion spec (`scanformat`), erroring on anything longer. We enforce
-  # the same bound so a spec like `%.2000000000f` cannot drive a giant
-  # `String.duplicate`/padding allocation.
-  @max_format_field 99
+  # PUC-Lua's `scanformat` reads at most two width and two precision digits and
+  # errors on a third. Mirror that with a digit-count limit (not a value limit)
+  # so the error message matches and a spec like `%.2000000000f` cannot drive a
+  # giant `String.duplicate`/padding allocation.
+  @max_format_digits 2
+
+  # PUC-Lua's flag scan tolerates the five flag characters once each before
+  # erroring; six or more flag characters trip the "repeated flags" guard.
+  @max_format_flags 5
 
   # Parse a format spec: [flags][width][.precision]specifier
   defp parse_format_spec(str) do
-    {flags, str} = parse_flags(str, 0)
-    {width, str} = parse_width(str)
-    {precision, str} = parse_precision(str)
+    {flags, flag_count, str} = parse_flags(str, 0, 0)
+
+    if flag_count > @max_format_flags do
+      raise ArgumentError, function_name: "string.format", details: "repeated flags"
+    end
+
+    {width, width_digits, str} = parse_width(str)
+    {precision, precision_digits, str} = parse_precision(str)
     {specifier, str} = parse_specifier(str)
-    check_format_field!(width)
-    check_format_field!(precision)
+    check_format_field!(width_digits)
+    check_format_field!(precision_digits)
     {{flags, width, precision, specifier}, str}
   end
 
-  defp check_format_field!(n) when is_nil(n) or n <= @max_format_field, do: :ok
+  defp check_format_field!(digits) when digits <= @max_format_digits, do: :ok
 
-  defp check_format_field!(_n) do
-    raise ArgumentError, function_name: "string.format", details: "invalid conversion"
+  defp check_format_field!(_digits) do
+    raise ArgumentError,
+      function_name: "string.format",
+      details: "invalid conversion (width or precision too long)"
   end
 
   # Flags are parsed once into an integer bitmask so the apply path reads
@@ -403,37 +420,37 @@ defmodule Lua.VM.Stdlib.String do
   @flag_space 0b01000
   @flag_hash 0b10000
 
-  defp parse_flags(<<?-, rest::binary>>, mask), do: parse_flags(rest, mask ||| @flag_minus)
-  defp parse_flags(<<?0, rest::binary>>, mask), do: parse_flags(rest, mask ||| @flag_zero)
-  defp parse_flags(<<?+, rest::binary>>, mask), do: parse_flags(rest, mask ||| @flag_plus)
-  defp parse_flags(<<?\s, rest::binary>>, mask), do: parse_flags(rest, mask ||| @flag_space)
-  defp parse_flags(<<?#, rest::binary>>, mask), do: parse_flags(rest, mask ||| @flag_hash)
+  defp parse_flags(<<?-, rest::binary>>, mask, n), do: parse_flags(rest, mask ||| @flag_minus, n + 1)
+  defp parse_flags(<<?0, rest::binary>>, mask, n), do: parse_flags(rest, mask ||| @flag_zero, n + 1)
+  defp parse_flags(<<?+, rest::binary>>, mask, n), do: parse_flags(rest, mask ||| @flag_plus, n + 1)
+  defp parse_flags(<<?\s, rest::binary>>, mask, n), do: parse_flags(rest, mask ||| @flag_space, n + 1)
+  defp parse_flags(<<?#, rest::binary>>, mask, n), do: parse_flags(rest, mask ||| @flag_hash, n + 1)
 
-  defp parse_flags(str, mask), do: {mask, str}
+  defp parse_flags(str, mask, n), do: {mask, n, str}
 
   defp parse_width(<<c, _::binary>> = str) when c in ?0..?9 do
-    parse_number(str, 0)
+    parse_number(str, 0, 0)
   end
 
-  defp parse_width(str), do: {nil, str}
+  defp parse_width(str), do: {nil, 0, str}
 
   defp parse_precision("." <> rest) do
     case rest do
       <<c, _::binary>> when c in ?0..?9 ->
-        parse_number(rest, 0)
+        parse_number(rest, 0, 0)
 
       _ ->
-        {0, rest}
+        {0, 0, rest}
     end
   end
 
-  defp parse_precision(str), do: {nil, str}
+  defp parse_precision(str), do: {nil, 0, str}
 
-  defp parse_number(<<c, rest::binary>>, acc) when c in ?0..?9 do
-    parse_number(rest, acc * 10 + (c - ?0))
+  defp parse_number(<<c, rest::binary>>, acc, digits) when c in ?0..?9 do
+    parse_number(rest, acc * 10 + (c - ?0), digits + 1)
   end
 
-  defp parse_number(str, acc), do: {acc, str}
+  defp parse_number(str, acc, digits), do: {acc, digits, str}
 
   # Keep the conversion char as a raw integer code point so apply_format_spec/2
   # dispatches on BEAM integer patterns rather than one-byte binaries.
@@ -460,14 +477,36 @@ defmodule Lua.VM.Stdlib.String do
         ?x -> format_spec_hex(arg, :lower)
         ?X -> format_spec_hex(arg, :upper)
         ?o -> format_spec_octal(arg)
+        ?a -> format_spec_hexfloat(arg, precision, :lower)
+        ?A -> format_spec_hexfloat(arg, precision, :upper)
         ?c -> format_char(arg)
-        ?s -> format_spec_string(arg, precision)
+        ?s -> format_spec_string(arg, precision, flags, width)
         ?q -> format_quoted(arg)
         _ -> raise ArgumentError, function_name: "string.format", details: "invalid option '%#{<<specifier>>}'"
       end
 
-    apply_width_flags(raw, flags, width)
+    raw
+    |> apply_sign_flag(flags, specifier)
+    |> apply_width_flags(flags, width)
   end
+
+  # The `+` and space flags only affect signed conversions (PUC-Lua passes them
+  # to C printf, where they are no-ops for %u/%o/%x and the rest). `+` forces a
+  # leading sign on non-negatives; a space reserves a blank where the sign would
+  # be. `+` wins when both are present, matching C.
+  @signed_numeric [?d, ?i, ?f, ?e, ?E, ?g, ?G, ?a, ?A]
+
+  defp apply_sign_flag(<<?-, _::binary>> = raw, _flags, _specifier), do: raw
+
+  defp apply_sign_flag(raw, flags, specifier) when specifier in @signed_numeric do
+    cond do
+      (flags &&& @flag_plus) != 0 -> "+" <> raw
+      (flags &&& @flag_space) != 0 -> " " <> raw
+      true -> raw
+    end
+  end
+
+  defp apply_sign_flag(raw, _flags, _specifier), do: raw
 
   defp format_spec_integer(val) when is_integer(val), do: Integer.to_string(val)
   defp format_spec_integer(val) when is_float(val), do: Integer.to_string(trunc(val))
@@ -630,7 +669,7 @@ defmodule Lua.VM.Stdlib.String do
   end
 
   defp format_spec_hex(val, case_style) when is_integer(val) do
-    str = Integer.to_string(val, 16)
+    str = Integer.to_string(as_unsigned64(val), 16)
     if case_style == :lower, do: String.downcase(str), else: String.upcase(str)
   end
 
@@ -640,21 +679,61 @@ defmodule Lua.VM.Stdlib.String do
     raise ArgumentError, function_name: "string.format", expected: "number"
   end
 
-  defp format_spec_octal(val) when is_integer(val), do: Integer.to_string(val, 8)
-  defp format_spec_octal(val) when is_float(val), do: Integer.to_string(trunc(val), 8)
+  defp format_spec_octal(val) when is_integer(val), do: Integer.to_string(as_unsigned64(val), 8)
+  defp format_spec_octal(val) when is_float(val), do: format_spec_octal(trunc(val))
 
   defp format_spec_octal(_) do
     raise ArgumentError, function_name: "string.format", expected: "number"
   end
 
-  defp format_spec_string(arg, precision) do
+  # PUC-Lua's %x/%X/%o/%u read the integer as an unsigned 64-bit value, so a
+  # negative argument prints its two's-complement bit pattern.
+  defp as_unsigned64(val) when val < 0, do: val + 0x10000000000000000
+  defp as_unsigned64(val), do: val
+
+  # %a/%A render a float as a C99 hexadecimal float literal. We support the
+  # plain conversion only: a precision modifier (%.3a) would require digit
+  # rounding, so we reject it, which lets callers detect the gap via pcall the
+  # way PUC-Lua's own suite does.
+  defp format_spec_hexfloat(_arg, precision, _case_style) when not is_nil(precision) do
+    raise ArgumentError,
+      function_name: "string.format",
+      details: "precision not supported for %a"
+  end
+
+  defp format_spec_hexfloat(:nan, _precision, _case_style), do: "nan"
+
+  defp format_spec_hexfloat(arg, _precision, case_style) when is_number(arg) do
+    str = float_to_hexfloat(arg / 1)
+    if case_style == :upper, do: String.upcase(str), else: str
+  end
+
+  defp format_spec_hexfloat(_, _, _) do
+    raise ArgumentError, function_name: "string.format", expected: "number"
+  end
+
+  defp format_spec_string(arg, precision, flags, width) do
     str = Util.to_lua_string(arg)
+
+    # PUC-Lua routes a bare `%s` straight to the buffer (embedded zeros are
+    # fine) but sends any modified spec through C `sprintf`, which truncates at
+    # the first NUL; it guards that path by rejecting strings that contain a
+    # zero byte.
+    if (flags != 0 or width != nil or precision != nil) and contains_zero?(str) do
+      raise ArgumentError,
+        function_name: "string.format",
+        details: "string contains zeros"
+    end
 
     case precision do
       nil -> str
-      n -> String.slice(str, 0, n)
+      n -> binary_part(str, 0, min(n, byte_size(str)))
     end
   end
+
+  defp contains_zero?(<<>>), do: false
+  defp contains_zero?(<<0, _::binary>>), do: true
+  defp contains_zero?(<<_, rest::binary>>), do: contains_zero?(rest)
 
   defp format_char(val) when is_integer(val) and val >= 0 and val <= 255, do: <<val>>
 
@@ -664,23 +743,110 @@ defmodule Lua.VM.Stdlib.String do
       details: "invalid value for %c"
   end
 
+  # %q emits a literal that the Lua reader parses back to the same value.
+  # Strings are quoted byte-by-byte following PUC-Lua's `addquoted`; numbers,
+  # nil and booleans follow `addliteral`. Other types have no literal form.
   defp format_quoted(val) when is_binary(val) do
-    escaped =
-      val
-      |> String.replace("\\", "\\\\")
-      |> String.replace("\"", "\\\"")
-      |> String.replace("\n", "\\n")
-      |> String.replace("\r", "\\r")
-      |> String.replace("\t", "\\t")
-
-    "\"#{escaped}\""
+    IO.iodata_to_binary([?", quote_string_bytes(val), ?"])
   end
+
+  defp format_quoted(val) when is_integer(val) do
+    # math.mininteger has no decimal literal form (its negation overflows), so
+    # PUC-Lua emits it as a hexadecimal literal that wraps to the same value.
+    if val == -0x8000000000000000 do
+      "0x8000000000000000"
+    else
+      Integer.to_string(val)
+    end
+  end
+
+  defp format_quoted(val) when is_float(val), do: quote_float(val)
+  defp format_quoted(:nan), do: "(0/0)"
+  defp format_quoted(nil), do: "nil"
+  defp format_quoted(true), do: "true"
+  defp format_quoted(false), do: "false"
 
   defp format_quoted(_) do
     raise ArgumentError,
       function_name: "string.format",
-      expected: "string",
-      details: "for %q"
+      details: "value has no literal form"
+  end
+
+  # Escape a string body following PUC-Lua `addquoted`: `"`, `\` and newline
+  # take a backslash before the literal byte; other control bytes become a
+  # decimal escape, zero-padded to three digits only when the next byte is a
+  # digit (so the reader cannot fold it into the escape).
+  defp quote_string_bytes(<<>>), do: []
+
+  defp quote_string_bytes(<<c, rest::binary>>) when c in [?", ?\\, ?\n] do
+    [?\\, c | quote_string_bytes(rest)]
+  end
+
+  defp quote_string_bytes(<<c, rest::binary>>) when c < 32 or c == 127 do
+    digits =
+      case rest do
+        <<d, _::binary>> when d in ?0..?9 -> String.pad_leading(Integer.to_string(c), 3, "0")
+        _ -> Integer.to_string(c)
+      end
+
+    [?\\, digits | quote_string_bytes(rest)]
+  end
+
+  defp quote_string_bytes(<<c, rest::binary>>), do: [c | quote_string_bytes(rest)]
+
+  # %q on a finite float emits a C99 hexadecimal float literal so the value
+  # round-trips through the reader with no rounding. Infinities use the same
+  # overflowing/underflowing decimal literals PUC-Lua's `quotefloat` does.
+  @float_inf <<0::1, 0x7FF::11, 0::52>>
+
+  defp quote_float(val) do
+    case <<val::float>> do
+      @float_inf -> "1e9999"
+      <<1::1, 0x7FF::11, 0::52>> -> "-1e9999"
+      _ -> float_to_hexfloat(val)
+    end
+  end
+
+  defp float_to_hexfloat(val) do
+    sign = if float_sign(val) == "-", do: "-", else: ""
+    <<_::1, exp::11, mantissa::52>> = <<abs(val)::float>>
+
+    cond do
+      # +/-0.0
+      exp == 0 and mantissa == 0 ->
+        sign <> "0x0p+0"
+
+      # Subnormals: leading digit is 0, unbiased exponent fixed at -1022.
+      exp == 0 ->
+        sign <> "0x0" <> fraction(mantissa) <> "p-1022"
+
+      # Normals: implicit leading 1, unbiased exponent is exp - 1023.
+      true ->
+        unbiased = exp - 1023
+        sign <> "0x1" <> fraction(mantissa) <> exponent_suffix(unbiased)
+    end
+  end
+
+  # The fractional part of a hex float, omitting the radix point entirely when
+  # the mantissa has no significant hex digits (so `1.0` renders `0x1p+0`).
+  defp fraction(mantissa) do
+    case hex_mantissa(mantissa) do
+      "" -> ""
+      digits -> "." <> digits
+    end
+  end
+
+  defp exponent_suffix(e) when e >= 0, do: "p+#{e}"
+  defp exponent_suffix(e), do: "p-#{-e}"
+
+  # Render the 52-bit mantissa as 13 hex digits, trimming trailing zero digits
+  # (an empty fraction renders as no digits, matching `0x1p+0`).
+  defp hex_mantissa(mantissa) do
+    mantissa
+    |> Integer.to_string(16)
+    |> String.downcase()
+    |> String.pad_leading(13, "0")
+    |> String.replace(~r/0+$/, "")
   end
 
   # string.find(s, pattern [, init [, plain]])
@@ -853,11 +1019,14 @@ defmodule Lua.VM.Stdlib.String do
         [str, pad]
       else
         # Right justify (default)
-        # Handle zero-padding with sign — the sign must stay leftmost.
-        if pad_char == "0" and String.starts_with?(str, "-") do
-          ["-", pad, binary_part(str, 1, byte_size(str) - 1)]
-        else
-          [pad, str]
+        # Handle zero-padding with sign — the sign (-, + or a reserved space)
+        # must stay leftmost, ahead of the zero fill.
+        case str do
+          <<sign, body::binary>> when pad_char == "0" and sign in [?-, ?+, ?\s] ->
+            [<<sign>>, pad, body]
+
+          _ ->
+            [pad, str]
         end
       end
     end
