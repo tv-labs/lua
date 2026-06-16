@@ -334,9 +334,7 @@ defmodule Lua.VM.Stdlib.Table do
     # border, so writing the sorted slice back through the split-aware
     # `put_many/2` rewrites those array slots in place without disturbing
     # the hash portion or any other key.
-    pairs = Enum.with_index(sorted, fn val, idx -> {idx + 1, val} end)
-
-    updated = Table.put_many(table, pairs)
+    updated = Table.replace_sequence(table, sorted)
 
     {[], %{state | tables: Map.put(state.tables, id, updated)}}
   end

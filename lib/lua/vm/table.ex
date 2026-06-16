@@ -302,6 +302,26 @@ defmodule Lua.VM.Table do
   end
 
   @doc """
+  Overwrites the array sequence `1..length(values)` with `values` in a single
+  pass, leaving the hash portion untouched.
+
+  When `values` exactly covers the current array border (the table.sort
+  write-back case — sort replaces the sequence with a permutation of itself),
+  the array is rebuilt with one `:array.from_list/2` instead of N individual
+  `:array.set/3` calls, each of which path-copies the functional array. The
+  values are a non-nil permutation of an existing sequence, so the border is
+  exactly their count. Falls back to `put_many/2` for any other shape.
+  """
+  @spec replace_sequence(t(), [term()]) :: t()
+  def replace_sequence(%__MODULE__{arr_n: n} = table, values) do
+    if Kernel.length(values) == n do
+      %{table | arr: :array.from_list(values, nil), border: n}
+    else
+      put_many(table, Enum.with_index(values, fn v, i -> {i + 1, v} end))
+    end
+  end
+
+  @doc """
   Normalizes a table key per Lua 5.3 §3.4.11.
   """
   @spec normalize_key(term()) :: term()
