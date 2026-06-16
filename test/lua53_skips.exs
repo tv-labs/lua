@@ -262,10 +262,17 @@
   ],
   "sort.lua" => [
     %{
-      lines: :all,
-      category: :stdlib,
+      lines: 201..209,
+      category: :semantic,
       reason:
-        "triage candidate: the first checkerror (line 19, table.insert arg count) passes; a later assertion fails. Also has O(n^2) table.sort / 2000-element unpack sections that may need range skips. Needs a triage pass.",
+        "table.sort with a deliberately-inconsistent comparator should raise 'invalid order function'; our insertion sort never detects it (PUC's quicksort-specific bounds check)",
+      issue: 262
+    },
+    %{
+      lines: 260..308,
+      category: :performance,
+      reason:
+        "50000-element table.sort timing block: the comparator path is O(n^2) and one comparator calls load() (excluded in the sandbox). Sort and metatable-__lt correctness are covered by the perm block above (lines 240-249) and test/lua/vm/stdlib/table_test.exs.",
       issue: 262
     }
   ],

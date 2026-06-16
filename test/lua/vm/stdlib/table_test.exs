@@ -204,6 +204,30 @@ defmodule Lua.VM.Stdlib.TableTest do
       assert {:ok, [10, 20, 30, "hi", "sparse"], _state} = VM.execute(proto, state)
     end
 
+    # ltablib.c sort rejects a length reaching INT_MAX with "array too
+    # big" before touching the table, so a `__len` returning a huge value
+    # raises promptly instead of trying to read billions of slots.
+    test "table.sort rejects an INT_MAX-length array with 'array too big'" do
+      code = """
+      local a = setmetatable({}, {__len = function () return math.maxinteger end})
+      table.sort(a)
+      """
+
+      assert_raise Lua.RuntimeException, ~r/array too big/, fn ->
+        Lua.eval!(Lua.new(), code)
+      end
+    end
+
+    # A negative __len leaves nothing to sort: the comparator is never
+    # invoked (here `error` would raise if it were).
+    test "table.sort with a negative __len compares nothing" do
+      assert run!("""
+             local a = setmetatable({}, {__len = function () return -1 end})
+             table.sort(a, error)
+             return #a
+             """) == [-1]
+    end
+
     test "table.move copies elements" do
       code = """
       local t1 = {1, 2, 3, 4, 5}
@@ -231,6 +255,58 @@ defmodule Lua.VM.Stdlib.TableTest do
       state = Stdlib.install(State.new())
 
       assert {:ok, [1, 2, 1, 2, 3], _state} = VM.execute(proto, state)
+    end
+  end
+
+  describe "table.move argument validation (Lua 5.3 §6.6, sort.lua)" do
+    # ltablib.c tmove checks the indices (args 2-4) before the source
+    # table (arg 1), so a non-table first arg with valid integer indices
+    # is blamed on arg #1, not arg #4.
+    test "non-table source with valid indices blames arg #1" do
+      assert_raise Lua.RuntimeException, ~r/#1.*table expected, got number/, fn ->
+        Lua.eval!(Lua.new(), "table.move(1, 2, 3, 4)")
+      end
+    end
+
+    test "overflowing element count raises 'too many'" do
+      assert_raise Lua.RuntimeException, ~r/too many elements to move/, fn ->
+        Lua.eval!(Lua.new(), "table.move({}, math.mininteger, math.maxinteger, 1)")
+      end
+    end
+
+    test "overflowing destination raises 'wrap around'" do
+      assert_raise Lua.RuntimeException, ~r/destination wrap around/, fn ->
+        Lua.eval!(Lua.new(), "table.move({}, 1, math.maxinteger, 2)")
+      end
+    end
+
+    # A move over a huge range interleaves read/write per element, so a
+    # __newindex error aborts after the first slot rather than first
+    # materialising the whole (impossibly large) slice.
+    test "metamethod error interrupts a maxinteger-wide move after the first slot" do
+      code = """
+      local pos1, pos2
+      local a = setmetatable({}, {
+        __index = function (_, k) pos1 = k end,
+        __newindex = function (_, k) pos2 = k; error() end,
+      })
+      local st = pcall(table.move, a, 1, math.maxinteger, 0)
+      return st, pos1, pos2
+      """
+
+      assert run!(code) == [false, 1, 0]
+    end
+
+    # Overlapping in-place moves stay coherent: PUC copies backward when
+    # the destination would otherwise clobber an unread source slot.
+    test "overlapping forward move with t inside the source range stays coherent" do
+      code = """
+      local t = {10, 20, 30}
+      table.move(t, 1, 3, 3)
+      return t[1], t[2], t[3], t[4], t[5]
+      """
+
+      assert run!(code) == [10, 20, 10, 20, 30]
     end
   end
 
