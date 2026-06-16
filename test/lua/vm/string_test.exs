@@ -1773,6 +1773,48 @@ defmodule Lua.VM.StringTest do
     end
   end
 
+  describe "string.format fixed-precision floats" do
+    setup do
+      %{state: Stdlib.install(State.new())}
+    end
+
+    test "rounds half away from zero on exact binary ties", %{state: state} do
+      # 0.125 is exactly representable; the tie rounds up, matching C/io_lib.
+      assert run_format("return string.format(\"%.2f\", 0.125)", state) == "0.13"
+    end
+
+    test "rounds on the true binary value, not the decimal literal", %{state: state} do
+      # 0.155 and 0.045 are stored just below their literal, so they round
+      # down — the formatter must use the IEEE significand, not the text.
+      assert run_format("return string.format(\"%.2f\", 0.155)", state) == "0.15"
+      assert run_format("return string.format(\"%.2f\", 0.045)", state) == "0.04"
+    end
+
+    test "pads the integer part and keeps the sign", %{state: state} do
+      assert run_format("return string.format(\"%.3f\", 1.5)", state) == "1.500"
+      assert run_format("return string.format(\"%.2f\", -1.5)", state) == "-1.50"
+      assert run_format("return string.format(\"%.4f\", 0.0)", state) == "0.0000"
+    end
+  end
+
+  describe "string.format template cache" do
+    setup do
+      %{state: Stdlib.install(State.new())}
+    end
+
+    test "a reused format string renders each argument independently", %{state: state} do
+      # Both calls hit the cached template; the cache holds the parsed spec,
+      # never the rendered output, so each render uses its own argument.
+      code = ~s{return string.format("[%d]", 1) .. string.format("[%d]", 2)}
+      assert run_format(code, state) == "[1][2]"
+    end
+
+    test "caching preserves flag/width/precision output", %{state: state} do
+      code = "return string.format(\"%-5d/%05.2f/%x\", 7, 3.14159, 255)"
+      assert run_format(code, state) == "7    /03.14/ff"
+    end
+  end
+
   # Helper to escape strings for Lua code
   defp escape_string(str) do
     str
