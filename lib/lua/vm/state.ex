@@ -49,7 +49,14 @@ defmodule Lua.VM.State do
             # `data` map. Allocated by `new/0`. Plan A16: `_ENV` semantics
             # require globals to be a real Lua table so `_ENV` reassignment
             # can redirect global access.
-            g_ref: nil
+            g_ref: nil,
+            # Memoizes parsed `string.format` templates (format string ->
+            # compiled segment list) so a format string reused across calls —
+            # the common `for ... string.format(FMT, ...)` loop shape — is
+            # scanned and spec-parsed once, not every call. Threaded in the
+            # struct (not ETS/process dictionary) to preserve value semantics;
+            # bounded in `Lua.VM.Stdlib.String`.
+            format_cache: %{}
 
   @type t :: %__MODULE__{
           call_stack: list(),
@@ -66,7 +73,8 @@ defmodule Lua.VM.State do
           userdata_next_id: non_neg_integer(),
           private: map(),
           multi_return_count: non_neg_integer(),
-          g_ref: nil | {:tref, non_neg_integer()}
+          g_ref: nil | {:tref, non_neg_integer()},
+          format_cache: %{optional(binary()) => list()}
         }
 
   @doc """
