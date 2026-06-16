@@ -290,6 +290,18 @@ defmodule Lua.VM.Stdlib.Table do
         details: "array too big"
     end
 
+    # Host-protection ceiling below INT_MAX. `sort_via_metamethods` eagerly
+    # materialises `len` slots via __index before any comparator runs, so a
+    # hostile `__len` returning e.g. ~100M (well under INT_MAX) would still
+    # exhaust the BEAM. Share `Limits.max_element_count` with
+    # `concat`/`unpack`/`move` so the deterministic ceiling is uniform.
+    if len > Limits.max_element_count() do
+      raise ArgumentError,
+        function_name: "table.sort",
+        arg_num: 1,
+        details: "array too big"
+    end
+
     table = Map.fetch!(state.tables, id)
 
     if table.metatable == nil do
@@ -539,6 +551,7 @@ defmodule Lua.VM.Stdlib.Table do
       got: Util.typeof(tref1)
   end
 
+  # f and e are valid integers but the destination t is the wrong type.
   defp table_move([_tref1, f, e, t | _rest], _state) when is_integer(f) and is_integer(e) do
     raise ArgumentError,
       function_name: "table.move",
@@ -547,12 +560,33 @@ defmodule Lua.VM.Stdlib.Table do
       got: Util.typeof(t)
   end
 
+  # f and e are valid integers but the destination t was omitted. PUC's
+  # luaL_checkinteger blames the absent arg #4 with "got no value", not the
+  # present arg #3.
+  defp table_move([_tref1, f, e], _state) when is_integer(f) and is_integer(e) do
+    raise ArgumentError,
+      function_name: "table.move",
+      arg_num: 4,
+      expected: "number",
+      got: "no value"
+  end
+
+  # f is a valid integer but e is the wrong type.
   defp table_move([_tref1, f, e | _rest], _state) when is_integer(f) do
     raise ArgumentError,
       function_name: "table.move",
       arg_num: 3,
       expected: "number",
       got: Util.typeof(e)
+  end
+
+  # f is a valid integer but e was omitted: blame the absent arg #3.
+  defp table_move([_tref1, f], _state) when is_integer(f) do
+    raise ArgumentError,
+      function_name: "table.move",
+      arg_num: 3,
+      expected: "number",
+      got: "no value"
   end
 
   defp table_move([_tref1, f | _rest], _state) do
@@ -605,8 +639,12 @@ defmodule Lua.VM.Stdlib.Table do
     # Host-protection ceiling: when neither table has a metatable, no
     # __index/__newindex can interrupt the loop, so a pathological count
     # would build tens of millions of slots and exhaust the BEAM. Refuse
-    # those up front. Metatable-backed moves skip this — the suite drives
-    # ranges as wide as 1..maxinteger that abort on the first metamethod.
+    # those up front. Metatable-backed moves intentionally skip this — the
+    # suite drives ranges as wide as 1..maxinteger that abort on the first
+    # metamethod, so the per-step __index/__newindex dispatch is itself the
+    # bound. (This asymmetry differs from table.sort, whose metatable path
+    # *does* take the ceiling: sort eagerly materialises every slot before
+    # any comparator runs, so it has no per-step abort to rely on.)
     if plain_tables?(tref1, tref2, state) do
       Limits.check_range_count!(n, "table.move")
     end

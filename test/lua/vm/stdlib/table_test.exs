@@ -268,6 +268,21 @@ defmodule Lua.VM.Stdlib.TableTest do
       end
     end
 
+    # luaL_checkinteger blames the absent argument by position with "got no
+    # value", not the last present argument. `table.move(t, 1, 3)` omits the
+    # destination (arg #4); `table.move(t, 1)` omits the final index (arg #3).
+    test "missing destination blames arg #4 with 'no value'" do
+      assert_raise Lua.RuntimeException,
+                   ~r/#4 to 'table.move' \(number expected, got no value\)/,
+                   fn -> Lua.eval!(Lua.new(), "table.move({1,2,3}, 1, 3)") end
+    end
+
+    test "missing final index blames arg #3 with 'no value'" do
+      assert_raise Lua.RuntimeException,
+                   ~r/#3 to 'table.move' \(number expected, got no value\)/,
+                   fn -> Lua.eval!(Lua.new(), "table.move({1,2,3}, 1)") end
+    end
+
     test "overflowing element count raises 'too many'" do
       assert_raise Lua.RuntimeException, ~r/too many elements to move/, fn ->
         Lua.eval!(Lua.new(), "table.move({}, math.mininteger, math.maxinteger, 1)")
