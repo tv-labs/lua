@@ -2,11 +2,9 @@
 
 This is the strategic overview. For per-PR detail, see [`.agents/plans/`](.agents/plans).
 
-## Status: 2026-06-10
+## Status: 2026-06-15
 
-- **Version**: `1.0.0-rc.2` shipped (rc.0, rc.1, rc.2 all released).
-- **Unit tests**: 2,230 passing (62 doctests, 51 properties, 2,117
-  tests), 0 failing, 7 skipped.
+- **Version**: `1.0.0-rc.3` shipped (rc.0–rc.3 all released).
 - **Lua 5.3 official suite**: 17/29 files passing. 8 fully clean
   (`api`, `bitwise`, `code`, `nextvar`, `simple_test`, `tpack`, `utf8`,
   `vararg`) plus 9 passing with documented skip-ranges (`all`, `calls`,
@@ -15,11 +13,39 @@ This is the strategic overview. For per-PR detail, see [`.agents/plans/`](.agent
   whole-file-skipped pending triage (`big`, `closure`, `coroutine`,
   `db`, `errors`, `math`, `sort`, `strings`).
 - **Current focus**: closing the `1.0.0` release gates in
-  [`A13`](.agents/plans/A13-release-rc1.md) — suite gate (settled at
-  **20/29 with 9 documented exclusions**; 17 pass today, 3 triage
-  plans remain — `strings`/`sort`/`math`), perf gate
-  (A33–A35 baseline + parity, recursion regression #324), and the DX
-  gate (`Lua.dbg/2`, PR #219).
+  [`A13`](.agents/plans/A13-release-rc1.md) — the suite gate (aim 20/29
+  with 9 documented exclusions; 17 pass today, three triage targets
+  remain: `strings`/`sort`/`math`) and a one-time perf-gate check
+  (fib already at 1.03–1.11× Luerl after #324/#360).
+
+## Release sequencing (decided 2026-06-15)
+
+The 1.0.0 milestone is deliberately **lean**: its sole job is to freeze
+the public API around the completed Luerl → Elixir-native rewrite. We do
+not add new public surface in the release that freezes the surface.
+
+- **1.0.0** — stabilize the rewrite. Suite + perf + docs gates only. The
+  rewrite already meets or beats Luerl where it counts (native VM,
+  structured errors, `parse_structured/1`, `:max_instructions`, O(1)
+  `#t`/`pairs`); the dimensions we trail (coroutines, full `io`,
+  gc/weak-tables) are documented deliberate non-goals, not gaps. Five
+  milestone issues were already satisfied by rc.3 and closed (#77, #89,
+  #92, #87 moot post-Luerl, and the bulk of #76).
+- **1.1.0** — additive DX + virtualization plumbing on the frozen API:
+  the `Lua.Encoder` protocol + `deflua` auto-marshalling (#341), and the
+  VFS plumbing that routes `os`/`require` IO through an in-memory virtual
+  filesystem (#297, PR #302) **with the deny-list unchanged**. All
+  additive → minor bump.
+- **2.0.0** — full virtualization: flip the sandbox default so `os`/`io`
+  operate against the VFS and nothing reaches the host. This changes
+  observable behaviour (today's sandbox refusals become successes), so it
+  is an honest major bump, built on 1.1's plumbing as a config-flip rather
+  than a rewrite.
+
+Rationale: bundling a brand-new public protocol (`Lua.Encoder`) into the
+API freeze would commit us to it before it is battle-tested; de-sandboxing
+is a major-version event by nature, so doing it as 2.0 soon after 1.0 is
+SemVer working as intended, not a delay.
 
 ## Done
 

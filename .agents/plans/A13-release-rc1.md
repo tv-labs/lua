@@ -24,16 +24,28 @@ final.
 - New features (must be in by now or wait for 1.1).
 - Documentation rewrites beyond what A30/A31/A32 ship.
 
-## Blocked on
+## Blocked on (as of 2026-06-15, rc.3)
 
-- A19 — error line/source in stdlib raises.
-- A20-A24 — suite triage clusters and their sub-plans, enough to hit
-  the suite gate.
-- A25 — `string.pack`.
-- A26 — error message quality pass.
-- A27-A32 — DX/docs track.
-- A33-A35 — perf parity locked in.
-- All milestone issues closed.
+Most of the original blocker list shipped across rc.1–rc.3 (A19, A25,
+A26, the A27–A32 DX/docs track, and the A33–A35 perf work via #324/#360).
+What actually remains for the 1.0.0 cut:
+
+- **Suite gate** — three triage targets to reach the 20/29 aim:
+  `strings.lua`, `sort.lua`, `math.lua` (all whole-file-skipped today).
+  If any proves a wording/perf rabbit hole, document it as a known-limit
+  exclusion and ship at the resulting floor (≥18).
+- **Perf gate** — a one-time `--compare-baseline` check. fib is already
+  1.03–1.11× Luerl after #324/#360, comfortably inside the ≤25% bar; this
+  is a confirmation run, not new perf work (#267).
+- **Milestone hygiene** — the 1.0.0 milestone is now lean. #77/#89/#92/#87
+  closed (delivered or moot post-Luerl); #297 (VFS) and #341 (Encoder)
+  moved to 1.1.0; perf-tooling #268/#269 moved off the release gate. See
+  ROADMAP "Release sequencing".
+
+Descoped from the 1.0 gate (post-1.0 DX niceties, not API-stability
+concerns): `Lua.dbg/2`, and the `mix lua.bench` / `mix lua.suite` tasks.
+Only `mix lua.eval` ships in 1.0; the suite/bench harnesses run via the
+existing `mix test --only lua53` and the `benchmarks/` scripts.
 
 ## Success criteria
 
@@ -71,8 +83,9 @@ final.
       cleanly with line/source; rendered output reviewed by Dave.
 - [ ] **Docs gate**: `mix docs --warnings-as-errors` exits 0; README
       and `examples/` link consistently; doctests pass.
-- [ ] **DX gate**: `mix lua.eval`, `mix lua.bench`, `mix lua.suite`
-      all work end-to-end. `Lua.dbg/2` exists and is documented.
+- [ ] **DX gate**: `mix lua.eval` works end-to-end. (`mix lua.bench`,
+      `mix lua.suite`, and `Lua.dbg/2` are descoped to post-1.0 — see
+      "Blocked on".)
 - [ ] `mix hex.build` succeeds.
 - [ ] Tag created: `git tag v1.0.0` (manual).
 - [ ] Pushed: `git push origin v1.0.0` (manual).
