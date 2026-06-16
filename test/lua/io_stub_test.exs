@@ -84,7 +84,7 @@ defmodule Lua.IoStubTest do
 
     test "rawlen on a number raises" do
       assert {[false, message], _} =
-               Lua.eval!(Lua.new(sandboxed: []), "return pcall(rawlen, 34)")
+               Lua.eval!(Lua.new(sandbox: false), "return pcall(rawlen, 34)")
 
       assert message =~ "rawlen"
       assert message =~ "number"
@@ -92,7 +92,7 @@ defmodule Lua.IoStubTest do
 
     test "rawlen with no arguments raises" do
       assert {[false, message], _} =
-               Lua.eval!(Lua.new(sandboxed: []), "return pcall(rawlen)")
+               Lua.eval!(Lua.new(sandbox: false), "return pcall(rawlen)")
 
       assert message =~ "rawlen"
       assert message =~ "value expected"
@@ -104,18 +104,18 @@ defmodule Lua.IoStubTest do
       return pcall(rawlen, f)
       """
 
-      assert {[false, message], _} = Lua.eval!(Lua.new(sandboxed: []), code)
+      assert {[false, message], _} = Lua.eval!(Lua.new(sandbox: false), code)
       assert message =~ "function"
     end
 
     test "rawlen on a table still returns its sequence length" do
       assert {[3], _} =
-               Lua.eval!(Lua.new(sandboxed: []), "return rawlen({10, 20, 30})")
+               Lua.eval!(Lua.new(sandbox: false), "return rawlen({10, 20, 30})")
     end
 
     test "rawlen on a string still returns its byte size" do
       assert {[5], _} =
-               Lua.eval!(Lua.new(sandboxed: []), ~S[return rawlen("hello")])
+               Lua.eval!(Lua.new(sandbox: false), ~S[return rawlen("hello")])
     end
   end
 end

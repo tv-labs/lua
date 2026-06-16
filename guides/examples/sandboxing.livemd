@@ -8,16 +8,17 @@ Mix.install([
 ])
 ```
 
-## The default sandbox
+## Virtual by default
 
-`Lua.new/0` sandboxes a curated list of functions (`os.execute`, `os.exit`,
-`os.getenv`, `require`, `loadfile`, ...). Calling a sandboxed function
-raises, which `pcall` turns into a `false, message` pair so the script can
-recover in-band.
+`Lua.new/0` is virtual and sandboxed: filesystem operations run against an
+in-memory virtual filesystem, `os.getenv` reads only injected values, and
+process execution is denied. A sandboxed script never touches the real
+machine. Calling a denied operation like `os.execute` raises, which `pcall`
+turns into a `false, message` pair so the script can recover in-band.
 
 ```elixir
 {[ok?, message], _lua} =
-  Lua.eval!(Lua.new(), ~S[return pcall(function() return os.getenv("HOME") end)])
+  Lua.eval!(Lua.new(), ~S[return pcall(function() return os.execute("echo hi") end)])
 
 {ok?, message}
 ```
@@ -25,28 +26,30 @@ recover in-band.
 <!-- livebook:{"output":true} -->
 
 ```
-{false, "Lua runtime error: os.getenv(_) is sandboxed"}
+{false, "Lua runtime error: os.execute(_) is sandboxed"}
 ```
 
-## Allowing specific operations
+## Injecting environment values
 
-`Lua.new(exclude: [...])` lifts the sandbox for specific paths while keeping
-everything else locked down. Here we allow `os.getenv` only.
+Sandboxed scripts cannot read the host environment. Pass the values they may
+see with `Lua.new(env: [...])`; `os.getenv` reads from there (an unset name
+is `nil`).
 
 ```elixir
-allowed = Lua.new(exclude: [[:os, :getenv]])
+allowed = Lua.new(env: [{"HOME", "/app"}])
 
-{[kind], _lua} = Lua.eval!(allowed, ~S[return type(os.getenv("HOME"))])
-kind
+{[home], _lua} = Lua.eval!(allowed, ~S[return os.getenv("HOME")])
+home
 ```
 
 <!-- livebook:{"output":true} -->
 
 ```
-"string"
+"/app"
 ```
 
-`os.execute` is still blocked on the `allowed` VM — we only lifted `getenv`.
+Process execution is still denied on this VM — injecting env does not open
+host access.
 
 ```elixir
 {[exec_ok?, _message], _lua} =
@@ -61,11 +64,12 @@ exec_ok?
 false
 ```
 
-## Replacing or disabling the sandbox
+## Enabling host access
 
-`Lua.new(sandboxed: [...])` replaces the whole sandbox list, and
-`Lua.new(sandboxed: [])` disables sandboxing entirely. Reach for these only
-when you fully trust the script you are running.
+`Lua.new(sandbox: false)` installs the host implementations, so `os`/`io`
+and the file loaders behave like normal non-sandboxed Lua against the real
+filesystem, environment, and shell. Reach for this only when you fully trust
+the script you are running.
 
 ## Bounding CPU work
 

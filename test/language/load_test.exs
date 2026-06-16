@@ -2,7 +2,7 @@ defmodule Lua.Language.LoadTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "load compiles and returns a function", %{lua: lua} do
@@ -82,7 +82,7 @@ defmodule Lua.Language.LoadTest do
 
   describe "load with a reader function" do
     setup do
-      %{lua: Lua.new(sandboxed: [])}
+      %{lua: Lua.new(sandbox: false)}
     end
 
     test "concatenates pieces returned by the reader", %{lua: lua} do

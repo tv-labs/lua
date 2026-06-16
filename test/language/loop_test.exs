@@ -2,7 +2,7 @@ defmodule Lua.Language.LoopTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "loops with external variables", %{lua: lua} do

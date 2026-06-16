@@ -2,7 +2,7 @@ defmodule Lua.Language.Stdlib.DebugTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "debug.getinfo on native function", %{lua: lua} do

@@ -228,13 +228,13 @@ guards against allocation-bomb denial-of-service by refusing oversized
 before they allocate.
 
 ```elixir
-# os.exit is sandboxed by default — calling it raises (catchable)
-iex> {[false, message], _} = Lua.eval!(Lua.new(), "return pcall(os.exit)")
+# os.execute is sandboxed by default — calling it raises (catchable)
+iex> {[false, message], _} = Lua.eval!(Lua.new(), "return pcall(os.execute, \"echo hi\")")
 iex> message =~ "sandboxed"
 true
 ```
 
-Capability sandboxing (`:sandboxed`, `:exclude`, `Lua.sandbox/2`),
+Virtual-by-default sandboxing (`sandbox: true | false`, `env:`),
 recursion limits (`:max_call_depth`), the built-in allocation guards, and
 the host-level pattern for bounding CPU time and total memory are all
 covered in the [Security and sandboxing](guides/sandboxing.md) guide.

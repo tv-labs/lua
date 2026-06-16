@@ -10,7 +10,7 @@ defmodule Lua.VM.LimitsTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   defp pcall_error(lua, expr) do
@@ -46,7 +46,7 @@ defmodule Lua.VM.LimitsTest do
     # the behavior an embedder relies on when running the VM under a
     # process heap cap.
     setup do
-      %{small: Lua.new(sandboxed: [], max_string_bytes: 1024)}
+      %{small: Lua.new(sandbox: false, max_string_bytes: 1024)}
     end
 
     test "string.rep honors a lowered ceiling", %{small: small} do

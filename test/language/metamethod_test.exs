@@ -2,7 +2,7 @@ defmodule Lua.Language.MetamethodTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "function __index is called on missing key", %{lua: lua} do

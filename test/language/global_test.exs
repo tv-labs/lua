@@ -2,7 +2,7 @@ defmodule Lua.Language.GlobalTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "_G references the global environment", %{lua: lua} do

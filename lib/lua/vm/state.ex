@@ -63,7 +63,17 @@ defmodule Lua.VM.State do
             # the file-oriented `os` functions) reads/writes here instead of the
             # host disk, so a sandboxed script never reaches the real machine.
             # Seeded by `new/0`; threaded via the `vfs_*` helpers below.
-            vfs: nil
+            vfs: nil,
+            # Whether the VM is sandboxed (virtual) — the default. When `true`,
+            # `os`/`io`/loader stdlib touch only the VFS and injected `env`;
+            # when `false` the host implementations are installed instead. The
+            # choice is made once at install time (the installed function *is*
+            # the right one); this flag records it for introspection and for
+            # the file-loader source fetch.
+            sandboxed?: true,
+            # Environment variables the host injects via `Lua.new(env: ...)`.
+            # The sandboxed `os.getenv` reads from here (never the host env).
+            env: %{}
 
   @type t :: %__MODULE__{
           call_stack: list(),
@@ -82,7 +92,9 @@ defmodule Lua.VM.State do
           multi_return_count: non_neg_integer(),
           g_ref: nil | {:tref, non_neg_integer()},
           format_cache: %{optional(binary()) => list()},
-          vfs: nil | VFS.t()
+          vfs: nil | VFS.t(),
+          sandboxed?: boolean(),
+          env: %{optional(binary()) => binary()}
         }
 
   @doc """

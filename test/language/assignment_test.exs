@@ -2,7 +2,7 @@ defmodule Lua.Language.AssignmentTest do
   use ExUnit.Case, async: true
 
   setup do
-    %{lua: Lua.new(sandboxed: [])}
+    %{lua: Lua.new(sandbox: false)}
   end
 
   test "vararg.lua early lines", %{lua: lua} do

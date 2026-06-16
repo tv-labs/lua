@@ -69,16 +69,21 @@ defmodule Lua.VM.Stdlib.OsTest do
       assert locale == "C"
     end
 
-    test "os.getenv returns nil for an undefined variable when not sandboxed" do
-      lua = Lua.new(sandboxed: [])
+    test "os.getenv returns the real host value under sandbox: false" do
+      lua = Lua.new(sandbox: false)
       {[v], _} = Lua.eval!(lua, ~S[return os.getenv("LUA_NONEXISTENT_VAR_XYZ")])
       assert v == nil
     end
 
-    test "os.getenv is sandboxed by default" do
-      assert_raise Lua.RuntimeException, ~r/os\.getenv.*sandboxed/, fn ->
-        Lua.eval!(~S[return os.getenv("PATH")])
-      end
+    test "os.getenv reads only injected env in the default sandbox" do
+      # The default VM never reads the host environment: an unset name is nil,
+      # and only values injected via `env:` are visible.
+      {[v], _} = Lua.eval!(Lua.new(), ~S[return os.getenv("PATH")])
+      assert v == nil
+
+      lua = Lua.new(env: [{"MY_VAR", "hello"}])
+      {[v], _} = Lua.eval!(lua, ~S[return os.getenv("MY_VAR")])
+      assert v == "hello"
     end
   end
 end
