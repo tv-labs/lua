@@ -37,8 +37,12 @@ defmodule Lua.VM.Stdlib.Math do
   import Bitwise
 
   alias Lua.VM.ArgumentError
+  alias Lua.VM.Numeric
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
+  alias Lua.VM.Value
+
+  @max_int 9_223_372_036_854_775_807
 
   @impl true
   def lib_name, do: "math"
@@ -52,6 +56,7 @@ defmodule Lua.VM.Stdlib.Math do
       "atan" => {:native_func, &math_atan/2},
       "ceil" => {:native_func, &math_ceil/2},
       "cos" => {:native_func, &math_cos/2},
+      "deg" => {:native_func, &math_deg/2},
       "exp" => {:native_func, &math_exp/2},
       "floor" => {:native_func, &math_floor/2},
       "fmod" => {:native_func, &math_fmod/2},
@@ -60,6 +65,7 @@ defmodule Lua.VM.Stdlib.Math do
       "min" => {:native_func, &math_min/2},
       "modf" => {:native_func, &math_modf/2},
       "pi" => :math.pi(),
+      "rad" => {:native_func, &math_rad/2},
       "random" => {:native_func, &math_random/2},
       "randomseed" => {:native_func, &math_randomseed/2},
       "sin" => {:native_func, &math_sin/2},
@@ -77,8 +83,14 @@ defmodule Lua.VM.Stdlib.Math do
     State.set_global(state, "math", tref)
   end
 
-  # math.abs(x)
-  defp math_abs([x], state) when is_number(x) do
+  # math.abs(x). Integer arithmetic wraps modulo 2^64 (Lua 5.3 §3.4.2), so
+  # `math.abs(math.mininteger)` is `math.mininteger` itself rather than a value
+  # that escapes the signed 64-bit range.
+  defp math_abs([x], state) when is_integer(x) do
+    {[Numeric.to_signed_int64(abs(x))], state}
+  end
+
+  defp math_abs([x], state) when is_float(x) do
     {[abs(x)], state}
   end
 
@@ -157,9 +169,15 @@ defmodule Lua.VM.Stdlib.Math do
     raise ArgumentError.value_expected("math.atan", 1)
   end
 
-  # math.ceil(x)
-  defp math_ceil([x], state) when is_number(x) do
-    {[trunc(Float.ceil(x / 1))], state}
+  # math.ceil(x). An integer argument is already integral and is returned
+  # unchanged; routing it through a float would lose precision near the 64-bit
+  # limits (e.g. `maxint` rounds up to 2^63 as a float).
+  defp math_ceil([x], state) when is_integer(x) do
+    {[x], state}
+  end
+
+  defp math_ceil([x], state) when is_float(x) do
+    {[integral_float_result(Float.ceil(x))], state}
   end
 
   defp math_ceil([x | _], _state) do
@@ -191,6 +209,40 @@ defmodule Lua.VM.Stdlib.Math do
     raise ArgumentError.value_expected("math.cos", 1)
   end
 
+  # math.deg(x) — radians to degrees
+  defp math_deg([x], state) when is_number(x) do
+    {[x / 1 * (180.0 / :math.pi())], state}
+  end
+
+  defp math_deg([x | _], _state) do
+    raise ArgumentError,
+      function_name: "math.deg",
+      arg_num: 1,
+      expected: "number",
+      got: Util.typeof(x)
+  end
+
+  defp math_deg([], _state) do
+    raise ArgumentError.value_expected("math.deg", 1)
+  end
+
+  # math.rad(x) — degrees to radians
+  defp math_rad([x], state) when is_number(x) do
+    {[x / 1 * (:math.pi() / 180.0)], state}
+  end
+
+  defp math_rad([x | _], _state) do
+    raise ArgumentError,
+      function_name: "math.rad",
+      arg_num: 1,
+      expected: "number",
+      got: Util.typeof(x)
+  end
+
+  defp math_rad([], _state) do
+    raise ArgumentError.value_expected("math.rad", 1)
+  end
+
   # math.exp(x)
   defp math_exp([x], state) when is_number(x) do
     {[:math.exp(x / 1)], state}
@@ -208,9 +260,15 @@ defmodule Lua.VM.Stdlib.Math do
     raise ArgumentError.value_expected("math.exp", 1)
   end
 
-  # math.floor(x)
-  defp math_floor([x], state) when is_number(x) do
-    {[trunc(Float.floor(x / 1))], state}
+  # math.floor(x). An integer argument is already integral and is returned
+  # unchanged; routing it through a float would lose precision near the 64-bit
+  # limits (e.g. `maxint` rounds up to 2^63 as a float).
+  defp math_floor([x], state) when is_integer(x) do
+    {[x], state}
+  end
+
+  defp math_floor([x], state) when is_float(x) do
+    {[integral_float_result(Float.floor(x))], state}
   end
 
   defp math_floor([x | _], _state) do
@@ -223,6 +281,13 @@ defmodule Lua.VM.Stdlib.Math do
 
   defp math_floor([], _state) do
     raise ArgumentError.value_expected("math.floor", 1)
+  end
+
+  # Lua 5.3 §6.7: `math.floor`/`math.ceil` return an integer when the integral
+  # result fits the signed 64-bit range, otherwise the (already integral) float.
+  defp integral_float_result(f) do
+    truncated = trunc(f)
+    if Numeric.signed?(truncated), do: truncated, else: f
   end
 
   # math.fmod(x, y)
@@ -373,6 +438,16 @@ defmodule Lua.VM.Stdlib.Math do
     {[:rand.uniform(m)], state}
   end
 
+  # Lua 5.3 §6.7: the interval `[m, n]` is too large when its span `n - m`
+  # exceeds the signed 64-bit range (e.g. `math.random(minint, 0)`). The span
+  # is computed in unbounded integer arithmetic before the range check so the
+  # overflow is detected rather than silently wrapping.
+  defp math_random([m, n], _state) when is_integer(m) and is_integer(n) and m <= n and n - m > @max_int do
+    raise ArgumentError,
+      function_name: "math.random",
+      details: "interval too large"
+  end
+
   defp math_random([m, n], state) when is_integer(m) and is_integer(n) and m <= n do
     # Returns an integer in [m, n]
     range = n - m + 1
@@ -483,16 +558,22 @@ defmodule Lua.VM.Stdlib.Math do
     raise ArgumentError.value_expected("math.tan", 1)
   end
 
-  # math.tointeger(x)
+  # math.tointeger(x). Returns x as an integer when it has an exact integer
+  # value within the signed 64-bit range, otherwise nil. Strings are coerced
+  # via the standard numeric-string rules (Lua 5.3 `lua_tointegerx`).
   defp math_tointeger([x], state) when is_integer(x) do
     {[x], state}
   end
 
   defp math_tointeger([x], state) when is_float(x) do
-    if Float.floor(x) == x do
-      {[trunc(x)], state}
-    else
-      {[nil], state}
+    {[float_to_integer_or_nil(x)], state}
+  end
+
+  defp math_tointeger([x], state) when is_binary(x) do
+    case Value.parse_number(x) do
+      n when is_integer(n) -> {[n], state}
+      n when is_float(n) -> {[float_to_integer_or_nil(n)], state}
+      _ -> {[nil], state}
     end
   end
 
@@ -502,6 +583,15 @@ defmodule Lua.VM.Stdlib.Math do
 
   defp math_tointeger([], _state) do
     raise ArgumentError.value_expected("math.tointeger", 1)
+  end
+
+  # A float converts to an integer only when it is integral and fits the signed
+  # 64-bit range (the `1.0e308` `math.huge` stand-in does not).
+  defp float_to_integer_or_nil(f) do
+    if Float.floor(f) == f do
+      truncated = trunc(f)
+      if Numeric.signed?(truncated), do: truncated
+    end
   end
 
   # math.type(x)

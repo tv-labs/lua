@@ -208,10 +208,31 @@
   "locals.lua" => [],
   "math.lua" => [
     %{
-      lines: :all,
-      category: :stdlib,
+      lines: 409..422,
+      category: :unimplemented,
       reason:
-        "triage candidate: fails a checkerror near line 47. NB the prior `math.huge is a finite stand-in` reason was inaccurate — `math.huge + 1 == math.huge` and `1/0 == math.huge` both hold with the 1.0e308 value. Real first failure is unclassified; needs a triage pass.",
+        "very-long hex/decimal numerals (2^1200, 16^301) exceed the BEAM IEEE-754 float range (~2^1023), so tonumber and 2.0^exp overflow where PUC-Lua produces a finite or inf result",
+      issue: nil
+    },
+    %{
+      lines: 550..553,
+      category: :unimplemented,
+      reason:
+        "`math.huge % x` should be NaN, but math.huge is the finite 1.0e308 stand-in so the modulo returns a real remainder (no true IEEE infinity on the BEAM)",
+      issue: nil
+    },
+    %{
+      lines: 695..695,
+      category: :unimplemented,
+      reason:
+        "signed-zero division `1/-0.0` should yield -inf; the BEAM does not preserve the sign of zero through division and the inf stand-in is always positive",
+      issue: nil
+    },
+    %{
+      lines: 700..718,
+      category: :unimplemented,
+      reason:
+        "true-infinity arithmetic (math.huge*2+1, inf-inf=NaN) and NaN-keyed table rawset depend on IEEE infinity/NaN the BEAM lacks; math.huge is a finite 1.0e308 stand-in",
       issue: nil
     }
   ],

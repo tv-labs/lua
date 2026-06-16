@@ -843,7 +843,12 @@ defmodule Lua.Lexer do
       end
     else
       {num, ""} = Integer.parse(num_str)
-      {:ok, num}
+      # Lua 5.3.3 §3.1: a decimal integer literal that overflows the signed
+      # 64-bit range converts to a float (a leading sign is a separate token,
+      # so `num` here is always the non-negative magnitude). Hex integer
+      # literals instead wrap via wrap_int64; this branch is decimal only.
+      # @sign_bit is 2^63, i.e. max_int + 1, so `>= @sign_bit` means overflow.
+      if num >= @sign_bit, do: {:ok, num * 1.0}, else: {:ok, num}
     end
   end
 
