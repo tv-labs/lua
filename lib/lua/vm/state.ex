@@ -3,6 +3,7 @@ defmodule Lua.VM.State do
   Runtime state for the Lua VM.
   """
 
+  alias Lua.VFS
   alias Lua.VM.Limits
   alias Lua.VM.RuntimeError
   alias Lua.VM.Table
@@ -56,7 +57,13 @@ defmodule Lua.VM.State do
             # scanned and spec-parsed once, not every call. Threaded in the
             # struct (not ETS/process dictionary) to preserve value semantics;
             # bounded in `Lua.VM.Stdlib.String`.
-            format_cache: %{}
+            format_cache: %{},
+            # The in-memory virtual filesystem backing the sandboxed VM.
+            # Filesystem-touching stdlib (`require`, `loadfile`/`dofile`, `io`,
+            # the file-oriented `os` functions) reads/writes here instead of the
+            # host disk, so a sandboxed script never reaches the real machine.
+            # Seeded by `new/0`; threaded via the `vfs_*` helpers below.
+            vfs: nil
 
   @type t :: %__MODULE__{
           call_stack: list(),
@@ -74,7 +81,8 @@ defmodule Lua.VM.State do
           private: map(),
           multi_return_count: non_neg_integer(),
           g_ref: nil | {:tref, non_neg_integer()},
-          format_cache: %{optional(binary()) => list()}
+          format_cache: %{optional(binary()) => list()},
+          vfs: nil | VFS.t()
         }
 
   @doc """
@@ -86,7 +94,7 @@ defmodule Lua.VM.State do
   def new do
     state = %__MODULE__{}
     {g_ref, state} = alloc_table(state)
-    %{state | g_ref: g_ref}
+    %{state | g_ref: g_ref, vfs: VFS.new()}
   end
 
   @doc """
@@ -300,6 +308,60 @@ defmodule Lua.VM.State do
   def get_userdata(state, {:udref, id}) do
     Map.fetch!(state.userdata, id)
   end
+
+  @doc """
+  Updates userdata in-place via a function.
+
+  Mutable userdata is how `io` file handles carry their cursor: the handle is a
+  `{:udref, _}` whose backing struct is rewritten through this helper as the
+  script reads/writes.
+  """
+  @spec update_userdata(t(), {:udref, non_neg_integer()}, (term() -> term())) :: t()
+  def update_userdata(state, {:udref, id}, fun) do
+    %{state | userdata: Map.update!(state.userdata, id, fun)}
+  end
+
+  @doc """
+  Reads a file from the virtual filesystem.
+
+  Returns `{:ok, contents}` or `{:error, reason}` where `reason` is a tagged
+  atom (`:enoent`/`:eisdir`/`:einval`). Reads do not mutate state, so no state
+  is threaded back.
+  """
+  @spec vfs_read(t(), VFS.path()) :: {:ok, binary()} | {:error, VFS.error()}
+  def vfs_read(%__MODULE__{vfs: vfs}, path), do: VFS.read(vfs, path)
+
+  @doc """
+  Writes a file into the virtual filesystem, threading the updated VFS back.
+
+  Returns `{:ok, state}` or `{:error, reason, state}`.
+  """
+  @spec vfs_write(t(), VFS.path(), binary()) :: {:ok, t()} | {:error, VFS.error(), t()}
+  def vfs_write(%__MODULE__{vfs: vfs} = state, path, contents) do
+    case VFS.write(vfs, path, contents) do
+      {:ok, vfs} -> {:ok, %{state | vfs: vfs}}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  @doc """
+  Removes a file from the virtual filesystem, threading the updated VFS back.
+
+  Returns `{:ok, state}` or `{:error, reason, state}`.
+  """
+  @spec vfs_rm(t(), VFS.path()) :: {:ok, t()} | {:error, VFS.error(), t()}
+  def vfs_rm(%__MODULE__{vfs: vfs} = state, path) do
+    case VFS.rm(vfs, path) do
+      {:ok, vfs} -> {:ok, %{state | vfs: vfs}}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  @doc """
+  Returns `true` when `path` names an existing file or directory in the VFS.
+  """
+  @spec vfs_exists?(t(), VFS.path()) :: boolean()
+  def vfs_exists?(%__MODULE__{vfs: vfs}, path), do: VFS.exists?(vfs, path)
 
   @doc """
   Stores a private value not exposed to Lua.
