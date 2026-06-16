@@ -690,6 +690,25 @@ defmodule Lua.VM.Stdlib.TableTest do
       assert run!(code) == [5, 4, 3, 2, 1]
     end
 
+    test "table.sort comparator drives a __lt metamethod on the elements" do
+      # The default (no-comparator) sort compares only numbers and
+      # strings, so element ordering through a __lt metamethod is only
+      # reachable when the comparator itself uses `<` on the elements.
+      # This pins that the comparator's `<` dispatches __lt and the
+      # elements end up ordered by their `val` field.
+      code = """
+      local tt = {__lt = function(a, b) return a.val < b.val end}
+      local t = {}
+      for i = 1, 5 do
+        t[i] = setmetatable({val = 6 - i}, tt)
+      end
+      table.sort(t, function(a, b) return a < b end)
+      return t[1].val, t[2].val, t[3].val, t[4].val, t[5].val
+      """
+
+      assert run!(code) == [1, 2, 3, 4, 5]
+    end
+
     test "__index as a function metamethod is invoked for table.concat" do
       # When __index is a function (not a table), the stdlib must call
       # it with (proxy, key) and use the returned value.

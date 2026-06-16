@@ -293,7 +293,7 @@
       lines: 260..308,
       category: :performance,
       reason:
-        "50000-element table.sort timing block: the comparator path is O(n^2) and one comparator calls load() (excluded in the sandbox). Sort and metatable-__lt correctness are covered by the perm block above (lines 240-249) and test/lua/vm/stdlib/table_test.exs.",
+        "50000-element table.sort timing block: the comparator path is O(n^2) and one comparator calls load() (excluded in the sandbox). The perm block above (lines 240-249) and test/lua/vm/stdlib/table_test.exs cover plain `<` ordering on numbers/strings and explicit-comparator dispatch (including a comparator that drives a __lt metamethod). The trailing `setmetatable(.., {__lt=..}); table.sort(a)` case is NOT covered: our default (no-comparator) sort compares only numbers and strings and never dispatches __lt, so a default sort over table elements raises 'attempt to compare table with table' instead of ordering through __lt.",
       issue: 262
     }
   ],
