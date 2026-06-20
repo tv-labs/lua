@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- `Lua.encode!/2` now maps Elixir `nil` to Lua `nil` instead of the string
+  `"nil"`. Previously top-level `nil` fell into the atom-encoding head and
+  became `"nil"`, which is truthy in Lua — silently inverting `if not value
+  then ...` checks and breaking `return nil, "reason"` error patterns. The
+  round trip `decode!(encode!(nil))` is now lossless, matching the existing
+  behaviour for `nil` inside tables and function result lists (#374).
+
 ## [1.0.0-rc.3] - 2026-06-15
 
 The fourth release candidate for `1.0.0`. It builds on rc.2 with a

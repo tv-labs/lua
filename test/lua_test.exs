@@ -722,6 +722,23 @@ defmodule LuaTest do
       assert [{1, 1}, {2, 2}] = lua |> Lua.decode!(ref) |> Enum.sort()
     end
 
+    test "it encodes nil to Lua nil rather than the string \"nil\"" do
+      lua = Lua.new()
+
+      # Top-level nil must map to Lua nil, not the truthy string "nil"
+      assert {encoded, lua} = Lua.encode!(lua, nil)
+      assert encoded == nil
+      refute encoded == "nil"
+
+      # Round trip is lossless and symmetric with decode!/2
+      assert nil == Lua.decode!(lua, encoded)
+
+      # The encoded value is falsy inside Lua, so `return nil, "..."` style
+      # error patterns and `if not value then` checks behave correctly.
+      lua = Lua.set!(lua, [:value], encoded)
+      assert {[true], _lua} = Lua.eval!(lua, "return not value")
+    end
+
     test "it raises for values that cannot be encoded" do
       error = "Lua runtime error: Failed to encode {:foo, :bar}"
 
