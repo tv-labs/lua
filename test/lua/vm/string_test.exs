@@ -141,6 +141,47 @@ defmodule Lua.VM.StringTest do
       state = Stdlib.install(State.new())
       assert {:ok, [""], _state} = VM.execute(proto, state)
     end
+
+    # Building the repeated string must allocate proportionally to the result,
+    # not to the repeat count. The previous `Enum.map_join(1..n, ...)`
+    # implementation materialized an n-element list (tens of times the result
+    # size) as transient garbage, spiking the heap and tripping `max_heap_size`
+    # on sandboxed processes for an otherwise modest output. A 16 MB result
+    # comfortably fits a 128 MB cap; the old code blew past 1 GB.
+    test "string.rep allocates proportionally to the result, not the count" do
+      size = 16 * 1024 * 1024
+
+      assert {:ok, result} =
+               heap_capped(128 * 1024 * 1024, fn ->
+                 {[string], _lua} = Lua.eval!(Lua.new(), ~s[return string.rep("x", #{size})])
+                 byte_size(string)
+               end)
+
+      assert result == size
+    end
+  end
+
+  # Runs `fun` in a process whose heap is capped at `byte_limit` (killed if it
+  # exceeds), returning `{:ok, result}` or `:killed`. Lets a test assert that
+  # work stays within a heap budget rather than sampling noisy global memory.
+  defp heap_capped(byte_limit, fun) do
+    parent = self()
+    word_limit = div(byte_limit, :erlang.system_info(:wordsize))
+    cap = %{size: word_limit, kill: true, error_logger: false}
+
+    {pid, ref} =
+      :erlang.spawn_opt(
+        fn -> send(parent, {:result, fun.()}) end,
+        [:monitor, max_heap_size: cap]
+      )
+
+    receive do
+      {:result, result} -> {:ok, result}
+      {:DOWN, ^ref, :process, ^pid, :killed} -> :killed
+      {:DOWN, ^ref, :process, ^pid, reason} -> {:error, reason}
+    after
+      30_000 -> :timeout
+    end
   end
 
   describe "string.reverse" do
