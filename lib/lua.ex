@@ -917,6 +917,14 @@ defmodule Lua do
       true
   """
   @spec encode!(t(), term()) :: {term(), t()}
+  # Elixir `nil` maps to Lua `nil`, mirroring `decode!/2` so the round trip is
+  # lossless. Without this clause `nil` falls into the atom head below and
+  # encodes to the string `"nil"`, which is truthy in Lua and silently inverts
+  # `if not value then ...` checks (e.g. `return nil, "not found"` patterns).
+  def encode!(%__MODULE__{} = lua, nil) do
+    {nil, lua}
+  end
+
   def encode!(%__MODULE__{} = lua, value) when is_atom(value) and not is_boolean(value) do
     {Atom.to_string(value), lua}
   end
