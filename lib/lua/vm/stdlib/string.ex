@@ -217,11 +217,22 @@ defmodule Lua.VM.Stdlib.String do
         # oversized request fails with a catchable error instead of trying to
         # allocate (and OOM the host on) a multi-petabyte binary.
         Limits.check_string_size!(n * byte_size(str) + (n - 1) * byte_size(sep), state.max_string_bytes)
-        Enum.map_join(1..n, sep, fn _ -> str end)
+        build_rep(str, n, sep)
       end
 
     {[result], state}
   end
+
+  # Build the repeated string with allocation proportional to the *result*
+  # size. The obvious `Enum.map_join(1..n, sep, ...)` materializes an
+  # n-element list (plus its iolist) as transient garbage — for a large `n`
+  # that is tens of times the size of the result itself, which spikes the
+  # process heap and trips `max_heap_size` on sandboxed processes (and bloats
+  # the reachable garbage observed through `Lua.call_function!/3`, since that
+  # path returns before the next GC sweeps it). `:binary.copy/2` allocates the
+  # backing binary exactly once, in a single pass.
+  defp build_rep(str, n, ""), do: :binary.copy(str, n)
+  defp build_rep(str, n, sep), do: :binary.copy(str <> sep, n - 1) <> str
 
   # string.reverse(s) - reverses a string byte-by-byte (Lua strings are
   # byte arrays, not codepoint sequences — so a NUL or non-UTF-8 byte
