@@ -227,41 +227,37 @@ defmodule Lua.VM.Value do
 
   Returns `{encoded_value, state}` since encoding maps and lists allocates tables.
   """
-  @spec encode(term(), State.t()) :: {term(), State.t()}
-  def encode(nil, state), do: {nil, state}
-  def encode(value, state) when is_boolean(value), do: {value, state}
-  def encode(value, state) when is_number(value), do: {value, state}
-  def encode(value, state) when is_binary(value), do: {value, state}
-  def encode(value, state) when is_atom(value), do: {Atom.to_string(value), state}
+  @spec encode(term(), State.t(), (fun() -> term())) :: {term(), State.t()}
+  def encode(value, state, fun_wrapper \\ &default_fun_wrapper/1)
+  def encode(nil, state, _fun_wrapper), do: {nil, state}
+  def encode(value, state, _fun_wrapper) when is_boolean(value), do: {value, state}
+  def encode(value, state, _fun_wrapper) when is_number(value), do: {value, state}
+  def encode(value, state, _fun_wrapper) when is_binary(value), do: {value, state}
+  def encode(value, state, _fun_wrapper) when is_atom(value), do: {Atom.to_string(value), state}
 
-  def encode(fun, state) when is_function(fun, 2), do: {{:native_func, fun}, state}
+  def encode(fun, state, fun_wrapper) when is_function(fun, 1) or is_function(fun, 2), do: {fun_wrapper.(fun), state}
 
-  def encode(fun, state) when is_function(fun, 1) do
-    wrapper = fn args, st -> {List.wrap(fun.(args)), st} end
-    {{:native_func, wrapper}, state}
-  end
-
-  def encode({:userdata, value}, state) do
+  def encode({:userdata, value}, state, _fun_wrapper) do
     State.alloc_userdata(state, value)
   end
 
-  def encode(map, state) when is_map(map) do
+  def encode(map, state, fun_wrapper) when is_map(map) do
     {data, state} =
       Enum.reduce(map, {%{}, state}, fn {k, v}, {data, state} ->
         key = if is_atom(k), do: Atom.to_string(k), else: k
-        {encoded_v, state} = encode(v, state)
+        {encoded_v, state} = encode(v, state, fun_wrapper)
         {Map.put(data, key, encoded_v), state}
       end)
 
     State.alloc_table(state, data)
   end
 
-  def encode(list, state) when is_list(list) do
+  def encode(list, state, fun_wrapper) when is_list(list) do
     if keyword_list?(list) do
       {data, state} =
         Enum.reduce(list, {%{}, state}, fn {k, v}, {data, state} ->
           key = Atom.to_string(k)
-          {encoded_v, state} = encode(v, state)
+          {encoded_v, state} = encode(v, state, fun_wrapper)
           {Map.put(data, key, encoded_v), state}
         end)
 
@@ -271,12 +267,21 @@ defmodule Lua.VM.Value do
         list
         |> Enum.with_index(1)
         |> Enum.reduce({%{}, state}, fn {v, idx}, {data, state} ->
-          {encoded_v, state} = encode(v, state)
+          {encoded_v, state} = encode(v, state, fun_wrapper)
           {Map.put(data, idx, encoded_v), state}
         end)
 
       State.alloc_table(state, data)
     end
+  end
+
+  # Default function wrapper, preserving the raw-state calling convention for
+  # low-level callers. `Lua.set!/3` and `Lua.encode!/2` inject their own
+  # wrapper so callbacks receive the public `t:Lua.t/0` instead.
+  defp default_fun_wrapper(fun) when is_function(fun, 2), do: {:native_func, fun}
+
+  defp default_fun_wrapper(fun) when is_function(fun, 1) do
+    {:native_func, fn args, st -> {List.wrap(fun.(args)), st} end}
   end
 
   @doc """
