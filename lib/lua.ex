@@ -303,67 +303,11 @@ defmodule Lua do
     raise Lua.RuntimeException, "Lua.set!/3 cannot have empty keys"
   end
 
-  def set!(%__MODULE__{} = lua, keys, func) when is_function(func, 1) do
+  def set!(%__MODULE__{} = lua, keys, func) when is_function(func, 1) or is_function(func, 2) do
     keys = keys |> List.wrap() |> Enum.map(&to_lua_key/1)
+    {function_name, scope} = List.pop_at(keys, -1)
 
-    wrapped =
-      {:native_func,
-       fn args, state ->
-         return = List.wrap(func.(args))
-
-         if not Util.list_encoded?(return) do
-           {function_name, scope} = List.pop_at(keys, -1)
-
-           raise Lua.RuntimeException,
-             function: function_name,
-             scope: scope,
-             message: "deflua functions must return encoded data, got #{inspect(return)}"
-         end
-
-         {return, state}
-       end}
-
-    state = do_set_nested(lua.state, keys, wrapped)
-    %{lua | state: state}
-  end
-
-  def set!(%__MODULE__{} = lua, keys, func) when is_function(func, 2) do
-    keys = keys |> List.wrap() |> Enum.map(&to_lua_key/1)
-
-    wrapped =
-      {:native_func,
-       fn args, state ->
-         {function_name, scope} = List.pop_at(keys, -1)
-
-         case func.(args, wrap(state)) do
-           {:error, reason, %__MODULE__{} = returned_lua} ->
-             raise RuntimeError, value: reason, state: returned_lua.state
-
-           {value, %__MODULE__{} = lua} ->
-             value = List.wrap(value)
-
-             if not Util.list_encoded?(value) do
-               raise Lua.RuntimeException,
-                 function: function_name,
-                 scope: scope,
-                 message: "deflua functions must return encoded data, got #{inspect(value)}"
-             end
-
-             {value, lua.state}
-
-           value ->
-             value = List.wrap(value)
-
-             if not Util.list_encoded?(value) do
-               raise Lua.RuntimeException,
-                 function: function_name,
-                 scope: scope,
-                 message: "deflua functions must return encoded data, got #{inspect(value)}"
-             end
-
-             {value, state}
-         end
-       end}
+    wrapped = wrap_callback(func, function_name, scope)
 
     state = do_set_nested(lua.state, keys, wrapped)
     %{lua | state: state}
@@ -372,12 +316,13 @@ defmodule Lua do
   def set!(%__MODULE__{} = lua, keys, value) do
     keys = keys |> List.wrap() |> Enum.map(&to_lua_key/1)
     value = Display.unwrap(value)
+    {function_name, scope} = List.pop_at(keys, -1)
 
     {encoded, state} =
       if Util.encoded?(value) do
         {value, lua.state}
       else
-        Value.encode(value, lua.state)
+        Value.encode(value, lua.state, &wrap_callback(&1, function_name, scope))
       end
 
     state = do_set_nested(state, keys, encoded)
@@ -935,7 +880,7 @@ defmodule Lua do
     if Util.encoded?(value) do
       {value, lua}
     else
-      {encoded, state} = Value.encode(value, state)
+      {encoded, state} = Value.encode(value, state, &wrap_callback(&1, :anonymous, []))
       {encoded, %{lua | state: state}}
     end
   rescue
@@ -1214,6 +1159,53 @@ defmodule Lua do
   end
 
   defp wrap(state), do: %__MODULE__{state: state}
+
+  # Builds the `{:native_func, closure}` for a user-supplied Elixir callback.
+  #
+  # Both arities speak the documented `t:Lua.t/0` convention at the VM
+  # boundary: the raw `Lua.VM.State` handed in by the executor is wrapped as a
+  # `%Lua{}` for the callback, the returned `%Lua{}` is unwrapped back to its
+  # raw `.state`, and returns are validated as encoded. Sharing one builder
+  # keeps `Lua.set!/3` at a path, functions nested inside a `set!` value, and
+  # `Lua.encode!/2` on the same convention. `function_name`/`scope` feed only
+  # the error message.
+  defp wrap_callback(func, function_name, scope) when is_function(func, 1) do
+    {:native_func,
+     fn args, state ->
+       return = List.wrap(func.(args))
+       validate_encoded!(return, function_name, scope)
+       {return, state}
+     end}
+  end
+
+  defp wrap_callback(func, function_name, scope) when is_function(func, 2) do
+    {:native_func,
+     fn args, state ->
+       case func.(args, wrap(state)) do
+         {:error, reason, %__MODULE__{} = returned_lua} ->
+           raise RuntimeError, value: reason, state: returned_lua.state
+
+         {value, %__MODULE__{} = lua} ->
+           value = List.wrap(value)
+           validate_encoded!(value, function_name, scope)
+           {value, lua.state}
+
+         value ->
+           value = List.wrap(value)
+           validate_encoded!(value, function_name, scope)
+           {value, state}
+       end
+     end}
+  end
+
+  defp validate_encoded!(value, function_name, scope) do
+    if not Util.list_encoded?(value) do
+      raise Lua.RuntimeException,
+        function: function_name,
+        scope: scope,
+        message: "deflua functions must return encoded data, got #{inspect(value)}"
+    end
+  end
 
   defp to_lua_key(key) when is_atom(key), do: Atom.to_string(key)
   defp to_lua_key(key) when is_binary(key), do: key
