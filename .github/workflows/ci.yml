@@ -22,7 +22,9 @@ jobs:
       matrix:
         include:
           - elixir: "1.19.0"
-            otp: "28.0"
+            # 28.1+, not 28.0: Hex 2.5.0 (setup-beam's autoinstalled default)
+            # calls :re.import/1, which only exists in OTP 28.1+.
+            otp: "28.1"
             bootstrap_beam: false
           # OTP 29 RC's :httpc can't reach builds.hex.pm, so we tell setup-beam
           # to skip Hex/Rebar autoinstall and curl them ourselves below.
@@ -92,7 +94,9 @@ jobs:
       matrix:
         include:
           - elixir: "1.19.0"
-            otp: "28.0"
+            # 28.1+, not 28.0: Hex 2.5.0 (setup-beam's autoinstalled default)
+            # calls :re.import/1, which only exists in OTP 28.1+.
+            otp: "28.1"
             bootstrap_beam: false
 
     steps:
@@ -126,7 +130,9 @@ jobs:
       matrix:
         include:
           - elixir: "1.19.0"
-            otp: "28.0"
+            # 28.1+, not 28.0: Hex 2.5.0 (setup-beam's autoinstalled default)
+            # calls :re.import/1, which only exists in OTP 28.1+.
+            otp: "28.1"
             bootstrap_beam: false
 
     steps:
@@ -224,7 +230,9 @@ jobs:
       matrix:
         include:
           - elixir: "1.19.0"
-            otp: "28.0"
+            # 28.1+, not 28.0: Hex 2.5.0 (setup-beam's autoinstalled default)
+            # calls :re.import/1, which only exists in OTP 28.1+.
+            otp: "28.1"
             bootstrap_beam: false
 
     steps:
