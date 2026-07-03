@@ -150,7 +150,8 @@ and raise catchable runtime errors, so `pcall` recovers from them in-band:
     iex> message =~ "instruction budget exceeded"
     true
 
-See the [Sandboxing guide](guides/examples/sandboxing.livemd) for details.
+See the runnable [Sandboxing example](guides/examples/sandboxing.livemd), or
+the [Security and sandboxing](guides/sandboxing.md) guide, for details.
 
 ### Metatables and metamethods
 
@@ -188,21 +189,21 @@ deliberate non-goal rather than a missing feature:
 
 For the live Lua 5.3 official test-suite pass count and the rationale behind
 each deferral, see the
-[`ROADMAP.md`](https://github.com/tv-labs/lua/blob/main/ROADMAP.md). This
-release is `1.0.0-rc.0`.
+[`ROADMAP.md`](https://github.com/tv-labs/lua/blob/main/ROADMAP.md).
 
 ## Examples
 
-Runnable, end-to-end scripts live in
-[`examples/`](https://github.com/tv-labs/lua/blob/main/examples/README.md). Run
-any of them with `mix run examples/<name>.exs`:
+End-to-end, runnable [Livebook](https://livebook.dev) notebooks live in
+[`guides/examples/`](https://github.com/tv-labs/lua/tree/main/guides/examples).
+Open any of them in Livebook, or read them rendered under **Examples** on
+[HexDocs](https://hexdocs.pm/lua):
 
-- [`examples/01_quickstart.exs`](https://github.com/tv-labs/lua/blob/main/examples/01_quickstart.exs) — eval some Lua and get the result.
-- [`examples/02_userdata.exs`](https://github.com/tv-labs/lua/blob/main/examples/02_userdata.exs) — pass an Elixir struct as userdata and call methods on it from Lua.
-- [`examples/03_custom_stdlib.exs`](https://github.com/tv-labs/lua/blob/main/examples/03_custom_stdlib.exs) — add an Elixir-defined function to the state and call it from Lua.
-- [`examples/04_sandboxing.exs`](https://github.com/tv-labs/lua/blob/main/examples/04_sandboxing.exs) — the default sandbox plus allowing specific `os.*` ops explicitly.
-- [`examples/05_chunks.exs`](https://github.com/tv-labs/lua/blob/main/examples/05_chunks.exs) — compile once, eval many times.
-- [`examples/06_error_handling.exs`](https://github.com/tv-labs/lua/blob/main/examples/06_error_handling.exs) — `pcall`, structured exception fields, source/line attribution.
+- [`quickstart.livemd`](https://github.com/tv-labs/lua/blob/main/guides/examples/quickstart.livemd) — eval some Lua and get the result.
+- [`userdata.livemd`](https://github.com/tv-labs/lua/blob/main/guides/examples/userdata.livemd) — pass an Elixir struct as userdata and call methods on it from Lua.
+- [`custom_stdlib.livemd`](https://github.com/tv-labs/lua/blob/main/guides/examples/custom_stdlib.livemd) — add an Elixir-defined function to the state and call it from Lua.
+- [`sandboxing.livemd`](https://github.com/tv-labs/lua/blob/main/guides/examples/sandboxing.livemd) — the default sandbox plus allowing specific `os.*` ops explicitly.
+- [`chunks.livemd`](https://github.com/tv-labs/lua/blob/main/guides/examples/chunks.livemd) — compile once, eval many times.
+- [`error_handling.livemd`](https://github.com/tv-labs/lua/blob/main/guides/examples/error_handling.livemd) — `pcall`, structured exception fields, source/line attribution.
 
 ## Documentation
 

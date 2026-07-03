@@ -60,7 +60,7 @@ defmodule Lua.API do
       end
 
   If you don't need to write Elixir, but want to execute some Lua
-  to setup global variables, modify state, or expose some additonal
+  to setup global variables, modify state, or expose some additional
   APIs, you can simply return a Lua chunk directly using the `c` modifier
   on `Lua.sigil_LUA/2`
 
@@ -190,27 +190,27 @@ defmodule Lua.API do
 
       deflua get_value(key), state do
         # Access the Lua environment
-        Lua.get!(lua, [key])
+        Lua.get!(state, [key])
       end
 
   To modify and return new state, return a tuple
 
       deflua set_value(key, value), state do
         # Return nothing but modify the state
-        {[], Lua.set!(lua, [key])}
+        {[], Lua.set!(state, [key], value)}
       end
 
   ## Using guards
 
   Since `deflua` uses non-conventional syntax to receive the current state, make sure
-  you specifiy the `when` clause and guards first, e.g.
+  you specify the `when` clause and guards first, e.g.
 
       deflua set_int(key, value) when is_integer(value), state do
         # Return nothing but modify the state
         {[], Lua.set!(state, [key])}
       end
 
-  Specifyiing the `when` clause and guards last will result in a confusing error message.
+  Specifying the `when` clause and guards last will result in a confusing error message.
 
   ## Variadic functions
 
@@ -226,7 +226,7 @@ defmodule Lua.API do
         IO.puts(Enum.join(args, " "))
       end
 
-  > #### @variadic behavior {: .neutal}
+  > #### @variadic behavior {: .neutral}
   > When using the `@variadic` attribute, note that it is per-function. `Lua` will
   > reset this attribute after every function definition, so there is no need to
   > manually reset it yourself

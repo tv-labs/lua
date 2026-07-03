@@ -31,7 +31,7 @@ the standard library:
   `loadstring`, `dofile`
 
 Everything else — `string`, `table`, `math`, `utf8`, the `debug`
-library, metatables, coroutity-free control flow — remains available.
+library, metatables, coroutine-free control flow — remains available.
 
 ```elixir
 # os.exit is sandboxed by default
@@ -72,7 +72,7 @@ lua = Lua.new(sandboxed: [])
 ### Sandboxing a single path
 
 `Lua.sandbox/2` sandboxes one path on an existing VM, which is handy when
-building a configuration up in instruction_count:
+building a configuration up in stages:
 
 ```elixir
 lua =
