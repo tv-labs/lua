@@ -2,10 +2,10 @@
 id: A49
 title: "Docs sync for 1.0.0: roadmap, changelog, guides, README true-up"
 issue: null
-pr: null
+pr: 381
 branch: docs/release-docs-sync
 base: main
-status: in_progress
+status: review
 direction: A
 ---
 
@@ -59,3 +59,19 @@ mix docs --warnings-as-errors
 ## Risks
 
 - Concurrent API-PR CHANGELOG conflict — kept small via labeled subsections.
+
+## What changed
+
+PR #381. Files touched: `ROADMAP.md`, `CHANGELOG.md`, `README.md`,
+`guides/sandboxing.md`, `guides/mix_tasks.md`, `lib/lua.ex`,
+`lib/lua/runtime_exception.ex`, `tasks/lua.suite.ex`,
+`test/lua_test.exs`, `test/lua/parser/error_unit_test.exs`, and the
+`B17` / `A33` plan files.
+
+Discoveries:
+- The `mix lua.suite` task moduledoc (`tasks/lua.suite.ex`) carried the
+  same stale `@ready_tests` reference and sample output as the guide, so
+  it was fixed alongside item 7 — same doc-only class, no behavior change.
+- The canonical suite count (20/29, skip ranges applied) differs from the
+  raw `mix lua.suite` count (9/17/3, no skips); the guide now distinguishes
+  them explicitly.
