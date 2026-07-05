@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+<!-- A50: API pre-freeze fixes — breaking-before-1.0 changes are called out
+     explicitly so they never surprise anyone after the surface freezes. -->
+
+### Changed (breaking, before 1.0 freeze)
+- Encoding a bare Elixir struct now raises. Previously `Lua.encode!/2` (and
+  `Lua.set!/3`) matched a struct as a plain map and silently encoded a Lua
+  table carrying a `"__struct__"` key — a lossy, accidental conversion.
+  Convert structs explicitly first (e.g. `Map.from_struct/1`), selecting the
+  fields Lua needs. This lands before 1.0 so the planned `Lua.Encoder`
+  protocol (#341) can be added without breaking a behaviour people relied on.
+- Removed the `is_mfa` guard from `Lua.API`. It was a Luerl-era compatibility
+  shim that always returned `false` and was imported into every `use Lua.API`
+  module; the VM has no MFA references. Remove any `when is_mfa(value)` clauses
+  (they never matched).
+
+### Changed
+- `Lua.new/1`'s `:max_string_bytes` now accepts `:infinity` for no limit,
+  making it uniform with its siblings `:max_call_depth` and
+  `:max_instructions`.
+- `Lua.CompilerException` no longer has a `:state` field. It was never
+  populated (always `nil`); `:errors` carries all the formatted diagnostics.
+
 ### Fixed
+- `Lua.eval!/3` now accepts a `:source` option when evaluating a pre-compiled
+  `Lua.Chunk`, matching the string-script clause. Previously
+  `eval!(lua, chunk, source: "x")` raised via `Keyword.validate!`. For a chunk
+  the option is accepted but ignored — the chunk already carries the source
+  name it was compiled with.
 - `Lua.encode!/2` now maps Elixir `nil` to Lua `nil` instead of the string
   `"nil"`. Previously top-level `nil` fell into the atom-encoding head and
   became `"nil"`, which is truthy in Lua — silently inverting `if not value

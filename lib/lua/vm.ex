@@ -1,8 +1,12 @@
 defmodule Lua.VM do
   @moduledoc """
-  Public API for the Lua Virtual Machine.
+  Internal entry point for the Lua Virtual Machine — executes compiled
+  prototypes.
 
-  Executes compiled Lua prototypes.
+  This module is not part of the public, stable API (it is filtered out of
+  the published HexDocs) and is kept readable for source readers and IEx
+  exploration only. Reach for `Lua.eval!/2` and friends instead; its shape
+  may change between releases without notice.
   """
 
   alias Lua.Compiler.Prototype
@@ -17,7 +21,8 @@ defmodule Lua.VM do
   ## Options
 
     * `:reset_instructions` - (default `true`) reset the `:max_instructions` instruction
-      tally to 0 before executing. True at a genuine top-level evaluation
+      tally to 0 before executing. This is internal require-reentrancy
+      machinery, not user API. It is `true` at a genuine top-level evaluation
       (`Lua.eval`/`eval!`). Internal re-entries that run mid-evaluation —
       notably `require`, which loads and runs a module's chunk through this
       function — must pass `false` so the module body accumulates against the

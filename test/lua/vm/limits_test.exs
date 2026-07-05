@@ -100,11 +100,22 @@ defmodule Lua.VM.LimitsTest do
     end
 
     test "rejects non-positive and non-integer values" do
-      for bad <- [0, -1, :infinity, "16m", 1.5] do
-        assert_raise ArgumentError, ~r/:max_string_bytes must be a positive integer/, fn ->
+      for bad <- [0, -1, "16m", 1.5] do
+        assert_raise ArgumentError, ~r/:max_string_bytes must be a positive integer or :infinity/, fn ->
           Lua.new(max_string_bytes: bad)
         end
       end
+    end
+
+    test "accepts :infinity to disable the ceiling, uniform with its siblings" do
+      # `:infinity` is a valid value (like `:max_call_depth`/`:max_instructions`)
+      # and lifts the string-size guard entirely.
+      unbounded = Lua.new(sandboxed: [], max_string_bytes: :infinity)
+
+      # A build that trips the 1 KB ceiling above succeeds with no limit.
+      assert {[8192], _} = Lua.eval!(unbounded, ~s|return #string.rep("x", 8192)|)
+      assert {[result], _} = Lua.eval!(unbounded, ~s|return string.rep("x", 4) .. "y"|)
+      assert result == "xxxxy"
     end
   end
 

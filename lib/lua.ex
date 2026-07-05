@@ -105,7 +105,8 @@ defmodule Lua do
   * `:max_string_bytes` - (default 256 MiB) ceiling for any single string the VM will build,
     whether via `..`, `string.rep`, or a `load` reader. An oversized result raises a catchable
     `"resulting string too large"` error — the size is computed *before* allocating, so the
-    bomb is refused rather than detected after the fact. Accepts a positive integer.
+    bomb is refused rather than detected after the fact. Accepts a positive integer or
+    `:infinity` for no limit (matching `:max_call_depth` and `:max_instructions`).
 
     When running the VM inside a process capped with `:max_heap_size`, set this comfortably
     below the heap cap: the default ceiling permits strings large enough to trip a smaller
@@ -169,11 +170,12 @@ defmodule Lua do
           ":max_call_depth must be a positive integer or :infinity, got: #{inspect(other)}"
   end
 
+  defp validate_max_string_bytes!(:infinity), do: :infinity
   defp validate_max_string_bytes!(bytes) when is_integer(bytes) and bytes > 0, do: bytes
 
   defp validate_max_string_bytes!(other) do
     raise ArgumentError,
-          ":max_string_bytes must be a positive integer, got: #{inspect(other)}"
+          ":max_string_bytes must be a positive integer or :infinity, got: #{inspect(other)}"
   end
 
   defp validate_max_instructions!(:infinity), do: :infinity
@@ -475,7 +477,9 @@ defmodule Lua do
                 Pass `decode: false` as an option to return encoded values
   * `:source` - (default `"<eval>"`) Source name attached to the compiled chunk. Surfaces in
                 runtime errors as `at <source>:<line>:` and in stack traces. Pick a name that
-                identifies where this script came from (e.g. `"my_script.lua"`).
+                identifies where this script came from (e.g. `"my_script.lua"`). When the script
+                is a pre-compiled `t:Lua.Chunk.t/0`, `:source` is accepted but ignored — the
+                chunk already carries the source name it was compiled with.
   """
   @spec eval!(String.t() | Lua.Chunk.t()) :: {[term()], t()}
   @spec eval!(t() | String.t() | Lua.Chunk.t(), String.t() | Lua.Chunk.t() | keyword()) ::
@@ -540,7 +544,10 @@ defmodule Lua do
   end
 
   def eval!(%__MODULE__{state: state} = lua, %Lua.Chunk{prototype: proto}, opts) do
-    opts = Keyword.validate!(opts, decode: true)
+    # `:source` is accepted for symmetry with the string clause but ignored: a
+    # chunk was already compiled with its source name baked into the prototype,
+    # and that name wins. Pass `:source` at `load_chunk!/2`/compile time to set it.
+    opts = Keyword.validate!(opts, decode: true, source: nil)
 
     {:ok, results, new_state} = Lua.VM.execute(proto, state)
 
@@ -698,6 +705,26 @@ defmodule Lua do
       iex> ret
       42
 
+  ## Errors
+
+  When the function raises, `call_function/3` returns `{:error, reason, lua}`.
+  Unlike the raising `call_function!/3`, `reason` is the raw Lua-facing error
+  value — exactly what `pcall` would hand back — not a terminal-formatted
+  message. A non-string error value passes through verbatim:
+
+      iex> {[ref], lua} = Lua.eval!(Lua.new(), "return function() error(42) end", decode: false)
+      iex> {:error, reason, _lua} = Lua.call_function(lua, ref, [])
+      iex> reason
+      42
+
+  A string passed to `error` comes back with Lua's `source:line:` position
+  prefix as a single-line string (no ANSI, no `"Lua runtime error:"` header):
+
+      iex> {[ref], lua} = Lua.eval!(Lua.new(), "return function() error('boom') end", decode: false)
+      iex> {:error, reason, _lua} = Lua.call_function(lua, ref, [])
+      iex> reason =~ "boom"
+      true
+
   """
   @spec call_function(t(), term(), [term()]) ::
           {:ok, [term()], t()} | {:error, term(), t()}
@@ -848,6 +875,13 @@ defmodule Lua do
   Useful when you need to pass an `eval`-returned closure or table
   reference to a tool that expects the raw VM tag (for example, an
   internal helper or a custom `deflua`).
+
+  > #### Tag tuples are not stable API {: .warning}
+  > The `{:tref, _}`, `{:lua_closure, _, _}`, `{:compiled_closure, _, _}`, and
+  > `{:native_func, _}` shapes returned here are VM internals and may change
+  > between releases. Use the `Lua.API` guards (`is_table/1`, `is_lua_func/1`,
+  > `is_erl_func/1`, `is_userdata/1`) to classify unwrapped values rather than
+  > pattern-matching the tuples directly.
   """
   @spec unwrap(term()) :: term()
   defdelegate unwrap(value), to: Display

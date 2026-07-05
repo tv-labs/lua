@@ -102,8 +102,7 @@ defmodule Lua.API do
           is_table: 1,
           is_userdata: 1,
           is_lua_func: 1,
-          is_erl_func: 1,
-          is_mfa: 1
+          is_erl_func: 1
         ]
 
       Module.register_attribute(__MODULE__, :lua_function, accumulate: true)
@@ -139,6 +138,12 @@ defmodule Lua.API do
 
   @doc """
   Is the value a reference to a Lua function?
+
+  > #### Internal tuple shape {: .warning}
+  > The `:lua_closure` / `:compiled_closure` tags this guard checks are VM
+  > internals and are **not** part of the stable API — they may change between
+  > releases. Match with this guard; do not pattern-match the tag tuples
+  > directly.
   """
   defguard is_lua_func(value)
            when is_tuple(value) and tuple_size(value) == 3 and
@@ -146,16 +151,14 @@ defmodule Lua.API do
 
   @doc """
   Is the value a reference to an Erlang / Elixir function?
+
+  > #### Internal tuple shape {: .warning}
+  > The `:native_func` tag this guard checks is a VM internal and is **not**
+  > part of the stable API. Match with this guard; do not pattern-match the tag
+  > tuple directly.
   """
   defguard is_erl_func(value)
            when is_tuple(value) and tuple_size(value) == 2 and elem(value, 0) == :native_func
-
-  @doc """
-  Is the value a reference to an Erlang / Elixir mfa?
-
-  Note: MFA references are not used in the new VM. This guard always returns false.
-  """
-  defguard is_mfa(_value) when false
 
   @doc """
   Raises a runtime exception inside an API function, displaying contextual
