@@ -241,6 +241,18 @@ defmodule Lua.VM.Value do
     State.alloc_userdata(state, value)
   end
 
+  # Structs are maps, so without this clause a bare `%MyStruct{}` would encode
+  # to a Lua table carrying a `"__struct__"` key — a silent, lossy conversion.
+  # Refuse it explicitly: the caller must decide how the struct maps to a Lua
+  # value. Protocol-based struct encoding is planned (see issue #341); raising
+  # now keeps that future addition additive rather than a breaking change.
+  def encode(%mod{}, _state, _fun_wrapper) do
+    raise Lua.RuntimeException,
+          "cannot encode #{inspect(mod)} struct into a Lua value. Convert it to a " <>
+            "plain map first (e.g. `Map.from_struct/1`), selecting only the fields " <>
+            "Lua needs. Protocol-based struct encoding is planned (issue #341)."
+  end
+
   def encode(map, state, fun_wrapper) when is_map(map) do
     {data, state} =
       Enum.reduce(map, {%{}, state}, fn {k, v}, {data, state} ->

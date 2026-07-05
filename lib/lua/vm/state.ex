@@ -62,7 +62,7 @@ defmodule Lua.VM.State do
           call_stack: list(),
           call_depth: non_neg_integer(),
           max_call_depth: pos_integer() | :infinity,
-          max_string_bytes: pos_integer(),
+          max_string_bytes: pos_integer() | :infinity,
           max_instructions: pos_integer() | :infinity,
           instruction_count: non_neg_integer(),
           metatables: map(),

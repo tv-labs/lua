@@ -370,8 +370,7 @@ defmodule Lua.APITest do
   describe "guards" do
     @tag :pending
     test "can use in functions" do
-      # Requires userdata support, string.lower (mfa), and is_userdata/is_mfa guards
-      # (currently stubbed as `when false`).
+      # Requires userdata support and the is_userdata guard.
       # Original implementation:
       # assert [{module, _}] =
       #          Code.compile_string("""
@@ -392,10 +391,6 @@ defmodule Lua.APITest do
       #
       #            deflua type(value) when is_erl_func(value) do
       #              "erl function"
-      #            end
-      #
-      #            deflua type(value) when is_mfa(value) do
-      #              "mfa"
       #            end
       #
       #            deflua type(_value) do
@@ -419,7 +414,6 @@ defmodule Lua.APITest do
       #          """)
       #
       # assert {["erl function"], _} = Lua.eval!(lua, "return guard.type(guard.type)")
-      # assert {["mfa"], _} = Lua.eval!(lua, "return guard.type(string.lower)")
       # assert {["other"], _} = Lua.eval!(lua, "return guard.type(5)")
     end
   end

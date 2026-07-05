@@ -236,6 +236,16 @@ defmodule LuaTest do
       assert {[10], _} = Lua.eval!(lua, ~LUA"return sum(1, 2, 3, 4)"c)
     end
 
+    test "it accepts a :source option when evaluating a chunk, matching the string clause" do
+      chunk = ~LUA[return 2 + 2]c
+
+      # `:source` is accepted for symmetry with the string clause (previously
+      # this raised via Keyword.validate!). The chunk's compiled-in source
+      # name wins, so the option is accepted but has no effect.
+      assert {[4], %Lua{}} = Lua.eval!(Lua.new(), chunk, source: "my_script.lua")
+      assert {[4], %Lua{}} = Lua.eval!(Lua.new(), chunk, decode: true, source: "x")
+    end
+
     test "it can register functions with two arguments that receive state" do
       foo = 22
       my_table = %{"a" => 1, "b" => 2}
@@ -753,6 +763,43 @@ defmodule LuaTest do
       assert_raise Lua.RuntimeException, error, fn ->
         Lua.decode!(Lua.new(), {})
       end
+    end
+
+    test "it raises a helpful error for a bare struct" do
+      assert_raise Lua.RuntimeException, ~r/cannot encode Date struct/, fn ->
+        Lua.encode!(Lua.new(), ~D[2024-01-01])
+      end
+
+      # The message points at the explicit conversion and the planned protocol.
+      err =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.encode!(Lua.new(), ~D[2024-01-01])
+        end
+
+      assert Exception.message(err) =~ "Map.from_struct/1"
+      assert Exception.message(err) =~ "#341"
+    end
+
+    test "a struct nested inside a map also raises" do
+      assert_raise Lua.RuntimeException, ~r/cannot encode Date struct/, fn ->
+        Lua.encode!(Lua.new(), %{when: ~D[2024-01-01]})
+      end
+    end
+
+    test "Lua.set!/3 with a bare struct raises the same helpful error" do
+      assert_raise Lua.RuntimeException, ~r/cannot encode Date struct/, fn ->
+        Lua.set!(Lua.new(), [:d], ~D[2024-01-01])
+      end
+    end
+
+    test "converting a struct with Map.from_struct/1 encodes cleanly" do
+      map = Map.from_struct(~D[2024-01-01])
+
+      assert {{:tref, _} = ref, lua} = Lua.encode!(Lua.new(), map)
+      decoded = lua |> Lua.decode!(ref) |> Enum.sort()
+      assert {"day", 1} in decoded
+      assert {"month", 1} in decoded
+      assert {"year", 2024} in decoded
     end
   end
 

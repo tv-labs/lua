@@ -5,7 +5,7 @@ defmodule Lua.CompilerException do
   """
   alias Lua.Util
 
-  defexception [:errors, :state]
+  defexception [:errors]
 
   def exception(formatted: errors) when is_list(errors) do
     %__MODULE__{errors: errors}

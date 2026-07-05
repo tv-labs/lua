@@ -46,7 +46,11 @@ defmodule Lua.VM.Limits do
   bound here). Raises a catchable "resulting string too large" runtime
   error otherwise.
   """
-  @spec check_string_size!(integer(), pos_integer()) :: :ok
+  # `max` may be `:infinity` (from `Lua.new(max_string_bytes: :infinity)`).
+  # Erlang term ordering places every number below every atom, so an integer
+  # `bytes <= :infinity` is always true and the check passes unconditionally —
+  # no separate clause is needed.
+  @spec check_string_size!(integer(), pos_integer() | :infinity) :: :ok
   def check_string_size!(bytes, max \\ @max_string_bytes)
 
   def check_string_size!(bytes, max) when is_integer(bytes) and bytes <= max, do: :ok
