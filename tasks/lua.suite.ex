@@ -11,12 +11,12 @@ defmodule Mix.Tasks.Lua.Suite do
   > are downloaded into this repo via `mix lua.get_tests` and are not
   > part of the Hex package.
 
-  Unlike `mix test --only lua53`, this task does not consult the
-  hand-curated `@ready_tests` / `@deferred_permanent` lists in
-  `test/lua53_suite_test.exs`. It runs every file and reports
-  whatever happens, which makes it useful for spotting newly-passing
-  files (candidates to promote) and for sanity-checking the suite
-  set during development.
+  Unlike `mix test --only lua53`, this task does not apply the per-file
+  skip ranges in `test/lua53_skips.exs` or the `@deferred_permanent`
+  list in `test/lua53_suite_test.exs`. It runs every file raw and
+  reports whatever happens, which makes it useful for spotting files
+  whose skip ranges could be narrowed or removed, and for
+  sanity-checking the suite set during development.
 
   ## Usage
 
@@ -45,16 +45,16 @@ defmodule Mix.Tasks.Lua.Suite do
 
   ## Output
 
-  A summary like:
+  A summary like (raw run — no skip ranges applied):
 
-      passing: 6
-      failing: 23
-      skipped: 0
+      passing: 9
+      failing: 17
+      timeout: 3
 
-      passing files: api, bitwise, code, simple_test, tpack, vararg
+      passing files: api, bitwise, code, locals, nextvar, simple_test, tpack, utf8, vararg
       failing files (top reason):
-        attrib.lua          'require' is sandboxed
-        big.lua             attempt to compare a string with a number
+        all.lua             loadfile(_) is sandboxed
+        math.lua            bad argument in arithmetic expression
         ...
 
   ## Exit codes

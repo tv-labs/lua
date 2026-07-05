@@ -54,7 +54,11 @@ read them back:
 Runtime errors raise `Lua.RuntimeException`, which carries the failing
 `:source` and `:line` so you can report exactly where a script broke:
 
+The `~LUA` sigil used below (and elsewhere in this tour) needs `import Lua`:
+
 ```elixir
+import Lua
+
 try do
   Lua.eval!(~LUA"""
   local x = 1
@@ -175,15 +179,19 @@ Lua object patterns work as written:
 `Lua` targets Lua 5.3. The lexer, parser, register-based VM, value
 encoding/decoding, varargs, multiple returns, `_G`/`_ENV`, metatables, the
 string-pattern engine (`find`/`match`/`gmatch`/`gsub`), and the `string`,
-`table`, `math`, `os`, and `debug` standard libraries are implemented.
+`table`, `math`, `os`, `utf8`, and `debug` standard libraries are implemented.
 
 As a sandboxed *embedded* VM, some standalone-interpreter behavior is a
 deliberate non-goal rather than a missing feature:
 
 - **Standalone interpreter / `os.execute`** — there is no shell-out to the host.
-- **Host filesystem access** — `Lua` does not read your host filesystem. The
-  `io.*` library and `require`/`dofile` are sandboxed by default and raise
-  rather than touching disk; there is no host-OS file or module resolution.
+- **Host filesystem access is deny-by-default** — `Lua` does not read your
+  host filesystem unless you opt in. The `io.*` library and `require`/`dofile`
+  are sandboxed by default and raise rather than touching disk, so out of the
+  box there is no host-OS file or module resolution. When you *want* it, you
+  enable it explicitly: `Lua.set_lua_paths/2` configures where `require`
+  resolves modules on disk, and `Lua.load_file!/2` loads a Lua file from the
+  host.
 - **Coroutines**, **garbage collection / weak tables**, and the **full
   `debug` library**.
 

@@ -2,21 +2,25 @@
 
 This is the strategic overview. For per-PR detail, see [`.agents/plans/`](.agents/plans).
 
-## Status: 2026-06-15
+## Status: 2026-07-05
 
-- **Version**: `1.0.0-rc.3` shipped (rc.0–rc.3 all released).
-- **Lua 5.3 official suite**: 17/29 files passing. 8 fully clean
-  (`api`, `bitwise`, `code`, `nextvar`, `simple_test`, `tpack`, `utf8`,
-  `vararg`) plus 9 passing with documented skip-ranges (`all`, `calls`,
-  `constructs`, `events`, `gc`, `goto`, `literals`, `locals`, `pm`). 4
-  deliberate non-goals (`main`, `files`, `attrib`, `verybig`). 8 still
-  whole-file-skipped pending triage (`big`, `closure`, `coroutine`,
-  `db`, `errors`, `math`, `sort`, `strings`).
+- **Version**: `1.0.0-rc.3` shipped (rc.0–rc.3 all released); `1.0.0`
+  final is pending the release cut.
+- **Lua 5.3 official suite**: 20/29 files passing. 9 fully clean
+  (`api`, `bitwise`, `code`, `locals`, `nextvar`, `simple_test`, `tpack`,
+  `utf8`, `vararg`) plus 11 passing with documented skip-ranges (`all`,
+  `calls`, `constructs`, `events`, `gc`, `goto`, `literals`, `math`,
+  `pm`, `sort`, `strings`). The remaining 9 are the documented
+  exclusions: 5 whole-file skips (`big`, `closure` — perf-bound, revisit
+  in 1.0.x; `coroutine`, `db` — capability non-goals; `errors` — PUC
+  error-wording divergence) plus 4 deliberate non-goals (`main`, `files`,
+  `attrib`, `verybig` — filesystem/subprocess). `strings`, `sort`, and
+  `math` were promoted in #368.
 - **Current focus**: closing the `1.0.0` release gates in
-  [`A13`](.agents/plans/A13-release-rc1.md) — the suite gate (aim 20/29
-  with 9 documented exclusions; 17 pass today, three triage targets
-  remain: `strings`/`sort`/`math`) and a one-time perf-gate check
-  (fib already at 1.03–1.11× Luerl after #324/#360).
+  [`A13`](.agents/plans/A13-release-rc1.md) — the suite gate is **MET**
+  (20/29 passing with 9 documented exclusions), and the one-time
+  perf-gate check is satisfied (fib already at 1.03–1.11× Luerl after
+  #324/#360). Remaining work is the release-cut and docs true-up.
 
 ## Release sequencing (decided 2026-06-15)
 

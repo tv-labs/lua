@@ -151,13 +151,47 @@ message =~ "stack overflow"
 > loops that PUC-Lua would run forever. Leave the default `:infinity`
 > if you rely on unbounded tail recursion.
 
-## Limiting CPU time and total memory
+## Limiting CPU work
 
-The VM has **no internal wall-clock timeout** and does **not** cap the
-host process's total memory. A script can still spin forever
-(`while true do end`) or accumulate memory in ways the per-operation
-guards above don't catch (for example, growing a table in a loop). These
-limits have to be enforced by the BEAM, around the call.
+The first defense against a runaway script (`while true do end`, a tight
+numeric loop) is `:max_instructions` — an **in-VM instruction budget**
+that terminates the evaluation deterministically, without a host `Task`
+or wall-clock timeout:
+
+```elixir
+lua = Lua.new(max_instructions: 1_000)
+
+{[false, message], _} =
+  Lua.eval!(lua, "return pcall(function() while true do end end)")
+
+message =~ "instruction budget exceeded"
+#=> true
+```
+
+`:max_instructions` defaults to `:infinity` (no bound). A finite budget is
+counted at loop back-edges and call boundaries — never per opcode, so the
+default path carries no cost — and is fresh for each top-level
+`Lua.eval!/2`. Exhausting it raises a catchable
+`"instruction budget exceeded"` error, so a script recovers with `pcall`
+just like it does from the allocation guards above. Because the budget is
+enforced inside the VM, it needs no extra process and it bounds CPU work
+even for code that never yields to the scheduler.
+
+> #### Instruction budget vs wall-clock time {: .info}
+> `:max_instructions` bounds *work*, not *elapsed time* — a fixed budget
+> executes the same number of instructions no matter how loaded the host
+> is. For a hard wall-clock ceiling ("no script may run longer than one
+> real second regardless of what it does"), pair it with the process
+> wrapper below.
+
+## Limiting wall-clock time and total memory
+
+Two limits still live outside the VM: real elapsed time and the host
+process's total memory. `:max_instructions` bounds work rather than
+seconds, and the VM does **not** cap the host process's memory — a script
+can still accumulate memory in ways the per-operation guards don't catch
+(for example, growing a table in a loop). These limits have to be enforced
+by the BEAM, around the call.
 
 Run untrusted scripts in a **separate, monitored process** with both a
 timeout and a heap ceiling. The key is to keep the wall-clock timeout and
@@ -246,16 +280,18 @@ Two details make this robust:
 ## Putting it together
 
 A typical configuration for running untrusted scripts combines all three
-layers — the default sandbox, a call-depth bound, and a process wrapper
-for time and memory:
+layers — the default sandbox, the in-VM recursion and instruction bounds,
+and a process wrapper for time and memory:
 
 ```elixir
-lua = Lua.new(max_call_depth: 200)
+lua = Lua.new(max_call_depth: 200, max_instructions: 10_000_000)
 
 SafeLua.run(lua, untrusted_source)
 ```
 
 The default sandbox blocks the OS/filesystem/loader surface, the built-in
 guards turn allocation bombs into catchable errors, `:max_call_depth`
-bounds recursion, and `SafeLua.run/2` bounds wall-clock time and total
-memory — with the host process surviving every one of those failures.
+bounds recursion, `:max_instructions` bounds CPU work deterministically
+inside the VM, and `SafeLua.run/2` adds a wall-clock timeout and a total
+memory ceiling — with the host process surviving every one of those
+failures.

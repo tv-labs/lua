@@ -5,7 +5,7 @@ issue: 306
 pr: 320
 branch: feat/vm-max-steps
 base: main
-status: review
+status: merged
 direction: B
 unlocks:
   - deterministic CPU bound for library consumers calling Lua.eval!/2 without a host Task + timeout wrapper
@@ -193,7 +193,9 @@ mix test --only lua53
 
 ## What changed
 
-PR #320.
+PR #320 (merged). The option shipped **renamed** from the plan's working
+name `:max_steps` to `:max_instructions` — the name used in `Lua.new/1`,
+the docs, and the CHANGELOG. Everything else below matches what landed.
 
 Files touched:
 

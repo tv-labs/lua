@@ -10,7 +10,7 @@ defmodule Lua.RuntimeException do
     * `:original`    — the underlying VM error term
     * `:state`       — the internal VM state at the point of failure
     * `:line`        — line number where the error was raised
-    * `:source`      — source name (filename or `<stdin>`)
+    * `:source`      — source name (filename or the default `<eval>`)
     * `:call_stack`  — list of Lua frames at failure
   """
   alias Lua.Util

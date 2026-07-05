@@ -52,10 +52,11 @@ to projects that depend on `:lua`.
 
 ### `mix lua.suite` — run the Lua 5.3 official suite
 
-Runs every `.lua` file in `test/lua53_tests/` against this VM and
-prints a pass / fail / timeout summary. Use it to spot newly-passing
-suite files (candidates to promote into `@ready_tests`) or to
-sanity-check the suite set during development.
+Runs every `.lua` file in `test/lua53_tests/` **unmodified** against this
+VM and prints a pass / fail / timeout summary. Because it applies no skip
+ranges, its pass count is lower than the canonical suite count — it is a
+triage and exploration tool for spotting files whose skip ranges in
+`test/lua53_skips.exs` could be narrowed or removed.
 
 ```bash
 # Run all files
@@ -73,35 +74,43 @@ mix lua.suite --verbose
 # Adjust per-file timeout (default 30s; long-running files like
 # `big.lua` and `closure.lua` need more, while CI may want less)
 mix lua.suite --timeout 60000
+
+# Per-file conformance summary read from the skips file (no tests run)
+mix lua.suite --status
+
+# Re-run each skip entry with it removed, flagging stale/promotable ranges
+mix lua.suite --audit
 ```
 
-Sample output:
+Sample output (raw run — no skip ranges applied):
 
 ```
-passing: 6
-failing: 21
-timeout: 2
+passing: 9
+failing: 17
+timeout: 3
 
-passing files: api, bitwise, code, simple_test, tpack, vararg
+passing files: api, bitwise, code, locals, nextvar, simple_test, tpack, utf8, vararg
 
 failing files (top reason):
-  attrib.lua      Lua runtime error: 'require' is sandboxed
-  big.lua         Lua runtime error: attempt to compare a string with a number
+  all.lua        Lua runtime error: loadfile(_) is sandboxed
+  math.lua       Lua runtime error: bad argument in arithmetic expression
   ...
 
 timed out:
-  closure.lua  > 30000ms
-  strings.lua  > 30000ms
+  big.lua         > 30000ms
+  closure.lua     > 30000ms
+  constructs.lua  > 30000ms
 ```
 
 Each file is run in its own monitored task so an infinite loop in
 one file can't hang the run.
 
-Unlike `mix test --only lua53`, this task does **not** consult the
-hand-curated `@ready_tests` / `@deferred_permanent` lists in
-`test/lua53_suite_test.exs`. It just runs everything. Use
-`mix test --only lua53` for the canonical green-bar set, and use
-`mix lua.suite` for exploration and triage.
+Unlike `mix test --only lua53`, this task does **not** apply the per-file
+skip ranges in `test/lua53_skips.exs` or the `@deferred_permanent` list in
+`test/lua53_suite_test.exs` — it just runs everything raw. Use
+`mix test --only lua53` for the canonical green-bar set (**20/29** files
+passing, with the 9 documented exclusions), and use `mix lua.suite` (and
+its `--status` / `--audit` modes) for exploration and triage.
 
 Exit status:
 
