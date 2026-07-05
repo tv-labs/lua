@@ -8,7 +8,7 @@ defmodule Lua.RuntimeException do
 
     * `:message`     — formatted error string
     * `:original`    — the underlying VM error term
-    * `:state`       — `Lua.VM.State` at the point of failure
+    * `:state`       — the internal VM state at the point of failure
     * `:line`        — line number where the error was raised
     * `:source`      — source name (filename or `<stdin>`)
     * `:call_stack`  — list of Lua frames at failure

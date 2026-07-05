@@ -1,17 +1,23 @@
 defmodule Lua.Parser.Error do
   @moduledoc """
-  Beautiful error reporting for the Lua parser.
+  Structured, wire-safe error reporting for the Lua parser.
 
-  Provides detailed error messages with:
+  Each error carries:
   - Source code context with line numbers
-  - Visual indicators pointing to the error location
-  - Helpful suggestions for common mistakes
-  - Multiple error reporting
+  - Position information pointing to the error location
+  - A human-readable message and, where possible, a suggested fix
+  - Related errors, for multi-error reporting
+
+  Produced when parsing fails: the parser's parse_structured/1 entry point
+  returns `{:error, [t()]}`. Call `to_map/2` for a JSON-serializable shape
+  suitable for editors, LSPs, and web frontends.
   """
 
-  alias Lua.AST.Meta
-
-  @type position :: Meta.position()
+  @type position :: %{
+          line: pos_integer(),
+          column: pos_integer(),
+          byte_offset: non_neg_integer()
+        }
 
   @type t :: %__MODULE__{
           type: error_type(),
@@ -37,9 +43,9 @@ defmodule Lua.Parser.Error do
         }
 
   @typedoc """
-  Wire-safe representation produced by `to_map/2`. Mirrors the shape of
-  `Lua.VM.ErrorFormatter.to_map/3` so runtime and parse errors render
-  through one path. `source`, `call_stack`, and `error_kind` are constant
+  Wire-safe representation produced by `to_map/2`. Mirrors the shape used
+  for runtime errors so runtime and parse errors render through one path.
+  `source`, `call_stack`, and `error_kind` are constant
   for parse errors (no file name, stack, or error kind) and exist only for
   shape parity.
   """
@@ -146,8 +152,8 @@ defmodule Lua.Parser.Error do
   @doc """
   Returns a wire-safe structured representation of a parse error.
 
-  The shape is identical to `Lua.VM.ErrorFormatter.to_map/3`, so runtime and
-  parse errors can flow through a single renderer (HTML, JSON, structured
+  The shape is identical to the map produced for runtime errors, so runtime
+  and parse errors can flow through a single renderer (HTML, JSON, structured
   logs). No ANSI escapes appear in any string field, and leading/trailing
   whitespace from the internal message/suggestion templates is trimmed.
 

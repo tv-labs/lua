@@ -1,8 +1,25 @@
 defmodule Lua.MixProject do
   use Mix.Project
 
+  alias Lua.Parser.Error
+  alias Mix.Tasks.Lua.Eval
+
   @url "https://github.com/tv-labs/lua"
   @version "1.0.0-rc.3"
+
+  # The curated public API surface rendered on HexDocs. Everything else is an
+  # implementation detail: its @moduledoc stays intact for source readers and
+  # `h Mod` in IEx, but `filter_modules/2` keeps it out of the published sidebar.
+  @public_modules [
+    Lua,
+    Lua.API,
+    Lua.Table,
+    Lua.Chunk,
+    Lua.RuntimeException,
+    Lua.CompilerException,
+    Error,
+    Eval
+  ]
 
   def project do
     [
@@ -34,18 +51,31 @@ defmodule Lua.MixProject do
         main: "Lua",
         source_url: @url,
         source_ref: "v#{@version}",
+        # Render only the curated public surface; keep internals in source/IEx.
+        filter_modules: fn module, _meta -> module in @public_modules end,
+        groups_for_modules: [
+          Core: [Lua, Lua.API, Lua.Table, Lua.Chunk],
+          Errors: [Lua.RuntimeException, Lua.CompilerException, Error],
+          "Mix Tasks": [Eval]
+        ],
         extras: [
-          "CHANGELOG.md",
-          "guides/working-with-lua.livemd",
-          "guides/sandboxing.md",
-          "guides/examples/quickstart.livemd",
-          "guides/examples/userdata.livemd",
-          "guides/examples/custom_stdlib.livemd",
-          "guides/examples/sandboxing.livemd",
-          "guides/examples/chunks.livemd",
-          "guides/examples/error_handling.livemd"
+          "guides/working-with-lua.livemd": [title: "Working with Lua"],
+          "guides/sandboxing.md": [title: "Security & Sandboxing"],
+          "guides/mix_tasks.md": [title: "Mix Tasks & the ~LUA sigil"],
+          "guides/examples/quickstart.livemd": [title: "Quickstart"],
+          "guides/examples/userdata.livemd": [title: "Userdata"],
+          "guides/examples/custom_stdlib.livemd": [title: "Custom stdlib"],
+          "guides/examples/sandboxing.livemd": [title: "Sandboxing"],
+          "guides/examples/chunks.livemd": [title: "Chunks"],
+          "guides/examples/error_handling.livemd": [title: "Error handling"],
+          "CHANGELOG.md": []
         ],
         groups_for_extras: [
+          Guides: [
+            "guides/working-with-lua.livemd",
+            "guides/sandboxing.md",
+            "guides/mix_tasks.md"
+          ],
           Examples: ~r{guides/examples/}
         ]
       ]

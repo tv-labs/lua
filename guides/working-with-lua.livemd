@@ -4,7 +4,7 @@
 
 ```elixir
 Mix.install([
-  {:lua, "~> 0.4.0"}
+  {:lua, "~> 1.0.0-rc.3"}
 ])
 ```
 
@@ -24,7 +24,7 @@ Lua
 
 ```elixir
 code = ~LUA"""
-
+return 2 + 2
 """
 
 {value, %Lua{}} = Lua.eval!(code)
@@ -33,7 +33,7 @@ code = ~LUA"""
 <!-- livebook:{"output":true} -->
 
 ```
-{[], #Lua<>}
+{[4], #Lua<>}
 ```
 
 ## Getting and Setting values
