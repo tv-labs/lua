@@ -4,7 +4,7 @@
 
 ```elixir
 Mix.install([
-  {:lua, "~> 1.0.0-rc"}
+  {:lua, "~> 1.0.0-rc.3"}
 ])
 ```
 
