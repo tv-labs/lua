@@ -2,10 +2,10 @@
 id: A50
 title: "API pre-freeze fixes: struct encoding, dead guard, option consistency"
 issue: null
-pr: null
+pr: 380
 branch: fix/api-pre-freeze
 base: main
-status: in_progress
+status: review
 direction: A
 ---
 
@@ -59,3 +59,24 @@ mix docs --warnings-as-errors
 - Struct encoding raise could break a caller that relied on the accidental
   `__struct__`-key behaviour. Audit found no legitimate struct encoding in
   lib/ or test/, so risk is low; it is exactly the pre-freeze fix.
+
+## What changed
+- `lib/lua/vm/value.ex`: `%mod{}` clause raises `Lua.RuntimeException` before
+  the `is_map` clause.
+- `lib/lua/api.ex`: removed `is_mfa/1` guard + import; unstable-tuple warnings
+  on `is_lua_func/1` and `is_erl_func/1`.
+- `lib/lua.ex`: `validate_max_string_bytes!` accepts `:infinity`; chunk `eval!/3`
+  accepts `:source`; `call_function/3` error-shape doctests; `unwrap/1` and
+  `:max_string_bytes` doc notes.
+- `lib/lua/vm/state.ex`: widened `max_string_bytes` typespec.
+- `lib/lua/vm/limits.ex`: documented `:infinity` term-ordering behaviour.
+- `lib/lua/compiler_exception.ex`: dropped `:state` field.
+- `lib/lua/vm.ex`: moduledoc reframed as internal.
+- `CHANGELOG.md`: Unreleased entries for items 1, 2, 4, 5, 7.
+- Tests: struct-encode raise + `Map.from_struct/1` path (`test/lua_test.exs`),
+  `:infinity` acceptance (`test/lua/vm/limits_test.exs`), chunk `:source`
+  (`test/lua_test.exs`).
+- **Audit finding:** no structs are legitimately encoded today — the plan's
+  carve-out concern is moot; the raise carves out nothing.
+- Verification: `mix test` 2580 passed / 7 skipped; `mix test --only lua53`
+  20 passed / 9 skipped; `mix docs --warnings-as-errors` clean.
