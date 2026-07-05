@@ -5,7 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+> Upgrading from a Luerl-based `0.x` release? See
+> [Upgrading from 0.x](#upgrading-from-0x-luerl-based-versions) below.
+
+## Upgrading from 0.x (Luerl-based versions)
+
+`1.0.0` replaces the Luerl backend with an Elixir-native Lua 5.3 VM, and
+Luerl is no longer a runtime dependency. Most code built on the high-level
+`Lua` API (`Lua.new/1`, `Lua.eval!/2`, `Lua.set!/3`, `deflua`,
+`Lua.load_api/2`) keeps working unchanged. The breaking changes are all at
+the value-encoding and error boundaries:
+
+- **Encoded table / userdata / function tags changed.** Values that carried
+  Luerl's internal tags now use the new VM's representation: tables are
+  `{:tref, integer()}` (was `:luerl.tref()`), userdata is
+  `{:udref, integer()}` (was `:luerl.usdref()`), and Elixir-defined Lua
+  callables are `{:native_func, fun}` (was `:luerl.erl_func()`); compiled Lua
+  functions are `{:lua_closure, _, _}`. If you pattern-matched the old
+  tuples, update the patterns — better still, treat encoded refs as opaque
+  and round-trip them through `Lua.decode!/2`.
+- **MFA callback encoding was removed.** `Lua.encode!/2` no longer accepts the
+  `{module(), atom(), list()}` MFA tuple form. Replace it with a function
+  literal or a `deflua` callback.
+- **Parser error messages have a new format.** The Luerl-style
+  `"Line 1: syntax error before: ';'"` is gone; the native parser produces
+  messages like `"Expected expression"`, with rich structured data available
+  via `Lua.Parser.parse_structured/1`. Assertions that string-matched the old
+  wording need updating.
+- **64-bit integers wrap on overflow.** Arithmetic and bitwise ops follow Lua
+  5.3 §3.4.1 (wrap-around at 2^63) instead of widening to bignums as Luerl
+  did. Code depending on arbitrary-precision integer results will now see
+  wrapped values.
+- **Chunks are self-contained.** `Lua.Chunk` now holds a compiled prototype
+  and is reusable across `Lua.eval!/2` calls; there is no separate load step.
+- **Exceptions are public.** `Lua.RuntimeException` and `Lua.CompilerException`
+  are documented, so user code can rescue and pattern-match them.
+
+Everything else — the default sandbox, `_G`/`_ENV` semantics, metatables, and
+the standard-library surface — is compatible. The full breaking-change list
+is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
+
+## [Unreleased]
+
+### Changed
+- Elixir callbacks now receive the public `Lua.t` (`%Lua{}`) as their state
+  argument **regardless of how they enter the VM**. Previously a two-arity
+  callback (`fn args, state -> {results, state} end`) got a `%Lua{}` when set
+  at a path or loaded via `deflua`/`Lua.load_api/2`, but the raw internal
+  `Lua.VM.State` when it reached the VM as an encoded value — nested inside a
+  value passed to `Lua.set!/3`, or produced by `Lua.encode!/2`. Those paths
+  now wrap the state consistently and validate the callback's return value, so
+  the same closure behaves identically everywhere. Code relying on the rc.3
+  raw-state behaviour (or a `%Lua{state: raw}` workaround) should drop the
+  workaround (#379).
 
 <!-- A50: API pre-freeze fixes — breaking-before-1.0 changes are called out
      explicitly so they never surprise anyone after the surface freezes. -->
@@ -41,6 +93,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   then ...` checks and breaking `return nil, "reason"` error patterns. The
   round trip `decode!(encode!(nil))` is now lossless, matching the existing
   behaviour for `nil` inside tables and function result lists (#374).
+- `string.rep` now sizes its allocation to the actual result length instead of
+  the raw repeat count, so a large count paired with an empty or short string
+  (e.g. `string.rep("", 1e9)`) no longer over-allocates or trips the
+  string-size guard spuriously. The guard still refuses genuinely oversized
+  results (#376).
+
+### Documentation
+- The Lua 5.3 official test suite now passes **20/29** files. The 9 excluded
+  files are deliberate, documented exclusions rather than open bugs:
+  - **Filesystem / subprocess non-goals** — `main`, `files`, `attrib`,
+    `verybig` (shell-out, file I/O, and filesystem `require`, which a
+    sandboxed embedded VM does not support).
+  - **Capability non-goals** — `coroutine`, `db` (the full
+    continuation/coroutine model and the full `debug` library).
+  - **Perf-bound, revisit in 1.0.x** — `big`, `closure` (run past the suite
+    timeout on the BEAM tuple-copy ceiling; the VM results are correct).
+  - **PUC error-wording divergence** — `errors` (our structured error
+    messages diverge from PUC-Lua's exact strings).
 
 ## [1.0.0-rc.3] - 2026-06-15
 
@@ -244,7 +314,7 @@ The public API is unchanged from rc.1.
   faster. This remains a deliberate safety/speed tradeoff for the RC and
   will be addressed before `1.0.0` final.
 
-## [v1.0.0-rc.1] - 2026-06-02
+## [1.0.0-rc.1] - 2026-06-02
 
 The second release candidate for `1.0.0`. It builds on rc.0 with a new
 `os` and `utf8` standard library, richer `debug` and error introspection,
@@ -330,7 +400,7 @@ the same machine (Luerl and PUC-Lua used as drift controls, ±3%):
   are unaffected or faster. This is a deliberate safety/speed tradeoff for
   the RC and will be addressed before `1.0.0` final.
 
-## [v1.0.0-rc.0] - 2026-05-26
+## [1.0.0-rc.0] - 2026-05-26
 
 This is the first release candidate for `1.0.0`. The library has been
 rewritten on a new Elixir-native Lua 5.3 virtual machine, and the public
@@ -441,7 +511,7 @@ API is intended to be stable. Please report any regressions before final.
 - Line number attribution for the first line of a chunk (#240).
 - `string.pack` no longer emits compile warnings (#224).
 
-## [v0.4.0] - 2025-12-06
+## [0.4.0] - 2025-12-06
 
 ### Changed
 - Upgrade to Luerl 1.5.1
@@ -449,7 +519,7 @@ API is intended to be stable. Please report any regressions before final.
 ### Fixed
 - Warnings on Elixir 1.19
 
-## [v0.3.0] - 2025-06-09
+## [0.3.0] - 2025-06-09
 
 ### Added
 - Guards for encoded Lua values in `deflua` functions
@@ -462,7 +532,7 @@ API is intended to be stable. Please report any regressions before final.
 ### Fixed
 - `deflua` function can now specify guards when using or not using state
 
-## [v0.2.1] - 2025-05-14
+## [0.2.1] - 2025-05-14
 
 ### Added
 - `Lua.encode_list!/2` and `Lua.decode_list!/2` for encoding and decoding function arguments and return values
@@ -470,18 +540,18 @@ API is intended to be stable. Please report any regressions before final.
 ### Fixed
 - Ensure that list return values are properly encoded
 
-## [v0.2.0] - 2025-05-14
+## [0.2.0] - 2025-05-14
 
 ### Changed
 - Any data returned from a `deflua` function, or a function set by `Lua.set!/3` is now validated. If the data is not an identity value, or an encoded value, it will raise an exception. In the past, `Lua` and Luerl would happily accept bad values, causing downstream problems in the program. This led to unexpected behavior, where depending on if the data passed was decoded or not, the program would succeed or fail.
 
 
-## [v0.1.1] - 2025-05-13
+## [0.1.1] - 2025-05-13
 
 ### Added
 - `Lua.put_private/3`, `Lua.get_private/2`, `Lua.get_private!/2`, and `Lua.delete_private/2` for working with private state
 
-## [v0.1.0] - 2025-05-12
+## [0.1.0] - 2025-05-12
 
 ### Fixed
 

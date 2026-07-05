@@ -3,6 +3,8 @@ defmodule Lua.Parser.ErrorUnitTest do
 
   alias Lua.Parser.Error
 
+  doctest Error
+
   describe "new/4" do
     test "creates error with all fields" do
       position = %{line: 1, column: 5, byte_offset: 0}

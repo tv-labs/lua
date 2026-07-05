@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: perf/baseline-luerl-gap
 base: main
-status: ready
+status: merged
 direction: A
 unlocks:
   - per-workload perf fix plans
@@ -145,4 +145,6 @@ this plan can use it. If not, run the scripts directly.
 
 ## Discoveries
 
-(populated during measurement)
+The baseline was captured and committed as
+[`benchmarks/BASELINE.md`](../../benchmarks/BASELINE.md) (2026-06-15),
+which supersedes the planned `bench_results/baseline-<date>.md` path.

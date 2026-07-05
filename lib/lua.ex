@@ -977,7 +977,7 @@ defmodule Lua do
   Loads a Lua file into the environment. Any values returned in the global
   scope are thrown away.
 
-  Mimics the functionality of Lua's [dofile](https://www.lua.org/manual/5.4/manual.html#pdf-dofile)
+  Mimics the functionality of Lua's [dofile](https://www.lua.org/manual/5.3/manual.html#pdf-dofile)
   """
   @spec load_file!(t(), String.t()) :: t()
   def load_file!(%__MODULE__{} = lua, path) when is_binary(path) do
