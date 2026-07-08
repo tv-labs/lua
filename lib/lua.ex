@@ -835,6 +835,13 @@ defmodule Lua do
   # A resolved tuple that isn't one of the callable shapes above — e.g. a
   # table or userdata reference. No name is available at this layer, so the
   # error is reported by type without a name hint.
+  #
+  # This is one place the programmatic boundary does *not* mirror the in-Lua
+  # `:call` opcode: a table carrying a `__call` metamethod is reported as
+  # "attempt to call a table value" here rather than invoking the metamethod.
+  # `call_function/3` is a by-name function-call entry point, not a general
+  # value-application path, so callable tables are out of scope (and the prior
+  # implementation errored on them too).
   defp do_call_function(other, _args, state) do
     {:error, Executor.call_type_error(other, nil, state), state}
   end
