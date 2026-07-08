@@ -3022,6 +3022,37 @@ defmodule Lua.VM.Executor do
     end
   end
 
+  # Builds (does not raise) the `Lua.VM.TypeError` for an attempt to call a
+  # non-callable value, matching the wording the `:call` opcode raises inside
+  # the VM.
+  #
+  # Used by the programmatic `Lua.call_function/3` boundary, which resolves a
+  # name to a value itself and must report an uncallable value with the same
+  # `attempt to call a <type> value (<namewhat> '<name>')` phrasing, structured
+  # `:error_kind`, and suggestion the in-Lua path produces. Returned as a struct
+  # (not raised) so `Lua.call_function/3` can hand it to its protected-call
+  # boundary while `Lua.call_function!/3` re-raises it for the rich render.
+  #
+  # `name_hint` is a `format_target_hint/1` tag (e.g. `{:global, "bar"}`) or
+  # `nil` when no name is known.
+  @doc false
+  @spec call_type_error(term(), term(), State.t()) :: TypeError.t()
+  def call_type_error(value, name_hint, %State{} = state) do
+    {error_kind, value_type} =
+      case value do
+        nil -> {:call_nil, nil}
+        other -> {:call_non_function, value_type(other)}
+      end
+
+    TypeError.exception(
+      value: "attempt to call a #{Value.type_name(value)} value" <> format_target_hint(name_hint),
+      call_stack: state.call_stack,
+      error_kind: error_kind,
+      value_type: value_type,
+      state: state
+    )
+  end
+
   defp raise_index_type_error(value, line, source, name_hint, state) do
     raise TypeError,
       value: "attempt to index a #{Value.type_name(value)} value" <> format_target_hint(name_hint),

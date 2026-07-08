@@ -775,10 +775,26 @@ defmodule Lua do
     keys = name |> List.wrap() |> Enum.map(&to_lua_key/1)
     func = do_get_nested(lua.state, keys)
 
-    if func == nil or not is_tuple(func) do
-      {:error, "undefined function '#{inspect(func)}'", lua.state}
-    else
+    if is_tuple(func) do
       do_call_function(func, args, lua.state)
+    else
+      # Report the *name that was looked up* — not the resolved `nil` — and
+      # reuse the VM's `attempt to call a <type> value (<namewhat> '<name>')`
+      # phrasing so the programmatic boundary matches an in-Lua call.
+      error = Executor.call_type_error(func, call_target_hint(name), lua.state)
+      {:error, error, lua.state}
+    end
+  end
+
+  # Derives a `format_target_hint/1` tag from the name passed to
+  # `call_function/3`. A bare name (`:foo` / `"foo"` / `[:foo]`) reads as a
+  # global; a nested path (`[:string, :lower]`) attributes to the final field,
+  # mirroring how Lua names the field it failed to resolve to a function.
+  defp call_target_hint(name) do
+    case List.wrap(name) do
+      [] -> nil
+      [single] -> {:global, to_string(single)}
+      segments -> {:field, to_string(List.last(segments))}
     end
   end
 
@@ -816,8 +832,11 @@ defmodule Lua do
     e -> {:error, e, recover_state(e, state)}
   end
 
+  # A resolved tuple that isn't one of the callable shapes above — e.g. a
+  # table or userdata reference. No name is available at this layer, so the
+  # error is reported by type without a name hint.
   defp do_call_function(other, _args, state) do
-    {:error, "undefined function '#{inspect(other)}'", state}
+    {:error, Executor.call_type_error(other, nil, state), state}
   end
 
   # This is a protected-call boundary like pcall: trapping the error

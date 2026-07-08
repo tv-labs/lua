@@ -12,6 +12,8 @@ defmodule Lua.CallFunctionErrorValueTest do
   # async: false — one test toggles the global `:elixir` ANSI flag.
   use ExUnit.Case, async: false
 
+  alias Lua.VM.TypeError
+
   defp fun!(code) do
     {[ref], lua} = Lua.eval!(Lua.new(), "return #{code}", decode: false)
     {ref, lua}
@@ -67,6 +69,63 @@ defmodule Lua.CallFunctionErrorValueTest do
       refute reason =~ "\e["
       refute reason =~ "at -no-source-"
       refute reason =~ "\n"
+    end
+  end
+
+  describe "call_function/3 on a name that does not resolve to a function" do
+    test "an undefined name names what was looked up, not the resolved nil" do
+      {_, lua} = Lua.eval!(Lua.new(), "function foo() return 1 end")
+
+      assert {:error, reason, %Lua{}} = Lua.call_function(lua, [:bar], [])
+
+      # Regression: previously reported the resolved value ("undefined
+      # function 'nil'"). It must name the requested global instead.
+      assert reason == "attempt to call a nil value (global 'bar')"
+    end
+
+    test "an existing non-function value reports its type, not 'undefined'" do
+      {_, lua} = Lua.eval!(Lua.new(), "x = 5")
+
+      assert {:error, reason, %Lua{}} = Lua.call_function(lua, [:x], [])
+
+      assert reason == "attempt to call a number value (global 'x')"
+    end
+
+    test "a nested path attributes to the final field" do
+      {_, lua} = Lua.eval!(Lua.new(), "t = {}")
+
+      assert {:error, reason, %Lua{}} = Lua.call_function(lua, [:t, :missing], [])
+
+      assert reason == "attempt to call a nil value (field 'missing')"
+    end
+  end
+
+  describe "call_function!/3 on an unresolved name keeps the rich render" do
+    test "raises with the location-less rich render and a suggestion" do
+      {_, lua} = Lua.eval!(Lua.new(), "function foo() return 1 end")
+
+      error =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.call_function!(lua, [:bar], [])
+        end
+
+      message = Exception.message(error)
+      assert message =~ "attempt to call a nil value (global 'bar')"
+      assert message =~ "Suggestion:"
+      # No Lua source position exists for a programmatic call, so no
+      # `at <source>:<line>:` header is rendered.
+      refute message =~ ~r/at \S+:\d+:/
+    end
+
+    test "the original TypeError carries the structured call-nil kind" do
+      {_, lua} = Lua.eval!(Lua.new(), "function foo() return 1 end")
+
+      error =
+        assert_raise Lua.RuntimeException, fn ->
+          Lua.call_function!(lua, [:bar], [])
+        end
+
+      assert %TypeError{error_kind: :call_nil} = error.original
     end
   end
 
@@ -179,7 +238,7 @@ defmodule Lua.CallFunctionErrorValueTest do
           Lua.call_function!(lua, ref, [])
         end
 
-      assert %Lua.VM.TypeError{error_kind: :index_non_table} = error.original
+      assert %TypeError{error_kind: :index_non_table} = error.original
     end
   end
 
