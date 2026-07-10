@@ -73,6 +73,18 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
   shim that always returned `false` and was imported into every `use Lua.API`
   module; the VM has no MFA references. Remove any `when is_mfa(value)` clauses
   (they never matched).
+- The public `{:error, _}`-returning APIs now hand back the exception struct
+  uniformly, instead of a pre-rendered message string, so callers own
+  rendering (`Exception.message/1`) and can pattern-match the concrete error.
+  - `Lua.call_function/3` returns `{:error, exception, lua}` where `exception`
+    is the VM struct (`Lua.VM.RuntimeError`, `Lua.VM.TypeError`,
+    `Lua.VM.ArgumentError`, …). The raised Lua value (`error(42)`, a table,
+    `nil`, `false`) is preserved on the struct's `:value`, matching what
+    `pcall` hands back inside Lua. Code matching on a string reason should
+    switch to the struct (or call `Exception.message/1` on it).
+  - `Lua.parse_chunk/1` returns `{:error, %Lua.CompilerException{}}` instead of
+    `{:error, [String.t()]}`. The formatted diagnostics are on the
+    exception's `:errors` field; `Exception.message/1` renders them.
 
 ### Changed
 - `Lua.new/1`'s `:max_string_bytes` now accepts `:infinity` for no limit,

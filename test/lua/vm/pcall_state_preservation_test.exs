@@ -521,8 +521,8 @@ defmodule Lua.VM.PcallStatePreservationTest do
         end
         """)
 
-      assert {:error, reason, lua} = Lua.call_function(lua, [:f], [])
-      assert reason =~ "boom"
+      assert {:error, %Lua.VM.RuntimeError{} = error, lua} = Lua.call_function(lua, [:f], [])
+      assert Exception.message(error) =~ "boom"
       assert Lua.get!(lua, [:x]) == 2
     end
 
