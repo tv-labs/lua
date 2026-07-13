@@ -2,6 +2,9 @@ defmodule Lua.MixProject do
   use Mix.Project
 
   alias Lua.Parser.Error
+  alias Lua.VM.ArgumentError
+  alias Lua.VM.RuntimeError
+  alias Lua.VM.TypeError
   alias Mix.Tasks.Lua.Eval
 
   @url "https://github.com/tv-labs/lua"
@@ -17,6 +20,9 @@ defmodule Lua.MixProject do
     Lua.Chunk,
     Lua.RuntimeException,
     Lua.CompilerException,
+    RuntimeError,
+    TypeError,
+    ArgumentError,
     Error,
     Eval
   ]
@@ -53,18 +59,24 @@ defmodule Lua.MixProject do
         source_ref: "v#{@version}",
         # Render only the curated public surface; keep internals in source/IEx.
         filter_modules: fn module, _meta -> module in @public_modules end,
-        # `call_function/3` names the concrete VM exception structs it can hand
-        # back, but those modules are filtered above. Render the names as plain
-        # code instead of autolinking to (filtered) pages, which errors under
-        # `--warnings-as-errors`.
+        # The public VM exception structs' moduledocs name internal plumbing
+        # (`Lua.VM.Executor`, `Lua.VM.ErrorFormatter`) that stays filtered.
+        # Render those references as plain code instead of autolinking to
+        # filtered pages, which errors under `--warnings-as-errors`.
         skip_code_autolink_to: [
-          "Lua.VM.RuntimeError",
-          "Lua.VM.TypeError",
-          "Lua.VM.ArgumentError"
+          "Lua.VM.Executor.current_position/0",
+          "Lua.VM.ErrorFormatter.to_map/3"
         ],
         groups_for_modules: [
           Core: [Lua, Lua.API, Lua.Table, Lua.Chunk],
-          Errors: [Lua.RuntimeException, Lua.CompilerException, Error],
+          Errors: [
+            Lua.RuntimeException,
+            Lua.CompilerException,
+            RuntimeError,
+            TypeError,
+            ArgumentError,
+            Error
+          ],
           "Mix Tasks": [Eval]
         ],
         extras: [
