@@ -674,7 +674,7 @@ defmodule Lua do
   def load_chunk!(%__MODULE__{} = lua, code) when is_binary(code) do
     case parse_chunk(code) do
       {:ok, chunk} -> {chunk, lua}
-      {:error, errors} -> raise Lua.CompilerException, formatted: errors
+      {:error, %Lua.CompilerException{} = exception} -> raise exception
     end
   end
 

@@ -456,20 +456,23 @@ defmodule LuaTest do
     end
 
     test "invalid strings raise Lua.CompilerException" do
-      # Original implementation (exact Luerl error message):
-      # message = """
-      # Failed to compile Lua!
-      #
-      # Line 1: syntax error before: ';'
-      # """
-      #
-      # assert_raise Lua.CompilerException, message, fn ->
-      #   Lua.load_chunk!(Lua.new(), "local foo = ;")
-      # end
+      error =
+        assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
+          Lua.load_chunk!(Lua.new(), "local foo = ;")
+        end
 
-      assert_raise Lua.CompilerException, ~r/Failed to compile Lua/, fn ->
-        Lua.load_chunk!(Lua.new(), "local foo = ;")
-      end
+      # `parse_chunk/1` now hands back a `%Lua.CompilerException{}`; `load_chunk!/2`
+      # must re-raise it as-is. Regression guard: re-wrapping it via
+      # `raise Lua.CompilerException, formatted: exception` mangled the message
+      # into an inspected `{:formatted, %Lua.CompilerException{}}` tuple.
+      assert %Lua.CompilerException{errors: [msg]} = error
+      assert is_binary(msg)
+      assert msg =~ "Expected expression"
+
+      message = Exception.message(error)
+      assert message =~ "Expected expression"
+      refute message =~ ":formatted"
+      refute message =~ "Lua.CompilerException"
     end
 
     test "chunks can be loaded multiple times" do
