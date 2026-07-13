@@ -53,16 +53,20 @@ end
 
 `Lua.parse_chunk/1` pre-parses a script so you can surface syntax errors
 before ever running anything. It returns `{:ok, chunk}` on success and
-`{:error, messages}` with human-readable diagnostics on failure.
+`{:error, %Lua.CompilerException{}}` on failure. Call `Exception.message/1`
+to render the human-readable diagnostics (or read the formatted list off the
+exception's `:errors` field).
 
 ```elixir
-{:error, [message]} = Lua.parse_chunk("return 1 +")
-IO.puts(message)
+{:error, error} = Lua.parse_chunk("return 1 +")
+IO.puts(Exception.message(error))
 ```
 
 <!-- livebook:{"output":true} -->
 
 ```
+Failed to compile Lua!
+
 Parse Error
 
   at line 1, column 11:
