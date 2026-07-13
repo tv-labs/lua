@@ -53,6 +53,15 @@ defmodule Lua.MixProject do
         source_ref: "v#{@version}",
         # Render only the curated public surface; keep internals in source/IEx.
         filter_modules: fn module, _meta -> module in @public_modules end,
+        # `call_function/3` names the concrete VM exception structs it can hand
+        # back, but those modules are filtered above. Render the names as plain
+        # code instead of autolinking to (filtered) pages, which errors under
+        # `--warnings-as-errors`.
+        skip_code_autolink_to: [
+          "Lua.VM.RuntimeError",
+          "Lua.VM.TypeError",
+          "Lua.VM.ArgumentError"
+        ],
         groups_for_modules: [
           Core: [Lua, Lua.API, Lua.Table, Lua.Chunk],
           Errors: [Lua.RuntimeException, Lua.CompilerException, Error],
