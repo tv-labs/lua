@@ -75,5 +75,6 @@ defmodule Lua.CompilerException do
     """
   end
 
-  defp clean_message(%Error{message: message}), do: String.trim(message)
+  defp clean_message(%Error{message: message}) when is_binary(message), do: String.trim(message)
+  defp clean_message(%Error{}), do: ""
 end
