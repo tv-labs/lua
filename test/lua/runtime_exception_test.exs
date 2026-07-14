@@ -31,8 +31,8 @@ defmodule Lua.RuntimeExceptionTest do
           e in RuntimeException -> e
         end
 
-      assert exception.message =~ "Lua runtime error:"
-      assert exception.message =~ "custom error message"
+      assert Exception.message(exception) =~ "Lua runtime error:"
+      assert Exception.message(exception) =~ "custom error message"
     end
 
     test "handles parse errors" do
@@ -60,7 +60,7 @@ defmodule Lua.RuntimeExceptionTest do
           e in RuntimeException -> e
         end
 
-      assert exception.message =~ "Lua runtime error:"
+      assert Exception.message(exception) =~ "Lua runtime error:"
     end
 
     test "handles illegal index errors" do
@@ -74,7 +74,7 @@ defmodule Lua.RuntimeExceptionTest do
           e in RuntimeException -> e
         end
 
-      assert exception.message =~ "Lua runtime error:"
+      assert Exception.message(exception) =~ "Lua runtime error:"
     end
   end
 
@@ -85,7 +85,7 @@ defmodule Lua.RuntimeExceptionTest do
 
       exception = RuntimeException.exception({:api_error, details, state})
 
-      assert exception.message == "Lua API error: invalid function call"
+      assert Exception.message(exception) == "Lua API error: invalid function call"
       assert exception.original == details
       assert exception.state == state
     end
@@ -96,7 +96,7 @@ defmodule Lua.RuntimeExceptionTest do
 
       exception = RuntimeException.exception({:api_error, details, state})
 
-      assert exception.message ==
+      assert Exception.message(exception) ==
                "Lua API error: function returned invalid type: expected table, got nil"
 
       assert exception.original == details
@@ -113,7 +113,7 @@ defmodule Lua.RuntimeExceptionTest do
           message: "invalid arguments"
         )
 
-      assert exception.message == "Lua runtime error: my_function() failed, invalid arguments"
+      assert Exception.message(exception) == "Lua runtime error: my_function() failed, invalid arguments"
 
       assert exception.original == [
                scope: [],
@@ -132,7 +132,7 @@ defmodule Lua.RuntimeExceptionTest do
           message: "negative number not allowed"
         )
 
-      assert exception.message ==
+      assert Exception.message(exception) ==
                "Lua runtime error: math.sqrt() failed, negative number not allowed"
 
       assert exception.original == [
@@ -152,7 +152,7 @@ defmodule Lua.RuntimeExceptionTest do
           message: "data validation failed"
         )
 
-      assert exception.message ==
+      assert Exception.message(exception) ==
                "Lua runtime error: my.module.nested.process() failed, data validation failed"
 
       assert exception.original == [
@@ -196,7 +196,7 @@ defmodule Lua.RuntimeExceptionTest do
     test "formats simple binary error" do
       exception = RuntimeException.exception("something went wrong")
 
-      assert exception.message == "Lua runtime error: something went wrong"
+      assert Exception.message(exception) == "Lua runtime error: something went wrong"
       assert exception.original == nil
       assert exception.state == nil
     end
@@ -204,7 +204,7 @@ defmodule Lua.RuntimeExceptionTest do
     test "trims whitespace from binary error" do
       exception = RuntimeException.exception("  error with spaces  \n")
 
-      assert exception.message == "Lua runtime error: error with spaces"
+      assert Exception.message(exception) == "Lua runtime error: error with spaces"
       assert exception.original == nil
       assert exception.state == nil
     end
@@ -212,7 +212,7 @@ defmodule Lua.RuntimeExceptionTest do
     test "handles empty binary string" do
       exception = RuntimeException.exception("")
 
-      assert exception.message == "Lua runtime error: "
+      assert Exception.message(exception) == "Lua runtime error: "
       assert exception.original == nil
       assert exception.state == nil
     end
@@ -225,7 +225,7 @@ defmodule Lua.RuntimeExceptionTest do
 
       exception = RuntimeException.exception(error_message)
 
-      assert exception.message == "Lua runtime error: multi-line error\nwith details"
+      assert Exception.message(exception) == "Lua runtime error: multi-line error\nwith details"
       assert exception.original == nil
       assert exception.state == nil
     end
@@ -237,7 +237,7 @@ defmodule Lua.RuntimeExceptionTest do
 
       exception = RuntimeException.exception(error)
 
-      assert exception.message == "Lua runtime error: invalid argument"
+      assert Exception.message(exception) == "Lua runtime error: invalid argument"
       assert exception.original == error
       assert exception.state == nil
     end
@@ -247,7 +247,7 @@ defmodule Lua.RuntimeExceptionTest do
 
       exception = RuntimeException.exception(error)
 
-      assert exception.message == "Lua runtime error: runtime failure"
+      assert Exception.message(exception) == "Lua runtime error: runtime failure"
       assert exception.original == error
       assert exception.state == nil
     end
@@ -257,8 +257,8 @@ defmodule Lua.RuntimeExceptionTest do
 
       exception = RuntimeException.exception(error)
 
-      assert exception.message =~ "Lua runtime error:"
-      assert exception.message =~ "key :missing not found"
+      assert Exception.message(exception) =~ "Lua runtime error:"
+      assert Exception.message(exception) =~ "key :missing not found"
       assert exception.original == error
       assert exception.state == nil
     end
@@ -266,7 +266,7 @@ defmodule Lua.RuntimeExceptionTest do
     test "handles non-exception atom" do
       exception = RuntimeException.exception(:some_error)
 
-      assert exception.message == "Lua runtime error: :some_error"
+      assert Exception.message(exception) == "Lua runtime error: :some_error"
       assert exception.original == :some_error
       assert exception.state == nil
     end
@@ -274,7 +274,7 @@ defmodule Lua.RuntimeExceptionTest do
     test "handles non-exception integer" do
       exception = RuntimeException.exception(42)
 
-      assert exception.message == "Lua runtime error: 42"
+      assert Exception.message(exception) == "Lua runtime error: 42"
       assert exception.original == 42
       assert exception.state == nil
     end
@@ -284,7 +284,7 @@ defmodule Lua.RuntimeExceptionTest do
 
       exception = RuntimeException.exception(error)
 
-      assert exception.message == "Lua runtime error: {:error, :not_found}"
+      assert Exception.message(exception) == "Lua runtime error: {:error, :not_found}"
       assert exception.original == error
       assert exception.state == nil
     end
@@ -294,7 +294,7 @@ defmodule Lua.RuntimeExceptionTest do
 
       exception = RuntimeException.exception(error)
 
-      assert exception.message == "Lua runtime error: %{code: 404, message: \"not found\"}"
+      assert Exception.message(exception) == "Lua runtime error: %{code: 404, message: \"not found\"}"
       assert exception.original == error
       assert exception.state == nil
     end
@@ -312,8 +312,8 @@ defmodule Lua.RuntimeExceptionTest do
 
       exception = RuntimeException.exception(error)
 
-      assert exception.message =~ "Lua runtime error:"
-      assert exception.message =~ "MyModule.my_func/2"
+      assert Exception.message(exception) =~ "Lua runtime error:"
+      assert Exception.message(exception) =~ "MyModule.my_func/2"
       assert exception.original == error
       assert exception.state == nil
     end
@@ -328,7 +328,7 @@ defmodule Lua.RuntimeExceptionTest do
           message: "error"
         )
 
-      assert exception.message =~ "test() failed"
+      assert Exception.message(exception) =~ "test() failed"
     end
 
     test "formats function with single element scope" do
@@ -339,7 +339,7 @@ defmodule Lua.RuntimeExceptionTest do
           message: "error"
         )
 
-      assert exception.message =~ "module.func() failed"
+      assert Exception.message(exception) =~ "module.func() failed"
     end
 
     test "formats function with nested scope" do
@@ -350,7 +350,7 @@ defmodule Lua.RuntimeExceptionTest do
           message: "error"
         )
 
-      assert exception.message =~ "a.b.c.method() failed"
+      assert Exception.message(exception) =~ "a.b.c.method() failed"
     end
   end
 
@@ -440,34 +440,32 @@ defmodule Lua.RuntimeExceptionTest do
     test "binary clause does not double-prefix" do
       exception = RuntimeException.exception("Lua runtime error: already prefixed")
 
-      assert exception.message == "Lua runtime error: already prefixed"
+      assert Exception.message(exception) == "Lua runtime error: already prefixed"
     end
 
     test "binary clause trims then guards" do
       exception = RuntimeException.exception("  Lua runtime error: trimmed  \n")
 
-      assert exception.message == "Lua runtime error: trimmed"
+      assert Exception.message(exception) == "Lua runtime error: trimmed"
     end
 
     test "lua_error tuple clause does not double-prefix" do
       exception =
         RuntimeException.exception({:lua_error, "Lua runtime error: from inner error", State.new()})
 
-      assert exception.message == "Lua runtime error: from inner error"
+      assert Exception.message(exception) == "Lua runtime error: from inner error"
     end
 
-    test "catch-all clause does not double-prefix when wrapping a VM exception" do
-      inner =
-        Lua.VM.RuntimeError.exception(
-          value: "boom",
-          source: "t.lua",
-          line: 3,
-          message: "Lua runtime error: boom"
-        )
+    test "catch-all clause prefixes a wrapped VM exception exactly once" do
+      inner = Lua.VM.RuntimeError.exception(value: "boom", source: "t.lua", line: 3)
 
-      exception = RuntimeException.exception(inner)
+      message = Exception.message(RuntimeException.exception(inner))
 
-      assert exception.message == "Lua runtime error: boom"
+      # A VM exception's rendered message never starts with the runtime prefix,
+      # so wrapping it adds exactly one — never a doubled chain.
+      assert String.starts_with?(message, "Lua runtime error: ")
+      refute message =~ "Lua runtime error: Lua runtime error:"
+      assert message =~ "runtime error: boom"
     end
 
     test "catch-all clause does not double-prefix when wrapping a built-in exception" do
@@ -475,7 +473,7 @@ defmodule Lua.RuntimeExceptionTest do
 
       exception = RuntimeException.exception(inner)
 
-      assert exception.message == "Lua runtime error: already wrapped"
+      assert Exception.message(exception) == "Lua runtime error: already wrapped"
     end
 
     test "keyword list clause still prefixes (inner never starts with prefix)" do
@@ -486,13 +484,13 @@ defmodule Lua.RuntimeExceptionTest do
           message: "boom"
         )
 
-      assert exception.message == "Lua runtime error: m.f() failed, boom"
+      assert Exception.message(exception) == "Lua runtime error: m.f() failed, boom"
     end
 
     test "binary clause still prefixes plain messages" do
       exception = RuntimeException.exception("plain message")
 
-      assert exception.message == "Lua runtime error: plain message"
+      assert Exception.message(exception) == "Lua runtime error: plain message"
     end
   end
 

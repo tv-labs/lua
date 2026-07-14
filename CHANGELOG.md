@@ -83,8 +83,19 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
     `pcall` hands back inside Lua. Code matching on a string reason should
     switch to the struct (or call `Exception.message/1` on it).
   - `Lua.parse_chunk/1` returns `{:error, %Lua.CompilerException{}}` instead of
-    `{:error, [String.t()]}`. The formatted diagnostics are on the
-    exception's `:errors` field; `Exception.message/1` renders them.
+    `{:error, [String.t()]}`. Call `Exception.message/1` to render the full,
+    human-readable report; the `:errors` field carries the bare, ANSI-free
+    messages for programmatic inspection.
+- Lua exceptions render their message lazily at `Exception.message/1` call
+  time, so the `:message` **struct field** is removed from
+  `Lua.VM.RuntimeError`, `Lua.VM.TypeError`, and `Lua.VM.AssertionError`, and
+  is `nil` on the `Lua.RuntimeException` wrapper when it wraps a VM exception.
+  Read the message through `Exception.message/1` (the idiomatic accessor)
+  rather than the `e.message` field. Likewise `Lua.CompilerException`'s
+  `:errors` field now holds bare, ANSI-free messages rather than the fully
+  formatted (and previously ANSI-colored) diagnostics — the rich report moved
+  to `Exception.message/1`. This is what lets the ANSI gate hold at output time
+  (#384).
 
 ### Changed
 - `Lua.new/1`'s `:max_string_bytes` now accepts `:infinity` for no limit,
@@ -94,6 +105,13 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
   populated (always `nil`); `:errors` carries all the formatted diagnostics.
 
 ### Fixed
+- Lua exception messages no longer leak ANSI escape codes (and multi-line rich
+  rendering) into non-terminal sinks such as log files, container stdout, or a
+  Sentry/AppSignal title. Messages were formatted eagerly during VM execution —
+  where `IO.ANSI.enabled?/0` is true — freezing escape codes into the struct
+  that survived long after the TTY gate. They now render at `Exception.message/1`
+  call time, so the ANSI gate is evaluated where the message is actually written
+  (#384).
 - `Lua.eval!/3` now accepts a `:source` option when evaluating a pre-compiled
   `Lua.Chunk`, matching the string-script clause. Previously
   `eval!(lua, chunk, source: "x")` raised via `Keyword.validate!`. For a chunk
