@@ -30,27 +30,29 @@ defmodule Lua.VM.RuntimeError do
   # raw `:value`, so host-facing rendering (which adds its own
   # `at source:line:` header) never doubles the location.
   @derive {Inspect, except: [:state]}
-  defexception [:value, :lua_value, :source, :message, :call_stack, :line, :state]
+  defexception [:value, :lua_value, :source, :call_stack, :line, :state]
 
   @impl true
   def exception(opts) do
     {auto_line, auto_source} = Lua.VM.Executor.current_position()
 
-    value = Keyword.get(opts, :value)
-    source = Keyword.get(opts, :source) || auto_source
-    call_stack = Keyword.get(opts, :call_stack, [])
-    line = Keyword.get(opts, :line) || auto_line
-    message = Keyword.get(opts, :message) || format_message(value, source, line, call_stack)
-
     %__MODULE__{
-      value: value,
+      value: Keyword.get(opts, :value),
       lua_value: Keyword.get(opts, :lua_value),
-      source: source,
-      message: message,
-      call_stack: call_stack,
-      line: line,
+      source: Keyword.get(opts, :source) || auto_source,
+      call_stack: Keyword.get(opts, :call_stack, []),
+      line: Keyword.get(opts, :line) || auto_line,
       state: Keyword.get(opts, :state)
     }
+  end
+
+  # Rendered lazily so `IO.ANSI.enabled?/0` is evaluated when the message is
+  # actually written (log sink, TTY, Sentry) rather than frozen at construction
+  # time — where it would run inside a Lua execution and always see a TTY. See
+  # issue #384; mirrors `Lua.VM.ArgumentError.message/1`.
+  @impl true
+  def message(%__MODULE__{} = error) do
+    format_message(error.value, error.source, error.line, error.call_stack)
   end
 
   @doc """

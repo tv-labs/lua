@@ -46,7 +46,7 @@ defmodule Lua.ErrorMessagesTest do
           VM.execute(proto, state)
         end
 
-      assert error.message =~ "number"
+      assert Exception.message(error) =~ "number"
     end
 
     test "error message includes source location" do
@@ -211,9 +211,9 @@ defmodule Lua.ErrorMessagesTest do
         end
 
       # Error message should be a formatted string
-      assert is_binary(error.message)
+      assert is_binary(Exception.message(error))
       # Should contain error type
-      assert error.message =~ ~r/Error/i
+      assert Exception.message(error) =~ ~r/Error/i
     end
   end
 
@@ -386,8 +386,8 @@ defmodule Lua.ErrorMessagesTest do
       # and IDE integrations can only string-scrape the formatted message.
       assert is_integer(e.line) and e.line > 0
       assert e.source == "demo.lua"
-      assert e.message =~ "demo.lua:#{e.line}"
-      assert e.message =~ "attempt to perform arithmetic on a string value"
+      assert Exception.message(e) =~ "demo.lua:#{e.line}"
+      assert Exception.message(e) =~ "attempt to perform arithmetic on a string value"
     end
 
     test "indexing a nil value carries line and source" do
@@ -403,7 +403,7 @@ defmodule Lua.ErrorMessagesTest do
 
       assert is_integer(e.line) and e.line > 0
       assert e.source == "demo.lua"
-      assert e.message =~ "demo.lua:#{e.line}"
+      assert Exception.message(e) =~ "demo.lua:#{e.line}"
     end
 
     test "calling a nil value carries line and source" do
@@ -419,8 +419,8 @@ defmodule Lua.ErrorMessagesTest do
 
       assert is_integer(e.line) and e.line > 0
       assert e.source == "demo.lua"
-      assert e.message =~ "demo.lua:#{e.line}"
-      assert e.message =~ "attempt to call a nil value"
+      assert Exception.message(e) =~ "demo.lua:#{e.line}"
+      assert Exception.message(e) =~ "attempt to call a nil value"
     end
 
     test "assert(false) from Lua carries line and source" do
@@ -436,8 +436,8 @@ defmodule Lua.ErrorMessagesTest do
 
       assert is_integer(e.line) and e.line > 0
       assert e.source == "check.lua"
-      assert e.message =~ "check.lua:#{e.line}"
-      assert e.message =~ "must be positive"
+      assert Exception.message(e) =~ "check.lua:#{e.line}"
+      assert Exception.message(e) =~ "must be positive"
     end
 
     test "default source name is <eval> when no source: given" do
@@ -449,7 +449,7 @@ defmodule Lua.ErrorMessagesTest do
         end
 
       assert e.source == "<eval>"
-      assert e.message =~ "<eval>:"
+      assert Exception.message(e) =~ "<eval>:"
     end
 
     test "source: option threads through to the compiled chunk" do
@@ -459,7 +459,7 @@ defmodule Lua.ErrorMessagesTest do
         end
 
       assert e.source == "user_input.lua"
-      assert e.message =~ "user_input.lua:"
+      assert Exception.message(e) =~ "user_input.lua:"
     end
 
     test "successful eval doesn't pay any line-tracking cost on the public path" do
@@ -498,8 +498,8 @@ defmodule Lua.ErrorMessagesTest do
       # The wrapped public exception preserves the structured fields.
       assert is_integer(e.line) and e.line > 0
       assert e.source == "demo.lua"
-      assert e.message =~ "demo.lua:#{e.line}"
-      assert e.message =~ "bad argument #1 to 'string.upper'"
+      assert Exception.message(e) =~ "demo.lua:#{e.line}"
+      assert Exception.message(e) =~ "bad argument #1 to 'string.upper'"
     end
 
     test "math.floor on string carries line and source" do
@@ -515,8 +515,8 @@ defmodule Lua.ErrorMessagesTest do
 
       assert is_integer(e.line) and e.line > 0
       assert e.source == "demo.lua"
-      assert e.message =~ "demo.lua:#{e.line}"
-      assert e.message =~ "bad argument #1 to 'math.floor'"
+      assert Exception.message(e) =~ "demo.lua:#{e.line}"
+      assert Exception.message(e) =~ "bad argument #1 to 'math.floor'"
     end
 
     test "table.insert with bad pos carries line and source" do
@@ -532,8 +532,8 @@ defmodule Lua.ErrorMessagesTest do
 
       assert is_integer(e.line) and e.line > 0
       assert e.source == "demo.lua"
-      assert e.message =~ "demo.lua:#{e.line}"
-      assert e.message =~ "table.insert"
+      assert Exception.message(e) =~ "demo.lua:#{e.line}"
+      assert Exception.message(e) =~ "table.insert"
     end
 
     test "select with non-numeric index carries line and source" do
@@ -549,8 +549,8 @@ defmodule Lua.ErrorMessagesTest do
 
       assert is_integer(e.line) and e.line > 0
       assert e.source == "demo.lua"
-      assert e.message =~ "demo.lua:#{e.line}"
-      assert e.message =~ "select"
+      assert Exception.message(e) =~ "demo.lua:#{e.line}"
+      assert Exception.message(e) =~ "select"
     end
 
     test "setmetatable on non-table carries line and source" do
@@ -566,8 +566,8 @@ defmodule Lua.ErrorMessagesTest do
 
       assert is_integer(e.line)
       assert e.source == "demo.lua"
-      assert e.message =~ "demo.lua:"
-      assert e.message =~ "setmetatable"
+      assert Exception.message(e) =~ "demo.lua:"
+      assert Exception.message(e) =~ "setmetatable"
     end
 
     test "ArgumentError raised outside a Lua execution has nil line/source" do
@@ -623,8 +623,8 @@ defmodule Lua.ErrorMessagesTest do
 
       assert is_integer(e.line) and e.line > 0
       assert e.source == "demo.lua"
-      assert e.message =~ "demo.lua:#{e.line}"
-      assert e.message =~ "select"
+      assert Exception.message(e) =~ "demo.lua:#{e.line}"
+      assert Exception.message(e) =~ "select"
     end
   end
 end

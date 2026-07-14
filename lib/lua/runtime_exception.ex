@@ -4,9 +4,15 @@ defmodule Lua.RuntimeException do
   arithmetic on a non-number, indexing a nil, an explicit `error()`
   call from Lua, or any other dynamic failure inside the VM.
 
+  Use `Exception.message/1` to render the message — do not read the `:message`
+  field directly. When this wraps a VM exception the field is `nil` and the
+  message is rendered lazily so ANSI color is gated on `IO.ANSI.enabled?/0` at
+  output time rather than frozen at construction (issue #384).
+
   Fields:
 
-    * `:message`     — formatted error string
+    * `:message`     — pre-rendered string for terminal-independent errors, or
+      `nil` when rendered lazily from `:original`
     * `:original`    — the underlying VM error term
     * `:state`       — the internal VM state at the point of failure
     * `:line`        — line number where the error was raised
@@ -50,25 +56,38 @@ defmodule Lua.RuntimeException do
   end
 
   def exception(error) do
-    message =
-      if is_exception(error) do
-        Exception.message(error)
-      else
-        inspect(error)
-      end
-
     # Copy structured fields off VM exceptions (TypeError, RuntimeError,
     # AssertionError) so consumers can pattern-match on `:line` / `:source`
     # without having to re-parse the message string.
     {line, source, call_stack} = extract_context(error)
 
+    # `:message` is left nil so `message/1` renders the wrapped error lazily.
+    # The inner VM exceptions gate ANSI on `IO.ANSI.enabled?/0` at render time
+    # (issue #384); freezing their rendered message here would bake in escape
+    # codes from the TTY-attached VM process and leak them into log sinks.
     %__MODULE__{
       original: error,
-      message: prefix_message(message),
       line: line,
       source: source,
       call_stack: call_stack
     }
+  end
+
+  # The `:lua_error`, `:api_error`, keyword-list, and binary clauses build
+  # ANSI-free strings that don't depend on the terminal, so they memoize into
+  # `:message`. The generic clause defers to keep the ANSI gate honest.
+  @impl true
+  def message(%__MODULE__{message: message}) when is_binary(message), do: message
+
+  def message(%__MODULE__{original: original}) do
+    rendered =
+      if is_exception(original) do
+        Exception.message(original)
+      else
+        inspect(original)
+      end
+
+    prefix_message(rendered)
   end
 
   defp prefix_message(@runtime_prefix <> _ = msg), do: msg

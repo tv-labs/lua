@@ -499,7 +499,7 @@ defmodule Lua do
   def eval!(%__MODULE__{state: state} = lua, script, opts) when is_binary(script) do
     opts = Keyword.validate!(opts, decode: true, source: "<eval>")
 
-    case Lua.Parser.parse(script) do
+    case Lua.Parser.parse_structured(script) do
       {:ok, ast} ->
         case Lua.Compiler.compile(ast, source: opts[:source]) do
           {:ok, proto} ->
@@ -520,8 +520,8 @@ defmodule Lua do
             raise Lua.CompilerException, msg
         end
 
-      {:error, msg} ->
-        raise Lua.CompilerException, msg
+      {:error, parse_errors} ->
+        raise Lua.CompilerException, {:parse_errors, parse_errors, script}
     end
   rescue
     e in [Lua.RuntimeException, Lua.CompilerException] ->
@@ -641,7 +641,7 @@ defmodule Lua do
   """
   @spec parse_chunk(String.t()) :: {:ok, Lua.Chunk.t()} | {:error, Lua.CompilerException.t()}
   def parse_chunk(code) do
-    case Lua.Parser.parse(code) do
+    case Lua.Parser.parse_structured(code) do
       {:ok, ast} ->
         case Lua.Compiler.compile(ast) do
           {:ok, proto} ->
@@ -651,8 +651,8 @@ defmodule Lua do
             {:error, Lua.CompilerException.exception(msg)}
         end
 
-      {:error, msg} ->
-        {:error, Lua.CompilerException.exception(msg)}
+      {:error, parse_errors} ->
+        {:error, Lua.CompilerException.exception({:parse_errors, parse_errors, code})}
     end
   end
 
