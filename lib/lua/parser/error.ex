@@ -239,7 +239,7 @@ defmodule Lua.Parser.Error do
     lines = String.split(source_code, "\n")
 
     header = [
-      IO.ANSI.red() <> IO.ANSI.bright() <> "Parse Error" <> IO.ANSI.reset(),
+      color("Parse Error", IO.ANSI.red() <> IO.ANSI.bright()),
       ""
     ]
 
@@ -268,7 +268,7 @@ defmodule Lua.Parser.Error do
       if error.suggestion do
         [
           "",
-          IO.ANSI.cyan() <> "Suggestion:" <> IO.ANSI.reset(),
+          color("Suggestion:", IO.ANSI.cyan()),
           indent(error.suggestion, 2)
         ]
       else
@@ -279,7 +279,7 @@ defmodule Lua.Parser.Error do
       if length(error.related) > 0 do
         [
           "",
-          IO.ANSI.yellow() <> "Related errors:" <> IO.ANSI.reset()
+          color("Related errors:", IO.ANSI.yellow())
         ] ++ Enum.flat_map(error.related, fn rel -> ["", indent(format(rel, source_code), 2)] end)
       else
         []
@@ -294,10 +294,10 @@ defmodule Lua.Parser.Error do
   @spec format_multiple([t()], String.t()) :: String.t()
   def format_multiple(errors, source_code) do
     header = [
-      IO.ANSI.red() <>
-        IO.ANSI.bright() <>
-        "Found #{length(errors)} parse error#{if length(errors) == 1, do: "", else: "s"}" <>
-        IO.ANSI.reset(),
+      color(
+        "Found #{length(errors)} parse error#{if length(errors) == 1, do: "", else: "s"}",
+        IO.ANSI.red() <> IO.ANSI.bright()
+      ),
       ""
     ]
 
@@ -306,7 +306,7 @@ defmodule Lua.Parser.Error do
       |> Enum.with_index(1)
       |> Enum.flat_map(fn {error, idx} ->
         [
-          IO.ANSI.yellow() <> "Error #{idx}:" <> IO.ANSI.reset(),
+          color("Error #{idx}:", IO.ANSI.yellow()),
           format(error, source_code),
           ""
         ]
@@ -316,6 +316,18 @@ defmodule Lua.Parser.Error do
   end
 
   # Private helpers
+
+  # ANSI helpers — no-ops unless the terminal actually supports color, so
+  # piping to a file or a non-TTY never embeds raw escape codes. Mirrors
+  # `Lua.VM.ErrorFormatter.color/2` so parse and runtime errors gate the same
+  # way (see issue #382).
+  defp color(text, ansi) do
+    if IO.ANSI.enabled?() do
+      ansi <> text <> IO.ANSI.reset()
+    else
+      text
+    end
+  end
 
   defp format_context(lines, position) do
     line_num = position.line
@@ -335,15 +347,15 @@ defmodule Lua.Parser.Error do
         if num == line_num do
           # Error line
           pointer = String.duplicate(" ", String.length(format_line_number(num)) + 3 + column - 1)
-          pointer = pointer <> IO.ANSI.red() <> "^" <> IO.ANSI.reset()
+          pointer = pointer <> color("^", IO.ANSI.red())
 
           [
-            IO.ANSI.red() <> line_str <> IO.ANSI.reset(),
+            color(line_str, IO.ANSI.red()),
             pointer
           ]
         else
           # Context line
-          [IO.ANSI.faint() <> line_str <> IO.ANSI.reset()]
+          [color(line_str, IO.ANSI.faint())]
         end
       end)
 

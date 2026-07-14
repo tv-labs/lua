@@ -475,6 +475,17 @@ defmodule LuaTest do
       refute message =~ "Lua.CompilerException"
     end
 
+    test "parse_chunk/1 errors carry no ANSI escapes when color is disabled" do
+      refute IO.ANSI.enabled?(), "test env should have ANSI disabled"
+
+      # Regression for #382: the formatted parse-error strings stored in
+      # %Lua.CompilerException{} must respect IO.ANSI.enabled?/0 rather than
+      # embedding raw escape codes unconditionally.
+      assert {:error, %Lua.CompilerException{errors: errors}} = Lua.parse_chunk("asdf")
+      refute Enum.any?(errors, &(&1 =~ "\e["))
+      refute Exception.message(Lua.CompilerException.exception(formatted: errors)) =~ "\e["
+    end
+
     test "chunks can be loaded multiple times" do
       lua = Lua.new()
       chunk = ~LUA[print("hello")]c

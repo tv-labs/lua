@@ -110,8 +110,16 @@ defmodule Lua.Parser.ErrorTest do
       assert msg =~ "│"
       # Error pointer
       assert msg =~ "^"
-      # ANSI color codes
-      assert msg =~ "\e["
+    end
+
+    test "format output is gated on IO.ANSI.enabled?" do
+      refute IO.ANSI.enabled?(), "test env should have ANSI disabled"
+
+      # Regression for #382: parse errors must not embed raw ANSI escape
+      # codes when color is disabled. The strings flow out of parse_chunk/1
+      # inside %Lua.CompilerException{}, so a leak here surfaces there too.
+      assert {:error, msg} = Parser.parse("asdf")
+      refute msg =~ "\e["
     end
 
     test "includes line and column information" do
@@ -148,20 +156,6 @@ defmodule Lua.Parser.ErrorTest do
 
       assert {:error, msg} = Parser.parse(code)
       assert msg =~ "Suggestion"
-    end
-
-    test "uses ANSI colors for better readability" do
-      code = "if x then"
-
-      assert {:error, msg} = Parser.parse(code)
-      # Red for errors
-      assert msg =~ "\e[31m"
-      # Bold
-      assert msg =~ "\e[1m"
-      # Reset
-      assert msg =~ "\e[0m"
-      # Cyan for suggestions
-      assert msg =~ "\e[36m"
     end
   end
 
