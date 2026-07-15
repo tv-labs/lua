@@ -708,8 +708,9 @@ defmodule Lua do
   ## Errors
 
   When the function raises, `call_function/3` returns `{:error, exception,
-  lua}`, where `exception` is the Lua VM exception struct — a
-  `Lua.VM.RuntimeError`, `Lua.VM.TypeError`, `Lua.VM.ArgumentError`, etc. Call
+  lua}`, where `exception` is a `Lua.RuntimeException`. Read `:kind`
+  (`:error | :type | :argument | :assertion | :internal`) to discriminate the
+  failure, and `:original` to reach the internal VM exception. Call
   `Exception.message/1` yourself to render it; unlike the raising
   `call_function!/3`, the boundary does *not* pre-render it (no ANSI, no
   `at <source>:<line>:` header, no `Suggestion:` block).
@@ -719,8 +720,8 @@ defmodule Lua do
       iex> Exception.message(exception) =~ "boom"
       true
 
-  The raised Lua value is preserved on the struct — exactly what `pcall` hands
-  back inside Lua. `error(42)` carries `42` on the `RuntimeError`'s `:value`:
+  The raised Lua value is preserved on `:value` — exactly what `pcall` hands
+  back inside Lua. `error(42)` carries `42`:
 
       iex> {[ref], lua} = Lua.eval!(Lua.new(), "return function() error(42) end", decode: false)
       iex> {:error, exception, _lua} = Lua.call_function(lua, ref, [])
@@ -735,25 +736,36 @@ defmodule Lua do
   end
 
   # `call_function/3` is a programmatic protected-call boundary. Its `:error`
-  # payload is the VM exception struct itself, carried out verbatim so callers
-  # own the rendering (`Exception.message/1`) and can pattern-match on the
-  # concrete error struct. In-Lua `pcall`/`xpcall` still project the raw §6.1
-  # value via `ProtectedCall.error_value/1`; this boundary deliberately does
-  # not. The raising variant `call_function!/3` re-raises the same exception
-  # through `Lua.RuntimeException` to get the rich `ErrorFormatter` render.
+  # payload is always the public `Lua.RuntimeException`: the internal VM
+  # exception is wrapped so callers pattern-match one type, read the raised Lua
+  # value off `:value` and the category off `:kind`, and render with
+  # `Exception.message/1`. In-Lua `pcall`/`xpcall` still project the raw §6.1
+  # value via `ProtectedCall.error_value/1` inside the VM; they never reach
+  # this boundary.
   defp finish_call(%__MODULE__{} = lua, {:ok, results, new_state}) do
     {:ok, results, %{lua | state: new_state}}
   end
 
-  defp finish_call(%__MODULE__{} = lua, {:error, e, new_state}) when is_exception(e) do
+  # Already a host-facing exception (a nested eval, or a compiler error from
+  # `load`) — carry it out unchanged rather than re-wrapping.
+  defp finish_call(%__MODULE__{} = lua, {:error, %Lua.RuntimeException{} = e, new_state}) do
     {:error, e, %{lua | state: new_state}}
   end
 
+  defp finish_call(%__MODULE__{} = lua, {:error, %Lua.CompilerException{} = e, new_state}) do
+    {:error, e, %{lua | state: new_state}}
+  end
+
+  defp finish_call(%__MODULE__{} = lua, {:error, e, new_state}) when is_exception(e) do
+    {:error, Lua.RuntimeException.exception(e), %{lua | state: new_state}}
+  end
+
   # Defensive: every `resolve_and_call/3` error path yields an exception today.
-  # If a bare Lua value ever reaches here, wrap it so the boundary's contract
-  # stays uniform — the `:error` payload is always an exception struct.
+  # If a bare Lua value ever reaches here, wrap it as an `error()` runtime
+  # exception so the boundary's contract stays uniform.
   defp finish_call(%__MODULE__{} = lua, {:error, reason, new_state}) do
-    {:error, %RuntimeError{value: reason}, %{lua | state: new_state}}
+    exception = Lua.RuntimeException.exception(RuntimeError.exception(value: reason))
+    {:error, exception, %{lua | state: new_state}}
   end
 
   # Resolves `name`/`func` to a callable and invokes it under protection.

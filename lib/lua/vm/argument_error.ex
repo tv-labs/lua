@@ -1,45 +1,30 @@
 defmodule Lua.VM.ArgumentError do
-  @moduledoc """
-  Raised when a function is called with invalid arguments.
+  @moduledoc false
 
-  This exception provides standardized error messages for bad arguments across
-  all Lua standard library functions.
-
-  ## Fields
-
-    - `:function_name` - The fully qualified function name (e.g., "string.rep")
-    - `:arg_num` - The argument number (1-based)
-    - `:expected` - What type or value was expected (e.g., "number", "string")
-    - `:got` - What was actually received (optional, e.g., "nil", "boolean")
-    - `:details` - Additional details about the error (optional)
-    - `:line` - Source line where the call originated (auto-populated from
-      `Lua.VM.Executor.current_position/0` when not given explicitly)
-    - `:source` - Source name where the call originated (auto-populated)
-    - `:call_stack` - Call stack frames at the raise site (default `[]`)
-
-  ## Examples
-
-      # Basic type error — line/source filled in automatically when raised
-      # from inside a Lua execution.
-      raise ArgumentError,
-        function_name: "string.rep",
-        arg_num: 2,
-        expected: "number"
-
-      # With actual type received
-      raise ArgumentError,
-        function_name: "string.sub",
-        arg_num: 2,
-        expected: "number",
-        got: "string"
-
-      # With additional details
-      raise ArgumentError,
-        function_name: "string.char",
-        arg_num: 1,
-        expected: "number",
-        details: "value out of range"
-  """
+  # Internal VM exception. Never surfaces to the host directly — it is wrapped
+  # into the public `Lua.RuntimeException` (kind: `:argument`) at the API
+  # boundary, which projects `raw_message/1` onto `:value`.
+  #
+  # Raised when a function is called with invalid arguments; provides
+  # standardized "bad argument #N to 'F'" messages across all Lua standard
+  # library functions.
+  #
+  # Fields:
+  #
+  #   - `:function_name` - fully qualified function name (e.g., "string.rep")
+  #   - `:arg_num` - the argument number (1-based)
+  #   - `:expected` - what type or value was expected ("number", "string", …)
+  #   - `:got` - what was actually received (optional, "nil", "boolean", …)
+  #   - `:details` - additional details about the error (optional)
+  #   - `:line` / `:source` - call origin, auto-populated from
+  #     `Lua.VM.Executor.current_position/0` when not given explicitly
+  #   - `:call_stack` - call stack frames at the raise site (default `[]`)
+  #
+  # Examples:
+  #
+  #     raise ArgumentError, function_name: "string.rep", arg_num: 2, expected: "number"
+  #     raise ArgumentError, function_name: "string.sub", arg_num: 2, expected: "number", got: "string"
+  #     raise ArgumentError, function_name: "string.char", arg_num: 1, expected: "number", details: "value out of range"
 
   alias Lua.VM.RuntimeError
 

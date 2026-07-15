@@ -1,8 +1,12 @@
 defmodule Lua.VM.InternalError do
-  @moduledoc """
-  Raised for internal VM errors: bad native function returns,
-  unimplemented instructions, and other invariant violations.
-  """
+  @moduledoc false
+
+  # Internal VM exception. Never surfaces to the host directly — it is wrapped
+  # into the public `Lua.RuntimeException` (kind: `:internal`) at the API
+  # boundary.
+  #
+  # Raised for internal VM errors: bad native function returns, unimplemented
+  # instructions, and other invariant violations.
 
   defexception [:value, :message]
 

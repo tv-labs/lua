@@ -1,16 +1,18 @@
 defmodule Lua.VM.TypeError do
-  @moduledoc """
-  Raised when a Lua operation is applied to a value of the wrong type.
+  @moduledoc false
 
-  Examples: calling a nil value, calling a number, indexing a boolean.
-
-  When raised without explicit `:line` / `:source` opts (e.g. from a stdlib
-  type check), `exception/1` populates them from the calling Lua source
-  position via `Lua.VM.Executor.current_position/0`. That position is
-  stashed in the process dictionary at every native-call boundary, so
-  any raise site reachable from a Lua execution inherits the correct
-  attribution automatically.
-  """
+  # Internal VM exception. Never surfaces to the host directly — it is wrapped
+  # into the public `Lua.RuntimeException` (kind: `:type`) at the API boundary.
+  #
+  # Raised when a Lua operation is applied to a value of the wrong type.
+  # Examples: calling a nil value, calling a number, indexing a boolean.
+  #
+  # When raised without explicit `:line` / `:source` opts (e.g. from a stdlib
+  # type check), `exception/1` populates them from the calling Lua source
+  # position via `Lua.VM.Executor.current_position/0`. That position is stashed
+  # in the process dictionary at every native-call boundary, so any raise site
+  # reachable from a Lua execution inherits the correct attribution
+  # automatically.
 
   alias Lua.VM.ErrorFormatter
 

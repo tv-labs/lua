@@ -1,18 +1,22 @@
 defmodule Lua.CallFunctionErrorValueTest do
   @moduledoc """
   Pins the `Lua.call_function/3` protected-call boundary: its `{:error,
-  exception, _}` payload is the VM exception struct itself — a
-  `Lua.VM.RuntimeError`, `Lua.VM.TypeError`, or `Lua.VM.ArgumentError` —
-  carried out verbatim. The boundary does no rendering: callers own that by
-  calling `Exception.message/1`, and can pattern-match on the concrete struct
-  and its structured fields. The raw Lua value handed to `error()` (§6.1) is
-  preserved on the struct's `:value`, so pcall-parity data survives.
+  exception, _}` payload is always the public `Lua.RuntimeException`. The
+  internal VM exception is wrapped so callers pattern-match one type and read:
 
-  The raising variant `call_function!/3` re-raises the same exception through
-  `Lua.RuntimeException`, keeping the rich `ErrorFormatter` render.
+    * `:kind`     — the category (`:error`, `:type`, `:argument`, …)
+    * `:value`    — the Lua-facing error value exactly as `pcall`/`xpcall`
+      would hand it back (§6.1)
+    * `:original` — the underlying VM exception, for deep inspection of
+      structured fields (`error_kind`, `function_name`, …)
+
+  The boundary does no rendering: callers own that by calling
+  `Exception.message/1`. The raising variant `call_function!/3` re-raises the
+  same `Lua.RuntimeException`, keeping the rich `ErrorFormatter` render.
   """
   use ExUnit.Case, async: true
 
+  alias Lua.RuntimeException
   alias Lua.VM.ArgumentError
   alias Lua.VM.RuntimeError
   alias Lua.VM.TypeError
@@ -22,39 +26,47 @@ defmodule Lua.CallFunctionErrorValueTest do
     {ref, lua}
   end
 
-  describe "call_function/3 returns the VM exception struct" do
-    test "error('boom') comes back as a RuntimeError carrying the raised value" do
+  describe "call_function/3 returns a Lua.RuntimeException" do
+    test "error('boom') comes back with kind :error and the §6.1 value" do
       {ref, lua} = fun!("function() error('boom') end")
 
-      assert {:error, %RuntimeError{value: "boom"} = error, %Lua{}} =
+      assert {:error, %RuntimeException{kind: :error, value: value} = error, %Lua{}} =
                Lua.call_function(lua, ref, [])
 
+      # String errors are position-prefixed by `error()`, matching pcall.
+      assert value =~ "boom"
+      assert %RuntimeError{value: "boom"} = error.original
       assert Exception.message(error) =~ "boom"
     end
 
-    test "a call-nil failure comes back as a TypeError struct" do
+    test "a call-nil failure comes back with kind :type" do
       {ref, lua} = fun!("function() local f = nil; f() end")
 
-      assert {:error, %TypeError{error_kind: :call_nil} = error, %Lua{}} =
+      assert {:error, %RuntimeException{kind: :type} = error, %Lua{}} =
                Lua.call_function(lua, ref, [])
 
+      assert %TypeError{error_kind: :call_nil} = error.original
       assert Exception.message(error) =~ "attempt to call a nil value"
     end
 
-    test "an index-nil failure comes back as a TypeError struct" do
+    test "an index-nil failure comes back with kind :type" do
       {ref, lua} = fun!("function() local t = nil; return t.x end")
 
-      assert {:error, %TypeError{error_kind: :index_non_table} = error, %Lua{}} =
+      assert {:error, %RuntimeException{kind: :type} = error, %Lua{}} =
                Lua.call_function(lua, ref, [])
 
+      assert %TypeError{error_kind: :index_non_table} = error.original
       assert Exception.message(error) =~ "attempt to index"
     end
 
-    test "a stdlib bad-argument failure comes back as an ArgumentError struct" do
+    test "a stdlib bad-argument failure comes back with kind :argument" do
       {ref, lua} = fun!(~S|function() for i in pairs("asdf") do end end|)
 
-      assert {:error, %ArgumentError{function_name: "pairs", arg_num: 1} = error, %Lua{}} =
+      assert {:error, %RuntimeException{kind: :argument, value: value} = error, %Lua{}} =
                Lua.call_function(lua, ref, [])
+
+      assert %ArgumentError{function_name: "pairs", arg_num: 1} = error.original
+      assert value =~ "bad argument #1 to 'pairs'"
 
       message = Exception.message(error)
       assert message =~ "bad argument #1 to 'pairs'"
@@ -67,8 +79,10 @@ defmodule Lua.CallFunctionErrorValueTest do
     test "an undefined name names what was looked up, not the resolved nil" do
       {_, lua} = Lua.eval!(Lua.new(), "function foo() return 1 end")
 
-      assert {:error, %TypeError{error_kind: :call_nil} = error, %Lua{}} =
+      assert {:error, %RuntimeException{kind: :type} = error, %Lua{}} =
                Lua.call_function(lua, [:bar], [])
+
+      assert %TypeError{error_kind: :call_nil} = error.original
 
       # Regression: previously reported the resolved value ("undefined
       # function 'nil'"). It must name the requested global instead.
@@ -78,7 +92,8 @@ defmodule Lua.CallFunctionErrorValueTest do
     test "an existing non-function value reports its type, not 'undefined'" do
       {_, lua} = Lua.eval!(Lua.new(), "x = 5")
 
-      assert {:error, %TypeError{} = error, %Lua{}} = Lua.call_function(lua, [:x], [])
+      assert {:error, %RuntimeException{kind: :type} = error, %Lua{}} =
+               Lua.call_function(lua, [:x], [])
 
       assert Exception.message(error) =~ "attempt to call a number value (global 'x')"
     end
@@ -86,7 +101,8 @@ defmodule Lua.CallFunctionErrorValueTest do
     test "a nested path attributes to the final field" do
       {_, lua} = Lua.eval!(Lua.new(), "t = {}")
 
-      assert {:error, %TypeError{} = error, %Lua{}} = Lua.call_function(lua, [:t, :missing], [])
+      assert {:error, %RuntimeException{kind: :type} = error, %Lua{}} =
+               Lua.call_function(lua, [:t, :missing], [])
 
       assert Exception.message(error) =~ "attempt to call a nil value (field 'missing')"
     end
@@ -97,7 +113,7 @@ defmodule Lua.CallFunctionErrorValueTest do
       {_, lua} = Lua.eval!(Lua.new(), "function foo() return 1 end")
 
       error =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.call_function!(lua, [:bar], [])
         end
 
@@ -113,7 +129,7 @@ defmodule Lua.CallFunctionErrorValueTest do
       {_, lua} = Lua.eval!(Lua.new(), "function foo() return 1 end")
 
       error =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.call_function!(lua, [:bar], [])
         end
 
@@ -121,30 +137,35 @@ defmodule Lua.CallFunctionErrorValueTest do
     end
   end
 
-  describe "call_function/3 preserves the raised Lua value on the struct (pcall parity)" do
+  describe "call_function/3 preserves the raised Lua value on :value (pcall parity)" do
     test "a table error object is preserved on :value" do
       {ref, lua} = fun!("function() error({code = 1}) end")
 
-      assert {:error, %RuntimeError{value: value}, %Lua{} = lua} = Lua.call_function(lua, ref, [])
+      assert {:error, %RuntimeException{kind: :error, value: value}, %Lua{} = lua} =
+               Lua.call_function(lua, ref, [])
+
       assert Lua.decode!(lua, value) == [{"code", 1}]
     end
 
     test "a number error object is preserved on :value" do
       {ref, lua} = fun!("function() error(42) end")
 
-      assert {:error, %RuntimeError{value: 42}, %Lua{}} = Lua.call_function(lua, ref, [])
+      assert {:error, %RuntimeException{kind: :error, value: 42}, %Lua{}} =
+               Lua.call_function(lua, ref, [])
     end
 
     test "a nil error object is preserved on :value" do
       {ref, lua} = fun!("function() error(nil) end")
 
-      assert {:error, %RuntimeError{value: nil}, %Lua{}} = Lua.call_function(lua, ref, [])
+      assert {:error, %RuntimeException{kind: :error, value: nil}, %Lua{}} =
+               Lua.call_function(lua, ref, [])
     end
 
     test "a false error object is preserved on :value" do
       {ref, lua} = fun!("function() error(false) end")
 
-      assert {:error, %RuntimeError{value: false}, %Lua{}} = Lua.call_function(lua, ref, [])
+      assert {:error, %RuntimeException{kind: :error, value: false}, %Lua{}} =
+               Lua.call_function(lua, ref, [])
     end
   end
 
@@ -153,7 +174,7 @@ defmodule Lua.CallFunctionErrorValueTest do
       {ref, lua} = fun!("function() error('boom') end")
 
       error =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.call_function!(lua, ref, [])
         end
 
@@ -171,7 +192,7 @@ defmodule Lua.CallFunctionErrorValueTest do
       {ref, lua} = fun!(~S|function() pairs("asdf") end|)
 
       error =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.call_function!(lua, ref, [])
         end
 
@@ -187,7 +208,7 @@ defmodule Lua.CallFunctionErrorValueTest do
       {ref, lua} = fun!("function() error('boom') end")
 
       error =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.call_function!(lua, ref, [])
         end
 
@@ -198,7 +219,7 @@ defmodule Lua.CallFunctionErrorValueTest do
       {ref, lua} = fun!("function() local t = nil; return t.x end")
 
       error =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.call_function!(lua, ref, [])
         end
 
@@ -217,7 +238,7 @@ defmodule Lua.CallFunctionErrorValueTest do
       {_, lua} = Lua.eval!(Lua.new(), code, source: "regression.lua")
 
       error =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.call_function!(lua, [:foo], [])
         end
 
@@ -240,7 +261,7 @@ defmodule Lua.CallFunctionErrorValueTest do
       {_, lua} = Lua.eval!(Lua.new(), code, source: "regression.lua")
 
       error =
-        assert_raise Lua.RuntimeException, fn ->
+        assert_raise RuntimeException, fn ->
           Lua.call_function!(lua, [:foo], [])
         end
 

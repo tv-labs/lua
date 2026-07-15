@@ -73,25 +73,35 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
   shim that always returned `false` and was imported into every `use Lua.API`
   module; the VM has no MFA references. Remove any `when is_mfa(value)` clauses
   (they never matched).
+- **The public runtime exception is now solely `Lua.RuntimeException`.** The
+  five internal VM error structs — `Lua.VM.RuntimeError`, `Lua.VM.TypeError`,
+  `Lua.VM.ArgumentError`, `Lua.VM.AssertionError`, `Lua.VM.InternalError` — are
+  no longer part of the public surface. They are wrapped into
+  `Lua.RuntimeException` before crossing any API boundary, so the whole public
+  exception surface is just `Lua.RuntimeException` (runtime failures) and
+  `Lua.CompilerException` (compile-time failures). To discriminate a runtime
+  failure, read the wrapper's new `:kind` field
+  (`:error | :type | :argument | :assertion | :internal`); the underlying VM
+  struct remains available on `:original`.
 - The public `{:error, _}`-returning APIs now hand back the exception struct
   uniformly, instead of a pre-rendered message string, so callers own
   rendering (`Exception.message/1`) and can pattern-match the concrete error.
   - `Lua.call_function/3` returns `{:error, exception, lua}` where `exception`
-    is the VM struct (`Lua.VM.RuntimeError`, `Lua.VM.TypeError`,
-    `Lua.VM.ArgumentError`, …). The raised Lua value (`error(42)`, a table,
-    `nil`, `false`) is preserved on the struct's `:value`, matching what
-    `pcall` hands back inside Lua. Code matching on a string reason should
-    switch to the struct (or call `Exception.message/1` on it).
+    is always a `Lua.RuntimeException`. The raised Lua value (`error(42)`, a
+    table, `nil`, `false`) is preserved on `:value`, matching what `pcall`
+    hands back inside Lua, with the category on `:kind` and the underlying VM
+    struct on `:original`. Code matching on a string reason should switch to
+    the exception (or call `Exception.message/1` on it).
   - `Lua.parse_chunk/1` returns `{:error, %Lua.CompilerException{}}` instead of
     `{:error, [String.t()]}`. Call `Exception.message/1` to render the full,
     human-readable report; the `:errors` field carries the bare, ANSI-free
     messages for programmatic inspection.
 - Lua exceptions render their message lazily at `Exception.message/1` call
-  time, so the `:message` **struct field** is removed from
-  `Lua.VM.RuntimeError`, `Lua.VM.TypeError`, and `Lua.VM.AssertionError`, and
-  is `nil` on the `Lua.RuntimeException` wrapper when it wraps a VM exception.
-  Read the message through `Exception.message/1` (the idiomatic accessor)
-  rather than the `e.message` field. Likewise `Lua.CompilerException`'s
+  time, so the `:message` **struct field** is `nil` on the
+  `Lua.RuntimeException` wrapper when it wraps an internal VM exception (and on
+  the internal VM structs themselves). Read the message through
+  `Exception.message/1` (the idiomatic accessor) rather than the `e.message`
+  field. Likewise `Lua.CompilerException`'s
   `:errors` field now holds bare, ANSI-free messages rather than the fully
   formatted (and previously ANSI-colored) diagnostics — the rich report moved
   to `Exception.message/1`. This is what lets the ANSI gate hold at output time
