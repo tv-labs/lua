@@ -112,7 +112,12 @@ defmodule Lua.VM.Table do
   end
 
   defp split_from_map(table, data) do
-    Enum.reduce(data, table, fn {k, v}, acc -> put(acc, k, v) end)
+    # Sorted fold: integer keys come first, ascending (term order puts numbers
+    # before other keys), so contiguous appends hit put/3's O(1) array path
+    # instead of parking in the hash and draining via absorb_from_hash — an
+    # O(n^2) build for dense int maps whose iteration order is by hash (any map
+    # >32 entries). The sort is O(n log n), cheaper than the O(n^2) it replaces.
+    Enum.reduce(Enum.sort(data), table, fn {k, v}, acc -> put(acc, k, v) end)
   end
 
   @doc """
