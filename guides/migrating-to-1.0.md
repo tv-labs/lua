@@ -139,16 +139,17 @@ exception's `:value` field, matching what `pcall` hands back inside Lua.
 instead of `{:error, [String.t()]}`; its `:errors` field carries the bare,
 ANSI-free messages for programmatic inspection.
 
-Render messages through `Exception.message/1`, **not** the `:message`
-struct field — messages render lazily, so `:message` may be `nil` on the
-struct:
+Render messages through `Exception.message/1`. There is no `:message`
+struct field to read — the message is composed lazily from the exception's
+semantic fields (`:kind`, `:value`, `:original`, `:line`, `:source`) at
+render time:
 
 ```elixir
-# Prefer this:
+# The only way to render:
 Exception.message(exception)
 
-# Not this — the field may be nil:
-exception.message
+# There is no exception.message field — inspect :kind / :value / :original
+# for programmatic access instead.
 ```
 
 ## Parser error messages have a new format

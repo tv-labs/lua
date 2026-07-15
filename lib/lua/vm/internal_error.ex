@@ -8,15 +8,15 @@ defmodule Lua.VM.InternalError do
   # Raised for internal VM errors: bad native function returns, unimplemented
   # instructions, and other invariant violations.
 
-  defexception [:value, :message]
+  defexception [:value]
 
   @impl true
   def exception(opts) do
-    value = Keyword.get(opts, :value)
-    message = Keyword.get(opts, :message) || stringify(value)
-
-    %__MODULE__{value: value, message: message}
+    %__MODULE__{value: Keyword.get(opts, :value)}
   end
+
+  @impl true
+  def message(%__MODULE__{value: value}), do: stringify(value)
 
   defp stringify(nil), do: "nil"
   defp stringify(v) when is_binary(v), do: v

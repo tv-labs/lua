@@ -150,7 +150,7 @@ defmodule Mix.Tasks.Lua.Suite do
         {:timeout, file, timeout}
 
       {:exit, reason} ->
-        {:fail, file, %Lua.RuntimeException{message: "exited: #{inspect(reason)}"}}
+        {:fail, file, Lua.RuntimeException.exception("exited: #{inspect(reason)}")}
     end
   end
 

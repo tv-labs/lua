@@ -4,15 +4,14 @@ defmodule Lua.RuntimeException do
   arithmetic on a non-number, indexing a nil, an explicit `error()`
   call from Lua, or any other dynamic failure inside the VM.
 
-  Use `Exception.message/1` to render the message — do not read the `:message`
-  field directly. When this wraps a VM exception the field is `nil` and the
-  message is rendered lazily so ANSI color is gated on `IO.ANSI.enabled?/0` at
-  output time rather than frozen at construction (issue #384).
+  Always render with `Exception.message/1` — there is no `:message` struct
+  field. The message is composed lazily from `:original` (and the semantic
+  fields below) so ANSI color is gated on `IO.ANSI.enabled?/0` at output time
+  rather than frozen at construction (issue #384), and so there is no field
+  that reads back `nil` for the common case of a wrapped VM error.
 
   Fields:
 
-    * `:message`     — pre-rendered string for terminal-independent errors, or
-      `nil` when rendered lazily from `:original`
     * `:original`    — the underlying VM error term
     * `:kind`        — the category of failure: `:error` (an explicit `error()`
       call), `:type`, `:argument`, `:assertion`, or `:internal`; `nil` for
@@ -33,34 +32,26 @@ defmodule Lua.RuntimeException do
 
   @type t :: %__MODULE__{}
 
-  defexception [:message, :original, :kind, :value, :state, :line, :source, :call_stack]
+  defexception [:original, :kind, :value, :state, :line, :source, :call_stack]
 
   @impl true
   def exception({:lua_error, error, _state}) do
-    %__MODULE__{
-      original: error,
-      message: prefix_message(Util.format_error(error))
-    }
-  end
-
-  def exception({:api_error, details, state}) do
-    %__MODULE__{original: details, state: state, message: "Lua API error: #{details}"}
+    %__MODULE__{original: error}
   end
 
   def exception(list) when is_list(list) do
-    scope = Keyword.fetch!(list, :scope)
-    function = Keyword.fetch!(list, :function)
-    message = Keyword.fetch!(list, :message)
+    # Validate the descriptor eagerly so a missing key fails at the raise site
+    # rather than lazily inside `message/1`. The list itself is the semantic
+    # source — `message/1` reads `:scope`/`:function`/`:message` back off it.
+    Keyword.fetch!(list, :scope)
+    Keyword.fetch!(list, :function)
+    Keyword.fetch!(list, :message)
 
-    %__MODULE__{
-      original: list,
-      state: nil,
-      message: prefix_message("#{format_function(scope, function)} failed, #{message}")
-    }
+    %__MODULE__{original: list}
   end
 
   def exception(error) when is_binary(error) do
-    %__MODULE__{message: prefix_message(String.trim(error))}
+    %__MODULE__{original: String.trim(error)}
   end
 
   def exception(error) do
@@ -72,8 +63,8 @@ defmodule Lua.RuntimeException do
     {line, source, call_stack} = extract_context(error)
     kind = kind(error)
 
-    # `:message` is left nil so `message/1` renders the wrapped error lazily.
-    # The inner VM exceptions gate ANSI on `IO.ANSI.enabled?/0` at render time
+    # No message is stored — `message/1` renders the wrapped error lazily. The
+    # inner VM exceptions gate ANSI on `IO.ANSI.enabled?/0` at render time
     # (issue #384); freezing their rendered message here would bake in escape
     # codes from the TTY-attached VM process and leak them into log sinks.
     %__MODULE__{
@@ -86,21 +77,27 @@ defmodule Lua.RuntimeException do
     }
   end
 
-  # The `:lua_error`, `:api_error`, keyword-list, and binary clauses build
-  # ANSI-free strings that don't depend on the terminal, so they memoize into
-  # `:message`. The generic clause defers to keep the ANSI gate honest.
+  # Everything renders lazily from `:original`, so the ANSI gate on wrapped VM
+  # exceptions is evaluated when the message is written, not frozen here.
   @impl true
-  def message(%__MODULE__{message: message}) when is_binary(message), do: message
+  def message(%__MODULE__{original: original}) when is_exception(original) do
+    prefix_message(Exception.message(original))
+  end
+
+  def message(%__MODULE__{original: list}) when is_list(list) do
+    prefix_message("#{format_function(list[:scope], list[:function])} failed, #{list[:message]}")
+  end
+
+  def message(%__MODULE__{original: binary}) when is_binary(binary) do
+    prefix_message(String.trim(binary))
+  end
+
+  def message(%__MODULE__{original: {tag, _, _} = term}) when tag in [:badarith, :illegal_index] do
+    prefix_message(Util.format_error(term))
+  end
 
   def message(%__MODULE__{original: original}) do
-    rendered =
-      if is_exception(original) do
-        Exception.message(original)
-      else
-        inspect(original)
-      end
-
-    prefix_message(rendered)
+    prefix_message(inspect(original))
   end
 
   defp prefix_message(@runtime_prefix <> _ = msg), do: msg
