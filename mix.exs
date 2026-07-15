@@ -55,6 +55,7 @@ defmodule Lua.MixProject do
       docs: [
         # The main page in the docs
         main: "Lua",
+        logo: "priv/logo.svg",
         source_url: @url,
         source_ref: "v#{@version}",
         # Render only the curated public surface; keep internals in source/IEx.

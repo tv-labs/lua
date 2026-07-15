@@ -1,4 +1,8 @@
-# Lua
+<p align="center">
+  <img src="priv/logo.svg" alt="Lua.ex" width="96" height="96" />
+</p>
+
+<h1 align="center">Lua</h1>
 
 [![Hex.pm](https://img.shields.io/hexpm/v/lua.svg)](https://hex.pm/packages/lua)
 [![Documentation](https://img.shields.io/badge/documentation-gray)](https://hexdocs.pm/lua)
