@@ -1,11 +1,14 @@
 defmodule Lua.VM.AssertionError do
-  @moduledoc """
-  Raised by the Lua `assert()` function when the condition is falsy.
+  @moduledoc false
 
-  When raised without explicit `:line` / `:source` opts, `exception/1`
-  populates them from the calling Lua source position via
-  `Lua.VM.Executor.current_position/0`.
-  """
+  # Internal VM exception. Never surfaces to the host directly — it is wrapped
+  # into the public `Lua.RuntimeException` (kind: `:assertion`) at the API
+  # boundary.
+  #
+  # Raised by the Lua `assert()` function when the condition is falsy. When
+  # raised without explicit `:line` / `:source` opts, `exception/1` populates
+  # them from the calling Lua source position via
+  # `Lua.VM.Executor.current_position/0`.
 
   alias Lua.VM.ErrorFormatter
 

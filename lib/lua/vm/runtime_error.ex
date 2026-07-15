@@ -1,17 +1,18 @@
 defmodule Lua.VM.RuntimeError do
-  @moduledoc """
-  Raised by the Lua `error()` function.
+  @moduledoc false
 
-  Carries the original Lua error value, which may be any Lua type (string,
-  number, table reference, etc.).
-
-  When raised without explicit `:line` / `:source` opts (e.g. from a stdlib
-  bad-argument check), `exception/1` populates them from the calling Lua
-  source position via `Lua.VM.Executor.current_position/0`. That position
-  is stashed in the process dictionary at every native-call boundary, so
-  any raise site reachable from a Lua execution inherits the correct
-  attribution automatically.
-  """
+  # Internal VM exception. Never surfaces to the host directly — it is wrapped
+  # into the public `Lua.RuntimeException` (kind: `:error`) at the API boundary.
+  #
+  # Raised by the Lua `error()` function. Carries the original Lua error value,
+  # which may be any Lua type (string, number, table reference, etc.).
+  #
+  # When raised without explicit `:line` / `:source` opts (e.g. from a stdlib
+  # bad-argument check), `exception/1` populates them from the calling Lua
+  # source position via `Lua.VM.Executor.current_position/0`. That position is
+  # stashed in the process dictionary at every native-call boundary, so any
+  # raise site reachable from a Lua execution inherits the correct attribution
+  # automatically.
 
   alias Lua.VM.ErrorFormatter
   alias Lua.VM.Value

@@ -14,18 +14,26 @@ defmodule Lua.RuntimeException do
     * `:message`     — pre-rendered string for terminal-independent errors, or
       `nil` when rendered lazily from `:original`
     * `:original`    — the underlying VM error term
+    * `:kind`        — the category of failure: `:error` (an explicit `error()`
+      call), `:type`, `:argument`, `:assertion`, or `:internal`; `nil` for
+      host-side API errors that don't originate from a Lua value
+    * `:value`       — the raised Lua value (per §6.1), as `pcall`/`xpcall`
+      would hand it back; `nil` when there is no Lua-side value
     * `:state`       — the internal VM state at the point of failure
     * `:line`        — line number where the error was raised
     * `:source`      — source name (filename or the default `<eval>`)
     * `:call_stack`  — list of Lua frames at failure
   """
   alias Lua.Util
+  alias Lua.VM.ProtectedCall
 
   @runtime_prefix "Lua runtime error: "
 
+  @type kind :: :error | :type | :argument | :assertion | :internal
+
   @type t :: %__MODULE__{}
 
-  defexception [:message, :original, :state, :line, :source, :call_stack]
+  defexception [:message, :original, :kind, :value, :state, :line, :source, :call_stack]
 
   @impl true
   def exception({:lua_error, error, _state}) do
@@ -57,9 +65,12 @@ defmodule Lua.RuntimeException do
 
   def exception(error) do
     # Copy structured fields off VM exceptions (TypeError, RuntimeError,
-    # AssertionError) so consumers can pattern-match on `:line` / `:source`
-    # without having to re-parse the message string.
+    # AssertionError, ArgumentError, InternalError) so consumers can
+    # pattern-match on `:kind` / `:value` / `:line` / `:source` without having
+    # to re-parse the message string. `:kind`/`:value` come back `nil` for
+    # arbitrary Elixir exceptions, which carry no Lua-side value.
     {line, source, call_stack} = extract_context(error)
+    kind = kind(error)
 
     # `:message` is left nil so `message/1` renders the wrapped error lazily.
     # The inner VM exceptions gate ANSI on `IO.ANSI.enabled?/0` at render time
@@ -67,6 +78,8 @@ defmodule Lua.RuntimeException do
     # codes from the TTY-attached VM process and leak them into log sinks.
     %__MODULE__{
       original: error,
+      kind: kind,
+      value: kind && ProtectedCall.error_value(error),
       line: line,
       source: source,
       call_stack: call_stack
@@ -98,6 +111,15 @@ defmodule Lua.RuntimeException do
   end
 
   defp extract_context(_), do: {nil, nil, nil}
+
+  # Classify a wrapped VM exception into its user-facing category. Arbitrary
+  # Elixir exceptions (no Lua-side value) return `nil`.
+  defp kind(%Lua.VM.RuntimeError{}), do: :error
+  defp kind(%Lua.VM.TypeError{}), do: :type
+  defp kind(%Lua.VM.ArgumentError{}), do: :argument
+  defp kind(%Lua.VM.AssertionError{}), do: :assertion
+  defp kind(%Lua.VM.InternalError{}), do: :internal
+  defp kind(_), do: nil
 
   defp format_function([], function), do: "#{function}()"
 

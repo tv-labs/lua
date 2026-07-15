@@ -319,6 +319,87 @@ defmodule Lua.RuntimeExceptionTest do
     end
   end
 
+  describe "kind/value projection when wrapping a VM exception" do
+    test "wrapping a RuntimeError yields kind :error and the raised value" do
+      inner = Lua.VM.RuntimeError.exception(value: "boom", source: "t.lua", line: 3)
+
+      exception = RuntimeException.exception(inner)
+
+      assert exception.kind == :error
+      assert exception.value == "boom"
+      assert exception.original == inner
+      # Structured context is copied onto the wrapper for pattern-matching.
+      assert exception.line == 3
+      assert exception.source == "t.lua"
+    end
+
+    test "wrapping a RuntimeError projects the §6.1 lua_value when present" do
+      inner = Lua.VM.RuntimeError.exception(value: "boom", lua_value: "t.lua:3: boom")
+
+      exception = RuntimeException.exception(inner)
+
+      # pcall parity: string errors carry the position-prefixed view.
+      assert exception.value == "t.lua:3: boom"
+    end
+
+    test "wrapping a RuntimeError preserves a non-string Lua value verbatim" do
+      inner = Lua.VM.RuntimeError.exception(value: 42)
+
+      exception = RuntimeException.exception(inner)
+
+      assert exception.kind == :error
+      assert exception.value == 42
+    end
+
+    test "wrapping a TypeError yields kind :type" do
+      inner = Lua.VM.TypeError.exception(value: "attempt to index a nil value")
+
+      exception = RuntimeException.exception(inner)
+
+      assert exception.kind == :type
+      assert exception.value == "attempt to index a nil value"
+    end
+
+    test "wrapping an ArgumentError yields kind :argument and the raw bad-argument string" do
+      inner =
+        Lua.VM.ArgumentError.exception(
+          function_name: "string.rep",
+          arg_num: 2,
+          expected: "number"
+        )
+
+      exception = RuntimeException.exception(inner)
+
+      assert exception.kind == :argument
+      assert exception.value == "bad argument #2 to 'string.rep' (number expected)"
+    end
+
+    test "wrapping an AssertionError yields kind :assertion" do
+      inner = Lua.VM.AssertionError.exception(value: "nope")
+
+      exception = RuntimeException.exception(inner)
+
+      assert exception.kind == :assertion
+      assert exception.value == "nope"
+    end
+
+    test "wrapping an InternalError yields kind :internal" do
+      inner = Lua.VM.InternalError.exception(value: "invariant violated")
+
+      exception = RuntimeException.exception(inner)
+
+      assert exception.kind == :internal
+      assert exception.value == "invariant violated"
+    end
+
+    test "wrapping an arbitrary Elixir exception leaves kind and value nil" do
+      exception = RuntimeException.exception(KeyError.exception(key: :missing, term: %{}))
+
+      assert exception.kind == nil
+      assert exception.value == nil
+    end
+  end
+
   describe "format_function/2 (private function tested via keyword list exception)" do
     test "formats function with empty scope" do
       exception =
