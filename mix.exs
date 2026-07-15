@@ -5,7 +5,7 @@ defmodule Lua.MixProject do
   alias Mix.Tasks.Lua.Eval
 
   @url "https://github.com/tv-labs/lua"
-  @version "1.0.0-rc.3"
+  @version "1.0.0"
 
   # The curated public API surface rendered on HexDocs. Everything else is an
   # implementation detail: its @moduledoc stays intact for source readers and
@@ -79,6 +79,7 @@ defmodule Lua.MixProject do
         ],
         extras: [
           "guides/working-with-lua.livemd": [title: "Working with Lua"],
+          "guides/migrating-to-1.0.md": [title: "Migrating to 1.0"],
           "guides/sandboxing.md": [title: "Security & Sandboxing"],
           "guides/mix_tasks.md": [title: "Mix Tasks & the ~LUA sigil"],
           "guides/examples/quickstart.livemd": [title: "Quickstart"],
@@ -92,6 +93,7 @@ defmodule Lua.MixProject do
         groups_for_extras: [
           Guides: [
             "guides/working-with-lua.livemd",
+            "guides/migrating-to-1.0.md",
             "guides/sandboxing.md",
             "guides/mix_tasks.md"
           ],
