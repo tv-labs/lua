@@ -69,14 +69,11 @@ rescue
     e.line    # => 2
     e.source  # => "<eval>" (chunk name)
 
-    # e.message is a formatted, colorized frame (ANSI codes elided here):
     #
-    #   Lua runtime error: Runtime Error
-    #
-    #     at <eval>:2:
+    #   Lua runtime error: at <eval>:2:
     #
     #     runtime error: something went wrong
-    e.message
+    Exception.message(e)
 end
 ```
 

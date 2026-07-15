@@ -96,10 +96,10 @@ defmodule Lua do
     bounds tail recursion too — including loops that PUC-Lua would run indefinitely. Leave the
     default `:infinity` if you rely on unbounded tail recursion.
 
-      iex> lua = Lua.new(max_call_depth: 10)
-      iex> {[false, message], _lua} = Lua.eval!(lua, "local function f() return f() end return pcall(f)")
-      iex> message =~ "stack overflow"
-      true
+        iex> lua = Lua.new(max_call_depth: 10)
+        iex> {[false, message], _lua} = Lua.eval!(lua, "local function f() return f() end return pcall(f)")
+        iex> message =~ "stack overflow"
+        true
 
   * `:max_string_bytes` - (default 256 MiB) ceiling for any single string the VM will build,
     whether via `..`, `string.rep`, or a `load` reader. An oversized result raises a catchable
@@ -112,10 +112,10 @@ defmodule Lua do
     heap cap mid-allocation, where the kill depends on garbage-collection timing rather than
     a deterministic refusal.
 
-      iex> lua = Lua.new(max_string_bytes: 1024)
-      iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(string.rep, \\"x\\", 2048)")
-      iex> message =~ "resulting string too large"
-      true
+        iex> lua = Lua.new(max_string_bytes: 1024)
+        iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(string.rep, 'x', 2048)")
+        iex> message =~ "resulting string too large"
+        true
 
   * `:max_instructions` - (default `:infinity`) caps the number of VM instructions a single
     evaluation may execute. When a script exceeds this budget, a catchable
@@ -125,10 +125,10 @@ defmodule Lua do
     back-edges and call boundaries, so the default `:infinity` path carries no per-instruction
     cost. The budget is fresh per top-level evaluation and recoverable via `pcall`.
 
-      iex> lua = Lua.new(max_instructions: 1000)
-      iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(function() while true do end end)")
-      iex> message =~ "instruction budget exceeded"
-      true
+        iex> lua = Lua.new(max_instructions: 1000)
+        iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(function() while true do end end)")
+        iex> message =~ "instruction budget exceeded"
+        true
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do

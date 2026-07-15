@@ -54,10 +54,10 @@ defmodule DemoWeb.Snippets do
 
       lua = Lua.new()
 
-      {:error, err} =
-        Lua.eval(lua, "return os.execute('rm -rf /')")
-
-      # err.message =~ "attempted to call"
+      # Calling a sandboxed function raises.
+      Lua.eval!(lua, "return os.execute('rm -rf /')")
+      # ** (Lua.RuntimeException) Lua runtime error:
+      #    os.execute(_) is sandboxed
       """
     },
     %{
@@ -75,7 +75,7 @@ defmodule DemoWeb.Snippets do
       lua = Lua.new() |> Lua.load_api(Agent.Tools)
 
       # The model emits Lua. You run it. Done.
-      {:ok, {results, _}} = Lua.eval(lua, llm_script)
+      {results, _lua} = Lua.eval!(lua, llm_script)
       """
     }
   ]
@@ -179,7 +179,7 @@ defmodule DemoWeb.Snippets do
 
   # The agent emits Lua. You run it. It can only
   # do what you exposed -- nothing else.
-  {:ok, {result, _lua}} = Lua.eval(lua, agent_script)
+  {result, _lua} = Lua.eval!(lua, agent_script)
   """
 
   @tvlabs_remote_api """
