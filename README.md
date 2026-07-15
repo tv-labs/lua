@@ -69,10 +69,6 @@ rescue
     e.line    # => 2
     e.source  # => "<eval>" (chunk name)
 
-    # Render the message with Exception.message/1. The :message struct field
-    # is nil when the exception wraps a VM error — the frame is built lazily
-    # so ANSI color is gated on the terminal at output time. It's a formatted,
-    # colorized frame (ANSI codes elided here):
     #
     #   Lua runtime error: at <eval>:2:
     #
