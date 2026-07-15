@@ -26,6 +26,7 @@ defmodule Lua.VM.ArgumentError do
   #     raise ArgumentError, function_name: "string.sub", arg_num: 2, expected: "number", got: "string"
   #     raise ArgumentError, function_name: "string.char", arg_num: 1, expected: "number", details: "value out of range"
 
+  alias Lua.VM.ErrorFormatter
   alias Lua.VM.RuntimeError
 
   @type t :: %__MODULE__{}
@@ -66,12 +67,39 @@ defmodule Lua.VM.ArgumentError do
     }
   end
 
+  # Plain, single-line, ANSI-free body — safe to log and consumed by the public
+  # `Lua.RuntimeException` wrapper. The rich multi-line render lives in
+  # `format/1`.
   @impl true
-  def message(%__MODULE__{} = e) do
-    Lua.VM.ErrorFormatter.format(:type_error, raw_message(e),
+  def message(%__MODULE__{} = e), do: raw_message(e)
+
+  @doc """
+  Rich multi-line render — location header and stack trace, ANSI-colored when
+  `IO.ANSI.enabled?/0` is true at call time (evaluated lazily, never frozen at
+  construction; see issue #384). Used by `Lua.format_exception/1`.
+  """
+  @spec format(t()) :: String.t()
+  def format(%__MODULE__{} = e) do
+    ErrorFormatter.format(:type_error, raw_message(e),
       source: e.source,
       line: e.line,
       call_stack: e.call_stack
+    )
+  end
+
+  @doc """
+  Returns a wire-safe structured map for this error. See
+  `Lua.VM.ErrorFormatter.to_map/3` for the shape.
+
+  Pass `:source_code` to populate `source_context`.
+  """
+  @spec to_map(t(), keyword()) :: map()
+  def to_map(%__MODULE__{} = e, opts \\ []) do
+    ErrorFormatter.to_map(:argument_error, raw_message(e),
+      source: e.source,
+      line: e.line,
+      call_stack: e.call_stack,
+      source_code: Keyword.get(opts, :source_code)
     )
   end
 

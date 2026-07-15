@@ -1379,7 +1379,7 @@ defmodule Lua.Compiler.IntegrationTest do
       assert {:ok, ast} = Parser.parse(code)
       assert {:ok, proto} = Compiler.compile(ast)
 
-      assert_raise Lua.VM.RuntimeError, ~r/runtime error: something went wrong/, fn ->
+      assert_raise Lua.VM.RuntimeError, ~r/something went wrong/, fn ->
         VM.execute(proto, state)
       end
     end

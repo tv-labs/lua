@@ -4,11 +4,17 @@ defmodule Lua.RuntimeException do
   arithmetic on a non-number, indexing a nil, an explicit `error()`
   call from Lua, or any other dynamic failure inside the VM.
 
-  Always render with `Exception.message/1` — there is no `:message` struct
-  field. The message is composed lazily from `:original` (and the semantic
-  fields below) so ANSI color is gated on `IO.ANSI.enabled?/0` at output time
-  rather than frozen at construction (issue #384), and so there is no field
-  that reads back `nil` for the common case of a wrapped VM error.
+  `Exception.message/1` returns a plain, single-line, ANSI-free string — the
+  error body plus a compact ` (at source:line)` suffix — safe to drop into a
+  `Logger` call or an error tracker. There is no `:message` struct field; the
+  message is composed lazily from `:original` (and the semantic fields below),
+  so there is no field that reads back `nil` for the common case of a wrapped
+  VM error.
+
+  For a rich, human-readable report (location header, stack trace, suggestions,
+  and ANSI color on a TTY) use `Lua.format_exception/1` — this is what
+  `mix lua.eval` prints. For structured error reporting (JSON, a UI) use
+  `to_map/2`.
 
   Fields:
 
@@ -24,7 +30,12 @@ defmodule Lua.RuntimeException do
     * `:call_stack`  — list of Lua frames at failure
   """
   alias Lua.Util
+  alias Lua.VM.ArgumentError
+  alias Lua.VM.AssertionError
+  alias Lua.VM.InternalError
   alias Lua.VM.ProtectedCall
+  alias Lua.VM.RuntimeError
+  alias Lua.VM.TypeError
 
   @runtime_prefix "Lua runtime error: "
 
@@ -77,11 +88,13 @@ defmodule Lua.RuntimeException do
     }
   end
 
-  # Everything renders lazily from `:original`, so the ANSI gate on wrapped VM
-  # exceptions is evaluated when the message is written, not frozen here.
+  # Plain, single-line, ANSI-free rendering. The wrapped VM exception's
+  # `message/1` returns just the error body; we prefix it and append the Lua
+  # source location so a log line carries the "where" without a multi-line
+  # block. The rich render lives in `format/1`.
   @impl true
-  def message(%__MODULE__{original: original}) when is_exception(original) do
-    prefix_message(Exception.message(original))
+  def message(%__MODULE__{original: original} = e) when is_exception(original) do
+    prefix_message(Exception.message(original)) <> location_suffix(e)
   end
 
   def message(%__MODULE__{original: list}) when is_list(list) do
@@ -100,6 +113,70 @@ defmodule Lua.RuntimeException do
     prefix_message(inspect(original))
   end
 
+  @doc """
+  Renders the rich, multi-line report for this error — location header, stack
+  trace, and suggestions — with ANSI color when `IO.ANSI.enabled?/0` is true.
+
+  This is the terminal/REPL rendering `mix lua.eval` prints and what
+  `Lua.format_exception/1` delegates to. For the plain, single-line, log-safe
+  string use `Exception.message/1`; for structured data use `to_map/2`.
+  """
+  @spec format(t()) :: String.t()
+  def format(%__MODULE__{original: original}) when is_exception(original) do
+    prefix_message(rich(original))
+  end
+
+  def format(%__MODULE__{} = e), do: message(e)
+
+  @doc """
+  Returns a wire-safe structured map — `message`, `source`, `line`,
+  `call_stack`, `source_context`, `suggestion`, `error_kind` — with no ANSI
+  escapes in any field. Intended for JSON payloads, structured logs, and
+  UI-facing error reporting.
+
+  Pass `:source_code` to populate `source_context`. Wrapped VM errors delegate
+  to their own `to_map/2`; host-side errors (no Lua value) return a minimal map.
+  """
+  @spec to_map(t(), keyword()) :: map()
+  def to_map(exception, opts \\ [])
+
+  def to_map(%__MODULE__{original: %RuntimeError{} = o}, opts), do: RuntimeError.to_map(o, opts)
+
+  def to_map(%__MODULE__{original: %TypeError{} = o}, opts), do: TypeError.to_map(o, opts)
+
+  def to_map(%__MODULE__{original: %AssertionError{} = o}, opts), do: AssertionError.to_map(o, opts)
+
+  def to_map(%__MODULE__{original: %ArgumentError{} = o}, opts), do: ArgumentError.to_map(o, opts)
+
+  def to_map(%__MODULE__{} = e, _opts), do: minimal_map(e)
+
+  defp rich(%RuntimeError{} = o), do: RuntimeError.format(o)
+  defp rich(%TypeError{} = o), do: TypeError.format(o)
+  defp rich(%AssertionError{} = o), do: AssertionError.format(o)
+  defp rich(%ArgumentError{} = o), do: ArgumentError.format(o)
+  defp rich(%InternalError{} = o), do: InternalError.format(o)
+  defp rich(other), do: Exception.message(other)
+
+  defp minimal_map(%__MODULE__{} = e) do
+    %{
+      type: nil,
+      message: message(e),
+      source: e.source,
+      line: e.line,
+      call_stack: e.call_stack || [],
+      source_context: nil,
+      suggestion: nil,
+      error_kind: nil
+    }
+  end
+
+  defp location_suffix(%__MODULE__{source: source, line: line}) when not is_nil(source) and not is_nil(line),
+    do: " (at #{source}:#{line})"
+
+  defp location_suffix(%__MODULE__{source: source}) when not is_nil(source), do: " (at #{source})"
+  defp location_suffix(%__MODULE__{line: line}) when not is_nil(line), do: " (at line #{line})"
+  defp location_suffix(_), do: ""
+
   defp prefix_message(@runtime_prefix <> _ = msg), do: msg
   defp prefix_message(msg), do: @runtime_prefix <> msg
 
@@ -111,11 +188,11 @@ defmodule Lua.RuntimeException do
 
   # Classify a wrapped VM exception into its user-facing category. Arbitrary
   # Elixir exceptions (no Lua-side value) return `nil`.
-  defp kind(%Lua.VM.RuntimeError{}), do: :error
-  defp kind(%Lua.VM.TypeError{}), do: :type
-  defp kind(%Lua.VM.ArgumentError{}), do: :argument
-  defp kind(%Lua.VM.AssertionError{}), do: :assertion
-  defp kind(%Lua.VM.InternalError{}), do: :internal
+  defp kind(%RuntimeError{}), do: :error
+  defp kind(%TypeError{}), do: :type
+  defp kind(%ArgumentError{}), do: :argument
+  defp kind(%AssertionError{}), do: :assertion
+  defp kind(%InternalError{}), do: :internal
   defp kind(_), do: nil
 
   defp format_function([], function), do: "#{function}()"

@@ -31,14 +31,16 @@ defmodule Lua.Parser.ErrorAnsiTest do
       assert msg =~ "\e[36m"
     end
 
-    test "parse_chunk/1 renders a colored message when ANSI is on" do
-      # The `:errors` field stays ANSI-free (issue #384); color lives in the
-      # lazily-rendered message so the gate is honored at output time.
+    test "Lua.format_exception/1 renders a colored report when ANSI is on" do
+      # The `:errors` field and the plain `Exception.message/1` stay ANSI-free;
+      # color lives in the lazily-rendered `Lua.format_exception/1` report so
+      # the gate is honored at output time.
       assert {:error, %Lua.CompilerException{errors: errors} = exception} =
                Lua.parse_chunk("asdf")
 
       refute Enum.any?(errors, &(&1 =~ "\e["))
-      assert Exception.message(exception) =~ "\e["
+      refute Exception.message(exception) =~ "\e["
+      assert Lua.format_exception(exception) =~ "\e["
     end
   end
 end

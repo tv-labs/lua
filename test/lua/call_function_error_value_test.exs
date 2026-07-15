@@ -10,9 +10,11 @@ defmodule Lua.CallFunctionErrorValueTest do
     * `:original` — the underlying VM exception, for deep inspection of
       structured fields (`error_kind`, `function_name`, …)
 
-  The boundary does no rendering: callers own that by calling
-  `Exception.message/1`. The raising variant `call_function!/3` re-raises the
-  same `Lua.RuntimeException`, keeping the rich `ErrorFormatter` render.
+  The boundary does no rendering: callers own that. `Exception.message/1`
+  gives the plain, single-line, log-safe form; `Lua.format_exception/1` gives
+  the rich `ErrorFormatter` render. The raising variant `call_function!/3`
+  re-raises the same `Lua.RuntimeException`, so both renderings are available
+  from the raised exception.
   """
   use ExUnit.Case, async: true
 
@@ -109,7 +111,23 @@ defmodule Lua.CallFunctionErrorValueTest do
   end
 
   describe "call_function!/3 on an unresolved name keeps the rich render" do
-    test "raises with the location-less rich render and a suggestion" do
+    test "Lua.format_exception/1 renders the location-less rich report and a suggestion" do
+      {_, lua} = Lua.eval!(Lua.new(), "function foo() return 1 end")
+
+      error =
+        assert_raise RuntimeException, fn ->
+          Lua.call_function!(lua, [:bar], [])
+        end
+
+      message = Lua.format_exception(error)
+      assert message =~ "attempt to call a nil value (global 'bar')"
+      assert message =~ "Suggestion:"
+      # No Lua source position exists for a programmatic call, so no
+      # `at <source>:<line>:` header is rendered.
+      refute message =~ ~r/at \S+:\d+:/
+    end
+
+    test "Exception.message/1 is the plain single line — no suggestion block" do
       {_, lua} = Lua.eval!(Lua.new(), "function foo() return 1 end")
 
       error =
@@ -118,11 +136,9 @@ defmodule Lua.CallFunctionErrorValueTest do
         end
 
       message = Exception.message(error)
-      assert message =~ "attempt to call a nil value (global 'bar')"
-      assert message =~ "Suggestion:"
-      # No Lua source position exists for a programmatic call, so no
-      # `at <source>:<line>:` header is rendered.
-      refute message =~ ~r/at \S+:\d+:/
+      assert message == "Lua runtime error: attempt to call a nil value (global 'bar')"
+      refute message =~ "Suggestion:"
+      refute message =~ "\n"
     end
 
     test "the original TypeError carries the structured call-nil kind" do
@@ -170,7 +186,7 @@ defmodule Lua.CallFunctionErrorValueTest do
   end
 
   describe "call_function!/3 keeps the rich render" do
-    test "raises Lua.RuntimeException whose message carries the formatted render" do
+    test "Lua.format_exception/1 carries the formatted render" do
       {ref, lua} = fun!("function() error('boom') end")
 
       error =
@@ -178,11 +194,11 @@ defmodule Lua.CallFunctionErrorValueTest do
           Lua.call_function!(lua, ref, [])
         end
 
-      message = Exception.message(error)
+      message = Lua.format_exception(error)
       assert message =~ "Lua runtime error:"
       assert message =~ "boom"
-      # The rich render includes the raw-message body that the terse
-      # programmatic reason deliberately omits.
+      # The rich render includes the raw-message body ("runtime error: boom")
+      # that the plain `Exception.message/1` deliberately omits.
       assert message =~ "runtime error:"
     end
   end
@@ -242,7 +258,7 @@ defmodule Lua.CallFunctionErrorValueTest do
           Lua.call_function!(lua, [:foo], [])
         end
 
-      message = Exception.message(error)
+      message = Lua.format_exception(error)
       assert message =~ "regression.lua:2:"
       assert message =~ "bad argument #1 to 'pairs'"
       assert error.original.line == 2
@@ -266,7 +282,7 @@ defmodule Lua.CallFunctionErrorValueTest do
         end
 
       assert error.original.line == 2
-      assert Exception.message(error) =~ "regression.lua:2:"
+      assert Lua.format_exception(error) =~ "regression.lua:2:"
     end
   end
 end

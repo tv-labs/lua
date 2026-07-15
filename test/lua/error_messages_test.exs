@@ -210,10 +210,14 @@ defmodule Lua.ErrorMessagesTest do
           VM.execute(proto, state)
         end
 
-      # Error message should be a formatted string
-      assert is_binary(Exception.message(error))
-      # Should contain error type
-      assert Exception.message(error) =~ ~r/Error/i
+      # The plain message is the bare, single-line body — no location header.
+      msg = Exception.message(error)
+      assert is_binary(msg)
+      assert msg =~ "attempt to call a nil value"
+      refute msg =~ "at error_test.lua"
+
+      # The rich formatter adds the location header and stays readable.
+      assert TypeError.format(error) =~ "at error_test.lua:3:"
     end
   end
 
@@ -604,7 +608,9 @@ defmodule Lua.ErrorMessagesTest do
 
       assert e.line == 42
       assert e.source == "explicit.lua"
-      assert Exception.message(e) =~ "explicit.lua:42"
+      # Location lives on the struct fields and in the rich render, not in the
+      # plain `Exception.message/1` body.
+      assert ArgumentError.format(e) =~ "explicit.lua:42"
     end
 
     test "RuntimeError raised from stdlib (e.g. select out of range) carries line and source" do

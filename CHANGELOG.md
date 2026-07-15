@@ -47,6 +47,26 @@ Everything else — the default sandbox, `_G`/`_ENV` semantics, metatables, and
 the standard-library surface — is compatible. The full breaking-change list
 is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
 
+## [Unreleased]
+
+### Added
+- `Lua.format_exception/1` renders a `Lua.RuntimeException` or
+  `Lua.CompilerException` as the rich, human-readable report — location, source
+  context, stack trace, and suggestions — with ANSI color when
+  `IO.ANSI.enabled?/0` is true. This is the report `mix lua.eval` prints.
+- `Lua.RuntimeException.to_map/2` and `Lua.CompilerException.to_map/1` expose a
+  wire-safe structured representation (no ANSI) for JSON payloads, structured
+  logs, and UI-facing error reporting (#393).
+
+### Changed
+- `Exception.message/1` on `Lua.RuntimeException` and `Lua.CompilerException`
+  now returns a plain, single-line, ANSI-free string suitable for `Logger` and
+  error trackers, rather than the multi-line ANSI report. The rich report moved
+  to `Lua.format_exception/1`. This removes ANSI escapes from logs even when the
+  app is started from a TTY (where `IO.ANSI.enabled?/0` is true). If you relied
+  on `Exception.message/1` for the rich render, switch to `Lua.format_exception/1`
+  (#393).
+
 ## [1.0.0] - 2026-07-15
 
 The first stable release on the Elixir-native Lua 5.3 VM, culminating the
