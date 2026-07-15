@@ -78,32 +78,6 @@ defmodule Lua.RuntimeExceptionTest do
     end
   end
 
-  describe "exception/1 with {:api_error, details, state}" do
-    test "creates exception with api error message" do
-      state = State.new()
-      details = "invalid function call"
-
-      exception = RuntimeException.exception({:api_error, details, state})
-
-      assert Exception.message(exception) == "Lua API error: invalid function call"
-      assert exception.original == details
-      assert exception.state == state
-    end
-
-    test "handles complex api error details" do
-      state = State.new()
-      details = "function returned invalid type: expected table, got nil"
-
-      exception = RuntimeException.exception({:api_error, details, state})
-
-      assert Exception.message(exception) ==
-               "Lua API error: function returned invalid type: expected table, got nil"
-
-      assert exception.original == details
-      assert exception.state == state
-    end
-  end
-
   describe "exception/1 with keyword list [scope:, function:, message:]" do
     test "formats error with empty scope" do
       exception =
@@ -197,7 +171,8 @@ defmodule Lua.RuntimeExceptionTest do
       exception = RuntimeException.exception("something went wrong")
 
       assert Exception.message(exception) == "Lua runtime error: something went wrong"
-      assert exception.original == nil
+      # The trimmed host string is the semantic source, stored on `:original`.
+      assert exception.original == "something went wrong"
       assert exception.state == nil
     end
 
@@ -205,7 +180,7 @@ defmodule Lua.RuntimeExceptionTest do
       exception = RuntimeException.exception("  error with spaces  \n")
 
       assert Exception.message(exception) == "Lua runtime error: error with spaces"
-      assert exception.original == nil
+      assert exception.original == "error with spaces"
       assert exception.state == nil
     end
 
@@ -213,7 +188,7 @@ defmodule Lua.RuntimeExceptionTest do
       exception = RuntimeException.exception("")
 
       assert Exception.message(exception) == "Lua runtime error: "
-      assert exception.original == nil
+      assert exception.original == ""
       assert exception.state == nil
     end
 
@@ -226,7 +201,7 @@ defmodule Lua.RuntimeExceptionTest do
       exception = RuntimeException.exception(error_message)
 
       assert Exception.message(exception) == "Lua runtime error: multi-line error\nwith details"
-      assert exception.original == nil
+      assert exception.original == "multi-line error\nwith details"
       assert exception.state == nil
     end
   end
@@ -386,10 +361,15 @@ defmodule Lua.RuntimeExceptionTest do
     test "wrapping an InternalError yields kind :internal" do
       inner = Lua.VM.InternalError.exception(value: "invariant violated")
 
+      # InternalError renders via message/1 from :value (no stored :message).
+      refute Map.has_key?(inner, :message)
+      assert Exception.message(inner) == "invariant violated"
+
       exception = RuntimeException.exception(inner)
 
       assert exception.kind == :internal
       assert exception.value == "invariant violated"
+      assert Exception.message(exception) == "Lua runtime error: invariant violated"
     end
 
     test "wrapping an arbitrary Elixir exception leaves kind and value nil" do
@@ -440,6 +420,14 @@ defmodule Lua.RuntimeExceptionTest do
       exception = RuntimeException.exception("test error")
 
       assert Exception.message(exception) == "Lua runtime error: test error"
+    end
+
+    test "struct has no :message field — Exception.message/1 is the only renderer" do
+      # The message is composed lazily from the semantic fields; there is no
+      # `:message` field to read back nil (issue #384 / 1.0 cleanup).
+      exception = RuntimeException.exception("test error")
+
+      refute Map.has_key?(exception, :message)
     end
 
     test "can be raised with raise/2" do
