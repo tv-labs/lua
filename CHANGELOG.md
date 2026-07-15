@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > Upgrading from a Luerl-based `0.x` release? See
-> [Upgrading from 0.x](#upgrading-from-0x-luerl-based-versions) below.
+> [Upgrading from 0.x](#upgrading-from-0x-luerl-based-versions) below, or the
+> full [Migrating to 1.0](guides/migrating-to-1.0.md) guide for step-by-step
+> before/after code.
 
 ## Upgrading from 0.x (Luerl-based versions)
 
@@ -45,7 +47,12 @@ Everything else — the default sandbox, `_G`/`_ENV` semantics, metatables, and
 the standard-library surface — is compatible. The full breaking-change list
 is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
 
-## [Unreleased]
+## [1.0.0] - 2026-07-15
+
+The first stable release on the Elixir-native Lua 5.3 VM, culminating the
+`1.0.0-rc.0` through `rc.3` series. Upgrading from the last public release,
+`0.4.0`? See [Migrating to 1.0](guides/migrating-to-1.0.md) for the full
+walkthrough. The changes below are those since `rc.3`.
 
 ### Changed
 - Elixir callbacks now receive the public `Lua.t` (`%Lua{}`) as their state
@@ -605,7 +612,7 @@ API is intended to be stable. Please report any regressions before final.
 - Upgrade to Luerl 1.4.1
 - Tables must now be explicitly decoded when receiving as arguments `deflua` and other Elixir callbacks
 
-[unreleased]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.3...HEAD
+[1.0.0]: https://github.com/tv-labs/lua/compare/v0.4.0...v1.0.0
 [1.0.0-rc.3]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.2...v1.0.0-rc.3
 [1.0.0-rc.2]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.1...v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.0...v1.0.0-rc.1

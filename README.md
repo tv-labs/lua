@@ -31,10 +31,13 @@ Add `lua` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:lua, "~> 1.0.0-rc"}
+    {:lua, "~> 1.0.0"}
   ]
 end
 ```
+
+Upgrading from `0.4.0` or earlier? See the
+[Migrating to 1.0](guides/migrating-to-1.0.md) guide.
 
 ## Quickstart
 
