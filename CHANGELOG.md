@@ -54,6 +54,15 @@ The first stable release on the Elixir-native Lua 5.3 VM, culminating the
 `0.4.0`? See [Migrating to 1.0](guides/migrating-to-1.0.md) for the full
 walkthrough. The changes below are those since `rc.3`.
 
+### Added
+- `Lua.format_exception/1` renders a `Lua.RuntimeException` or
+  `Lua.CompilerException` as the rich, human-readable report — location, source
+  context, stack trace, and suggestions — with ANSI color when
+  `IO.ANSI.enabled?/0` is true. This is the report `mix lua.eval` prints (#393).
+- `Lua.RuntimeException.to_map/2` and `Lua.CompilerException.to_map/1` expose a
+  wire-safe structured representation (no ANSI) for JSON payloads, structured
+  logs, and UI-facing error reporting (#393).
+
 ### Changed
 - Elixir callbacks now receive the public `Lua.t` (`%Lua{}`) as their state
   argument **regardless of how they enter the VM**. Previously a two-arity
@@ -108,11 +117,12 @@ walkthrough. The changes below are those since `rc.3`.
   `Lua.RuntimeException` wrapper when it wraps an internal VM exception (and on
   the internal VM structs themselves). Read the message through
   `Exception.message/1` (the idiomatic accessor) rather than the `e.message`
-  field. Likewise `Lua.CompilerException`'s
-  `:errors` field now holds bare, ANSI-free messages rather than the fully
-  formatted (and previously ANSI-colored) diagnostics — the rich report moved
-  to `Exception.message/1`. This is what lets the ANSI gate hold at output time
-  (#384).
+  field. `Exception.message/1` returns a plain, single-line, ANSI-free string
+  (safe for `Logger` and error trackers); the rich, ANSI-gated report —
+  location, source context, stack trace, and suggestions — is available via
+  `Lua.format_exception/1`. Likewise `Lua.CompilerException`'s `:errors` field
+  now holds bare, ANSI-free messages rather than the fully formatted (and
+  previously ANSI-colored) diagnostics (#384, #393).
 
 ### Changed
 - `Lua.new/1`'s `:max_string_bytes` now accepts `:infinity` for no limit,
@@ -126,9 +136,10 @@ walkthrough. The changes below are those since `rc.3`.
   rendering) into non-terminal sinks such as log files, container stdout, or a
   Sentry/AppSignal title. Messages were formatted eagerly during VM execution —
   where `IO.ANSI.enabled?/0` is true — freezing escape codes into the struct
-  that survived long after the TTY gate. They now render at `Exception.message/1`
-  call time, so the ANSI gate is evaluated where the message is actually written
-  (#384).
+  that survived long after the TTY gate. `Exception.message/1` now returns a
+  plain, ANSI-free, single-line message; the rich, ANSI-gated report lives in
+  `Lua.format_exception/1`, where the gate is evaluated at call time — where the
+  report is actually written (#384, #393).
 - `Lua.eval!/3` now accepts a `:source` option when evaluating a pre-compiled
   `Lua.Chunk`, matching the string-script clause. Previously
   `eval!(lua, chunk, source: "x")` raised via `Keyword.validate!`. For a chunk

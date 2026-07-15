@@ -2,10 +2,11 @@ defmodule Lua.CompilerException do
   @moduledoc """
   Raised when Lua source cannot be lexed, parsed, or compiled.
 
-  Use `Exception.message/1` to render the full, human-readable report (location,
-  source context, pointer, and suggestions). ANSI color is applied only when
-  `IO.ANSI.enabled?/0` is true *at render time*, so the same exception logs
-  cleanly to a file and renders in color on a TTY (issue #384).
+  `Exception.message/1` returns a plain, ANSI-free string — the bare per-error
+  messages under a `Failed to compile Lua!` header — safe to log. For the full,
+  human-readable report (location, source context, pointer, suggestions, and
+  ANSI color on a TTY) use `Lua.format_exception/1`, which is what
+  `mix lua.eval` prints. For structured data use `to_map/1`.
 
   The `:errors` field carries the bare, ANSI-free error messages (no location
   header or source context) for programmatic inspection and clean logging.
@@ -51,13 +52,29 @@ defmodule Lua.CompilerException do
     %__MODULE__{errors: [error]}
   end
 
-  # Compile-time errors don't have a meaningful runtime stack trace — they're
-  # produced by the lexer/parser/compiler before any code is executed. The rich
-  # source context (line, column, pointer to the offending token) is rendered
-  # here from the structured diagnostics, so we join it under a clear
-  # "Failed to compile" header.
+  # Plain, ANSI-free rendering from the bare `:errors` strings — no location
+  # header, source context, or color. Safe to log. The rich source-context
+  # report lives in `format/1`.
   @impl true
-  def message(%__MODULE__{diagnostics: [_ | _] = diagnostics, source: source}) do
+  def message(%__MODULE__{errors: errors}) do
+    """
+    Failed to compile Lua!
+
+    #{Enum.join(errors, "\n")}
+    """
+  end
+
+  @doc """
+  Renders the rich, human-readable report — location, source context, a pointer
+  to the offending token, and suggestions — with ANSI color when
+  `IO.ANSI.enabled?/0` is true. Used by `Lua.format_exception/1`.
+
+  Compile-time errors have no runtime stack trace; the context is rendered from
+  the structured `:diagnostics`. Falls back to the plain `message/1` when no
+  structured diagnostics are present (lexer/compiler errors).
+  """
+  @spec format(t()) :: String.t()
+  def format(%__MODULE__{diagnostics: [_ | _] = diagnostics, source: source}) do
     rendered = Enum.map_join(diagnostics, "\n", &Error.format(&1, source))
 
     """
@@ -67,13 +84,21 @@ defmodule Lua.CompilerException do
     """
   end
 
-  def message(%__MODULE__{errors: errors}) do
-    """
-    Failed to compile Lua!
+  def format(%__MODULE__{} = e), do: message(e)
 
-    #{Enum.join(errors, "\n")}
-    """
+  @doc """
+  Returns a wire-safe structured representation — a list of per-error maps in
+  the `Lua.Parser.Error` shape (`type`, `message`, `line`, `source_context`,
+  `suggestion`, …), with no ANSI escapes. Returns `[]` for non-parser inputs
+  (lexer/compiler errors) that carry no structured diagnostics; read `:errors`
+  for those.
+  """
+  @spec to_map(t()) :: [map()]
+  def to_map(%__MODULE__{diagnostics: [_ | _] = diagnostics, source: source}) do
+    Enum.map(diagnostics, &Error.to_map(&1, source))
   end
+
+  def to_map(%__MODULE__{}), do: []
 
   defp clean_message(%Error{message: message}) when is_binary(message), do: String.trim(message)
   defp clean_message(%Error{}), do: ""

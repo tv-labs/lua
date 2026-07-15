@@ -1,13 +1,16 @@
 defmodule Lua.ErrorGalleryTest do
   @moduledoc """
-  Locks the user-visible rendered output for every error category a Lua
-  program can hit. Each case evaluates a snippet and compares the public
-  `Exception.message/1` against an expected string defined inline next to
-  the source.
+  Locks the user-visible rich rendered output for every error category a Lua
+  program can hit. Each case evaluates a snippet and compares
+  `Lua.format_exception/1` (the report `mix lua.eval` prints) against an
+  expected string defined inline next to the source.
 
   The suite runs with ANSI disabled, so the expected text is stable across
   terminals. When the format changes on purpose, update the `expected`
   string for the affected case.
+
+  The plain, single-line `Exception.message/1` form is locked separately in
+  `Lua.ErrorMessagesTest`.
   """
 
   use ExUnit.Case, async: true
@@ -154,7 +157,7 @@ defmodule Lua.ErrorGalleryTest do
       Lua.eval!(lua, source, source: "gallery.lua")
       flunk("expected #{inspect(source)} to raise")
     rescue
-      e -> Exception.message(e)
+      e -> Lua.format_exception(e)
     end
   end
 end

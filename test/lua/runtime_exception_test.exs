@@ -710,4 +710,63 @@ defmodule Lua.RuntimeExceptionTest do
       assert MyApp.LuaHelper in modules
     end
   end
+
+  defp arithmetic_error do
+    assert_raise RuntimeException, fn ->
+      Lua.eval!(Lua.new(), "local x = nil\nreturn x + 1", source: "demo.lua")
+    end
+  end
+
+  describe "plain message, rich format, and structured to_map" do
+    test "Exception.message/1 is a single ANSI-free line with a location suffix" do
+      message = Exception.message(arithmetic_error())
+
+      assert message =~ "Lua runtime error: attempt to perform arithmetic on a nil value (local 'x')"
+      assert message =~ "(at demo.lua:2)"
+      refute message =~ "\n"
+      refute message =~ "\e["
+    end
+
+    test "Lua.format_exception/1 renders the rich multi-line report" do
+      rich = Lua.format_exception(arithmetic_error())
+
+      assert rich =~ "at demo.lua:2:"
+      assert rich =~ "Suggestion:"
+      assert rich =~ "\n"
+    end
+
+    test "to_map/2 delegates to the wrapped VM error's structured shape" do
+      map = RuntimeException.to_map(arithmetic_error())
+
+      assert map.type == :type_error
+      assert map.line == 2
+      assert map.source == "demo.lua"
+      assert map.message =~ "attempt to perform arithmetic"
+      refute map.message =~ "\e["
+    end
+
+    test "to_map/2 populates source_context when given source_code" do
+      code = "local x = nil\nreturn x + 1"
+
+      error =
+        assert_raise RuntimeException, fn ->
+          Lua.eval!(Lua.new(), code, source: "demo.lua")
+        end
+
+      map = RuntimeException.to_map(error, source_code: code)
+
+      assert %{lines: [_ | _], pointer_column: _} = map.source_context
+    end
+
+    test "to_map/2 returns a uniform minimal map for host-side (non-VM) errors" do
+      map = RuntimeException.to_map(RuntimeException.exception("cannot do that"))
+
+      assert map.type == nil
+      assert map.message == "Lua runtime error: cannot do that"
+      assert map.source == nil
+      assert map.line == nil
+      assert map.call_stack == []
+      assert map.source_context == nil
+    end
+  end
 end

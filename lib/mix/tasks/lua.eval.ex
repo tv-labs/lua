@@ -50,7 +50,7 @@ defmodule Mix.Tasks.Lua.Eval do
       IO.puts(inspect(results, pretty: true, limit: :infinity, charlists: :as_lists))
     rescue
       e in [Lua.CompilerException, Lua.RuntimeException] ->
-        IO.puts(:stderr, Exception.message(e))
+        IO.puts(:stderr, Lua.format_exception(e))
         exit({:shutdown, 1})
     end
   end

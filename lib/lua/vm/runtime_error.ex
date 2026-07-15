@@ -47,13 +47,24 @@ defmodule Lua.VM.RuntimeError do
     }
   end
 
-  # Rendered lazily so `IO.ANSI.enabled?/0` is evaluated when the message is
-  # actually written (log sink, TTY, Sentry) rather than frozen at construction
-  # time — where it would run inside a Lua execution and always see a TTY. See
-  # issue #384; mirrors `Lua.VM.ArgumentError.message/1`.
+  # Plain, single-line, ANSI-free body — safe to log and consumed by the public
+  # `Lua.RuntimeException` wrapper. The rich multi-line render (location, stack
+  # trace, ANSI on a TTY) lives in `format/1`.
   @impl true
-  def message(%__MODULE__{} = error) do
-    format_message(error.value, error.source, error.line, error.call_stack)
+  def message(%__MODULE__{value: value}), do: stringify(value)
+
+  @doc """
+  Rich multi-line render — location header and stack trace, ANSI-colored when
+  `IO.ANSI.enabled?/0` is true at call time (evaluated lazily, never frozen at
+  construction; see issue #384). Used by `Lua.format_exception/1`.
+  """
+  @spec format(t()) :: String.t()
+  def format(%__MODULE__{} = error) do
+    ErrorFormatter.format(:runtime_error, raw_message(error.value),
+      source: error.source,
+      line: error.line,
+      call_stack: error.call_stack
+    )
   end
 
   @doc """
@@ -69,14 +80,6 @@ defmodule Lua.VM.RuntimeError do
       line: error.line,
       call_stack: error.call_stack,
       source_code: Keyword.get(opts, :source_code)
-    )
-  end
-
-  defp format_message(value, source, line, call_stack) do
-    ErrorFormatter.format(:runtime_error, raw_message(value),
-      source: source,
-      line: line,
-      call_stack: call_stack
     )
   end
 

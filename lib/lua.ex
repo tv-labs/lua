@@ -710,10 +710,12 @@ defmodule Lua do
   When the function raises, `call_function/3` returns `{:error, exception,
   lua}`, where `exception` is a `Lua.RuntimeException`. Read `:kind`
   (`:error | :type | :argument | :assertion | :internal`) to discriminate the
-  failure, and `:original` to reach the internal VM exception. Call
-  `Exception.message/1` yourself to render it; unlike the raising
-  `call_function!/3`, the boundary does *not* pre-render it (no ANSI, no
-  `at <source>:<line>:` header, no `Suggestion:` block).
+  failure, and `:original` to reach the internal VM exception. Render it
+  yourself: `Exception.message/1` for a plain, single-line, log-safe string;
+  `Lua.format_exception/1` for the rich report (location, stack trace,
+  suggestions, ANSI on a TTY); or `Lua.RuntimeException.to_map/2` for structured
+  data. The boundary does *not* pre-render — `:original` holds the raw VM
+  exception.
 
       iex> {[ref], lua} = Lua.eval!(Lua.new(), "return function() error('boom') end", decode: false)
       iex> {:error, exception, _lua} = Lua.call_function(lua, ref, [])
@@ -930,6 +932,25 @@ defmodule Lua do
   """
   @spec unwrap(term()) :: term()
   defdelegate unwrap(value), to: Display
+
+  @doc """
+  Renders a `Lua.RuntimeException` or `Lua.CompilerException` as a rich,
+  human-readable report — location, source context, stack trace, and
+  suggestions — with ANSI color when `IO.ANSI.enabled?/0` is true.
+
+  This is the terminal/REPL rendering used by `mix lua.eval`. For a plain,
+  single-line message suitable for `Logger` and error trackers use
+  `Exception.message/1`; for structured data (JSON, a UI) use the exception's
+  `to_map/2`.
+
+      iex> exception = Lua.RuntimeException.exception("boom")
+      iex> Lua.format_exception(exception)
+      "Lua runtime error: boom"
+  """
+  @spec format_exception(Lua.RuntimeException.t() | Lua.CompilerException.t()) :: String.t()
+  def format_exception(%Lua.RuntimeException{} = exception), do: Lua.RuntimeException.format(exception)
+
+  def format_exception(%Lua.CompilerException{} = exception), do: Lua.CompilerException.format(exception)
 
   @doc """
   Encodes a Lua value into its internal form

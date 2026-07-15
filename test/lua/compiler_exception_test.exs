@@ -15,14 +15,32 @@ defmodule Lua.CompilerExceptionTest do
         e in Lua.CompilerException -> e
       end
 
-    msg = Exception.message(e)
+    msg = Lua.format_exception(e)
 
     # The parser emits rich source context in its formatted error string,
-    # which `CompilerException.message/1` then forwards under the "Failed
-    # to compile Lua!" header. Assert the location bits survive.
+    # which `Lua.format_exception/1` renders under the "Failed to compile
+    # Lua!" header. Assert the location bits survive.
     assert msg =~ "Failed to compile Lua!"
     assert msg =~ ~r/line\s+1/
     assert msg =~ ~r/column\s+\d+/
+  end
+
+  test "plain Exception.message/1 is ANSI-free with no source context" do
+    e =
+      try do
+        Lua.eval!(Lua.new(), "local x =;")
+      rescue
+        e in Lua.CompilerException -> e
+      end
+
+    msg = Exception.message(e)
+
+    # The plain message carries the header and the bare error text only — no
+    # line/column, no rendered source line, no ANSI. Those live in
+    # `Lua.format_exception/1`.
+    assert msg =~ "Failed to compile Lua!"
+    refute msg =~ "\e["
+    refute msg =~ "local x =;"
   end
 
   test "compile errors include the offending source line as context" do
@@ -33,7 +51,7 @@ defmodule Lua.CompilerExceptionTest do
         e in Lua.CompilerException -> e
       end
 
-    msg = Exception.message(e)
+    msg = Lua.format_exception(e)
 
     # The parser's error formatter renders the source line itself with a
     # caret pointing at the failure column.
@@ -67,13 +85,35 @@ defmodule Lua.CompilerExceptionTest do
         e in Lua.CompilerException -> e
       end
 
-    msg = Exception.message(e)
+    msg = Lua.format_exception(e)
 
     assert msg =~ "Failed to compile Lua!"
     assert msg =~ ~r/line\s+1/
     assert msg =~ ~r/column\s+\d+/
     assert msg =~ "bare arithmetic"
     refute msg =~ "(no position information)"
+  end
+
+  test "to_map/1 returns structured, ANSI-free per-error maps for parse errors" do
+    e =
+      try do
+        Lua.eval!(Lua.new(), "local x =;")
+      rescue
+        e in Lua.CompilerException -> e
+      end
+
+    assert [%{type: _, message: msg, line: 1} | _] = Lua.CompilerException.to_map(e)
+    assert is_binary(msg)
+
+    for m <- Lua.CompilerException.to_map(e) do
+      refute m.message =~ "\e["
+    end
+  end
+
+  test "to_map/1 returns [] for non-parser (binary) errors" do
+    e = Lua.CompilerException.exception("oops")
+
+    assert Lua.CompilerException.to_map(e) == []
   end
 
   test "string-keyed table renders with location and a bracketed-key suggestion" do
@@ -88,7 +128,7 @@ defmodule Lua.CompilerExceptionTest do
         e in Lua.CompilerException -> e
       end
 
-    msg = Exception.message(e)
+    msg = Lua.format_exception(e)
 
     assert msg =~ "Failed to compile Lua!"
     assert msg =~ ~r/line\s+1/
