@@ -47,6 +47,20 @@ Everything else — the default sandbox, `_G`/`_ENV` semantics, metatables, and
 the standard-library surface — is compatible. The full breaking-change list
 is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
 
+## [1.0.1] - 2026-07-16
+
+### Fixed
+- Parser and lexer errors for non-ASCII source are now valid UTF-8. An
+  unexpected multibyte character (or a non-ASCII byte inside a comment, string,
+  or long string) was matched one byte at a time, so the error message kept
+  only the UTF-8 lead byte and produced a mangled, non-UTF-8 string. The lexer
+  now carries the full codepoint, and the message reads
+  `Unexpected character: … (U+XXXX)`. A genuinely invalid UTF-8 lead byte is
+  reported separately as `Invalid byte 0xXX` with an encoding-check suggestion.
+- Every string field of `Lua.Parser.Error.to_map/1` is now valid UTF-8 and safe
+  to `Jason.encode!/1`, even when the offending token is non-ASCII or malformed
+  — invalid bytes are scrubbed via `String.replace_invalid/1` (#395).
+
 ## [1.0.0] - 2026-07-15
 
 The first stable release on the Elixir-native Lua 5.3 VM, culminating the
@@ -623,6 +637,7 @@ API is intended to be stable. Please report any regressions before final.
 - Upgrade to Luerl 1.4.1
 - Tables must now be explicitly decoded when receiving as arguments `deflua` and other Elixir callbacks
 
+[1.0.1]: https://github.com/tv-labs/lua/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/tv-labs/lua/compare/v0.4.0...v1.0.0
 [1.0.0-rc.3]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.2...v1.0.0-rc.3
 [1.0.0-rc.2]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.1...v1.0.0-rc.2
