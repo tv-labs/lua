@@ -5,7 +5,7 @@ defmodule Lua.MixProject do
   alias Mix.Tasks.Lua.Eval
 
   @url "https://github.com/tv-labs/lua"
-  @version "1.0.0"
+  @version "1.0.1"
 
   # The curated public API surface rendered on HexDocs. Everything else is an
   # implementation detail: its @moduledoc stays intact for source readers and
