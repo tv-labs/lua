@@ -1501,11 +1501,20 @@ defmodule Lua.Parser do
        "To use this expression, return it or assign it to a name."}
   end
 
-  defp convert_lexer_error({:unexpected_character, char, pos}, _code) do
-    Error.new(:invalid_syntax, "Unexpected character: #{<<char>>}", pos,
+  defp convert_lexer_error({:unexpected_character, cp, pos}, _code) do
+    Error.new(:invalid_syntax, "Unexpected character: #{<<cp::utf8>>} (U+#{codepoint_hex(cp)})", pos,
       suggestion: """
       This character is not valid in Lua syntax.
       Check for typos or invisible characters.
+      """
+    )
+  end
+
+  defp convert_lexer_error({:invalid_byte, byte, pos}, _code) do
+    Error.new(:invalid_syntax, "Invalid byte 0x#{byte_hex(byte)}", pos,
+      suggestion: """
+      The source contains a byte that is not valid UTF-8.
+      Check the file encoding.
       """
     )
   end
@@ -1533,6 +1542,14 @@ defmodule Lua.Parser do
 
   defp convert_lexer_error(other, _code) do
     Error.new(:lexer_error, "Lexer error: #{inspect(other)}", nil)
+  end
+
+  defp codepoint_hex(cp) do
+    cp |> Integer.to_string(16) |> String.upcase() |> String.pad_leading(4, "0")
+  end
+
+  defp byte_hex(byte) do
+    byte |> Integer.to_string(16) |> String.upcase() |> String.pad_leading(2, "0")
   end
 
   defp suggest_for_token_error(type, message) do

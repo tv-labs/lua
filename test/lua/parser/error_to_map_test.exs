@@ -130,8 +130,38 @@ defmodule Lua.Parser.ErrorToMapTest do
     end
   end
 
+  describe "UTF-8 wire safety" do
+    # Valid UTF-8 in every string field is what makes the map JSON-encodable;
+    # the library carries no JSON dependency, so we assert the invariant directly.
+    test "a multibyte unexpected character produces a valid, wire-safe message" do
+      code = "local x = │"
+      map = code |> error!() |> Error.to_map(code)
+
+      assert String.valid?(map.message)
+      assert map.message =~ "U+2502"
+      assert_all_strings_valid(map)
+    end
+
+    test "every string field stays valid UTF-8 when the source has malformed bytes" do
+      code = <<"local x = ", 0xFF>>
+      map = code |> error!() |> Error.to_map(code)
+
+      assert map.message == "Invalid byte 0xFF"
+      assert_all_strings_valid(map)
+    end
+  end
+
+  defp assert_all_strings_valid(map) do
+    assert String.valid?(map.message)
+    assert String.valid?(map.suggestion || "")
+
+    for line <- map.source_context.lines do
+      assert String.valid?(line.text)
+    end
+  end
+
   defp error!(code) do
-    {:error, [error]} = Parser.parse_structured(code)
+    {:error, [error | _]} = Parser.parse_structured(code)
     error
   end
 end

@@ -268,9 +268,16 @@ defmodule Lua.Lexer do
     scan_identifier(<<c, rest::binary>>, "", acc, pos, pos)
   end
 
-  # Unexpected character
-  defp do_tokenize(<<c, _rest::binary>>, _acc, pos) do
-    {:error, {:unexpected_character, c, pos}}
+  # Unexpected character — carry the full codepoint so error messages stay
+  # valid UTF-8 even for multibyte characters (a byte-level match would keep
+  # only the UTF-8 lead byte).
+  defp do_tokenize(<<cp::utf8, _rest::binary>>, _acc, pos) do
+    {:error, {:unexpected_character, cp, pos}}
+  end
+
+  # Genuinely invalid UTF-8 lead byte (no valid codepoint here).
+  defp do_tokenize(<<byte, _rest::binary>>, _acc, pos) do
+    {:error, {:invalid_byte, byte, pos}}
   end
 
   # Scan single-line comment (collect text until newline)
@@ -300,6 +307,10 @@ defmodule Lua.Lexer do
   defp scan_single_line_comment_content(<<>>, text, acc, pos, start_pos) do
     token = {:comment, :single, text, start_pos}
     {:ok, Enum.reverse([{:eof, pos}, token | acc])}
+  end
+
+  defp scan_single_line_comment_content(<<cp::utf8, rest::binary>>, text, acc, pos, start_pos) when cp > 127 do
+    scan_single_line_comment_content(rest, text <> <<cp::utf8>>, acc, advance_utf8(pos, cp), start_pos)
   end
 
   defp scan_single_line_comment_content(<<c, rest::binary>>, text, acc, pos, start_pos) do
@@ -335,6 +346,17 @@ defmodule Lua.Lexer do
 
   defp scan_multiline_comment_text(<<>>, _text, _acc, pos, _start_pos, _level) do
     {:error, {:unclosed_comment, pos}}
+  end
+
+  defp scan_multiline_comment_text(<<cp::utf8, rest::binary>>, text, acc, pos, start_pos, level) when cp > 127 do
+    scan_multiline_comment_text(
+      rest,
+      text <> <<cp::utf8>>,
+      acc,
+      advance_utf8(pos, cp),
+      start_pos,
+      level
+    )
   end
 
   defp scan_multiline_comment_text(<<c, rest::binary>>, text, acc, pos, start_pos, level) do
@@ -433,6 +455,10 @@ defmodule Lua.Lexer do
 
   defp scan_string(<<>>, _str_acc, _acc, pos, _start_pos, _quote) do
     {:error, {:unclosed_string, pos}}
+  end
+
+  defp scan_string(<<cp::utf8, rest::binary>>, str_acc, acc, pos, start_pos, quote) when cp > 127 do
+    scan_string(rest, str_acc <> <<cp::utf8>>, acc, advance_utf8(pos, cp), start_pos, quote)
   end
 
   defp scan_string(<<c, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
@@ -619,6 +645,10 @@ defmodule Lua.Lexer do
 
   defp scan_long_string(<<>>, _str_acc, _acc, pos, _start_pos, _level) do
     {:error, {:unclosed_long_string, pos}}
+  end
+
+  defp scan_long_string(<<cp::utf8, rest::binary>>, str_acc, acc, pos, start_pos, level) when cp > 127 do
+    scan_long_string(rest, str_acc <> <<cp::utf8>>, acc, advance_utf8(pos, cp), start_pos, level)
   end
 
   defp scan_long_string(<<c, rest::binary>>, str_acc, acc, pos, start_pos, level) do
@@ -855,6 +885,13 @@ defmodule Lua.Lexer do
   # Position tracking helpers
   defp advance_column(pos, n) do
     %{pos | column: pos.column + n, byte_offset: pos.byte_offset + n}
+  end
+
+  # Advance one display column for a codepoint that occupies its full UTF-8
+  # byte width in the source, so `column` stays per-codepoint while
+  # `byte_offset` stays per-byte.
+  defp advance_utf8(pos, cp) do
+    %{pos | column: pos.column + 1, byte_offset: pos.byte_offset + byte_size(<<cp::utf8>>)}
   end
 
   # Advance one source line, consuming `n` raw bytes (the backslash plus the
