@@ -155,7 +155,9 @@ defmodule Lua.Parser.Error do
   The shape is identical to the map produced for runtime errors, so runtime
   and parse errors can flow through a single renderer (HTML, JSON, structured
   logs). No ANSI escapes appear in any string field, and leading/trailing
-  whitespace from the internal message/suggestion templates is trimmed.
+  whitespace from the internal message/suggestion templates is trimmed. Every
+  string field is valid UTF-8 and safe to `Jason.encode!/1` — even when the
+  offending source token is a non-ASCII or malformed byte.
 
       %{
         type: atom(),
@@ -200,7 +202,7 @@ defmodule Lua.Parser.Error do
   end
 
   defp clean(nil), do: nil
-  defp clean(text) when is_binary(text), do: String.trim(text)
+  defp clean(text) when is_binary(text), do: text |> String.replace_invalid() |> String.trim()
 
   # Deliberately mirrors `Lua.VM.ErrorFormatter`'s private source-context
   # windowing (same 2-before/2-after math) to keep the wire shapes in lockstep.
@@ -222,7 +224,9 @@ defmodule Lua.Parser.Error do
         |> Enum.slice((start_line - 1)..(end_line - 1))
         |> Enum.with_index(start_line)
         |> Enum.map(fn {text, num} ->
-          %{number: num, text: text, highlight?: num == line}
+          # Source may contain malformed bytes; scrub so the wire map stays
+          # valid UTF-8 and JSON-encodable.
+          %{number: num, text: String.replace_invalid(text), highlight?: num == line}
         end)
 
       %{lines: rendered_lines, pointer_column: position.column}

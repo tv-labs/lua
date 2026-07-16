@@ -714,6 +714,40 @@ defmodule Lua.LexerTest do
       assert {:error, {:unexpected_character, ?`, _}} = Lexer.tokenize("`")
     end
 
+    test "carries the full codepoint for a multibyte unexpected character" do
+      # A box-drawing char (U+2502, bytes E2 94 82) must be reported by its
+      # whole codepoint, not just the UTF-8 lead byte.
+      assert {:error, {:unexpected_character, 0x2502, _}} = Lexer.tokenize("│")
+    end
+
+    test "reports a genuinely invalid UTF-8 byte separately" do
+      assert {:error, {:invalid_byte, 0xFF, _}} = Lexer.tokenize(<<0xFF>>)
+    end
+
+    test "counts a multibyte character as one column inside a string" do
+      # `column` advances per codepoint while `byte_offset` stays per byte, so
+      # a 2-byte `é` in the string body must not overcount the column of the
+      # following unexpected `@`.
+      {:error, {:unexpected_character, ?@, ascii_pos}} = Lexer.tokenize(~s("cafe" @))
+      {:error, {:unexpected_character, ?@, utf8_pos}} = Lexer.tokenize(~s("café" @))
+      assert ascii_pos.column == utf8_pos.column
+      assert utf8_pos.byte_offset == ascii_pos.byte_offset + 1
+    end
+
+    test "counts a multibyte character as one column inside a comment" do
+      {:error, {:unexpected_character, ?@, ascii_pos}} = Lexer.tokenize("--[[a]]@")
+      {:error, {:unexpected_character, ?@, utf8_pos}} = Lexer.tokenize("--[[é]]@")
+      assert ascii_pos.column == utf8_pos.column
+      assert utf8_pos.byte_offset == ascii_pos.byte_offset + 1
+    end
+
+    test "counts a multibyte character as one column inside a long string" do
+      {:error, {:unexpected_character, ?@, ascii_pos}} = Lexer.tokenize("[[a]]@")
+      {:error, {:unexpected_character, ?@, utf8_pos}} = Lexer.tokenize("[[é]]@")
+      assert ascii_pos.column == utf8_pos.column
+      assert utf8_pos.byte_offset == ascii_pos.byte_offset + 1
+    end
+
     test "handles consecutive operators" do
       assert {:ok, tokens} = Lexer.tokenize("+-*/")
 
