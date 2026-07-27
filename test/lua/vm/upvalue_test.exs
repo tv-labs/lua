@@ -423,7 +423,8 @@ defmodule Lua.VM.UpvalueTest do
       # Same program as above, built through the public `Lua.AST.Builder`
       # rather than the parser, so the nodes start without `meta.id`. The two
       # `for` bodies are equal terms; only compile-time id stamping keeps
-      # their close-upvalue watermarks apart.
+      # their close-upvalue watermarks apart. The peephole pass is off for the
+      # same reason as above: it drops the opcodes the watermark is read from.
       chunk =
         Builder.chunk([
           Builder.do_block([
@@ -436,7 +437,7 @@ defmodule Lua.VM.UpvalueTest do
           Builder.for_num("i", Builder.number(1), Builder.number(1), [])
         ])
 
-      assert {:ok, proto} = Compiler.compile(chunk, source: "test.lua")
+      assert {:ok, proto} = Compiler.compile(chunk, source: "test.lua", peephole: false)
 
       assert [_, _] = thresholds = close_thresholds(proto)
       assert thresholds == Enum.uniq(thresholds)
