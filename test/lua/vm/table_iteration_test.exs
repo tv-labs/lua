@@ -320,6 +320,20 @@ defmodule Lua.VM.TableIterationTest do
       end
     end
 
+    property "from_data equals the sorted put/3 fold it replaces, key shape regardless" do
+      # from_data/1 skips the fold entirely for an all-string-keyed map,
+      # building `data` and `order` in one shot. That shortcut has to be
+      # invisible: the resulting struct must be the one the fold produced,
+      # field for field, so iteration order and border bookkeeping are
+      # unchanged.
+      check all(entries <- list_of(tuple({key_gen(), integer(1..1000)}), max_length: 40)) do
+        data = Map.new(entries)
+        folded = Enum.reduce(Enum.sort(data), %Table{}, fn {k, v}, acc -> Table.put(acc, k, v) end)
+
+        assert Table.from_data(data) == folded
+      end
+    end
+
     property "clearing the current key mid-walk still visits every live key once (§6.1), memo and fallback" do
       check all(ops <- entries_gen()) do
         {table, oracle} = build_pair(ops)
