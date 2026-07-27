@@ -11,22 +11,31 @@ defmodule Lua.Compiler do
   alias Lua.Compiler.Codegen
   alias Lua.Compiler.GotoResolution
   alias Lua.Compiler.GotoValidation
+  alias Lua.Compiler.Peephole
   alias Lua.Compiler.Prototype
   alias Lua.Compiler.Scope
 
   @type compile_opts :: [
-          source: binary()
+          source: binary(),
+          peephole: boolean()
         ]
 
   @doc """
   Compiles a Lua AST chunk into a prototype.
 
-  After codegen, the prototype is offered to `Lua.Compiler.Bytecode` for
-  dense encoding. Sub-prototypes are encoded independently — the dispatcher
-  takes over per-prototype wherever every opcode in that prototype falls
-  within its coverage; anything else stays on the interpreter. The
-  original instruction stream is preserved either way, so error reporting
-  and tooling continue to work unchanged.
+  Codegen's output first goes through `Lua.Compiler.Peephole`, which elides
+  redundant moves, folds literals into `_k` opcode variants, fuses upvalue
+  field access, and re-derives `max_registers` from the result. Both engines
+  run the rewritten stream. Pass `peephole: false` to skip it — the
+  unoptimised stream is semantically identical and the differential tests
+  compare the two.
+
+  The prototype is then offered to `Lua.Compiler.Bytecode` for dense
+  encoding. Sub-prototypes are encoded independently — the dispatcher takes
+  over per-prototype wherever every opcode in that prototype falls within
+  its coverage; anything else stays on the interpreter. The instruction
+  stream is preserved either way, so error reporting and tooling continue to
+  work unchanged.
   """
   @spec compile(Chunk.t(), compile_opts()) :: {:ok, Prototype.t()} | {:error, term()}
   def compile(%Chunk{} = chunk, opts \\ []) do
@@ -43,16 +52,27 @@ defmodule Lua.Compiler do
     with :ok <- GotoValidation.validate(chunk),
          {:ok, scope_state} <- Scope.resolve(chunk, opts),
          {:ok, prototype} <- Codegen.generate(chunk, scope_state, opts) do
-      # Encode bytecode first (it reads the raw `:goto` / `:label` stream),
-      # then resolve gotos for the list interpreter. The two passes are
-      # independent: the dispatcher runs `bytecode`, the interpreter runs the
-      # resolved `instructions` plus `goto_targets`.
+      # Peephole first — it rewrites the raw instruction stream, so both the
+      # bytecode encoding and the interpreter's list see the same code. Then
+      # encode bytecode (it reads the raw `:goto` / `:label` stream) and
+      # finally resolve gotos for the list interpreter. The last two passes
+      # are independent: the dispatcher runs `bytecode`, the interpreter runs
+      # the resolved `instructions` plus `goto_targets`.
       prototype =
         prototype
+        |> maybe_peephole(opts)
         |> Bytecode.compile()
         |> GotoResolution.resolve()
 
       {:ok, prototype}
+    end
+  end
+
+  defp maybe_peephole(prototype, opts) do
+    if Keyword.get(opts, :peephole, true) do
+      Peephole.optimize(prototype)
+    else
+      prototype
     end
   end
 

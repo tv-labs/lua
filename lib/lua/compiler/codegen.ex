@@ -120,7 +120,8 @@ defmodule Lua.Compiler.Codegen do
 
   # Returns the register-slot count an instruction proves is needed (its
   # highest written register index + 1), recursing into nested bodies.
-  defp instruction_size({:load_nil, dest, count}), do: dest + count
+  # `load_nil` clears `count + 1` registers, `dest..dest + count`.
+  defp instruction_size({:load_nil, dest, count}), do: dest + count + 1
   defp instruction_size({:vararg, base, count}) when is_integer(count) and count > 0, do: base + count
   defp instruction_size({:vararg, base, _}), do: base + 1
   defp instruction_size({:self, base, _obj, _name, _hint}), do: base + 2
@@ -159,6 +160,10 @@ defmodule Lua.Compiler.Codegen do
   defp instruction_size({:set_field, _table, _name, _value, _hint}), do: 0
   defp instruction_size({:set_upvalue, _index, _source}), do: 0
   defp instruction_size({:set_open_upvalue, _reg, _source}), do: 0
+
+  # `Lua.Compiler.Peephole` emits this: operand 1 is an *upvalue* index, not
+  # a register, so it must not reach the default clause below.
+  defp instruction_size({:set_field_upvalue, _index, _name, _value, _hint}), do: 0
 
   # Everything that reaches here is an ordinary value-producing opcode —
   # `{tag, dest, ...}` whose destination is operand 1. That is the rule for
