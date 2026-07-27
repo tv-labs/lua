@@ -45,10 +45,23 @@ defmodule Lua.VM.Bootstrap do
   # these must invalidate the template even though no fun in it points there.
   @template_modules [__MODULE__, Lua, Lua.VM.Limits, Lua.VM.State, Lua.VM.Stdlib, Lua.VM.Table]
 
-  @registry {__MODULE__, :keys}
+  # Every key `fetch/2` may be called with, and therefore everything `reset/0`
+  # has to erase. Fixed at compile time on purpose: the store stays a known,
+  # bounded size, and `reset/0` needs no bookkeeping that a concurrent cold
+  # start could lose.
+  @memoized_keys [{Lua, :default_lua}, {Lua, :base_state}]
+
+  # Earlier builds tracked the keys here at runtime. Erased by `reset/0` so a
+  # release upgraded from one of those builds does not keep the entry forever.
+  @obsolete_registry {__MODULE__, :keys}
 
   @doc """
   Returns the memoized template for `key`, building it with `builder` on a miss.
+
+  `key` must be one of the compile-time literals in `memoized_keys/0`. That is
+  what bounds the store: `:persistent_term` has no eviction, so a key derived
+  from user input would grow it without limit, and `reset/0` would not know to
+  erase it.
 
   `builder` must be pure: it is invoked on a cold start (possibly more than
   once under concurrent first use, see the moduledoc) and again after a module
@@ -66,6 +79,12 @@ defmodule Lua.VM.Bootstrap do
   end
 
   @doc """
+  The keys `fetch/2` accepts, and the exact set `reset/0` erases.
+  """
+  @spec memoized_keys() :: [term()]
+  def memoized_keys, do: @memoized_keys
+
+  @doc """
   Erases every memoized template, so the next `fetch/2` of each key rebuilds.
 
   Required after explicitly loading new Lua-implementation code in `:embedded`
@@ -75,29 +94,14 @@ defmodule Lua.VM.Bootstrap do
   """
   @spec reset() :: :ok
   def reset do
-    Enum.each(:persistent_term.get(@registry, []), &:persistent_term.erase/1)
-    :persistent_term.erase(@registry)
+    Enum.each([@obsolete_registry | @memoized_keys], &:persistent_term.erase/1)
     :ok
   end
 
   defp build_and_store(key, builder) do
     term = builder.()
     :persistent_term.put(key, {fingerprint(term), term})
-    register(key)
     term
-  end
-
-  # Tracks the stored keys so `reset/0` can erase them without knowing the
-  # callers. Best-effort under the same cold-start race as the templates
-  # themselves; builds are rare, so the extra put is negligible.
-  defp register(key) do
-    keys = :persistent_term.get(@registry, [])
-
-    if key not in keys do
-      :persistent_term.put(@registry, [key | keys])
-    end
-
-    :ok
   end
 
   defp current?(:static), do: true
