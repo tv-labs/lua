@@ -212,13 +212,16 @@ defmodule Website.LuaSandbox do
       end)
 
     try do
-      bytecode =
+      # Parse once and reuse the chunk for both the bytecode pane and the
+      # evaluation itself. A parse failure falls through to eval!/2 on the
+      # source so the error path still raises the usual CompilerException.
+      {bytecode, runnable} =
         case Lua.parse_chunk(source) do
-          {:ok, %Lua.Chunk{prototype: proto}} -> disassemble(proto)
-          _ -> []
+          {:ok, %Lua.Chunk{prototype: proto} = chunk} -> {disassemble(proto), chunk}
+          _ -> {[], source}
         end
 
-      {results, _lua} = Lua.eval!(lua, source)
+      {results, _lua} = Lua.eval!(lua, runnable)
 
       %{
         status: :ok,
