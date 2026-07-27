@@ -265,18 +265,21 @@ defmodule Lua.Compiler.Peephole do
   #   * that register is written exactly twice in the whole parent — by the
   #     binding itself — so no assignment anywhere can rebind the name;
   #   * the parent only ever reads it to call it, and the scratch register
-  #     the closure passed through is read only by the binding, so the
-  #     closure value never becomes an operand of anything else;
+  #     the closure passed through on its way there is overwritten before
+  #     anything reads it back, so the closure value never becomes an
+  #     operand of anything else;
   #   * inside the child, the self-upvalue is likewise only ever loaded to
   #     be called, is never assigned, and is captured by no nested
   #     prototype — nothing can hand the value (or the cell behind it) to
   #     `debug.setupvalue`;
   #   * the child is not vararg, and contains no `goto`.
   #
-  # Mutual recursion never qualifies (each name is a separate register,
-  # bound to a different prototype), and neither does a `local function`
-  # that is later reassigned, nor `local f; f = function() … f() … end`
-  # (whose `local f` write makes the register's write count 3).
+  # Mutual recursion never qualifies: each name is a separate register bound
+  # to a different prototype, so the callee is never the caller. Neither does
+  # `local f; f = function() … f() … end` — an assignment publishes the
+  # closure to the cell without ever copying it into the local's register, so
+  # it is not the binding shape, and the `local f` declaration has already
+  # written that register anyway.
 
   defp fuse_self_calls(instructions, prototypes) do
     prototypes
