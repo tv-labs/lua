@@ -35,7 +35,8 @@ defmodule Lua.AST.Meta do
   `Lua.AST.Ids.assign/1` stamps every node of a parsed chunk, including the
   bodies of nested functions. Compiler passes that need a per-node table key
   it by this integer instead of by the node term, so a lookup hashes one word
-  rather than a whole subtree. It is `nil` on hand-built AST nodes.
+  rather than a whole subtree. Hand-built AST nodes carry `nil` until
+  `Lua.Compiler.compile/2` stamps the chunk they belong to.
   """
   @type id :: non_neg_integer() | nil
 
@@ -65,7 +66,9 @@ defmodule Lua.AST.Meta do
   @doc """
   Merges two Meta structs, taking the earliest start and latest end.
 
-  Useful when combining multiple nodes into a single parent node.
+  Useful when combining multiple nodes into a single parent node. The
+  `metadata` (comments) and `id` of the left operand are kept, so merging a
+  wider span into a node never silently drops what was already attached to it.
 
   ## Examples
 
@@ -80,10 +83,12 @@ defmodule Lua.AST.Meta do
       }
   """
   @spec merge(t(), t()) :: t()
-  def merge(%__MODULE__{start: start1, end: end1}, %__MODULE__{start: start2, end: end2}) do
-    new_start = earliest_position(start1, start2)
-    new_end = latest_position(end1, end2)
-    new(new_start, new_end)
+  def merge(%__MODULE__{} = left, %__MODULE__{} = right) do
+    %{
+      left
+      | start: earliest_position(left.start, right.start),
+        end: latest_position(left.end, right.end)
+    }
   end
 
   @doc """
