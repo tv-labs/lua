@@ -368,6 +368,88 @@ defmodule Lua.Compiler.BytecodeTest do
     ]
   end
 
+  describe "static-arity call encoding" do
+    defp encoded_tags(%Prototype{bytecode: bytecode}) do
+      bytecode |> Tuple.to_list() |> Enum.map(&:erlang.element(1, &1))
+    end
+
+    test "picks a dedicated tag per small argument count" do
+      proto =
+        compile!("""
+        function f(g)
+          g()
+          g(1)
+          g(1, 2)
+          g(1, 2, 3)
+          local a = g()
+          local b = g(1)
+          local c = g(1, 2)
+          local d = g(1, 2, 3)
+          return a, b, c, d
+        end
+        """)
+
+      [f] = proto.prototypes
+      tags = encoded_tags(f)
+
+      assert Bytecode.op_call_zero_0() in tags
+      assert Bytecode.op_call_zero_1() in tags
+      assert Bytecode.op_call_zero_2() in tags
+      assert Bytecode.op_call_one_0() in tags
+      assert Bytecode.op_call_one_1() in tags
+      assert Bytecode.op_call_one_2() in tags
+
+      # Three arguments is past the specialised set, so both result shapes
+      # fall back to the generic opcodes that carry `arg_count`.
+      assert Enum.count(tags, &(&1 == Bytecode.op_call_zero())) == 1
+      assert Enum.count(tags, &(&1 == Bytecode.op_call_one())) == 1
+    end
+
+    test "the specialised tuples keep the name hint and the line" do
+      proto =
+        compile!("""
+        function f(t)
+          local x = t.method(1)
+          return x
+        end
+        """)
+
+      [f] = proto.prototypes
+
+      assert [{tag, _base, {:field, "method", {:local, "t"}}, 2}] =
+               f.bytecode |> Tuple.to_list() |> Enum.filter(&(:erlang.element(1, &1) == Bytecode.op_call_one_1()))
+
+      assert tag == Bytecode.op_call_one_1()
+    end
+  end
+
+  describe "self-recursive call encoding" do
+    test "a fused self-call encodes to one tag across every result shape" do
+      proto =
+        compile!("""
+        local function f(n)
+          if n == 0 then return 0 end
+          f(n - 1)
+          local x = f(n - 1)
+          return x + f(n - 2)
+        end
+        return f(3)
+        """)
+
+      [f] = proto.prototypes
+      self_calls = Enum.filter(Tuple.to_list(f.bytecode), &(:erlang.element(1, &1) == Bytecode.op_call_self()))
+
+      assert length(self_calls) == 3
+      assert Enum.all?(self_calls, &(tuple_size(&1) == 6))
+
+      # {tag, base, arg_count, result_count, name_hint, line}: the discarded
+      # call, the one-result call, and the operand call.
+      assert Enum.map(self_calls, &:erlang.element(4, &1)) == [0, 1, 1]
+      assert Enum.all?(self_calls, &(:erlang.element(5, &1) == {:upvalue, "f"}))
+      assert Enum.all?(self_calls, &(:erlang.element(6, &1) > 0))
+    end
+  end
+
   describe "call opcodes carry the source line" do
     test "@op_call_one bakes the line of the call site into its tuple" do
       # `pairs(x)` is a `:call` with result_count > 0 used as an rvalue,
