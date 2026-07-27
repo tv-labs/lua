@@ -11,9 +11,12 @@ defmodule Lua.VM.Bootstrap do
 
   `fetch/2` builds a template on first use and stores it under `key`. Later
   calls return the stored term for the cost of one `:persistent_term.get/2`.
-  The key is written exactly once per node: a `put` on an existing key forces a
-  global scan of every process, so the stored term is never refreshed except by
-  the staleness path below.
+  There is no mutual exclusion: callers racing a cold start each build and
+  `put`, and every `put` over a live key forces a global scan of every
+  process. Builders are pure, so the racing puts all store equal terms — the
+  race costs redundant work on first use, never an inconsistent result — and
+  once warm the key is effectively write-once, refreshed only by the
+  staleness path below.
 
   ## Staleness
 
@@ -21,19 +24,35 @@ defmodule Lua.VM.Bootstrap do
   those modules twice and the old code is purged, turning every captured
   closure into a `badfun`. That only happens while iterating in a shell, so the
   guard is priced for it: at build time, in `:interactive` mode, every module
-  reachable through a captured fun is fingerprinted by its `module_info(:md5)`,
-  and a `fetch/2` hit re-checks those hashes before handing the term back. A
-  mismatch rebuilds. Under `:embedded` mode (releases) code never reloads, so no
-  fingerprint is taken and a hit is the bare `get`.
+  reachable through a captured fun — plus the template-shaping modules whose
+  struct layouts and defaults are baked into the term without leaving a
+  closure in it — is fingerprinted by its `module_info(:md5)`, and a `fetch/2`
+  hit re-checks those hashes before handing the term back. A mismatch (or a
+  fingerprinted module that can no longer be loaded) rebuilds.
+
+  Under `:embedded` mode (releases) code never reloads on its own, so no
+  fingerprint is taken and a hit is the bare `get`. A host that loads new
+  Lua-implementation code anyway — `:code.load_file/1`, a remote-console
+  recompile, a hot upgrade — must call `reset/0` afterwards, or `fetch/2`
+  keeps serving templates built against the replaced code.
   """
 
-  @typep fingerprint :: :static | [{module(), binary()}]
+  @typep fingerprint :: :static | [{module(), binary() | nil}]
+
+  # Modules whose code shapes a built template without necessarily leaving a
+  # captured closure inside it: struct layouts, table splitting, and default
+  # limits are baked into the stored term at build time, so reloading any of
+  # these must invalidate the template even though no fun in it points there.
+  @template_modules [__MODULE__, Lua, Lua.VM.Limits, Lua.VM.State, Lua.VM.Stdlib, Lua.VM.Table]
+
+  @registry {__MODULE__, :keys}
 
   @doc """
   Returns the memoized template for `key`, building it with `builder` on a miss.
 
-  `builder` must be pure: it is invoked once per node (plus once more after a
-  module reload in `:interactive` mode) and every caller shares the result.
+  `builder` must be pure: it is invoked on a cold start (possibly more than
+  once under concurrent first use, see the moduledoc) and again after a module
+  reload in `:interactive` mode; every caller shares the stored result.
   """
   @spec fetch(term(), (-> term())) :: term()
   def fetch(key, builder) when is_function(builder, 0) do
@@ -46,16 +65,55 @@ defmodule Lua.VM.Bootstrap do
     end
   end
 
+  @doc """
+  Erases every memoized template, so the next `fetch/2` of each key rebuilds.
+
+  Required after explicitly loading new Lua-implementation code in `:embedded`
+  mode (releases), where no staleness fingerprint exists — see the moduledoc.
+  Safe to call at any time in any mode; concurrent `fetch/2` callers simply
+  rebuild.
+  """
+  @spec reset() :: :ok
+  def reset do
+    Enum.each(:persistent_term.get(@registry, []), &:persistent_term.erase/1)
+    :persistent_term.erase(@registry)
+    :ok
+  end
+
   defp build_and_store(key, builder) do
     term = builder.()
     :persistent_term.put(key, {fingerprint(term), term})
+    register(key)
     term
+  end
+
+  # Tracks the stored keys so `reset/0` can erase them without knowing the
+  # callers. Best-effort under the same cold-start race as the templates
+  # themselves; builds are rare, so the extra put is negligible.
+  defp register(key) do
+    keys = :persistent_term.get(@registry, [])
+
+    if key not in keys do
+      :persistent_term.put(@registry, [key | keys])
+    end
+
+    :ok
   end
 
   defp current?(:static), do: true
 
   defp current?(fingerprint) do
-    Enum.all?(fingerprint, fn {module, md5} -> module.module_info(:md5) === md5 end)
+    Enum.all?(fingerprint, fn {module, md5} -> loaded_md5(module) === md5 end)
+  end
+
+  # A fingerprinted module that has since been deleted has no md5 to compare;
+  # returning nil makes the comparison fail, so the caller rebuilds instead of
+  # raising `UndefinedFunctionError` mid-fetch.
+  defp loaded_md5(module) do
+    case :code.ensure_loaded(module) do
+      {:module, ^module} -> module.module_info(:md5)
+      {:error, _reason} -> nil
+    end
   end
 
   @spec fingerprint(term()) :: fingerprint()
@@ -64,8 +122,9 @@ defmodule Lua.VM.Bootstrap do
       :interactive ->
         term
         |> fun_modules()
+        |> Enum.concat(@template_modules)
         |> Enum.uniq()
-        |> Enum.map(fn module -> {module, module.module_info(:md5)} end)
+        |> Enum.map(fn module -> {module, loaded_md5(module)} end)
 
       _embedded ->
         :static

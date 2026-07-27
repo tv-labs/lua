@@ -8,6 +8,7 @@ defmodule Lua.VM.BootstrapTest do
   use ExUnit.Case, async: true
 
   alias Lua.VM.Bootstrap
+  alias Lua.VM.Limits
   alias Lua.VM.State
 
   describe "Lua.new/1" do
@@ -85,7 +86,7 @@ defmodule Lua.VM.BootstrapTest do
 
       refute default.debug
       assert default.state.max_call_depth == :infinity
-      assert default.state.max_string_bytes == Lua.VM.Limits.max_string_bytes()
+      assert default.state.max_string_bytes == Limits.max_string_bytes()
       assert default.state.max_instructions == :infinity
     end
   end
@@ -183,6 +184,56 @@ defmodule Lua.VM.BootstrapTest do
 
       assert Bootstrap.fetch(key, fn -> :rebuilt end) == :rebuilt
       assert Bootstrap.fetch(key, fn -> :again end) == :rebuilt
+    end
+
+    test "a fingerprinted module that no longer exists rebuilds instead of raising", %{key: key} do
+      :persistent_term.put(key, {[{Lua.VM.NoSuchModule, <<"md5 of deleted code">>}], :stale})
+
+      assert Bootstrap.fetch(key, fn -> :rebuilt end) == :rebuilt
+      assert Bootstrap.fetch(key, fn -> :again end) == :rebuilt
+    end
+
+    test "the fingerprint covers template-shaping modules even without captured funs", %{key: key} do
+      # The stored term carries no closures at all, so every module below gets
+      # into the fingerprint only via the explicit template-module list: a
+      # struct-layout or default-limit change in any of them must invalidate
+      # the template even though no fun in it points there.
+      assert :code.get_mode() == :interactive
+
+      Bootstrap.fetch(key, fn -> %{value: :no_funs_here} end)
+
+      {fingerprint, _term} = :persistent_term.get(key)
+      modules = Enum.map(fingerprint, fn {module, _md5} -> module end)
+
+      for module <- [Lua, Bootstrap, Limits, State, Lua.VM.Stdlib, Lua.VM.Table] do
+        assert module in modules, "fingerprint is missing template-shaping module #{inspect(module)}"
+      end
+    end
+  end
+
+  describe "reset/0" do
+    setup do
+      key = {__MODULE__, System.unique_integer()}
+      on_exit(fn -> :persistent_term.erase(key) end)
+      %{key: key}
+    end
+
+    test "erases the stored template so the next fetch rebuilds", %{key: key} do
+      assert Bootstrap.fetch(key, fn -> :first end) == :first
+
+      assert Bootstrap.reset() == :ok
+      assert :persistent_term.get(key, nil) == nil
+
+      assert Bootstrap.fetch(key, fn -> :second end) == :second
+      assert Bootstrap.fetch(key, fn -> :third end) == :second
+    end
+
+    test "Lua.new/1 still works after a reset" do
+      _warm = Lua.new()
+
+      assert Bootstrap.reset() == :ok
+
+      assert {[2], _} = Lua.eval!(Lua.new(), "return 1 + 1")
     end
   end
 end

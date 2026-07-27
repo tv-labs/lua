@@ -42,6 +42,15 @@ defmodule Lua.VM.TableIterationTest do
 
   defp entries_gen, do: list_of(tuple({key_gen(), integer(1..1000)}), max_length: 40)
 
+  # Values for the map-based constructors (`from_data/1`, `replace_data/2`):
+  # unlike `entries_gen/0` these include `nil`, which means "absent" in Lua and
+  # forces the constructors off the all-string one-shot build (its nil bail-out
+  # guard) onto the put/3 fold with its delete branch.
+  defp data_entries_gen do
+    value_gen = frequency([{4, integer(1..1000)}, {1, constant(nil)}])
+    list_of(tuple({key_gen(), value_gen}), max_length: 40)
+  end
+
   # Builds the table and an independent key=>value oracle from the same ops
   # (last write wins on both sides; generated values are always non-nil).
   defp build_pair(ops) do
@@ -325,12 +334,47 @@ defmodule Lua.VM.TableIterationTest do
       # building `data` and `order` in one shot. That shortcut has to be
       # invisible: the resulting struct must be the one the fold produced,
       # field for field, so iteration order and border bookkeeping are
-      # unchanged.
-      check all(entries <- list_of(tuple({key_gen(), integer(1..1000)}), max_length: 40)) do
+      # unchanged. Generated values include nil, so maps carrying a
+      # nil-valued entry must bail out of the one-shot build and take the
+      # fold's delete branch, matching it exactly.
+      check all(entries <- data_entries_gen()) do
         data = Map.new(entries)
         folded = Enum.reduce(Enum.sort(data), %Table{}, fn {k, v}, acc -> Table.put(acc, k, v) end)
 
         assert Table.from_data(data) == folded
+      end
+    end
+
+    property "replace_data on a lived-in table equals replace_data on a fresh one" do
+      # replace_data/2 is the riskier split_from_map/2 caller: the struct it
+      # rebuilds arrives pre-populated with an array/hash split, dead keys,
+      # an order memo, and a metatable. Nothing from that history may leak
+      # into the rebuilt contents — only the metatable survives — so the
+      # result must be indistinguishable from replacing into a table that
+      # never held anything.
+      check all(ops <- entries_gen(), entries <- data_entries_gen()) do
+        {built, oracle} = build_pair(ops)
+
+        lived_in =
+          oracle
+          |> Map.keys()
+          |> Enum.take(div(map_size(oracle), 2))
+          |> Enum.reduce(built, fn k, acc -> Table.put(acc, k, nil) end)
+          |> Table.flush_order()
+          |> Map.put(:metatable, {:tref, 7})
+
+        data = Map.new(entries)
+        replaced = Table.replace_data(lived_in, data)
+
+        assert replaced == Table.replace_data(%Table{metatable: {:tref, 7}}, data)
+        assert replaced.metatable == {:tref, 7}
+        assert replaced.dead == %{}
+
+        # The walk sees exactly the non-nil entries of the new data map.
+        live = for {k, v} <- data, v != nil, into: %{}, do: {k, v}
+        walked = walk(Table.flush_order(replaced))
+
+        assert MapSet.new(walked) == MapSet.new(live)
       end
     end
 

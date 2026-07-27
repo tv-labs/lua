@@ -60,6 +60,7 @@ defmodule Lua.MixProject do
         # autolinking to filtered pages, which errors under
         # `--warnings-as-errors`.
         skip_code_autolink_to: [
+          "Lua.VM.Bootstrap.reset/0",
           "Lua.VM.Executor.current_position/0",
           "Lua.VM.ErrorFormatter.to_map/3",
           "Lua.VM.RuntimeError",
