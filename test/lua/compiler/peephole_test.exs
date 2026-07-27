@@ -392,7 +392,43 @@ defmodule Lua.Compiler.PeepholeTest do
     end
     return #t, t[1], t[16]
     """,
-    "print('one') print(2) print(nil, true) return 'printed'"
+    "print('one') print(2) print(nil, true) return 'printed'",
+    # The folded `_k` forms have to reach the metamethod bridge with the
+    # constant boxed, and the fused upvalue-field forms have to reach
+    # `__index` / `__newindex` on `_ENV`. These are the interactions the
+    # fusions could plausibly break.
+    """
+    local mt = {
+      __add = function(_, b) return 'ADD:' .. tostring(b) end,
+      __sub = function(_, b) return 'SUB:' .. tostring(b) end,
+      __mul = function(_, b) return 'MUL:' .. tostring(b) end
+    }
+    local t = setmetatable({}, mt)
+    function f(x) return x + 1, x - 2, x * 3 end
+    return f(t)
+    """,
+    """
+    local mt = {__lt = function() return 'LT' end, __le = function() return 'LE' end}
+    local t = setmetatable({}, mt)
+    function f(x) return (x < 1), (x <= 1) end
+    return f(t)
+    """,
+    "function f(x) return x - 1 end return f('10')",
+    "function f(x) return x + 1, x - 1 end return f(math.maxinteger)",
+    "function f(x) return x * 2, x + 0.5 end return f(1.5)",
+    "function f(x) return x == 1, x == 'a', x == nil end return f(1)",
+    """
+    setmetatable(_G, {__index = function(_, k) return 'G:' .. k end})
+    function f() return missing_global end
+    return f()
+    """,
+    """
+    local log = {}
+    setmetatable(_G, {__newindex = function(t, k, v) log[#log + 1] = k rawset(t, k, v) end})
+    function f() written = 7 end
+    f()
+    return written, log[#log]
+    """
   ]
 
   describe "differential: peephole off vs on" do
@@ -433,7 +469,12 @@ defmodule Lua.Compiler.PeepholeTest do
       "local x = 'str' return x - 1",
       "local h = math.huge return h .. {}",
       "for i = 1, 'x' do end",
-      "local function f(n) return n * 2 end return f({})"
+      "local function f(n) return n * 2 end return f({})",
+      # The folded forms must render the same operand hint as the register
+      # forms they replaced.
+      "local function f(n) return n - 1 end return f({})",
+      "local function f(n) return n + 1 end return f('abc')",
+      "local function f(n) if n < 1 then return 0 end return n end return f({})"
     ]
 
     for {source, index} <- Enum.with_index(@failing) do
