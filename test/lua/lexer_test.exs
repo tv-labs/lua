@@ -789,6 +789,18 @@ defmodule Lua.LexerTest do
       assert utf8_pos.byte_offset == ascii_pos.byte_offset + 1
     end
 
+    test "a multibyte character inside a single-line comment does not shift its start column" do
+      # The comment's start position must reflect where the `--` opener sits,
+      # not be skewed by multibyte codepoints scanned later in the body.
+      assert {:ok, [{:comment, :single, " é", pos} | _]} = Lexer.tokenize("-- é\nx")
+      assert pos == %{line: 1, column: 1, byte_offset: 0}
+
+      assert {:ok, tokens} = Lexer.tokenize("local y = 1 -- é\n")
+
+      assert {:comment, :single, " é", %{line: 1, column: 13, byte_offset: 12}} =
+               Enum.find(tokens, &match?({:comment, _, _, _}, &1))
+    end
+
     test "handles consecutive operators" do
       assert {:ok, tokens} = Lexer.tokenize("+-*/")
 
@@ -1033,6 +1045,52 @@ defmodule Lua.LexerTest do
       code = "{1, 2, x = 3, [\"key\"] = 4}"
       assert {:ok, tokens} = Lexer.tokenize(code)
       assert length(tokens) > 10
+    end
+  end
+
+  describe "token invariants" do
+    test "every token position has line >= 1 and column >= 1 across the Lua 5.3 suite files" do
+      fixtures = Path.wildcard(Path.join(__DIR__, "../lua53_tests/*.lua"))
+      assert fixtures != []
+
+      for file <- fixtures do
+        assert {:ok, tokens} = Lexer.tokenize(File.read!(file))
+
+        for token <- tokens do
+          pos = elem(token, tuple_size(token) - 1)
+
+          assert pos.line >= 1 and pos.column >= 1,
+                 "#{Path.basename(file)}: token #{inspect(token)} has an out-of-range position"
+        end
+      end
+    end
+
+    test "token text does not retain the source binary" do
+      # Sub-binaries over 64 bytes are references into the original binary;
+      # token text must be copied out so retained tokens don't keep a large
+      # source alive. Build a >4KB source with a >64-byte escape-free string
+      # literal and a >64-byte comment, and check each token's text is
+      # backed by exactly its own bytes.
+      long = String.duplicate("a", 100)
+      padding = String.duplicate("local x = 1\n", 400)
+      src = ~s(local s = "#{long}" -- #{long}\n) <> padding
+
+      assert byte_size(src) > 4096
+      assert {:ok, tokens} = Lexer.tokenize(src)
+
+      assert {:string, string_text, _} = Enum.find(tokens, &match?({:string, _, _}, &1))
+      assert byte_size(string_text) > 64
+      assert :binary.referenced_byte_size(string_text) == byte_size(string_text)
+
+      assert {:comment, :single, comment_text, _} =
+               Enum.find(tokens, &match?({:comment, :single, _, _}, &1))
+
+      assert byte_size(comment_text) > 64
+      assert :binary.referenced_byte_size(comment_text) == byte_size(comment_text)
+
+      for {:identifier, text, _} <- tokens do
+        assert :binary.referenced_byte_size(text) == byte_size(text)
+      end
     end
   end
 end

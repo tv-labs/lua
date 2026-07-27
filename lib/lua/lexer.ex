@@ -10,10 +10,12 @@ defmodule Lua.Lexer do
   error is emitted. `line_start` absorbs the continuation bytes of multibyte
   codepoints, so `column` counts codepoints while `byte_offset` counts bytes.
 
-  Token text is sliced out of the source binary with `binary_part/3`. String
-  escapes and long-string end-of-line normalization are the only places where
-  a token's text differs from its source bytes; those fall back to collecting
-  chunks of iodata around the rewritten spans.
+  Token text is sliced out of the source binary with `binary_part/3` and then
+  copied with `:binary.copy/1`, so a retained token never keeps the whole
+  source binary alive. String escapes and long-string end-of-line
+  normalization are the only places where a token's text differs from its
+  source bytes; those fall back to collecting chunks of iodata around the
+  rewritten spans.
   """
 
   import Bitwise
@@ -85,7 +87,9 @@ defmodule Lua.Lexer do
   defp utf8_width(_cp), do: 4
 
   # Assemble token text from the trailing raw span plus any earlier chunks.
-  defp chunked_text(src, start, offset, []), do: binary_part(src, start, offset - start)
+  # The single-slice path copies the sub-binary so a token doesn't keep the
+  # whole source binary alive; the chunked path copies via iodata already.
+  defp chunked_text(src, start, offset, []), do: :binary.copy(binary_part(src, start, offset - start))
 
   defp chunked_text(src, start, offset, chunks) do
     IO.iodata_to_binary(:lists.reverse([binary_part(src, start, offset - start) | chunks]))
@@ -142,12 +146,14 @@ defmodule Lua.Lexer do
 
       :error ->
         # Single-line comment starting with --[
-        scan_single_line_comment(rest, acc, src, line, line_start, offset + 3, offset + 3, offset)
+        start_pos = position(line, line_start, offset)
+        scan_single_line_comment(rest, acc, src, line, line_start, offset + 3, offset + 3, start_pos)
     end
   end
 
   defp do_tokenize(<<"--", rest::binary>>, acc, src, line, line_start, offset) do
-    scan_single_line_comment(rest, acc, src, line, line_start, offset + 2, offset + 2, offset)
+    start_pos = position(line, line_start, offset)
+    scan_single_line_comment(rest, acc, src, line, line_start, offset + 2, offset + 2, start_pos)
   end
 
   # Strings: double-quoted
@@ -284,7 +290,8 @@ defmodule Lua.Lexer do
     token =
       case keyword_atom(text) do
         {:ok, keyword} -> {:keyword, keyword, start_pos}
-        :error -> {:identifier, text, start_pos}
+        # Copy the slice so the identifier doesn't keep the source alive.
+        :error -> {:identifier, :binary.copy(text), start_pos}
       end
 
     do_tokenize(after_id, [token | acc], src, line, line_start, offset + len)
@@ -327,33 +334,35 @@ defmodule Lua.Lexer do
   defp single_delimiter(?:), do: :colon
 
   # Scan single-line comment: the text runs from `text_start` to the newline
-  # (or end of input) and is always a verbatim slice of the source.
-  defp scan_single_line_comment(<<?\n, rest::binary>>, acc, src, line, line_start, offset, text_start, token_start) do
-    token = single_comment(src, text_start, offset, position(line, line_start, token_start))
+  # (or end of input) and is always a verbatim slice of the source. The start
+  # position is built eagerly by the caller — multibyte codepoints in the body
+  # shift `line_start`, so it can't be reconstructed after scanning.
+  defp scan_single_line_comment(<<?\n, rest::binary>>, acc, src, line, _line_start, offset, text_start, start_pos) do
+    token = single_comment(src, text_start, offset, start_pos)
     do_tokenize(rest, [token | acc], src, line + 1, offset + 1, offset + 1)
   end
 
-  defp scan_single_line_comment(<<?\r, ?\n, rest::binary>>, acc, src, line, line_start, offset, text_start, token_start) do
-    token = single_comment(src, text_start, offset, position(line, line_start, token_start))
+  defp scan_single_line_comment(<<?\r, ?\n, rest::binary>>, acc, src, line, _line_start, offset, text_start, start_pos) do
+    token = single_comment(src, text_start, offset, start_pos)
     do_tokenize(rest, [token | acc], src, line + 1, offset + 2, offset + 2)
   end
 
-  defp scan_single_line_comment(<<?\r, rest::binary>>, acc, src, line, line_start, offset, text_start, token_start) do
-    token = single_comment(src, text_start, offset, position(line, line_start, token_start))
+  defp scan_single_line_comment(<<?\r, rest::binary>>, acc, src, line, _line_start, offset, text_start, start_pos) do
+    token = single_comment(src, text_start, offset, start_pos)
     do_tokenize(rest, [token | acc], src, line + 1, offset + 1, offset + 1)
   end
 
-  defp scan_single_line_comment(<<>>, acc, src, line, line_start, offset, text_start, token_start) do
-    token = single_comment(src, text_start, offset, position(line, line_start, token_start))
+  defp scan_single_line_comment(<<>>, acc, src, line, line_start, offset, text_start, start_pos) do
+    token = single_comment(src, text_start, offset, start_pos)
     {:ok, Enum.reverse([{:eof, position(line, line_start, offset)}, token | acc])}
   end
 
-  defp scan_single_line_comment(<<c, rest::binary>>, acc, src, line, line_start, offset, text_start, token_start)
+  defp scan_single_line_comment(<<c, rest::binary>>, acc, src, line, line_start, offset, text_start, start_pos)
        when c < 128 do
-    scan_single_line_comment(rest, acc, src, line, line_start, offset + 1, text_start, token_start)
+    scan_single_line_comment(rest, acc, src, line, line_start, offset + 1, text_start, start_pos)
   end
 
-  defp scan_single_line_comment(<<cp::utf8, rest::binary>>, acc, src, line, line_start, offset, text_start, token_start)
+  defp scan_single_line_comment(<<cp::utf8, rest::binary>>, acc, src, line, line_start, offset, text_start, start_pos)
        when cp > 127 do
     width = utf8_width(cp)
 
@@ -365,16 +374,16 @@ defmodule Lua.Lexer do
       line_start + width - 1,
       offset + width,
       text_start,
-      token_start
+      start_pos
     )
   end
 
-  defp scan_single_line_comment(<<_c, rest::binary>>, acc, src, line, line_start, offset, text_start, token_start) do
-    scan_single_line_comment(rest, acc, src, line, line_start, offset + 1, text_start, token_start)
+  defp scan_single_line_comment(<<_c, rest::binary>>, acc, src, line, line_start, offset, text_start, start_pos) do
+    scan_single_line_comment(rest, acc, src, line, line_start, offset + 1, text_start, start_pos)
   end
 
   defp single_comment(src, text_start, offset, start_pos) do
-    {:comment, :single, binary_part(src, text_start, offset - text_start), start_pos}
+    {:comment, :single, :binary.copy(binary_part(src, text_start, offset - text_start)), start_pos}
   end
 
   # Scan multi-line comment body. The opening bracket level was determined by
@@ -383,7 +392,7 @@ defmodule Lua.Lexer do
   defp scan_multiline_comment(<<"]", rest::binary>>, acc, src, line, line_start, offset, text_start, start_pos, level) do
     case try_close_long_bracket(rest, level, 0) do
       {:ok, after_bracket} ->
-        text = binary_part(src, text_start, offset - text_start)
+        text = :binary.copy(binary_part(src, text_start, offset - text_start))
         token = {:comment, :multi, text, start_pos}
         do_tokenize(after_bracket, [token | acc], src, line, line_start, offset + 2 + level)
 
@@ -482,18 +491,14 @@ defmodule Lua.Lexer do
     end
   end
 
-  # \ddd decimal escape: 1-3 decimal digits, value must fit in a byte
+  # \ddd decimal escape: 1-3 decimal digits. read_decimal_escape/3 stops
+  # before a digit would push the value past 255, so it always fits in a byte.
   defp scan_string(<<?\\, d1, rest::binary>>, acc, src, line, line_start, offset, chunk, chunks, start_pos, quote)
        when d1 in ?0..?9 do
     {value, digits, remaining} = read_decimal_escape(d1 - ?0, 1, rest)
-
-    if value > 255 do
-      {:error, {:invalid_escape, position(line, line_start, offset)}}
-    else
-      chunks = [<<value>> | flush_chunk(src, chunk, offset, chunks)]
-      offset = offset + 1 + digits
-      scan_string(remaining, acc, src, line, line_start, offset, offset, chunks, start_pos, quote)
-    end
+    chunks = [<<value>> | flush_chunk(src, chunk, offset, chunks)]
+    offset = offset + 1 + digits
+    scan_string(remaining, acc, src, line, line_start, offset, offset, chunks, start_pos, quote)
   end
 
   # \<newline> line continuation: a backslash before a real end-of-line yields a
