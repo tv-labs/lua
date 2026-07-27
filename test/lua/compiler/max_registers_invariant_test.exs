@@ -71,6 +71,7 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
       op == Bytecode.op_call_zero_1() -> :call_arity_1
       op == Bytecode.op_call_one_2() -> :call_arity_2
       op == Bytecode.op_call_zero_2() -> :call_arity_2
+      op == Bytecode.op_call_self() -> :call_self
       op == Bytecode.op_return_one() -> [1]
       op == Bytecode.op_return_zero() -> []
       # Table opcodes (B5b-v2).
@@ -200,6 +201,13 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
       :call_arity_2 ->
         :erlang.element(2, instr) + 2
 
+      :call_self ->
+        # {tag, base, arg_count, result_count, hint, line}: the fused
+        # callee is the running prototype, so no register holds it — the
+        # dispatcher reads the arguments at base+1..base+arg_count and
+        # writes the result back at base.
+        :erlang.element(2, instr) + :erlang.element(3, instr)
+
       :self ->
         # {tag, base, obj_reg, method, hint}: reads obj_reg, writes base
         # (method) and base+1 (receiver). The base+1 write is not a syntactic
@@ -265,6 +273,18 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
        if n < 2 then return n end
        return fib(n - 1) + fib(n - 2)
      end
+     """},
+    # A self-recursive `local function` is the shape the peephole pass
+    # fuses into `:call_self` (a global recursion like the entry above
+    # never fuses), so this is what puts that opcode in front of the
+    # walker.
+    {"self-recursive local function (:call_self)",
+     """
+     local function fib(n)
+       if n < 2 then return n end
+       return fib(n - 1) + fib(n - 2)
+     end
+     return fib(5)
      """},
     {"deep temp chain (string.upper)",
      """

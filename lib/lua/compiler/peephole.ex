@@ -153,10 +153,11 @@ defmodule Lua.Compiler.Peephole do
   def optimize(%Prototype{} = proto) do
     prototypes = Enum.map(proto.prototypes, &optimize/1)
     instructions = optimize_instructions(proto.instructions, prototypes)
+    prototypes = fuse_self_calls(instructions, prototypes)
 
     %{
       proto
-      | prototypes: fuse_self_calls(instructions, prototypes),
+      | prototypes: prototypes,
         instructions: instructions,
         max_registers: recompute_max_registers(proto, instructions, prototypes)
     }
@@ -415,6 +416,23 @@ defmodule Lua.Compiler.Peephole do
   defp callee_only_upvalue_block?([{:get_upvalue, dest, upvalue_index} | rest], prototypes, upvalue_index) do
     callee_only?(rest, dest, prototypes) and callee_only_upvalue_block?(rest, prototypes, upvalue_index)
   end
+
+  # A field access fused against the self index (`f.x` / `f.x = v`, fused
+  # by rule 3 before this analysis runs) indexes the value in the cell
+  # without ever staging it in a register, so the `:get_upvalue` clause
+  # above never sees it. The value is participating in something other
+  # than a call, which is exactly what the proof forbids.
+  defp callee_only_upvalue_block?(
+         [{:get_field_upvalue, _dest, upvalue_index, _name, _hint} | _rest],
+         _prototypes,
+         upvalue_index
+       ), do: false
+
+  defp callee_only_upvalue_block?(
+         [{:set_field_upvalue, upvalue_index, _name, _value, _hint} | _rest],
+         _prototypes,
+         upvalue_index
+       ), do: false
 
   defp callee_only_upvalue_block?([_instr | rest], prototypes, upvalue_index) do
     callee_only_upvalue_block?(rest, prototypes, upvalue_index)
@@ -1071,6 +1089,12 @@ defmodule Lua.Compiler.Peephole do
 
   # Unrecognised shape — including `:goto` / `:label`, which only reach here
   # via the register-extent scan. Assume it observes everything.
+  #
+  # `:call_self` also lands here *deliberately*: it is emitted by the last
+  # rewrite in the pipeline, so no scan needs a precise answer today, and
+  # the reads-everything default fails closed if one ever sees it. Any
+  # reordering that runs another rewrite over fused instructions must give
+  # it a real clause rather than quietly ride on this catch-all.
   defp reads?(_instr, _reg, _protos), do: true
 
   defp captures?(prototypes, index, reg) do

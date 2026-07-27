@@ -472,6 +472,17 @@ defmodule Lua.Compiler.PeepholeTest do
          "local function rebind() f = function() return 99 end end local a = f(2) rebind() return a, f(2)"},
       {"a closure captures the name without reassigning it",
        "local function f(n) if n == 0 then return 0 end return f(n-1) end local function call() return f(2) end return call()"},
+      {"a closure declared inside the body captures the self-upvalue",
+       "local function f(n) local function g() return f end if n == 0 then return g end return f(n-1) end return type(f(3))"},
+      # Field accesses through the name fuse into `get_field_upvalue` /
+      # `set_field_upvalue` before the self-call analysis runs, so they
+      # index the closure straight out of its cell with no `get_upvalue`
+      # left to see — the analysis has to recognise the fused shapes on
+      # the self index as the value escaping a callee-only life.
+      {"a field read through the name",
+       "local function f(n) if n == 99 then return f.x end if n == 0 then return 0 end return f(n-1) end return f(3)"},
+      {"a field write through the name",
+       "local function f(n) if n == 99 then f.x = 1 return 0 end if n == 0 then return 0 end return f(n-1) end return f(3)"},
       {"the function is passed as a value",
        "local function f(n) if n == 0 then return 0 end return f(n-1) end local function apply(g) return g(2) end return apply(f)"},
       {"the function is handed to pcall",
