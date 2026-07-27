@@ -235,8 +235,7 @@ defmodule Lua.VM.Value do
   def encode(value, state, _fun_wrapper) when is_binary(value), do: {value, state}
   def encode(value, state, _fun_wrapper) when is_atom(value), do: {Atom.to_string(value), state}
 
-  def encode(fun, state, fun_wrapper) when is_function(fun, 1) or is_function(fun, 2),
-    do: {fun_wrapper.(fun), state}
+  def encode(fun, state, fun_wrapper) when is_function(fun, 1) or is_function(fun, 2), do: {fun_wrapper.(fun), state}
 
   def encode({:userdata, value}, state, _fun_wrapper) do
     State.alloc_userdata(state, value)
@@ -333,7 +332,7 @@ defmodule Lua.VM.Value do
   normally.
   """
   @spec decode(term(), State.t()) :: term()
-  def decode(value, state), do: decode(value, state, MapSet.new())
+  def decode(value, state), do: decode(value, state, %{})
 
   defp decode(nil, _state, _ancestors), do: nil
   defp decode(value, _state, _ancestors) when is_boolean(value), do: value
@@ -346,11 +345,11 @@ defmodule Lua.VM.Value do
   end
 
   defp decode({:tref, id} = ref, state, ancestors) do
-    if MapSet.member?(ancestors, id) do
+    if Map.has_key?(ancestors, id) do
       ref
     else
       table = Map.fetch!(state.tables, id)
-      ancestors = MapSet.put(ancestors, id)
+      ancestors = Map.put(ancestors, id, true)
 
       Enum.map(Lua.VM.Table.to_map(table), fn {k, v} -> {k, decode(v, state, ancestors)} end)
     end

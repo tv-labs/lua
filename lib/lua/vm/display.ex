@@ -93,7 +93,7 @@ defmodule Lua.VM.Display do
   see `Lua.VM.Display.Table`.
   """
   @spec wrap_value(term(), State.t(), boolean()) :: term()
-  def wrap_value(value, state, decode?), do: wrap_value(value, state, decode?, MapSet.new())
+  def wrap_value(value, state, decode?), do: wrap_value(value, state, decode?, %{})
 
   # decode: true — only wrap closures/native; tables and userdata
   # have already been decoded and are passed through unchanged.
@@ -114,10 +114,10 @@ defmodule Lua.VM.Display do
   # this walk; revisiting one means the table contains itself.
   defp wrap_value({:tref, id} = ref, state, false, ancestors) do
     peek =
-      if MapSet.member?(ancestors, id) do
+      if Map.has_key?(ancestors, id) do
         :circular
       else
-        peek_table(state, id, false, MapSet.put(ancestors, id))
+        peek_table(state, id, false, Map.put(ancestors, id, true))
       end
 
     %DTable{id: id, peek: peek, ref: ref}
@@ -133,8 +133,7 @@ defmodule Lua.VM.Display do
 
   # ---- internal helpers ----
 
-  defp wrap_closure({tag, proto, _upvalues} = ref)
-       when tag in [:lua_closure, :compiled_closure] do
+  defp wrap_closure({tag, proto, _upvalues} = ref) when tag in [:lua_closure, :compiled_closure] do
     {first_line, _last_line} = proto.lines || {0, 0}
 
     %Closure{
