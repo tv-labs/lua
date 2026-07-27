@@ -12,6 +12,7 @@ defmodule Lua.Compiler.PeepholeTest do
   """
 
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   import ExUnit.CaptureIO
 
@@ -131,6 +132,105 @@ defmodule Lua.Compiler.PeepholeTest do
 
       assert {[7, 1], _} =
                Lua.eval!(source <> " return f({a = 7}, false), f({a = 7}, true)")
+    end
+  end
+
+  describe "move elision across loop exits" do
+    # A local written unconditionally inside a loop body and read only
+    # after the loop. The back edge overwrites it every iteration, but the
+    # exit path reads the final iteration's value — the write to the local
+    # must survive. The call argument copy is the bait: with an unsound
+    # scan, a second elision retargets the producer back at the temporary
+    # and the local is never written at all.
+    @live_out_cases [
+      {"numeric for with call argument",
+       """
+       local function id(x) return x end
+       local c = 0
+       for i = 1, 2 do
+         c = i
+         local y = id(c)
+       end
+       return c
+       """, [2]},
+      {"numeric for with arithmetic producer",
+       """
+       local function id(x) return x end
+       local c = 0
+       for i = 1, 2 do
+         c = i + 1
+         local y = id(c)
+       end
+       return c
+       """, [3]},
+      {"while loop",
+       """
+       local function id(x) return x end
+       local c = 0
+       local i = 0
+       while i < 2 do
+         i = i + 1
+         c = i
+         local y = id(c)
+       end
+       return c
+       """, [2]},
+      {"repeat loop",
+       """
+       local function id(x) return x end
+       local c = 0
+       local i = 0
+       repeat
+         i = i + 1
+         c = i
+         local y = id(c)
+       until i >= 2
+       return c
+       """, [2]},
+      {"generic for",
+       """
+       local function id(x) return x end
+       local c = 0
+       for _, v in ipairs({1, 2}) do
+         c = v
+         local y = id(c)
+       end
+       return c
+       """, [2]},
+      {"method call argument",
+       """
+       local o = {}
+       function o:m(x) return x end
+       local c = 0
+       for i = 1, 2 do
+         c = i
+         local y = o:m(c)
+       end
+       return c
+       """, [2]},
+      {"inside a nested function",
+       """
+       local function id(x) return x end
+       local function run()
+         local c = 0
+         for i = 1, 2 do
+           c = i
+           local y = id(c)
+         end
+         return c
+       end
+       return run()
+       """, [2]}
+    ]
+
+    for {name, source, expected} <- @live_out_cases do
+      test "#{name}: the loop-exit read keeps the write alive" do
+        source = unquote(source)
+        expected = unquote(Macro.escape(expected))
+
+        assert {{:ok, ^expected}, ""} = run(source, peephole: false)
+        assert {{:ok, ^expected}, ""} = run(source, peephole: true)
+      end
     end
   end
 
@@ -485,6 +585,91 @@ defmodule Lua.Compiler.PeepholeTest do
         {{:error, on}, _} = run(source, peephole: true)
 
         assert off == on
+      end
+    end
+  end
+
+  # ── Randomized differential ─────────────────────────────────────────────
+  #
+  # Small integer programs over three locals: unconditional writes inside
+  # loop bodies, call-argument copies through helper functions, and reads
+  # after the loop — exactly the shapes move elision and constant folding
+  # rewrite, arranged by a generator instead of by hand.
+
+  @program_vars ~w(a b c)
+
+  defp gen_leaf(vars) do
+    one_of([
+      member_of(vars),
+      map(integer(-9..9), &Integer.to_string/1)
+    ])
+  end
+
+  defp gen_expr(vars) do
+    leaf = gen_leaf(vars)
+
+    one_of([
+      leaf,
+      map({leaf, member_of(["+", "-"]), leaf}, fn {a, op, b} -> "(#{a} #{op} #{b})" end),
+      # Multiplication only by a literal keeps repeated self-multiplication
+      # from wandering into slow huge-integer territory.
+      map({leaf, integer(-9..9)}, fn {a, k} -> "(#{a} * #{k})" end),
+      map(leaf, fn a -> "id(#{a})" end),
+      map({leaf, leaf}, fn {a, b} -> "add2(#{a}, #{b})" end)
+    ])
+  end
+
+  defp gen_statement(loop_vars) do
+    expr = gen_expr(@program_vars ++ loop_vars)
+
+    one_of([
+      map({member_of(@program_vars), expr}, fn {v, e} -> "#{v} = #{e}" end),
+      map(expr, fn e -> "local t = #{e}" end)
+    ])
+  end
+
+  defp gen_body(loop_vars) do
+    map(list_of(gen_statement(loop_vars), min_length: 1, max_length: 4), &Enum.join(&1, "\n"))
+  end
+
+  defp gen_loop do
+    one_of([
+      map({integer(1..3), gen_body(["i"])}, fn {limit, body} ->
+        "for i = 1, #{limit} do\n#{body}\nend"
+      end),
+      map({integer(1..3), gen_body(["n"])}, fn {limit, body} ->
+        "local n = 0\nwhile n < #{limit} do\nn = n + 1\n#{body}\nend"
+      end),
+      map({integer(1..3), gen_body(["n"])}, fn {limit, body} ->
+        "local n = 0\nrepeat\nn = n + 1\n#{body}\nuntil n >= #{limit}"
+      end),
+      map(gen_body(["v"]), fn body ->
+        "for _, v in ipairs({1, 2, 3}) do\n#{body}\nend"
+      end)
+    ])
+  end
+
+  defp gen_program do
+    inits = list_of(integer(-9..9), length: 3)
+    loops = list_of(gen_loop(), min_length: 1, max_length: 2)
+
+    map({inits, loops}, fn {[a, b, c], loops} ->
+      """
+      local function id(x) return x end
+      local function add2(x, y) return x + y end
+      local a = #{a}
+      local b = #{b}
+      local c = #{c}
+      #{Enum.join(loops, "\n")}
+      return a, b, c, a + b + c
+      """
+    end)
+  end
+
+  describe "differential: randomized loop programs" do
+    property "every generated program evaluates identically with the pass off and on" do
+      check all(source <- gen_program(), max_runs: 300) do
+        assert run(source, peephole: false) == run(source, peephole: true)
       end
     end
   end

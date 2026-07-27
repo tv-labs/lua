@@ -36,10 +36,13 @@ defmodule Lua.Compiler.Peephole do
   Every rewrite is gated on the rewritten temporary being *dead* — never
   read again on any path that can follow. Liveness is answered by scanning
   the instructions that may execute after the rewrite site: the rest of the
-  enclosing block, then the rest of each enclosing block outward, plus the
-  enclosing loop instruction itself (which covers the back edge). Registers
-  read through an upvalue cell count: `:closure` reads every parent register
-  its child prototype captures, and the open-upvalue opcodes read theirs
+  enclosing block, then the rest of each enclosing block outward. Inside a
+  loop body two continuations follow the rewrite site — one more trip
+  around the loop, and the loop exiting into the code after it — and the
+  register must be dead along both: a write on the back edge settles only
+  the back-edge path, never the exit path. Registers read through an
+  upvalue cell count: `:closure` reads every parent register its child
+  prototype captures, and the open-upvalue opcodes read theirs
   syntactically.
 
   `reads?/3` defaults to "reads everything" for an instruction shape it does
@@ -240,9 +243,12 @@ defmodule Lua.Compiler.Peephole do
   # fixpoint loop.
   #
   # `future` is the list of instruction lists that may execute after the
-  # current position, innermost first. Every rewrite only ever removes reads,
-  # so scanning a not-yet-optimised tail is conservative in the safe
-  # direction.
+  # current position, innermost first. Scanning a not-yet-optimised tail is
+  # conservative: no rewrite ever adds a read, and while move elision does
+  # delete a write (the copy), the retargeted producer re-establishes that
+  # write earlier across instructions transparent to it — a kill the scan
+  # relied on only ever moves earlier, and the temporary whose own write
+  # disappears was already proven unread on every following path.
 
   defp fuse_block([], _future, _prototypes), do: []
 
@@ -286,31 +292,45 @@ defmodule Lua.Compiler.Peephole do
   #
   # A branch body simply continues into whatever follows the branch. A loop
   # body continues into one more trip around the loop first, spelled out
-  # instruction by instruction so the scan can find a kill on the back edge
-  # — a temporary rewritten at the top of every iteration is dead at the
-  # bottom of the previous one, which is most of them. The loop instruction
-  # with its bodies emptied stands in for the header's own register reads
-  # (the `for` control triple, the `while` test register).
+  # instruction by instruction so the scan can find a read on the back edge.
+  # The loop instruction with its bodies emptied stands in for the header's
+  # own register reads (the `for` control triple, the `while` test
+  # register).
+  #
+  # The trip is tagged `:back_edge` because it is only one of two
+  # continuations: the loop may equally exit into `future` without running
+  # it. `dead?/3` therefore treats a kill inside the trip as settling the
+  # back-edge path only, and still requires the register to be dead along
+  # the exit path — a write at the top of every iteration must not license
+  # deleting a write that the code after the loop reads.
   defp body_futures({:test, _reg, _then_body, _else_body}, future), do: [future, future]
   defp body_futures({:test_and, _dest, _source, _body}, future), do: [future]
   defp body_futures({:test_or, _dest, _source, _body}, future), do: [future]
 
   defp body_futures({:while_loop, cond_body, _reg, body} = instr, future) do
     header = [put_bodies(instr, [[], []])]
-    [[header ++ body ++ cond_body | future], [cond_body ++ header ++ body | future]]
+
+    [
+      [{:back_edge, header ++ body ++ cond_body} | future],
+      [{:back_edge, cond_body ++ header ++ body} | future]
+    ]
   end
 
   defp body_futures({:repeat_loop, body, cond_body, _reg} = instr, future) do
     header = [put_bodies(instr, [[], []])]
-    [[cond_body ++ header ++ body | future], [header ++ body ++ cond_body | future]]
+
+    [
+      [{:back_edge, cond_body ++ header ++ body} | future],
+      [{:back_edge, header ++ body ++ cond_body} | future]
+    ]
   end
 
   defp body_futures({:numeric_for, _base, _loop_var, body} = instr, future) do
-    [[[put_bodies(instr, [[]])] ++ body | future]]
+    [[{:back_edge, [put_bodies(instr, [[]])] ++ body} | future]]
   end
 
   defp body_futures({:generic_for, _base, _var_regs, body} = instr, future) do
-    [[[put_bodies(instr, [[]])] ++ body | future]]
+    [[{:back_edge, [put_bodies(instr, [[]])] ++ body} | future]]
   end
 
   # Rule 3: `_ENV` (or any upvalue) field access. `t` holding the table is a
@@ -504,12 +524,26 @@ defmodule Lua.Compiler.Peephole do
   # the outermost list means the frame is gone, which is the strongest form
   # of dead.
   #
+  # A `{:back_edge, instructions}` entry is one more trip around an
+  # enclosing loop, and the loop may exit instead of taking it. A read
+  # inside the trip still settles the question, but a kill inside it only
+  # settles the back-edge path — the exit continuation (the lists after it)
+  # is scanned as well, so a register the code after the loop reads stays
+  # live no matter what the next iteration would do to it.
+  #
   # Conditional writes (a write nested inside a branch or loop body) do not
   # kill: the scan just keeps going, which can only under-report deadness.
   # A `break` reached before the killing write does suppress it, though —
   # the value would survive the block on that path and reach code the outer
   # lists cover.
   defp dead?(_reg, [], _prototypes), do: true
+
+  defp dead?(reg, [{:back_edge, instructions} | outer], prototypes) do
+    case scan(instructions, reg, prototypes, false) do
+      :read -> false
+      _killed_or_through -> dead?(reg, outer, prototypes)
+    end
+  end
 
   defp dead?(reg, [instructions | outer], prototypes) do
     case scan(instructions, reg, prototypes, false) do
