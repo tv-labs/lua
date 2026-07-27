@@ -2083,9 +2083,55 @@ defmodule Lua.VM.Dispatcher do
     # Exact-sized like `init_regs/2`; runs on every compiled-closure call,
     # so sizing to the callee's honest register peak (no slack) is what keeps
     # deep recursion off a per-frame over-allocation (issue #324).
-    regs = Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count))
-    copy_n = min(arg_count, callee_proto.param_count)
-    copy_regs(src_regs, src_off, regs, 0, copy_n)
+    param_count = callee_proto.param_count
+
+    mkregs(
+      max(callee_proto.max_registers, param_count),
+      min(arg_count, param_count),
+      src_regs,
+      src_off
+    )
+  end
+
+  # ── Callee register files ───────────────────────────────────────────────
+  #
+  # Building the callee's register tuple as `Tuple.duplicate/2` plus one
+  # `setelement` per argument allocates it `1 + copied` times over: every
+  # `setelement` copies the whole tuple. The generated clauses below build
+  # the finished tuple in a single literal construction for the small
+  # (size, parameter-count) shapes ordinary Lua functions have. A
+  # parameterless shape allocates nothing at all — an all-`nil` tuple is a
+  # compile-time literal.
+  #
+  # `size` is the callee's register-file width, `params` the number of
+  # arguments actually landing in parameter slots (already clamped to the
+  # callee's `param_count` by the caller), `src`/`off` the caller's register
+  # tuple and the 0-based index of the first argument in it. Shapes past the
+  # generated bounds fall back to duplicate-and-copy; vararg overflow is
+  # separate machinery (`setup_vararg_proto/4`) and unaffected, as is the
+  # `grow_regs/2` growth contract for multi-return and vararg writes.
+  @mkregs_max_size 16
+  @mkregs_max_params 6
+
+  for size <- 1..@mkregs_max_size, params <- 0..min(size, @mkregs_max_params) do
+    src = Macro.var(:src, __MODULE__)
+    off = Macro.var(:off, __MODULE__)
+
+    slots =
+      Enum.map(1..params//1, fn i ->
+        quote(do: :erlang.element(unquote(i) + unquote(off), unquote(src)))
+      end) ++ List.duplicate(nil, size - params)
+
+    head_src = if params == 0, do: quote(do: _src), else: src
+    head_off = if params == 0, do: quote(do: _off), else: off
+
+    defp mkregs(unquote(size), unquote(params), unquote(head_src), unquote(head_off)) do
+      unquote({:{}, [], slots})
+    end
+  end
+
+  defp mkregs(size, params, src, off) do
+    copy_regs(src, off, Tuple.duplicate(nil, size), 0, params)
   end
 
   defp copy_regs(_src, _src_i, dst, _dst_i, 0), do: dst
