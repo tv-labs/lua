@@ -123,6 +123,14 @@ defmodule Lua.Compiler.Instruction do
   def closure(dest, proto_index), do: {:closure, dest, proto_index}
   def call(base, arg_count, result_count, name_hint \\ nil), do: {:call, base, arg_count, result_count, name_hint}
 
+  # A call whose callee is the prototype making it, reached through the
+  # `local function` self-reference upvalue. Operands mirror `call/4` minus
+  # the closure: the engines already hold the prototype and its upvalues, so
+  # `base` is only the argument base and the result destination.
+  # `Lua.Compiler.Peephole` emits these; codegen never does.
+  def call_self(base, arg_count, result_count, name_hint \\ nil),
+    do: {:call_self, base, arg_count, result_count, name_hint}
+
   def tail_call(base, arg_count, name_hint \\ nil), do: {:tail_call, base, arg_count, name_hint}
   def return_instr(base, count), do: {:return, base, count}
   def return_vararg, do: {:return_vararg}

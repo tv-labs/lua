@@ -139,6 +139,12 @@ defmodule Lua.Compiler.Bytecode do
   @op_call_zero_1 74
   @op_call_zero_2 75
 
+  # Self-recursive call: the callee is the prototype making the call, so the
+  # opcode carries no closure and the dispatcher recurses with the code,
+  # prototype, and upvalues it is already holding.
+  # `Lua.Compiler.Peephole` emits the instruction; codegen never does.
+  @op_call_self 76
+
   # The call opcodes whose tuple is `{tag, base, name_hint}` before
   # `annotate_line/2` bakes the source line in.
   @static_arity_calls [
@@ -237,6 +243,9 @@ defmodule Lua.Compiler.Bytecode do
 
   defp annotate_line({@op_call_multi, base, args, results, hint}, line),
     do: {@op_call_multi, base, args, results, hint, line}
+
+  defp annotate_line({@op_call_self, base, args, results, hint}, line),
+    do: {@op_call_self, base, args, results, hint, line}
 
   defp annotate_line({@op_generic_for, base, var_regs, body}, line), do: {@op_generic_for, base, var_regs, body, line}
 
@@ -412,6 +421,14 @@ defmodule Lua.Compiler.Bytecode do
 
   defp encode({:call, base, arg_count, result_count, name_hint}) do
     {:ok, {@op_call_multi, base, arg_count, result_count, name_hint}}
+  end
+
+  # `:call_self` keeps one shape across every result count — the handler
+  # derives the frame's result destination the same way `@op_call_multi`
+  # does. Only the statically known argument counts the peephole fuses
+  # reach here; anything else would have kept its `:call`.
+  defp encode({:call_self, base, arg_count, result_count, name_hint}) when is_integer(arg_count) and arg_count >= 0 do
+    {:ok, {@op_call_self, base, arg_count, result_count, name_hint}}
   end
 
   # `:return` shapes:
@@ -727,4 +744,5 @@ defmodule Lua.Compiler.Bytecode do
   def op_call_zero_0, do: @op_call_zero_0
   def op_call_zero_1, do: @op_call_zero_1
   def op_call_zero_2, do: @op_call_zero_2
+  def op_call_self, do: @op_call_self
 end

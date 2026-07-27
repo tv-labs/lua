@@ -149,6 +149,10 @@ defmodule Lua.VM.Dispatcher do
   @op_call_zero_1 74
   @op_call_zero_2 75
 
+  # Self-recursive call. The callee is the prototype currently running, so
+  # the loop already holds everything the call needs.
+  @op_call_self 76
+
   @doc """
   Execute a compiled prototype against `args` and `state`.
   """
@@ -1334,6 +1338,61 @@ defmodule Lua.VM.Dispatcher do
               ou
             )
         end
+
+      # ── Self-recursive calls ────────────────────────────────────────
+      #
+      # The callee is the prototype this loop is already running, reached
+      # through the `local function` self-reference the compiler proved
+      # can never be rebound (`Lua.Compiler.Peephole`). There is no closure
+      # value to read and no upvalue cell to resolve: the frame keeps the
+      # caller's state, and the loop re-enters `proto.bytecode` with the
+      # same `upvalues` and a fresh register file.
+      #
+      # Everything else about the call is a generic call: a frame is
+      # pushed so tracebacks and `debug.getinfo` see the same stack, the
+      # instruction budget ticks, the depth check runs at the same point
+      # with the same depth, and the callee starts with an empty
+      # open-upvalue map while the caller's rides in the frame.
+
+      # `line` is carried for shape parity with the other call opcodes and
+      # for tooling that reads the encoded stream; the handler never needs
+      # it, because a self-call can never reach the native bridge that
+      # attributes errors to a source line, and the frame's own line slot
+      # is `0` for every dispatcher-side call.
+      {@op_call_self, base, arg_count, result_count, name_hint, _line} ->
+        callee_regs = init_callee_regs(proto, regs, base + 1, arg_count)
+
+        callee_proto =
+          if proto.is_vararg,
+            do: setup_vararg_proto(proto, regs, base + 1, arg_count),
+            else: proto
+
+        dest =
+          case result_count do
+            0 -> :discard
+            1 -> base
+            _ -> {:multi, base, result_count}
+          end
+
+        frame = {code, pc + 1, regs, upvalues, proto, cont, dest, ou}
+        call_info = {proto.source, 0, name_hint}
+        instruction_count = tick(state, instruction_count, cs, cd)
+        ckdepth(state, cs, cd)
+
+        dispatch(
+          callee_proto.bytecode,
+          1,
+          callee_regs,
+          upvalues,
+          callee_proto,
+          state,
+          [],
+          [frame | frames],
+          instruction_count,
+          [call_info | cs],
+          cd + 1,
+          %{}
+        )
 
       # ── Returns ─────────────────────────────────────────────────────
       #

@@ -1325,6 +1325,42 @@ defmodule Lua.VM.Executor do
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
 
+  # ── call_self — a call whose callee is the running prototype ───────────────
+  #
+  # `Lua.Compiler.Peephole` emits this for a `local function` it has proved
+  # is permanently bound to itself, dropping the `get_upvalue` that used to
+  # load the closure into the callee register. The dispatcher recurses
+  # without materialising a closure at all; the interpreter has no such
+  # short cut to take, so it reconstructs the value the upvalue cell holds —
+  # this prototype closed over these upvalues — and runs an ordinary call.
+  # Identical work, identical results, identical errors.
+  defp do_execute(
+         [{:call_self, base, arg_count, result_count, name_hint} | rest],
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         line,
+         instruction_count
+       ) do
+    tag = if proto.bytecode, do: :compiled_closure, else: :lua_closure
+    regs = put_elem(regs, base, {tag, proto, upvalues})
+
+    do_execute(
+      [{:call, base, arg_count, result_count, name_hint} | rest],
+      regs,
+      upvalues,
+      proto,
+      state,
+      cont,
+      frames,
+      line,
+      instruction_count
+    )
+  end
+
   # ── call — Lua closures via CPS frames; native functions inline ────────────
 
   defp do_execute(
