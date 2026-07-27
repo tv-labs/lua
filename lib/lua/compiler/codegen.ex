@@ -450,7 +450,7 @@ defmodule Lua.Compiler.Codegen do
 
   defp gen_statement(%Statement.Local{names: names, values: values} = local_stmt, ctx) do
     # Get per-statement register assignments from var_map
-    reg_list = Map.get(ctx.scope.var_map, local_stmt, [])
+    reg_list = Map.get(ctx.scope.var_map, Scope.node_key(local_stmt), [])
     num_names = length(names)
     num_values = length(values)
 
@@ -604,7 +604,7 @@ defmodule Lua.Compiler.Codegen do
     # captured during scope resolution so consecutive `for` loops with the
     # same variable name use distinct registers (issue #146).
     loop_var_reg =
-      Map.get(ctx.scope.var_map, {:for_num_var_reg, for_stmt}, ctx.scope.locals[var])
+      Map.get(ctx.scope.var_map, {:for_num_var_reg, Scope.node_key(for_stmt)}, ctx.scope.locals[var])
 
     # Allocate 3 internal registers for: counter, limit, step
     base = ctx.next_reg
@@ -654,7 +654,11 @@ defmodule Lua.Compiler.Codegen do
     # bindings captured during scope resolution so consecutive `for` loops
     # with the same variable names use distinct registers (issue #146).
     var_regs =
-      Map.get(ctx.scope.var_map, {:for_in_var_regs, for_stmt}, Enum.map(vars, fn name -> ctx.scope.locals[name] end))
+      Map.get(
+        ctx.scope.var_map,
+        {:for_in_var_regs, Scope.node_key(for_stmt)},
+        Enum.map(vars, fn name -> ctx.scope.locals[name] end)
+      )
 
     # Allocate 3 internal registers for: iterator function, invariant state, control variable
     base = ctx.next_reg
@@ -757,7 +761,7 @@ defmodule Lua.Compiler.Codegen do
         # Per Lua 5.3: `function name(...) end` is sugar for `name = function(...) end`.
         # Use the var_map entry resolved by scope analysis.
         {store_instructions, ctx} =
-          case Map.get(ctx.scope.var_map, {:func_decl_target, decl}) do
+          case Map.get(ctx.scope.var_map, {:func_decl_target, Scope.node_key(decl)}) do
             {:register, local_reg} ->
               instrs = if local_reg == closure_reg, do: [], else: [Instruction.move(local_reg, closure_reg)]
               {instrs, ctx}
@@ -773,7 +777,7 @@ defmodule Lua.Compiler.Codegen do
 
             nil ->
               # Should never happen after scope analysis (single-name FuncDecl
-              # always populates {:func_decl_target, decl}).
+              # always populates the `{:func_decl_target, _}` entry).
               raise "codegen: missing var_map entry for FuncDecl target #{inspect(name)}"
           end
 
@@ -804,7 +808,7 @@ defmodule Lua.Compiler.Codegen do
     {closure_instructions, closure_reg, ctx} = gen_closure_from_node(local_func, ctx)
 
     # Get the local variable's register from var_map (per-statement, handles redefinitions)
-    dest_reg = Map.get(ctx.scope.var_map, {:local_func_reg, local_func}, ctx.scope.locals[name])
+    dest_reg = Map.get(ctx.scope.var_map, {:local_func_reg, Scope.node_key(local_func)}, ctx.scope.locals[name])
 
     # Move closure to the local's register
     move_instructions =
@@ -841,7 +845,7 @@ defmodule Lua.Compiler.Codegen do
     # at block entry; emitting unconditionally is cheap — the executor's
     # close helper short-circuits when `open_upvalues` is empty, which is the
     # overwhelming common case.
-    threshold = Map.fetch!(ctx.scope.var_map, {:do_close_threshold, do_stmt})
+    threshold = Map.fetch!(ctx.scope.var_map, {:do_close_threshold, Scope.node_key(do_stmt)})
     {body_instructions ++ [Instruction.close_upvalues(threshold)], ctx}
   end
 
@@ -857,7 +861,7 @@ defmodule Lua.Compiler.Codegen do
   # its own block or an enclosing one, never a nested or sibling block
   # (Lua 5.3 §3.3.4).
   defp gen_statement(%Statement.Goto{label: label} = goto, ctx) do
-    block_path = Map.fetch!(ctx.scope.var_map, {:goto_block, goto})
+    block_path = Map.fetch!(ctx.scope.var_map, {:goto_block, Scope.node_key(goto)})
     {[{:goto, label, block_path}], ctx}
   end
 
@@ -870,8 +874,8 @@ defmodule Lua.Compiler.Codegen do
   # declared deeper in the block being re-entered or exited). See
   # `Lua.Compiler.GotoResolution`.
   defp gen_statement(%Statement.Label{name: name} = label, ctx) do
-    level = Map.fetch!(ctx.scope.var_map, {:label_level, label})
-    block_path = Map.fetch!(ctx.scope.var_map, {:label_block, label})
+    level = Map.fetch!(ctx.scope.var_map, {:label_level, Scope.node_key(label)})
+    block_path = Map.fetch!(ctx.scope.var_map, {:label_block, Scope.node_key(label)})
     {[{:label, name, level, block_path}], ctx}
   end
 
@@ -887,11 +891,11 @@ defmodule Lua.Compiler.Codegen do
   # the executor's close helper short-circuits when `open_upvalues` is empty.
   #
   # If/elseif/else branches, while/repeat bodies, and for bodies all key on
-  # the block AST node. Loop bodies re-run this close on every iteration
+  # the block's node id. Loop bodies re-run this close on every iteration
   # boundary and on loop exit; cells therefore persist within an iteration
   # and close only at its tail, which is exactly the §3.4.10 contract.
   defp append_block_close(instructions, block, ctx) do
-    case Map.fetch(ctx.scope.var_map, {:block_close_threshold, block}) do
+    case Map.fetch(ctx.scope.var_map, {:block_close_threshold, Scope.node_key(block)}) do
       {:ok, threshold} -> instructions ++ [Instruction.close_upvalues(threshold)]
       :error -> instructions
     end
@@ -903,7 +907,7 @@ defmodule Lua.Compiler.Codegen do
   # `%Expr.Var{}` — local register, captured-local cell, parent upvalue,
   # or free name read through `_ENV`.
   defp gen_func_decl_head(decl, ctx) do
-    case Map.get(ctx.scope.var_map, {:func_decl_head, decl}) do
+    case Map.get(ctx.scope.var_map, {:func_decl_head, Scope.node_key(decl)}) do
       {:register, reg} ->
         {[], reg, ctx}
 
@@ -927,7 +931,7 @@ defmodule Lua.Compiler.Codegen do
 
   # Helpers for assignment target code generation
   defp gen_assign_target(%Expr.Var{} = target_var, value_reg, ctx) do
-    case Map.get(ctx.scope.var_map, target_var) do
+    case Map.get(ctx.scope.var_map, Scope.node_key(target_var)) do
       {:register, local_reg} ->
         instrs = if local_reg == value_reg, do: [], else: [Instruction.move(local_reg, value_reg)]
         {instrs, ctx}
@@ -1157,7 +1161,7 @@ defmodule Lua.Compiler.Codegen do
 
   defp gen_expr(%Expr.Var{} = var, ctx) do
     # Look up variable classification from scope
-    case Map.get(ctx.scope.var_map, var) do
+    case Map.get(ctx.scope.var_map, Scope.node_key(var)) do
       {:register, reg} ->
         # Local variable - already in a register, just return it
         {[], reg, ctx}
@@ -1664,7 +1668,7 @@ defmodule Lua.Compiler.Codegen do
   # Shared helper: generates a closure from a function node (Expr.Function, Statement.FuncDecl, etc.)
   # Returns {instructions, dest_reg, ctx} like gen_expr.
   defp gen_closure_from_node(node, ctx) do
-    func_key = Map.get(ctx.scope.var_map, node)
+    func_key = Map.get(ctx.scope.var_map, Scope.node_key(node))
     func_scope = ctx.scope.functions[func_key]
 
     # Generate the function body in a fresh context with function-scoped locals
@@ -1722,7 +1726,7 @@ defmodule Lua.Compiler.Codegen do
   # that sibling captures of the same name don't trigger a spurious
   # set_open_upvalue against a cell that doesn't exist yet.
   defp captures_self?(local_func, name, ctx) do
-    with {:ok, func_key} <- Map.fetch(ctx.scope.var_map, local_func),
+    with {:ok, func_key} <- Map.fetch(ctx.scope.var_map, Scope.node_key(local_func)),
          {:ok, func_scope} <- Map.fetch(ctx.scope.functions, func_key) do
       Enum.any?(func_scope.upvalue_descriptors, fn
         {:parent_local, _reg, captured_name} -> captured_name == name
@@ -1769,7 +1773,7 @@ defmodule Lua.Compiler.Codegen do
   # runtime errors, mirroring PUC-Lua. `nil` means "no useful name" (e.g.
   # anonymous callee like `(f or g)()`).
   defp name_hint(%Expr.Var{} = var, ctx) do
-    case Map.get(ctx.scope.var_map, var) do
+    case Map.get(ctx.scope.var_map, Scope.node_key(var)) do
       {:env_field, _env_ref, name} -> {:global, name}
       {:upvalue, _index} -> {:upvalue, var.name}
       {:register, _reg} -> {:local, var.name}

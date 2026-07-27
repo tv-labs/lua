@@ -1,6 +1,7 @@
 defmodule Lua.VM.UpvalueTest do
   use ExUnit.Case, async: true
 
+  alias Lua.AST.Builder
   alias Lua.Compiler
   alias Lua.Parser
   alias Lua.VM
@@ -363,6 +364,88 @@ defmodule Lua.VM.UpvalueTest do
       """
 
       assert {:ok, [600], _state} = run_lua(code)
+    end
+  end
+
+  # Every empty block parses to the same term (`%Block{stmts: [], meta: nil}`),
+  # so while scope analysis keyed its per-block close-upvalue watermark by the
+  # block node, all the empty blocks in a chunk shared one entry and the last
+  # one resolved decided the threshold for all of them. A block that borrowed
+  # a lower watermark then closed cells belonging to live enclosing locals.
+  # Keying by node id gives each block its own entry. PUC-Lua prints `42 42`
+  # for the program below.
+  describe "empty blocks get their own close-upvalue watermark" do
+    test "an empty loop body does not close an enclosing captured local" do
+      code = """
+      local t = {}
+
+      do
+        local a, b, c, d = 1, 2, 3, 4
+        local n = 0
+        local get = function() return n end
+        local set = function(v) n = v end
+        for i = 1, 1 do end
+        set(42)
+        t[1] = get()
+        t[2] = n
+      end
+
+      for i = 1, 1 do end
+
+      return t[1], t[2]
+      """
+
+      assert {:ok, [42, 42], _state} = run_lua(code)
+    end
+
+    test "sibling empty loop bodies compile to different thresholds" do
+      code = """
+      do
+        local a, b, c, d = 1, 2, 3, 4
+        for i = 1, 1 do end
+      end
+
+      for i = 1, 1 do end
+      """
+
+      assert {:ok, ast} = Parser.parse(code)
+      assert {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+
+      assert [_, _] = thresholds = close_thresholds(proto)
+      assert thresholds == Enum.uniq(thresholds)
+    end
+
+    test "structurally identical hand-built loop bodies compile to different thresholds" do
+      # Same program as above, built through the public `Lua.AST.Builder`
+      # rather than the parser, so the nodes start without `meta.id`. The two
+      # `for` bodies are equal terms; only compile-time id stamping keeps
+      # their close-upvalue watermarks apart.
+      chunk =
+        Builder.chunk([
+          Builder.do_block([
+            Builder.local(
+              ["a", "b", "c", "d"],
+              [Builder.number(1), Builder.number(2), Builder.number(3), Builder.number(4)]
+            ),
+            Builder.for_num("i", Builder.number(1), Builder.number(1), [])
+          ]),
+          Builder.for_num("i", Builder.number(1), Builder.number(1), [])
+        ])
+
+      assert {:ok, proto} = Compiler.compile(chunk, source: "test.lua")
+
+      assert [_, _] = thresholds = close_thresholds(proto)
+      assert thresholds == Enum.uniq(thresholds)
+    end
+  end
+
+  # The empty loop bodies above compile to a body that is exactly the block's
+  # close-upvalues instruction; anything else in the body means the shape of
+  # the compiled output changed and the assertion should be revisited.
+  defp close_thresholds(proto) do
+    for {:numeric_for, _base, _loop_var, body} <- proto.instructions do
+      assert [{:close_upvalues, threshold}] = body
+      threshold
     end
   end
 end

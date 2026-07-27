@@ -25,7 +25,7 @@ defmodule Lua.AST.Block do
       %Lua.AST.Block{stmts: [], meta: nil}
 
       iex> Lua.AST.Block.new([], %Lua.AST.Meta{})
-      %Lua.AST.Block{stmts: [], meta: %Lua.AST.Meta{start: nil, end: nil, metadata: %{}}}
+      %Lua.AST.Block{stmts: [], meta: %Lua.AST.Meta{start: nil, end: nil, metadata: %{}, id: nil}}
   """
   @spec new([Statement.t()], Meta.t() | nil) :: t()
   def new(stmts \\ [], meta \\ nil) do

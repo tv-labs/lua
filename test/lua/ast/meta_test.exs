@@ -169,6 +169,20 @@ defmodule Lua.AST.MetaTest do
       assert merged.start == %{line: 1, column: 1, byte_offset: 0}
       assert merged.end == %{line: 1, column: 10, byte_offset: 9}
     end
+
+    test "keeps the left operand's id and metadata" do
+      comment = %{type: :single, text: " note", position: %{line: 1, column: 1, byte_offset: 0}}
+
+      meta1 = Meta.add_leading_comment(%{Meta.new(%{line: 1, column: 1, byte_offset: 0}, nil) | id: 7}, comment)
+
+      meta2 = Meta.add_metadata(%{Meta.new(nil, %{line: 1, column: 10, byte_offset: 9}) | id: 99}, :other, :dropped)
+
+      merged = Meta.merge(meta1, meta2)
+
+      assert merged.id == 7
+      assert Meta.get_leading_comments(merged) == [comment]
+      refute Map.has_key?(merged.metadata, :other)
+    end
   end
 
   describe "position tracking" do

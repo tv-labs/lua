@@ -6,6 +6,7 @@ defmodule Lua.Compiler do
   """
 
   alias Lua.AST.Chunk
+  alias Lua.AST.Ids
   alias Lua.Compiler.Bytecode
   alias Lua.Compiler.Codegen
   alias Lua.Compiler.GotoResolution
@@ -29,6 +30,14 @@ defmodule Lua.Compiler do
   """
   @spec compile(Chunk.t(), compile_opts()) :: {:ok, Prototype.t()} | {:error, term()}
   def compile(%Chunk{} = chunk, opts \\ []) do
+    # Scope resolution and codegen key per-node tables by `meta.id` (see
+    # `Lua.AST.Ids`); without ids, structurally identical nodes (e.g. two
+    # empty loop bodies) would share one table entry and miscompile. Stamping
+    # here covers chunks that never went through the parser, such as those
+    # built with `Lua.AST.Builder`. Assignment is deterministic, so a parsed
+    # chunk (already stamped by `Lua.Parser`) re-stamps to the same ids.
+    chunk = Ids.assign(chunk)
+
     with :ok <- GotoValidation.validate(chunk),
          {:ok, scope_state} <- Scope.resolve(chunk, opts),
          {:ok, prototype} <- Codegen.generate(chunk, scope_state, opts) do
