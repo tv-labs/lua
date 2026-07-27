@@ -149,6 +149,11 @@ defmodule Lua.Compiler.UpvalueDescriptorTest do
       return table.concat(out, ",")
       """
 
+      # PUC-Lua prints "a,b": it only gives a closure an `_ENV` upvalue when
+      # the closure actually references a global. This VM currently hands
+      # `_ENV` to every nested function, so slot 1 is always `_ENV`. This
+      # assertion pins that divergence on purpose — aligning `_ENV` capture
+      # with PUC-Lua should update it to "a,b", not read as a regression.
       assert {["_ENV,a,b"], _} = Lua.eval!(code)
     end
   end

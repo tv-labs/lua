@@ -144,9 +144,13 @@ defmodule Website.LuaSandbox do
           error_result(started, reason)
 
         # This task is being cancelled by the caller (the LiveView timeout).
-        # Stop the worker and let the cancellation proceed.
+        # Stop the worker and let the cancellation proceed. As on the timeout
+        # path below, `Process.exit/2` only *sends* the kill — if `exit/1` is
+        # caught upstream, the worker's `:killed` would come back after
+        # `trap_exit` is restored, so cut the link before exiting.
         {:EXIT, _other, reason} ->
           Process.exit(worker, :kill)
+          unlink_worker(worker)
           exit(reason)
       after
         @run_timeout_ms ->
