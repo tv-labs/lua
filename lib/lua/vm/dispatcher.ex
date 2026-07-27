@@ -241,7 +241,7 @@ defmodule Lua.VM.Dispatcher do
       {@op_load_env, dest} ->
         env =
           if tuple_size(upvalues) > 0 do
-            Map.get(state.upvalue_cells, :erlang.element(1, upvalues))
+            :maps.get(:erlang.element(1, upvalues), state.upvalue_cells, nil)
           else
             State.g_ref(state)
           end
@@ -251,12 +251,12 @@ defmodule Lua.VM.Dispatcher do
 
       {@op_get_upvalue, dest, index} ->
         cell_ref = :erlang.element(index + 1, upvalues)
-        # Mirror the interpreter's `Map.get/2` (returns nil for a dangling
+        # Mirror the interpreter's defaulting read (nil for a dangling
         # cell) rather than `:erlang.map_get/2` (which raises `:badkey`).
         # Compiled closures should never carry stale cell refs, but the
         # invariant is the interpreter's, not ours, and the error shape
         # has to match where it does fire.
-        v = Map.get(state.upvalue_cells, cell_ref)
+        v = :maps.get(cell_ref, state.upvalue_cells, nil)
         regs = :erlang.setelement(dest + 1, regs, v)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
@@ -679,17 +679,19 @@ defmodule Lua.VM.Dispatcher do
         case func_value do
           {:compiled_closure, callee_proto, callee_upvalues} ->
             callee_regs = init_callee_regs(callee_proto, regs, base + 1, arg_count)
-            # B5c-v2: compiled callees may now be vararg functions. The
-            # `is_vararg` check in `setup_vararg_proto/4` short-circuits for
-            # the common non-vararg case at one tuple-field read.
-            callee_proto = setup_vararg_proto(callee_proto, regs, base + 1, arg_count)
+            # Compiled callees may be vararg functions. Testing `is_vararg`
+            # here keeps the common non-vararg call to one field read.
+            callee_proto =
+              if callee_proto.is_vararg,
+                do: setup_vararg_proto(callee_proto, regs, base + 1, arg_count),
+                else: callee_proto
 
             frame =
               {code, pc + 1, regs, upvalues, proto, cont, :discard, state.open_upvalues}
 
-            call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            instruction_count = State.tick!(state, instruction_count)
-            State.check_call_depth!(state)
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count)
+            ckdepth(state)
 
             state = %{
               state
@@ -712,9 +714,9 @@ defmodule Lua.VM.Dispatcher do
 
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, arg_count)
-            call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            instruction_count = State.tick!(state, instruction_count)
-            State.check_call_depth!(state)
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count)
+            ckdepth(state)
 
             state = %{
               state
@@ -747,7 +749,11 @@ defmodule Lua.VM.Dispatcher do
         case func_value do
           {:compiled_closure, callee_proto, callee_upvalues} ->
             callee_regs = init_callee_regs(callee_proto, regs, base + 1, arg_count)
-            callee_proto = setup_vararg_proto(callee_proto, regs, base + 1, arg_count)
+
+            callee_proto =
+              if callee_proto.is_vararg,
+                do: setup_vararg_proto(callee_proto, regs, base + 1, arg_count),
+                else: callee_proto
 
             # Frame is a tuple, not a map: pattern-matching a tuple in
             # `return_one/3` skips Map.fetch! lookups and lets the BEAM
@@ -755,9 +761,9 @@ defmodule Lua.VM.Dispatcher do
             frame =
               {code, pc + 1, regs, upvalues, proto, cont, base, state.open_upvalues}
 
-            call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            instruction_count = State.tick!(state, instruction_count)
-            State.check_call_depth!(state)
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count)
+            ckdepth(state)
 
             state = %{
               state
@@ -780,9 +786,9 @@ defmodule Lua.VM.Dispatcher do
 
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, arg_count)
-            call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            instruction_count = State.tick!(state, instruction_count)
-            State.check_call_depth!(state)
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count)
+            ckdepth(state)
 
             state = %{
               state
@@ -918,11 +924,34 @@ defmodule Lua.VM.Dispatcher do
         state = Executor.dispatcher_set_table(table_val, key, value, state, proto, name_hint)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
+      # Mirrors `@op_get_field`'s shape: a tref whose table has no metatable
+      # has no `__newindex` to consult, so the write is a direct
+      # `Table.put/3` into `state.tables`. Anything else — a non-tref, or a
+      # table carrying a metatable — bridges so the `__newindex` chain and
+      # the index type errors stay the interpreter's.
       {@op_set_field, table_reg, name, value_reg, name_hint} ->
         table_val = :erlang.element(table_reg + 1, regs)
         value = :erlang.element(value_reg + 1, regs)
-        state = Executor.dispatcher_set_field(table_val, name, value, state, proto, name_hint)
-        dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
+
+        case table_val do
+          {:tref, id} ->
+            table = :erlang.map_get(id, state.tables)
+
+            state =
+              case :erlang.map_get(:metatable, table) do
+                nil ->
+                  %{state | tables: :maps.put(id, Table.put(table, name, value), state.tables)}
+
+                _ ->
+                  Executor.dispatcher_set_field(table_val, name, value, state, proto, name_hint)
+              end
+
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
+
+          # Indexing a non-table always raises; the bridge owns the wording.
+          _ ->
+            Executor.dispatcher_set_field(table_val, name, value, state, proto, name_hint)
+        end
 
       # `:set_list` with a positive integer count is the table-constructor
       # form. The `count == 0` sentinel was filtered upstream and never
@@ -1009,7 +1038,7 @@ defmodule Lua.VM.Dispatcher do
 
         if should_continue do
           regs = :erlang.setelement(loop_var + 1, regs, counter)
-          state = Executor.dispatcher_close_open_upvalues_at_or_above(state, loop_var)
+          state = close_upv(state, loop_var)
           marker = {:cps_for, base, loop_var, body_bc, code, pc + 1}
           loop_exit = {:loop_exit, code, pc + 1}
           dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | cont], frames, instruction_count)
@@ -1063,7 +1092,7 @@ defmodule Lua.VM.Dispatcher do
             regs = :erlang.setelement(base + 3, regs, first)
             regs = assign_iter_results(regs, var_regs, results, 0)
             first_var_reg = :erlang.element(1, var_regs)
-            state = Executor.dispatcher_close_open_upvalues_at_or_above(state, first_var_reg)
+            state = close_upv(state, first_var_reg)
             marker = {:cps_generic_for, base, var_regs, body_bc, line, code, pc + 1}
             loop_exit = {:loop_exit, code, pc + 1}
             dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | cont], frames, instruction_count)
@@ -1092,11 +1121,11 @@ defmodule Lua.VM.Dispatcher do
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_goto, 0, target_pc, level} ->
-        state = Executor.dispatcher_close_open_upvalues_at_or_above(state, level)
+        state = close_upv(state, level)
         dispatch(code, target_pc, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_goto, depth, target_pc, level} ->
-        state = Executor.dispatcher_close_open_upvalues_at_or_above(state, level)
+        state = close_upv(state, level)
         {dest_code, rest_cont} = unwind_goto(cont, depth)
         dispatch(dest_code, target_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
 
@@ -1143,9 +1172,9 @@ defmodule Lua.VM.Dispatcher do
 
       {@op_get_open_upvalue, dest, reg} ->
         value =
-          case Map.get(state.open_upvalues, reg) do
+          case :maps.get(reg, state.open_upvalues, nil) do
             nil -> :erlang.element(reg + 1, regs)
-            cell_ref -> Map.get(state.upvalue_cells, cell_ref)
+            cell_ref -> :maps.get(cell_ref, state.upvalue_cells, nil)
           end
 
         regs = :erlang.setelement(dest + 1, regs, value)
@@ -1153,7 +1182,7 @@ defmodule Lua.VM.Dispatcher do
 
       {@op_set_open_upvalue, reg, source} ->
         state =
-          case Map.get(state.open_upvalues, reg) do
+          case :maps.get(reg, state.open_upvalues, nil) do
             nil ->
               state
 
@@ -1165,7 +1194,7 @@ defmodule Lua.VM.Dispatcher do
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       {@op_close_upvalues, threshold} ->
-        state = Executor.dispatcher_close_open_upvalues_at_or_above(state, threshold)
+        state = close_upv(state, threshold)
         dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count)
 
       # ── Vararg ────────────────────────────────────────────────────
@@ -1227,7 +1256,12 @@ defmodule Lua.VM.Dispatcher do
         case func_value do
           {:compiled_closure, callee_proto, callee_upvalues} ->
             callee_regs = init_callee_regs(callee_proto, regs, base + 1, total_args)
-            callee_proto = setup_vararg_proto(callee_proto, regs, base + 1, total_args)
+
+            callee_proto =
+              if callee_proto.is_vararg,
+                do: setup_vararg_proto(callee_proto, regs, base + 1, total_args),
+                else: callee_proto
+
             # Reuse the fast-path frame shapes when result_count is 0
             # (discard) or 1 (single integer base). Only the genuine
             # multi-return shapes (-1, -2, n > 1) need the tagged
@@ -1240,9 +1274,9 @@ defmodule Lua.VM.Dispatcher do
               end
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, dest, state.open_upvalues}
-            call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            instruction_count = State.tick!(state, instruction_count)
-            State.check_call_depth!(state)
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count)
+            ckdepth(state)
 
             state = %{
               state
@@ -1265,9 +1299,9 @@ defmodule Lua.VM.Dispatcher do
 
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, total_args)
-            call_info = Executor.dispatcher_call_info(proto, name_hint, 0)
-            instruction_count = State.tick!(state, instruction_count)
-            State.check_call_depth!(state)
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count)
+            ckdepth(state)
 
             state = %{
               state
@@ -1391,9 +1425,9 @@ defmodule Lua.VM.Dispatcher do
     should_continue = if step > 0, do: new_counter <= limit, else: new_counter >= limit
 
     if should_continue do
-      instruction_count = State.tick!(state, instruction_count)
+      instruction_count = tick(state, instruction_count)
       regs = :erlang.setelement(loop_var + 1, regs, new_counter)
-      state = Executor.dispatcher_close_open_upvalues_at_or_above(state, loop_var)
+      state = close_upv(state, loop_var)
       dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | rest_cont], frames, instruction_count)
     else
       dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
@@ -1438,7 +1472,7 @@ defmodule Lua.VM.Dispatcher do
          frames,
          instruction_count
        ) do
-    instruction_count = State.tick!(state, instruction_count)
+    instruction_count = tick(state, instruction_count)
     cps = {:cps_while_test, test_reg, cond_bc, body_bc, outer_code, outer_pc}
     dispatch(cond_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, instruction_count)
   end
@@ -1476,7 +1510,7 @@ defmodule Lua.VM.Dispatcher do
        ) do
     case :erlang.element(test_reg + 1, regs) do
       v when v === nil or v === false ->
-        instruction_count = State.tick!(state, instruction_count)
+        instruction_count = tick(state, instruction_count)
         cps = {:cps_repeat_body, test_reg, body_bc, cond_bc, outer_code, outer_pc}
         dispatch(body_bc, 1, regs, upvalues, proto, state, [cps, loop_exit | rest_cont], frames, instruction_count)
 
@@ -1517,11 +1551,11 @@ defmodule Lua.VM.Dispatcher do
         dispatch(outer_code, outer_pc, regs, upvalues, proto, state, rest_cont, frames, instruction_count)
 
       [first | _] ->
-        instruction_count = State.tick!(state, instruction_count)
+        instruction_count = tick(state, instruction_count)
         regs = :erlang.setelement(base + 3, regs, first)
         regs = assign_iter_results(regs, var_regs, results, 0)
         first_var_reg = :erlang.element(1, var_regs)
-        state = Executor.dispatcher_close_open_upvalues_at_or_above(state, first_var_reg)
+        state = close_upv(state, first_var_reg)
         dispatch(body_bc, 1, regs, upvalues, proto, state, [marker, loop_exit | rest_cont], frames, instruction_count)
     end
   end
@@ -1643,6 +1677,26 @@ defmodule Lua.VM.Dispatcher do
 
   # ── Helpers ─────────────────────────────────────────────────────────────
 
+  # Hot-path guards. Each of these fires on every call or loop iteration
+  # only to discover it has nothing to do under the default configuration.
+  # Inlining the guard here keeps the no-op case to a single function-head
+  # match instead of a cross-module call into `Executor`/`State`; the
+  # non-trivial case still routes to the canonical implementation so the
+  # behaviour (and its error shapes) live in one place.
+  @compile {:inline, close_upv: 2, tick: 2, ckdepth: 1}
+
+  defp close_upv(%{open_upvalues: ou} = state, _threshold) when map_size(ou) == 0, do: state
+
+  defp close_upv(state, threshold) do
+    Executor.dispatcher_close_open_upvalues_at_or_above(state, threshold)
+  end
+
+  defp tick(%{max_instructions: :infinity}, instruction_count), do: instruction_count
+  defp tick(state, instruction_count), do: State.tick!(state, instruction_count)
+
+  defp ckdepth(%{max_call_depth: :infinity}), do: :ok
+  defp ckdepth(state), do: State.check_call_depth!(state)
+
   defp clear_nils(regs, _dest, 0), do: regs
 
   defp clear_nils(regs, dest, n) do
@@ -1735,15 +1789,16 @@ defmodule Lua.VM.Dispatcher do
   # Vararg setup at the call boundary. Mirrors the executor's per-call
   # behaviour: when calling a vararg function, regs[param_count..total_args)
   # become the varargs list carried on `%{proto | varargs: ...}`.
+  #
+  # Only reached when the callee is actually vararg — call sites test
+  # `callee_proto.is_vararg` inline so a non-vararg call pays one field
+  # read rather than a call into a function that rebuilds nothing. The
+  # vararg case still copies the whole `%Prototype{}`.
   defp setup_vararg_proto(callee_proto, src_regs, src_off, total_args) do
-    if callee_proto.is_vararg do
-      param_count = callee_proto.param_count
-      vararg_count = max(total_args - param_count, 0)
-      varargs = collect_args(src_regs, src_off + param_count, vararg_count)
-      %{callee_proto | varargs: varargs}
-    else
-      callee_proto
-    end
+    param_count = callee_proto.param_count
+    vararg_count = max(total_args - param_count, 0)
+    varargs = collect_args(src_regs, src_off + param_count, vararg_count)
+    %{callee_proto | varargs: varargs}
   end
 
   # Closure upvalue capture. `:parent_local` allocates (or reuses) an
@@ -1753,7 +1808,7 @@ defmodule Lua.VM.Dispatcher do
 
   defp build_upvalues([{:parent_local, reg, _name} | rest], regs, upvalues, state, acc) do
     {cell_ref, state} =
-      case Map.get(state.open_upvalues, reg) do
+      case :maps.get(reg, state.open_upvalues, nil) do
         nil ->
           new_ref = make_ref()
           value = :erlang.element(reg + 1, regs)

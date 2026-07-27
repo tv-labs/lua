@@ -580,14 +580,22 @@ defmodule Lua.VM.Executor do
     # raise sites reading `current_position/0` — `error()`'s §6.1 prefix,
     # stdlib bad-argument raises — attribute to the right call site.
     # Restored after the call so nested invocations don't leak.
-    prev_pos = Process.get(@position_key, @unset)
-    set_position(line, proto.source)
+    #
+    # Every compiled-mode stdlib call lands here, so the bridge talks to the
+    # process dictionary through the BIFs and restores explicitly instead of
+    # paying for the `Process.*` wrappers and a `try` frame. A raise skips
+    # the restore; `execute/5`'s `after restore_position/1` is the outer net
+    # that stops a published position outliving the evaluation.
+    prev_pos = :erlang.get(@position_key)
+    :erlang.put(@position_key, {line, proto.source})
+    result = call_function(nf, args, state)
 
-    try do
-      call_function(nf, args, state)
-    after
-      restore_position(prev_pos)
+    case prev_pos do
+      :undefined -> :erlang.erase(@position_key)
+      pos -> :erlang.put(@position_key, pos)
     end
+
+    result
   end
 
   def dispatcher_call_function(other, args, state, proto, name_hint, line) do
@@ -949,7 +957,7 @@ defmodule Lua.VM.Executor do
          instruction_count
        ) do
     cell_ref = elem(upvalues, index)
-    value = Map.get(state.upvalue_cells, cell_ref)
+    value = :maps.get(cell_ref, state.upvalue_cells, nil)
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
@@ -991,9 +999,9 @@ defmodule Lua.VM.Executor do
          instruction_count
        ) do
     value =
-      case Map.get(state.open_upvalues, reg) do
+      case :maps.get(reg, state.open_upvalues, nil) do
         nil -> elem(regs, reg)
-        cell_ref -> Map.get(state.upvalue_cells, cell_ref)
+        cell_ref -> :maps.get(cell_ref, state.upvalue_cells, nil)
       end
 
     regs = put_elem(regs, dest, value)
@@ -1043,7 +1051,7 @@ defmodule Lua.VM.Executor do
          instruction_count
        ) do
     state =
-      case Map.get(state.open_upvalues, reg) do
+      case :maps.get(reg, state.open_upvalues, nil) do
         nil ->
           state
 
@@ -1287,7 +1295,7 @@ defmodule Lua.VM.Executor do
     {captured_upvalues_reversed, state} =
       Enum.reduce(nested_proto.upvalue_descriptors, {[], state}, fn
         {:parent_local, reg, _name}, {cells, state} ->
-          case Map.get(state.open_upvalues, reg) do
+          case :maps.get(reg, state.open_upvalues, nil) do
             nil ->
               cell_ref = make_ref()
               value = elem(regs, reg)
@@ -3751,7 +3759,7 @@ defmodule Lua.VM.Executor do
   # environment lives in upvalue slot 0 when present (a chunk loaded via
   # `load(..., env)`), otherwise default to the global table `_G`.
   defp load_env_value(upvalues, state) when tuple_size(upvalues) > 0 do
-    Map.get(state.upvalue_cells, elem(upvalues, 0))
+    :maps.get(elem(upvalues, 0), state.upvalue_cells, nil)
   end
 
   defp load_env_value(_upvalues, state), do: State.g_ref(state)
