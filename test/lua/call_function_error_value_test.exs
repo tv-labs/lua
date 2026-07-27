@@ -285,4 +285,60 @@ defmodule Lua.CallFunctionErrorValueTest do
       assert Lua.format_exception(error) =~ "regression.lua:2:"
     end
   end
+
+  describe "call_function/3 position hygiene across evaluations" do
+    test "a raise inside a compiled closure's stdlib call does not leak its position" do
+      # The dispatcher publishes {line, source} around every native stdlib
+      # call so raise sites attribute to the right call site. That position
+      # must be restored even when the native call raises: `call_function/3`
+      # has no outer save/restore net, so a leak here surfaces in a *later*,
+      # unrelated evaluation whose own error carries no line info.
+      {[ref], lua} =
+        Lua.eval!(
+          Lua.new(),
+          """
+          local function boom()
+
+
+            error("kaboom")
+          end
+          return boom
+          """,
+          decode: false,
+          source: "first.lua"
+        )
+
+      # Pin that `boom` bytecode-compiled: the leak under test lives in the
+      # dispatcher's native-call bridge, not the interpreter's.
+      assert {:compiled_closure, _, _} = ref.ref
+
+      assert {:error, %RuntimeException{kind: :error}, %Lua{} = lua} =
+               Lua.call_function(lua, ref, [])
+
+      error =
+        assert_raise RuntimeException, fn ->
+          Lua.eval!(
+            lua,
+            """
+            local function g()
+              local t = nil
+              return t.x
+            end
+            return g()
+            """,
+            source: "second.lua"
+          )
+        end
+
+      # Indexing nil inside a compiled body raises without line info, and
+      # the exception falls back to `current_position/0`. A leaked position
+      # would attribute this error to first.lua:4 instead of no line.
+      assert %TypeError{error_kind: :index_non_table, line: nil, source: "second.lua"} =
+               error.original
+
+      message = Lua.format_exception(error)
+      refute message =~ "first.lua"
+      refute message =~ ":4:"
+    end
+  end
 end

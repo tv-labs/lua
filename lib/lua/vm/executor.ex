@@ -187,9 +187,10 @@ defmodule Lua.VM.Executor do
 
   def call_function({:compiled_closure, callee_proto, callee_upvalues}, args, state) do
     # Compiled callees route through the dispatcher. The dispatcher manages
-    # its own register file setup, vararg routing, and open-upvalue save/
-    # restore — `Dispatcher.execute/4` mirrors the semantics of this
-    # function for the bytecode-encoded path.
+    # its own register file setup and vararg routing, and isolates open
+    # upvalues by threading them as a dispatch-loop parameter seeded empty
+    # at this boundary — `Dispatcher.execute/4` mirrors the semantics of
+    # this function for the bytecode-encoded path.
     Dispatcher.execute(callee_proto, args, callee_upvalues, state)
   end
 
@@ -573,23 +574,25 @@ defmodule Lua.VM.Executor do
     # Publish the source line baked into the call opcode by the encoder so
     # raise sites reading `current_position/0` — `error()`'s §6.1 prefix,
     # stdlib bad-argument raises — attribute to the right call site.
-    # Restored after the call so nested invocations don't leak.
     #
     # Every compiled-mode stdlib call lands here, so the bridge talks to the
-    # process dictionary through the BIFs and restores explicitly instead of
-    # paying for the `Process.*` wrappers and a `try` frame. A raise skips
-    # the restore; `execute/5`'s `after restore_position/1` is the outer net
-    # that stops a published position outliving the evaluation.
+    # process dictionary through the BIFs instead of the `Process.*`
+    # wrappers. The restore must run on raise too — not every entry into
+    # this bridge sits under `execute/5`'s `after restore_position/1` net
+    # (e.g. `Lua.call_function/3` invoking a compiled closure), so a
+    # raise-skipped restore would leak a stale position into later,
+    # unrelated evaluations' diagnostics.
     prev_pos = :erlang.get(@position_key)
     :erlang.put(@position_key, {line, proto.source})
-    result = call_function(nf, args, state)
 
-    case prev_pos do
-      :undefined -> :erlang.erase(@position_key)
-      pos -> :erlang.put(@position_key, pos)
+    try do
+      call_function(nf, args, state)
+    after
+      case prev_pos do
+        :undefined -> :erlang.erase(@position_key)
+        pos -> :erlang.put(@position_key, pos)
+      end
     end
-
-    result
   end
 
   def dispatcher_call_function(other, args, state, proto, name_hint, line) do

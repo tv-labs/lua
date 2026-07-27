@@ -119,6 +119,13 @@ defmodule Lua.VM.RequireOpenUpvalueTest do
     return outer()
     """
 
+    # Pin that `outer` actually bytecode-compiles, so this exercises the
+    # dispatcher rather than silently degrading into an interpreter test.
+    {:ok, ast} = Lua.Parser.parse(code)
+    {:ok, proto} = Lua.Compiler.compile(ast, source: "test.lua")
+    assert %Lua.Compiler.Prototype{prototypes: [outer_proto | _]} = proto
+    assert outer_proto.bytecode
+
     assert {["reassigned", "inner", "inner_value"], _} = eval_with_path(code, tmp_dir)
   end
 end
