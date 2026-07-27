@@ -193,10 +193,14 @@ defmodule Lua.AST.Ids do
     {%{node | values: values, meta: with_id(node.meta, next)}, next + 1}
   end
 
-  # Any node shape not listed above keeps its metadata untouched. It then has
-  # no id, and the compiler falls back to keying by the node term — slower,
-  # but still correct.
-  defp number(node, next), do: {node, next}
+  # Every node shape must have a clause above. Silently skipping one would
+  # leave its whole subtree unnumbered, and the compiler's raw-term fallback
+  # key collides for structurally identical subtrees — a miscompile, not a
+  # slowdown — so an unrecognized node fails loudly instead.
+  defp number(node, _next) do
+    raise ArgumentError,
+          "Lua.AST.Ids has no number/2 clause for node: #{inspect(node, limit: 5)}"
+  end
 
   defp number_optional(nil, next), do: {nil, next}
   defp number_optional(node, next), do: number(node, next)

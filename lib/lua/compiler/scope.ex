@@ -68,11 +68,13 @@ defmodule Lua.Compiler.Scope do
   @doc """
   Returns the `var_map` key that stands for `node`.
 
-  Parsed nodes carry a chunk-unique `meta.id` (see `Lua.AST.Ids`), so the key
-  is one integer and a lookup hashes one word. Hand-built AST nodes have no
-  id; those fall back to the node term itself, which is slower to hash but
-  just as unique. Codegen keys its reads through this same function, so both
-  sides agree whichever shape a node has.
+  Nodes reaching the compiler carry a chunk-unique `meta.id` (see
+  `Lua.AST.Ids`; `Lua.Compiler.compile/2` stamps every chunk before scope
+  resolution), so the key is one integer and a lookup hashes one word. Nodes
+  without an id fall back to the node term itself — slower to hash and, unlike
+  an id, shared by structurally identical nodes, so two equal subtrees would
+  collapse onto one entry. Codegen keys its reads through this same function,
+  so both sides agree whichever shape a node has.
   """
   @spec node_key(term()) :: term()
   def node_key(%{meta: %{id: id}}) when is_integer(id), do: id
@@ -613,9 +615,8 @@ defmodule Lua.Compiler.Scope do
           nil ->
             # Parent doesn't have it. Recurse to ensure the parent gets it first.
             case ensure_upvalue(name, parent.function, rest, state) do
-              {:ok, _parent_uv_index, state} ->
-                # Parent now has an upvalue for this variable. Find its index.
-                parent_uv_index = upvalue_index(state, parent.function, name)
+              {:ok, parent_uv_index, state} ->
+                # Parent now has an upvalue for this variable at that index.
                 put_upvalue(state, for_function, {:parent_upvalue, parent_uv_index, name})
 
               :not_found ->

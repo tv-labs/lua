@@ -66,13 +66,30 @@ defmodule Lua.AST.IdsTest do
 
       assert Ids.assign(chunk) == chunk
     end
+
+    test "numbers every node of the compilable surface, uniquely" do
+      # `number/2` raises on a node shape it has no clause for, so any AST
+      # node type reachable from real programs that is missing coverage fails
+      # this walk loudly rather than leaving a subtree unnumbered.
+      sources = Path.wildcard("test/lua53_tests/*.lua") ++ Path.wildcard("test/integration/**/*.lua")
+
+      refute sources == []
+
+      for path <- sources do
+        {:ok, chunk} = Lua.Parser.parse_raw(File.read!(path))
+
+        ids = Walker.reduce(Ids.assign(chunk), [], fn node, acc -> [node.meta.id | acc] end)
+
+        refute ids == []
+        assert Enum.all?(ids, &is_integer/1), "node without an integer id in #{path}"
+        assert length(ids) == length(Enum.uniq(ids)), "duplicate node ids in #{path}"
+      end
+    end
   end
 
   defp ids_for(source) do
     {:ok, chunk} = Lua.Parser.parse_raw(source)
 
-    chunk
-    |> Walker.reduce([], fn node, acc -> [node.meta.id | acc] end)
-    |> Enum.reject(&is_nil/1)
+    Walker.reduce(chunk, [], fn node, acc -> [node.meta.id | acc] end)
   end
 end
