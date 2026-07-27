@@ -698,9 +698,12 @@ defmodule Lua.Compiler.Peephole do
     min(proto.max_registers, Enum.max([proto.param_count, peak, reads]))
   end
 
+  # Probe downward from the incoming bound and stop at the first hit: the
+  # answer is normally within a slot or two of the top, so this is a couple
+  # of scans rather than one per register.
   defp highest_read(instructions, prototypes, limit) do
-    Enum.reduce(0..(limit - 1)//1, 0, fn reg, acc ->
-      if any_reads?(instructions, reg, prototypes), do: reg + 1, else: acc
+    Enum.find_value((limit - 1)..0//-1, 0, fn reg ->
+      if any_reads?(instructions, reg, prototypes), do: reg + 1
     end)
   end
 
