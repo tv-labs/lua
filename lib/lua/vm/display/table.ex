@@ -26,6 +26,8 @@ defmodule Lua.VM.Display.Table do
   See `Lua.eval!/3` and the `decode:` option.
   """
 
+  alias Lua.VM.Display.Table
+
   @type t :: %__MODULE__{
           id: non_neg_integer(),
           peek: list() | map() | :circular,
@@ -37,7 +39,7 @@ defmodule Lua.VM.Display.Table do
   defimpl Inspect do
     import Inspect.Algebra
 
-    def inspect(%Lua.VM.Display.Table{id: id, peek: :circular}, _opts) do
+    def inspect(%Table{id: id, peek: :circular}, _opts) do
       concat([
         "#Lua.Table<id: ",
         Integer.to_string(id),
@@ -45,7 +47,7 @@ defmodule Lua.VM.Display.Table do
       ])
     end
 
-    def inspect(%Lua.VM.Display.Table{id: id, peek: peek}, opts) do
+    def inspect(%Table{id: id, peek: peek}, opts) do
       concat([
         "#Lua.Table<id: ",
         Integer.to_string(id),

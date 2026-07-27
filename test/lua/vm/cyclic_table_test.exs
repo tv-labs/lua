@@ -43,6 +43,19 @@ defmodule Lua.VM.CyclicTableTest do
       assert inspect(t) =~ "circular"
     end
 
+    test "a cycle through a sequence element peeks as :circular" do
+      code = """
+      local t = {}
+      t[1] = t
+      return t
+      """
+
+      {[t], _} = Lua.eval!(Lua.new(), code, decode: false)
+
+      assert %DTable{id: id, peek: [inner]} = t
+      assert %DTable{id: ^id, peek: :circular} = inner
+    end
+
     test "shared non-cyclic references still peek fully" do
       code = """
       local shared = {x = 1}
@@ -91,7 +104,22 @@ defmodule Lua.VM.CyclicTableTest do
       """
 
       {[decoded], _} = Lua.eval!(Lua.new(), code)
-      assert is_list(decoded)
+
+      branch = [{"l", [{"v", 1}]}, {"r", [{"v", 1}]}]
+
+      assert [{"left", left}, {"right", right}] = Enum.sort(decoded)
+      assert Enum.sort(left) == branch
+      assert Enum.sort(right) == branch
+    end
+  end
+
+  describe "re-encoding a decoded cycle" do
+    test "the leftover tref is refused with an actionable error" do
+      {[decoded], lua} = Lua.eval!(Lua.new(), @self_cycle)
+
+      assert_raise Lua.RuntimeException, ~r/marks a cyclic table/, fn ->
+        Lua.set!(lua, [:x], Map.new(decoded))
+      end
     end
   end
 end

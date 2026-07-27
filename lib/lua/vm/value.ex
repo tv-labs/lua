@@ -241,6 +241,18 @@ defmodule Lua.VM.Value do
     State.alloc_userdata(state, value)
   end
 
+  # `decode/2` leaves a bare `{:tref, id}` wherever a table contains itself,
+  # so a decoded cyclic value can carry one back in here. The id only means
+  # anything against the state it was decoded from; passing it through live
+  # would let a caller forge a reference into unrelated VM state.
+  def encode({:tref, _} = ref, _state, _fun_wrapper) do
+    raise Lua.RuntimeException,
+          "cannot encode #{inspect(ref)} into a Lua value. This reference marks a " <>
+            "cyclic table that decoding left in place rather than walking forever. " <>
+            "Evaluate with `decode: false` to get a table reference that round-trips " <>
+            "back into the VM."
+  end
+
   # Structs are maps, so without this clause a bare `%MyStruct{}` would encode
   # to a Lua table carrying a `"__struct__"` key — a silent, lossy conversion.
   # Refuse it explicitly: the caller must decide how the struct maps to a Lua
