@@ -120,7 +120,8 @@ defmodule Lua.Compiler.Codegen do
 
   # Returns the register-slot count an instruction proves is needed (its
   # highest written register index + 1), recursing into nested bodies.
-  defp instruction_size({:load_nil, dest, count}), do: dest + count
+  # `load_nil` clears `count + 1` registers, `dest..dest + count`.
+  defp instruction_size({:load_nil, dest, count}), do: dest + count + 1
   defp instruction_size({:vararg, base, count}) when is_integer(count) and count > 0, do: base + count
   defp instruction_size({:vararg, base, _}), do: base + 1
   defp instruction_size({:self, base, _obj, _name, _hint}), do: base + 2

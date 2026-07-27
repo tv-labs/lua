@@ -71,7 +71,8 @@ defmodule Lua.Compiler.InstructionSizeTest do
   # Structural opcodes: write a range, a fixed offset off a base, or recurse
   # into nested bodies.
   @structural [
-    {{:load_nil, 5, 3}, 8},
+    # `load_nil` clears `count + 1` registers, so 5..8 needs 9 slots.
+    {{:load_nil, 5, 3}, 9},
     {{:vararg, 5, 3}, 8},
     {{:vararg, 5, 0}, 6},
     {{:self, 5, 1, "m", nil}, 7},
