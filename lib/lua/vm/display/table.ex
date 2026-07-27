@@ -15,7 +15,10 @@ defmodule Lua.VM.Display.Table do
   - `:peek` — a snapshot of the table's data as it was at the time
     the eval boundary was crossed, suitable for human display. May
     be a list (sequence-like tables) or a map (mixed-key tables).
-    Truncated to `Inspect.Opts.limit` entries when rendered.
+    Truncated to `Inspect.Opts.limit` entries when rendered. When a
+    table (transitively) contains itself — e.g. the `T.__index = T`
+    OOP idiom — the recurring occurrence carries `:circular` instead
+    of a snapshot, bounding an otherwise infinite walk.
   - `:ref` — the original `{:tref, id}` tuple so callers can
     round-trip the value back into the VM (via `Lua.set!/3`,
     `Lua.encode!/2`, etc.).
@@ -25,7 +28,7 @@ defmodule Lua.VM.Display.Table do
 
   @type t :: %__MODULE__{
           id: non_neg_integer(),
-          peek: list() | map(),
+          peek: list() | map() | :circular,
           ref: tuple()
         }
 
@@ -33,6 +36,14 @@ defmodule Lua.VM.Display.Table do
 
   defimpl Inspect do
     import Inspect.Algebra
+
+    def inspect(%Lua.VM.Display.Table{id: id, peek: :circular}, _opts) do
+      concat([
+        "#Lua.Table<id: ",
+        Integer.to_string(id),
+        ", circular>"
+      ])
+    end
 
     def inspect(%Lua.VM.Display.Table{id: id, peek: peek}, opts) do
       concat([

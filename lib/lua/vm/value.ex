@@ -323,25 +323,39 @@ defmodule Lua.VM.Value do
 
   Tables are returned as lists of `{key, decoded_value}` tuples.
   Functions (closures, native) pass through as-is.
+
+  Cyclic tables (e.g. the common `T.__index = T` idiom) cannot be
+  represented as acyclic Elixir data, so the walk terminates at the
+  point of recurrence and leaves the table's `{:tref, id}` reference
+  there — mirroring how functions already pass through as opaque
+  references. Shared references that do not form a cycle decode
+  normally.
   """
   @spec decode(term(), State.t()) :: term()
-  def decode(nil, _state), do: nil
-  def decode(value, _state) when is_boolean(value), do: value
-  def decode(value, _state) when is_number(value), do: value
-  def decode(value, _state) when is_binary(value), do: value
+  def decode(value, state), do: decode(value, state, %{})
 
-  def decode({:udref, _} = ref, state) do
+  defp decode(nil, _state, _ancestors), do: nil
+  defp decode(value, _state, _ancestors) when is_boolean(value), do: value
+  defp decode(value, _state, _ancestors) when is_number(value), do: value
+  defp decode(value, _state, _ancestors) when is_binary(value), do: value
+
+  defp decode({:udref, _} = ref, state, _ancestors) do
     value = State.get_userdata(state, ref)
     {:userdata, value}
   end
 
-  def decode({:tref, id}, state) do
-    table = Map.fetch!(state.tables, id)
+  defp decode({:tref, id} = ref, state, ancestors) do
+    if Map.has_key?(ancestors, id) do
+      ref
+    else
+      table = Map.fetch!(state.tables, id)
+      ancestors = Map.put(ancestors, id, true)
 
-    Enum.map(Lua.VM.Table.to_map(table), fn {k, v} -> {k, decode(v, state)} end)
+      Enum.map(Lua.VM.Table.to_map(table), fn {k, v} -> {k, decode(v, state, ancestors)} end)
+    end
   end
 
-  def decode(value, _state), do: value
+  defp decode(value, _state, _ancestors), do: value
 
   @doc """
   Decodes a list of Lua VM values.
