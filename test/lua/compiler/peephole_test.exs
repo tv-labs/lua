@@ -701,6 +701,23 @@ defmodule Lua.Compiler.PeepholeTest do
     end
     return t[1], t[2], t[3]
     """,
+    # The same shape, but each closure outlives the iteration that made it.
+    # Storing it is a read of the name, so the fusion has to decline — and
+    # each surviving closure still has to see its own iteration's upvalue.
+    """
+    local fns = {}
+    for i = 1, 3 do
+      local function f(n) if n == 0 then return i end return f(n-1) end
+      fns[i] = f
+    end
+    return fns[1](2), fns[2](2), fns[3](2)
+    """,
+    """
+    local t = {}
+    local function f(n) if n == 0 then return 'base' end return f(n-1) end
+    t.f = f
+    return t.f(3), f(3)
+    """,
     """
     local function walk(node, depth)
       if node == nil then return depth end
