@@ -616,6 +616,47 @@ defmodule Lua.LexerTest do
 
       assert [{:string, "hello", %{line: 1, column: 1, byte_offset: 0}}, {:eof, _}] = tokens
     end
+
+    test "counts the closing quote of a short string" do
+      code = ~s(local x = "ab" ])
+
+      assert {:ok, tokens} = Lexer.tokenize(code)
+
+      assert [
+               {:keyword, :local, %{column: 1, byte_offset: 0}},
+               {:identifier, "x", %{column: 7, byte_offset: 6}},
+               {:operator, :assign, %{column: 9, byte_offset: 8}},
+               {:string, "ab", %{column: 11, byte_offset: 10}},
+               {:delimiter, :rbracket, %{column: 16, byte_offset: 15}},
+               {:eof, %{column: 17, byte_offset: 16}}
+             ] = tokens
+    end
+
+    test "the eof offset is the size of the source, whatever precedes it" do
+      for code <- [
+            ~s(local x = "ab"),
+            ~s(local x = 'a' .. 'b'),
+            ~s(x = "\\u{41}"),
+            "--[[ comment ]]",
+            "--[==[ comment ]==]",
+            "x = [[long]]"
+          ] do
+        assert {:ok, tokens} = Lexer.tokenize(code)
+        assert {:eof, pos} = List.last(tokens)
+        assert pos.byte_offset == byte_size(code), "wrong eof offset for #{inspect(code)}"
+        assert pos.column == byte_size(code) + 1, "wrong eof column for #{inspect(code)}"
+      end
+    end
+
+    test "counts the whole opener and body of a multi-line comment" do
+      assert {:ok, tokens} = Lexer.tokenize("--[==[ c ]==] x")
+
+      assert [
+               {:comment, :multi, " c ", %{column: 1, byte_offset: 0}},
+               {:identifier, "x", %{column: 15, byte_offset: 14}},
+               {:eof, %{column: 16, byte_offset: 15}}
+             ] = tokens
+    end
   end
 
   describe "complex expressions" do

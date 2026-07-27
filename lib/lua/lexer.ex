@@ -99,12 +99,13 @@ defmodule Lua.Lexer do
     # so it correctly detects --[[ (level 0), --[=[ (level 1), --[==[ (level 2), etc.
     case scan_long_bracket(rest, 0) do
       {:ok, equals, after_bracket} ->
-        # Multi-line comment of the given level
+        # Multi-line comment of the given level. The opener spans `--[`, the
+        # level's `=` signs, and the second `[`.
         scan_multiline_comment_text(
           after_bracket,
           "",
           acc,
-          advance_column(pos, 3 + equals),
+          advance_column(pos, 4 + equals),
           pos,
           equals
         )
@@ -374,7 +375,7 @@ defmodule Lua.Lexer do
   defp scan_string(<<quote, rest::binary>>, str_acc, acc, pos, start_pos, quote) do
     # Closing quote
     token = {:string, str_acc, start_pos}
-    do_tokenize(rest, [token | acc], pos)
+    do_tokenize(rest, [token | acc], advance_column(pos, 1))
   end
 
   # \z escape: skip all following whitespace
@@ -403,8 +404,8 @@ defmodule Lua.Lexer do
     case scan_unicode_escape(rest, 0, 0) do
       {:ok, codepoint, digits, after_brace} when codepoint <= 0x7FFFFFFF ->
         utf8 = encode_lua_utf8(codepoint)
-        # consumed: \u{ + digits + }
-        scan_string(after_brace, str_acc <> utf8, acc, advance_column(pos, 4 + digits), start_pos, quote)
+        # consumed: `\u{` plus `digits`, which already counts the closing `}`
+        scan_string(after_brace, str_acc <> utf8, acc, advance_column(pos, 3 + digits), start_pos, quote)
 
       _ ->
         {:error, {:invalid_escape, pos}}
