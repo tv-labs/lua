@@ -88,4 +88,37 @@ defmodule Lua.VM.RequireOpenUpvalueTest do
 
     assert {["registered:ok"], _} = eval_with_path(code, tmp_dir)
   end
+
+  test "compiled caller's open upvalues survive a require in its body", %{tmp_dir: tmp_dir} do
+    # Same invariant, entered from the bytecode dispatcher rather than the
+    # interpreter. The dispatcher carries its open upvalues as a loop
+    # parameter, so a nested evaluation cannot reach them; this pins that
+    # a `require` between capturing a local and reading it back through
+    # the cell still yields the caller's value.
+    File.write!(Path.join(tmp_dir, "inner.lua"), """
+    local inner_local = "inner_value"
+
+    local function captures_it()
+      return inner_local
+    end
+
+    return { tag = "inner", fn = captures_it }
+    """)
+
+    # The body runs on the dispatcher: `outer/0` is reached by a call, and
+    # its own body creates the closure over `mine`.
+    code = ~S"""
+    local function outer()
+      local mine = "outer_value"
+      local function read_mine() return mine end
+      local m = require("inner")
+      mine = "reassigned"
+      return read_mine(), m.tag, m.fn()
+    end
+
+    return outer()
+    """
+
+    assert {["reassigned", "inner", "inner_value"], _} = eval_with_path(code, tmp_dir)
+  end
 end
