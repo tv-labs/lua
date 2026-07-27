@@ -60,7 +60,20 @@ defmodule DemoWeb.Bytecode do
       do: "text-secondary font-semibold"
 
   def op_class(op)
-      when op in [:new_table, :set_list, :get_table, :set_table, :get_field, :set_field],
+      when op in [:add_k, :subtract_k, :multiply_k, :equal_k, :less_than_k, :less_equal_k],
+      do: "text-secondary font-semibold"
+
+  def op_class(op)
+      when op in [
+             :new_table,
+             :set_list,
+             :get_table,
+             :set_table,
+             :get_field,
+             :set_field,
+             :get_field_upvalue,
+             :set_field_upvalue
+           ],
       do: "text-info font-semibold"
 
   def op_class(_), do: "text-success font-semibold"
@@ -114,6 +127,13 @@ defmodule DemoWeb.Bytecode do
   defp do_format(:set_table, [t, k, v | _]), do: "r#{t}[#{format_arg(k)}], r#{v}"
   defp do_format(:get_field, [d, t, name | _]), do: ~s|r#{d}, r#{t}.#{name}|
   defp do_format(:set_field, [t, name, v | _]), do: ~s|r#{t}.#{name}, r#{v}|
+
+  defp do_format(op, [d, a, k | _])
+       when op in [:add_k, :subtract_k, :multiply_k, :equal_k, :less_than_k, :less_equal_k],
+       do: "r#{d}, r#{a}, #{format_lit(k)}"
+
+  defp do_format(:get_field_upvalue, [d, idx, name | _]), do: ~s|r#{d}, up[#{idx}].#{name}|
+  defp do_format(:set_field_upvalue, [idx, name, v | _]), do: ~s|up[#{idx}].#{name}, r#{v}|
 
   defp do_format(:set_list, [t, s, c, o]),
     do: "r#{t}, start=#{s}, count=#{c}, off=#{o}"
@@ -218,6 +238,17 @@ defmodule DemoWeb.Bytecode do
       equal: "Compare `a == b` and write `true` or `false` to a register.",
       less_than: "Compare `a < b` and write the boolean result.",
       less_equal: "Compare `a <= b` and write the boolean result.",
+      add_k:
+        "Compute `a + K` where `K` is a literal baked into the instruction — no register is spent materialising the constant.",
+      subtract_k: "Compute `a - K` with the literal inline. This is what `n - 1` compiles to.",
+      multiply_k: "Compute `a * K` with the literal inline.",
+      equal_k: "Compare `a == K` against an inline literal.",
+      less_than_k: "Compare `a < K` against an inline literal. This is what `n < 2` compiles to.",
+      less_equal_k: "Compare `a <= K` against an inline literal.",
+      get_field_upvalue:
+        "Read `up[i].name` in one step. Every global read inside a function is this shape: `_ENV` is an upvalue and the name is a field of it.",
+      set_field_upvalue:
+        "Write `up[i].name` in one step — the global-assignment counterpart of `get_field_upvalue`.",
       bitwise_and: "Compute `a & b` (bitwise AND).",
       bitwise_or: "Compute `a | b` (bitwise OR).",
       bitwise_xor: "Compute `a ~ b` (bitwise XOR — the binary `~`).",
@@ -358,6 +389,15 @@ defmodule DemoWeb.Bytecode do
 
       op when op in [:equal, :less_than, :less_equal] ->
         "rD, rA, rB"
+
+      op when op in [:add_k, :subtract_k, :multiply_k, :equal_k, :less_than_k, :less_equal_k] ->
+        "rD, rA, K"
+
+      :get_field_upvalue ->
+        "rD, up[i], name"
+
+      :set_field_upvalue ->
+        "up[i], name, rS"
 
       op when op in [:negate, :not, :length, :bitwise_not] ->
         "rD, rS"

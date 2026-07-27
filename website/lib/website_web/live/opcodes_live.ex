@@ -80,6 +80,22 @@ defmodule DemoWeb.OpcodesLive do
       ops: [:closure]
     },
     %{
+      id: "fused",
+      title: "Fused forms",
+      blurb:
+        "Emitted by the peephole pass, never by codegen directly. Each collapses a pair of instructions the naive lowering would otherwise have produced.",
+      ops: [
+        :add_k,
+        :subtract_k,
+        :multiply_k,
+        :equal_k,
+        :less_than_k,
+        :less_equal_k,
+        :get_field_upvalue,
+        :set_field_upvalue
+      ]
+    },
+    %{
       id: "meta",
       title: "Metadata",
       blurb: "Pseudo-instructions for source tracking and debugging.",

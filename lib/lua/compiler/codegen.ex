@@ -160,6 +160,10 @@ defmodule Lua.Compiler.Codegen do
   defp instruction_size({:set_upvalue, _index, _source}), do: 0
   defp instruction_size({:set_open_upvalue, _reg, _source}), do: 0
 
+  # `Lua.Compiler.Peephole` emits this: operand 1 is an *upvalue* index, not
+  # a register, so it must not reach the default clause below.
+  defp instruction_size({:set_field_upvalue, _index, _name, _value, _hint}), do: 0
+
   # Everything that reaches here is an ordinary value-producing opcode —
   # `{tag, dest, ...}` whose destination is operand 1. That is the rule for
   # every load / move / arithmetic / comparison / bitwise / table-read /

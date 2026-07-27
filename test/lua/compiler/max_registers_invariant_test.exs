@@ -106,6 +106,19 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
       # multi-return values occupy start..top at runtime, but the only
       # syntactic register operands are table_reg and the start slot.
       op == Bytecode.op_set_list_multi() -> [1, 2]
+      # Peephole fusions. The `_k` family's slot 3 is a literal value, not a
+      # register, so only dest and the left operand count.
+      # `get_field_upvalue`'s slot 2 is an upvalue index and
+      # `set_field_upvalue`'s slot 1 likewise — neither indexes the register
+      # file, and both would blow past `max_registers` if counted.
+      op == Bytecode.op_add_k() -> [1, 2]
+      op == Bytecode.op_subtract_k() -> [1, 2]
+      op == Bytecode.op_multiply_k() -> [1, 2]
+      op == Bytecode.op_less_than_k() -> [1, 2]
+      op == Bytecode.op_less_equal_k() -> [1, 2]
+      op == Bytecode.op_equal_k() -> [1, 2]
+      op == Bytecode.op_get_field_upvalue() -> [1]
+      op == Bytecode.op_set_field_upvalue() -> [3]
       true -> raise "register_positions/1 is missing a case for opcode #{inspect(op)}"
     end
   end

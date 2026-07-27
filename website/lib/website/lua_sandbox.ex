@@ -459,6 +459,16 @@ defmodule Website.LuaSandbox do
   defp format_op_args(:get_field, [d, t, name | _]), do: ~s|r#{d}, r#{t}.#{name}|
   defp format_op_args(:set_field, [t, name, v | _]), do: ~s|r#{t}.#{name}, r#{v}|
 
+  # Peephole fusions: the `_k` family's right operand is an inline literal,
+  # and the upvalue-field pair indexes the upvalue table rather than a
+  # register.
+  defp format_op_args(op, [d, a, k | _])
+       when op in [:add_k, :subtract_k, :multiply_k, :equal_k, :less_than_k, :less_equal_k],
+       do: "r#{d}, r#{a}, #{format_lit(k)}"
+
+  defp format_op_args(:get_field_upvalue, [d, idx, name | _]), do: ~s|r#{d}, up[#{idx}].#{name}|
+  defp format_op_args(:set_field_upvalue, [idx, name, v | _]), do: ~s|up[#{idx}].#{name}, r#{v}|
+
   defp format_op_args(:set_list, [t, s, c, o]),
     do: "r#{t}, start=#{s}, count=#{count(c)}, off=#{o}"
 

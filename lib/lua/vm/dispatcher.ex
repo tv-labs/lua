@@ -124,6 +124,20 @@ defmodule Lua.VM.Dispatcher do
   @op_label 60
   @op_goto 61
 
+  # Fused opcodes from `Lua.Compiler.Peephole`. The `_k` family carries its
+  # right operand inline, so the fast path skips one register read and the
+  # `load_constant` that fed it. `@op_get_field_upvalue` /
+  # `@op_set_field_upvalue` source the table straight out of `upvalues`
+  # instead of a scratch register.
+  @op_add_k 62
+  @op_subtract_k 63
+  @op_multiply_k 64
+  @op_less_than_k 65
+  @op_less_equal_k 66
+  @op_equal_k 67
+  @op_get_field_upvalue 68
+  @op_set_field_upvalue 69
+
   @doc """
   Execute a compiled prototype against `args` and `state`.
   """
@@ -315,6 +329,72 @@ defmodule Lua.VM.Dispatcher do
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
         end
 
+      # Same shape as `@op_get_field`, but the table comes from the
+      # upvalue cell rather than a register — the fused form of the
+      # `get_upvalue` + `get_field` pair every global read compiles to.
+      {@op_get_field_upvalue, dest, index, name, name_hint} ->
+        cell_ref = :erlang.element(index + 1, upvalues)
+        table_val = :maps.get(cell_ref, state.upvalue_cells, nil)
+
+        case table_val do
+          {:tref, id} ->
+            table = :erlang.map_get(id, state.tables)
+            data = :erlang.map_get(:data, table)
+
+            case data do
+              %{^name => value} ->
+                regs = :erlang.setelement(dest + 1, regs, value)
+                dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+              _ ->
+                case :erlang.map_get(:metatable, table) do
+                  nil ->
+                    regs = :erlang.setelement(dest + 1, regs, nil)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+                  _ ->
+                    {value, state} =
+                      Executor.dispatcher_get_field(table_val, name, sync(state, cs, cd), proto, name_hint)
+
+                    regs = :erlang.setelement(dest + 1, regs, value)
+                    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+                end
+            end
+
+          _ ->
+            {value, state} =
+              Executor.dispatcher_get_field(table_val, name, sync(state, cs, cd), proto, name_hint)
+
+            regs = :erlang.setelement(dest + 1, regs, value)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+        end
+
+      # Mirror of `@op_set_field` sourcing the table from an upvalue cell —
+      # the fused form of the pair every global write compiles to.
+      {@op_set_field_upvalue, index, name, value_reg, name_hint} ->
+        cell_ref = :erlang.element(index + 1, upvalues)
+        table_val = :maps.get(cell_ref, state.upvalue_cells, nil)
+        value = :erlang.element(value_reg + 1, regs)
+
+        case table_val do
+          {:tref, id} ->
+            table = :erlang.map_get(id, state.tables)
+
+            state =
+              case :erlang.map_get(:metatable, table) do
+                nil ->
+                  %{state | tables: :maps.put(id, Table.put(table, name, value), state.tables)}
+
+                _ ->
+                  Executor.dispatcher_set_field(table_val, name, value, sync(state, cs, cd), proto, name_hint)
+              end
+
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          _ ->
+            Executor.dispatcher_set_field(table_val, name, value, sync(state, cs, cd), proto, name_hint)
+        end
+
       # ── Arithmetic ──────────────────────────────────────────────────
       #
       # Integer fast paths mirror the interpreter's. Numbers can't carry
@@ -381,6 +461,73 @@ defmodule Lua.VM.Dispatcher do
 
           true ->
             {value, state} = Executor.dispatcher_binop(:multiply, va, vb, sync(state, cs, cd), proto, hint_a, hint_b)
+            regs = :erlang.setelement(dest + 1, regs, value)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+        end
+
+      # ── Constant-folded arithmetic ──────────────────────────────────
+      #
+      # Same three tiers as the register forms, with `k` read straight out
+      # of the opcode tuple. The slow path boxes `k` and hands it to the
+      # shared bridge, so `__add` / `__sub` / `__mul` fidelity and the
+      # `(local 'n')` error suffix are unchanged.
+
+      {@op_add_k, dest, a, k, hint_a} ->
+        va = :erlang.element(a + 1, regs)
+
+        cond do
+          is_integer(va) and is_integer(k) ->
+            sum = va + k
+            wrapped = if sum >= @min_int and sum <= @max_int, do: sum, else: Numeric.to_signed_int64(sum)
+            regs = :erlang.setelement(dest + 1, regs, wrapped)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          is_number(va) and is_number(k) ->
+            regs = :erlang.setelement(dest + 1, regs, va + k)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          true ->
+            {value, state} = Executor.dispatcher_binop(:add, va, k, sync(state, cs, cd), proto, hint_a, nil)
+            regs = :erlang.setelement(dest + 1, regs, value)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+        end
+
+      {@op_subtract_k, dest, a, k, hint_a} ->
+        va = :erlang.element(a + 1, regs)
+
+        cond do
+          is_integer(va) and is_integer(k) ->
+            diff = va - k
+            wrapped = if diff >= @min_int and diff <= @max_int, do: diff, else: Numeric.to_signed_int64(diff)
+            regs = :erlang.setelement(dest + 1, regs, wrapped)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          is_number(va) and is_number(k) ->
+            regs = :erlang.setelement(dest + 1, regs, va - k)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          true ->
+            {value, state} = Executor.dispatcher_binop(:subtract, va, k, sync(state, cs, cd), proto, hint_a, nil)
+            regs = :erlang.setelement(dest + 1, regs, value)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+        end
+
+      {@op_multiply_k, dest, a, k, hint_a} ->
+        va = :erlang.element(a + 1, regs)
+
+        cond do
+          is_integer(va) and is_integer(k) ->
+            prod = va * k
+            wrapped = if prod >= @min_int and prod <= @max_int, do: prod, else: Numeric.to_signed_int64(prod)
+            regs = :erlang.setelement(dest + 1, regs, wrapped)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          is_number(va) and is_number(k) ->
+            regs = :erlang.setelement(dest + 1, regs, va * k)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          true ->
+            {value, state} = Executor.dispatcher_binop(:multiply, va, k, sync(state, cs, cd), proto, hint_a, nil)
             regs = :erlang.setelement(dest + 1, regs, value)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
         end
@@ -639,6 +786,67 @@ defmodule Lua.VM.Dispatcher do
 
           true ->
             {value, state} = Executor.dispatcher_cmp(:not_equal, va, vb, sync(state, cs, cd), proto)
+            regs = :erlang.setelement(dest + 1, regs, value)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+        end
+
+      # ── Constant-folded comparisons ─────────────────────────────────
+      #
+      # `k` is a literal, so it can never carry a metatable: the fast
+      # paths fire whenever the register side is a number or a binary.
+      # Everything else still routes through the shared bridge so `__lt`
+      # / `__le` / `__eq` behave exactly as in the register form.
+
+      {@op_less_than_k, dest, a, k} ->
+        va = :erlang.element(a + 1, regs)
+
+        cond do
+          is_number(va) and is_number(k) ->
+            regs = :erlang.setelement(dest + 1, regs, va < k)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          is_binary(va) and is_binary(k) ->
+            regs = :erlang.setelement(dest + 1, regs, va < k)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          true ->
+            {value, state} = Executor.dispatcher_cmp(:less_than, va, k, sync(state, cs, cd), proto)
+            regs = :erlang.setelement(dest + 1, regs, value)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+        end
+
+      {@op_less_equal_k, dest, a, k} ->
+        va = :erlang.element(a + 1, regs)
+
+        cond do
+          is_number(va) and is_number(k) ->
+            regs = :erlang.setelement(dest + 1, regs, va <= k)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          is_binary(va) and is_binary(k) ->
+            regs = :erlang.setelement(dest + 1, regs, va <= k)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          true ->
+            {value, state} = Executor.dispatcher_cmp(:less_equal, va, k, sync(state, cs, cd), proto)
+            regs = :erlang.setelement(dest + 1, regs, value)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+        end
+
+      {@op_equal_k, dest, a, k} ->
+        va = :erlang.element(a + 1, regs)
+
+        cond do
+          is_number(va) and is_number(k) ->
+            regs = :erlang.setelement(dest + 1, regs, va == k)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          is_binary(va) and is_binary(k) ->
+            regs = :erlang.setelement(dest + 1, regs, va == k)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          true ->
+            {value, state} = Executor.dispatcher_cmp(:equal, va, k, sync(state, cs, cd), proto)
             regs = :erlang.setelement(dest + 1, regs, value)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
         end

@@ -112,6 +112,19 @@ defmodule Lua.Compiler.Bytecode do
   @op_label 60
   @op_goto 61
 
+  # Fused opcodes produced by `Lua.Compiler.Peephole`. The `_k` family
+  # carries its right operand as an inline literal instead of a register;
+  # the upvalue-field pair folds a `get_upvalue` into the field access that
+  # consumes it. Codegen never emits any of them directly.
+  @op_add_k 62
+  @op_subtract_k 63
+  @op_multiply_k 64
+  @op_less_than_k 65
+  @op_less_equal_k 66
+  @op_equal_k 67
+  @op_get_field_upvalue 68
+  @op_set_field_upvalue 69
+
   @doc """
   Compile a prototype, populating its `bytecode` field on success.
 
@@ -305,6 +318,26 @@ defmodule Lua.Compiler.Bytecode do
   defp encode({:shift_left, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_shift_left, dest, a, b, hint_a, hint_b}}
   defp encode({:shift_right, dest, a, b, hint_a, hint_b}), do: {:ok, {@op_shift_right, dest, a, b, hint_a, hint_b}}
   defp encode({:bitwise_not, dest, src, hint}), do: {:ok, {@op_bitwise_not, dest, src, hint}}
+
+  # Constant-folded arithmetic and comparison. Slot 4 is a literal Lua
+  # value, not a register index — the dispatcher and the interpreter both
+  # use it directly as the right operand. `hint_a` still rides along so
+  # `attempt to perform arithmetic` errors keep their `(local 'n')` suffix;
+  # the constant side never had a hint.
+  defp encode({:add_k, dest, a, constant, hint_a}), do: {:ok, {@op_add_k, dest, a, constant, hint_a}}
+  defp encode({:subtract_k, dest, a, constant, hint_a}), do: {:ok, {@op_subtract_k, dest, a, constant, hint_a}}
+  defp encode({:multiply_k, dest, a, constant, hint_a}), do: {:ok, {@op_multiply_k, dest, a, constant, hint_a}}
+  defp encode({:less_than_k, dest, a, constant}), do: {:ok, {@op_less_than_k, dest, a, constant}}
+  defp encode({:less_equal_k, dest, a, constant}), do: {:ok, {@op_less_equal_k, dest, a, constant}}
+  defp encode({:equal_k, dest, a, constant}), do: {:ok, {@op_equal_k, dest, a, constant}}
+
+  # Field access through an upvalue-held table — the shape of every global
+  # read and write outside the chunk itself.
+  defp encode({:get_field_upvalue, dest, index, name, name_hint}),
+    do: {:ok, {@op_get_field_upvalue, dest, index, name, name_hint}}
+
+  defp encode({:set_field_upvalue, index, name, value_reg, name_hint}),
+    do: {:ok, {@op_set_field_upvalue, index, name, value_reg, name_hint}}
 
   defp encode({:less_than, dest, a, b}), do: {:ok, {@op_less_than, dest, a, b}}
   defp encode({:less_equal, dest, a, b}), do: {:ok, {@op_less_equal, dest, a, b}}
@@ -642,4 +675,12 @@ defmodule Lua.Compiler.Bytecode do
   def op_set_list_multi, do: @op_set_list_multi
   def op_label, do: @op_label
   def op_goto, do: @op_goto
+  def op_add_k, do: @op_add_k
+  def op_subtract_k, do: @op_subtract_k
+  def op_multiply_k, do: @op_multiply_k
+  def op_less_than_k, do: @op_less_than_k
+  def op_less_equal_k, do: @op_less_equal_k
+  def op_equal_k, do: @op_equal_k
+  def op_get_field_upvalue, do: @op_get_field_upvalue
+  def op_set_field_upvalue, do: @op_set_field_upvalue
 end
