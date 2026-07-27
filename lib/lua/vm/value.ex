@@ -241,6 +241,18 @@ defmodule Lua.VM.Value do
     State.alloc_userdata(state, value)
   end
 
+  # `decode/2` leaves a bare `{:tref, id}` wherever a table contains itself,
+  # so a decoded cyclic value can carry one back in here. The id only means
+  # anything against the state it was decoded from; passing it through live
+  # would let a caller forge a reference into unrelated VM state.
+  def encode({:tref, _} = ref, _state, _fun_wrapper) do
+    raise Lua.RuntimeException,
+          "cannot encode #{inspect(ref)} into a Lua value. This reference marks a " <>
+            "cyclic table that decoding left in place rather than walking forever. " <>
+            "Evaluate with `decode: false` to get a table reference that round-trips " <>
+            "back into the VM."
+  end
+
   # Structs are maps, so without this clause a bare `%MyStruct{}` would encode
   # to a Lua table carrying a `"__struct__"` key — a silent, lossy conversion.
   # Refuse it explicitly: the caller must decide how the struct maps to a Lua
@@ -323,25 +335,39 @@ defmodule Lua.VM.Value do
 
   Tables are returned as lists of `{key, decoded_value}` tuples.
   Functions (closures, native) pass through as-is.
+
+  Cyclic tables (e.g. the common `T.__index = T` idiom) cannot be
+  represented as acyclic Elixir data, so the walk terminates at the
+  point of recurrence and leaves the table's `{:tref, id}` reference
+  there — mirroring how functions already pass through as opaque
+  references. Shared references that do not form a cycle decode
+  normally.
   """
   @spec decode(term(), State.t()) :: term()
-  def decode(nil, _state), do: nil
-  def decode(value, _state) when is_boolean(value), do: value
-  def decode(value, _state) when is_number(value), do: value
-  def decode(value, _state) when is_binary(value), do: value
+  def decode(value, state), do: decode(value, state, %{})
 
-  def decode({:udref, _} = ref, state) do
+  defp decode(nil, _state, _ancestors), do: nil
+  defp decode(value, _state, _ancestors) when is_boolean(value), do: value
+  defp decode(value, _state, _ancestors) when is_number(value), do: value
+  defp decode(value, _state, _ancestors) when is_binary(value), do: value
+
+  defp decode({:udref, _} = ref, state, _ancestors) do
     value = State.get_userdata(state, ref)
     {:userdata, value}
   end
 
-  def decode({:tref, id}, state) do
-    table = Map.fetch!(state.tables, id)
+  defp decode({:tref, id} = ref, state, ancestors) do
+    if Map.has_key?(ancestors, id) do
+      ref
+    else
+      table = Map.fetch!(state.tables, id)
+      ancestors = Map.put(ancestors, id, true)
 
-    Enum.map(Lua.VM.Table.to_map(table), fn {k, v} -> {k, decode(v, state)} end)
+      Enum.map(Lua.VM.Table.to_map(table), fn {k, v} -> {k, decode(v, state, ancestors)} end)
+    end
   end
 
-  def decode(value, _state), do: value
+  defp decode(value, _state, _ancestors), do: value
 
   @doc """
   Decodes a list of Lua VM values.

@@ -87,37 +87,49 @@ defmodule Lua.VM.Display do
   Wraps a single eval-result value for display.
 
   See `wrap_results/3` for the decode-mode matrix.
+
+  Tables that (transitively) contain themselves get a `:circular`
+  peek at the point of recurrence rather than recursing forever —
+  see `Lua.VM.Display.Table`.
   """
   @spec wrap_value(term(), State.t(), boolean()) :: term()
-  def wrap_value(value, state, decode?)
+  def wrap_value(value, state, decode?), do: wrap_value(value, state, decode?, %{})
 
   # decode: true — only wrap closures/native; tables and userdata
   # have already been decoded and are passed through unchanged.
-  def wrap_value({:lua_closure, _, _} = ref, _state, _decode?) do
+  defp wrap_value({:lua_closure, _, _} = ref, _state, _decode?, _ancestors) do
     wrap_closure(ref)
   end
 
-  def wrap_value({:compiled_closure, _, _} = ref, _state, _decode?) do
+  defp wrap_value({:compiled_closure, _, _} = ref, _state, _decode?, _ancestors) do
     wrap_closure(ref)
   end
 
-  def wrap_value({:native_func, fun} = ref, _state, _decode?) do
+  defp wrap_value({:native_func, fun} = ref, _state, _decode?, _ancestors) do
     %NativeFunc{fun: fun, ref: ref}
   end
 
   # decode: false — wrap tref/udref too, and recurse into table peek.
-  def wrap_value({:tref, id} = ref, state, false) do
-    peek = peek_table(state, id, false)
+  # `ancestors` holds the tref ids currently being peeked higher up
+  # this walk; revisiting one means the table contains itself.
+  defp wrap_value({:tref, id} = ref, state, false, ancestors) do
+    peek =
+      if Map.has_key?(ancestors, id) do
+        :circular
+      else
+        peek_table(state, id, false, Map.put(ancestors, id, true))
+      end
+
     %DTable{id: id, peek: peek, ref: ref}
   end
 
-  def wrap_value({:udref, id} = ref, state, false) do
+  defp wrap_value({:udref, id} = ref, state, false, _ancestors) do
     term = State.get_userdata(state, ref)
     %Userdata{id: id, term: term, ref: ref}
   end
 
   # decode: true catch-all (already-decoded values pass through)
-  def wrap_value(value, _state, _decode?), do: value
+  defp wrap_value(value, _state, _decode?, _ancestors), do: value
 
   # ---- internal helpers ----
 
@@ -138,15 +150,18 @@ defmodule Lua.VM.Display do
   # (1..N keys) render as a list; mixed-key tables render as a map.
   # Nested tables/closures are recursively wrapped so `Inspect` does
   # not have to know about live VM state.
-  defp peek_table(state, id, decode?) do
+  defp peek_table(state, id, decode?, ancestors) do
     case Map.fetch(state.tables, id) do
       {:ok, table} ->
         data = Lua.VM.Table.to_map(table)
 
         if sequence_like?(data) do
-          Enum.map(1..map_size(data), &wrap_value(Map.fetch!(data, &1), state, decode?))
+          Enum.map(
+            1..map_size(data),
+            &wrap_value(Map.fetch!(data, &1), state, decode?, ancestors)
+          )
         else
-          Map.new(data, fn {k, v} -> {k, wrap_value(v, state, decode?)} end)
+          Map.new(data, fn {k, v} -> {k, wrap_value(v, state, decode?, ancestors)} end)
         end
 
       :error ->
