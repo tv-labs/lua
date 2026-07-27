@@ -74,7 +74,7 @@ defmodule Lua.VM.Stdlib.Pattern do
   Global match - returns list of all matches as {start, stop, captures}.
   """
   def gmatch(subject, pattern) do
-    # Lua 5.3 §6.4.3: in gmatch a leading `^` does not work as an anchor
+    # Lua 5.3 §6.4 (`string.gmatch`): a leading `^` does not work as an anchor
     # (it would prevent the iteration). PUC-Lua's gmatch_aux never strips
     # it, so `match` sees it as an ordinary character — recompile the
     # pattern with the caret kept as a literal.

@@ -6,8 +6,8 @@ defmodule Lua.VM.Stdlib.PatternAnchorTest do
   # of the subject, so gsub performs at most one replacement and reports a
   # count of 0 or 1 (mirrors the `anchor` handling in PUC-Lua lstrlib.c
   # str_gsub). In gmatch a leading `^` does not anchor — PUC-Lua matches
-  # it as a literal caret (§6.4.3). Expected values verified against
-  # PUC-Lua 5.3.6.
+  # it as a literal caret (§6.4, `string.gmatch`). Expected values verified
+  # against PUC-Lua.
 
   alias Lua.VM.Stdlib.Pattern
 
@@ -34,6 +34,25 @@ defmodule Lua.VM.Stdlib.PatternAnchorTest do
 
     test "n = 0 suppresses the anchored replacement" do
       assert {["xax", 0], _} = Lua.eval!(~S|return string.gsub("xax", "^x", "Y", 0)|)
+    end
+
+    test "n greater than 1 still allows at most one anchored replacement" do
+      assert {["Xaa", 1], _} = Lua.eval!(~S|return string.gsub("aaa", "^a", "X", 3)|)
+      assert {["Xaa", 1], _} = Lua.eval!(~S|return string.gsub("aaa", "^a", "X", 2)|)
+      assert {["Yax", 1], _} = Lua.eval!(~S|return string.gsub("xax", "^x", "Y", 5)|)
+    end
+
+    test "negative n suppresses the anchored replacement" do
+      assert {["xax", 0], _} = Lua.eval!(~S|return string.gsub("xax", "^x", "Y", -1)|)
+    end
+
+    test "a table replacement is consulted once with the anchored capture" do
+      assert {["AAlo alo", 1], _} =
+               Lua.eval!(~S|return string.gsub("alo alo", "^(%a)", {a = "AA"})|)
+    end
+
+    test "anchored pattern whose $ fails leaves the subject untouched" do
+      assert {["abc\n", 0], _} = Lua.eval!(~S|return string.gsub("abc\n", "^%a*$", "X")|)
     end
 
     test "captures reach a function replacement exactly once" do
@@ -74,6 +93,36 @@ defmodule Lua.VM.Stdlib.PatternAnchorTest do
 
       assert {[2, "^a", "^a"], _} = Lua.eval!(script)
     end
+
+    test "yields the captures of every literal-caret match" do
+      script = ~S"""
+      local t = {}
+      for w in ("^a^b"):gmatch("^(%a)") do t[#t + 1] = w end
+      return #t, t[1], t[2]
+      """
+
+      assert {[2, "a", "b"], _} = Lua.eval!(script)
+    end
+
+    test "a quantifier binds to the literal caret" do
+      script = ~S"""
+      local t = {}
+      for w in ("^*x"):gmatch("^*") do t[#t + 1] = w end
+      return #t, t[1], t[2], t[3]
+      """
+
+      assert {[3, "^", "", ""], _} = Lua.eval!(script)
+    end
+
+    test "a trailing $ still anchors to the end after a literal caret" do
+      script = ~S"""
+      local t = {}
+      for w in ("a^"):gmatch("^$") do t[#t + 1] = w end
+      return #t, t[1]
+      """
+
+      assert {[1, "^"], _} = Lua.eval!(script)
+    end
   end
 
   describe "anchored Pattern.gsub/4" do
@@ -84,6 +133,14 @@ defmodule Lua.VM.Stdlib.PatternAnchorTest do
 
     test "honours an explicit max_n of 0" do
       assert {"xax", 0} = Pattern.gsub("xax", "^x", "Y", 0)
+    end
+
+    test "caps the count at 1 for a max_n above 1" do
+      assert {"Xaa", 1} = Pattern.gsub("aaa", "^a", "X", 3)
+    end
+
+    test "treats a negative max_n as no replacement" do
+      assert {"xax", 0} = Pattern.gsub("xax", "^x", "Y", -1)
     end
   end
 end
