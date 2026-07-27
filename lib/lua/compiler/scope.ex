@@ -609,72 +609,63 @@ defmodule Lua.Compiler.Scope do
     case Map.get(parent.locals, name) do
       nil ->
         # Not in this parent's locals — check if the parent already has it as an upvalue
-        parent_func = state.functions[parent.function]
-
-        case Enum.find_index(parent_func.upvalue_descriptors, fn
-               {:parent_local, _, n} -> n == name
-               {:parent_upvalue, _, n} -> n == name
-             end) do
+        case upvalue_index(state, parent.function, name) do
           nil ->
             # Parent doesn't have it. Recurse to ensure the parent gets it first.
             case ensure_upvalue(name, parent.function, rest, state) do
               {:ok, _parent_uv_index, state} ->
                 # Parent now has an upvalue for this variable. Find its index.
-                parent_func = state.functions[parent.function]
-
-                parent_uv_index =
-                  Enum.find_index(parent_func.upvalue_descriptors, fn
-                    {:parent_local, _, n} -> n == name
-                    {:parent_upvalue, _, n} -> n == name
-                  end)
-
-                # Add to for_function referencing parent's upvalue
-                func = state.functions[for_function]
-                uv_index = length(func.upvalue_descriptors)
-
-                func = %{
-                  func
-                  | upvalue_descriptors:
-                      func.upvalue_descriptors ++
-                        [{:parent_upvalue, parent_uv_index, name}]
-                }
-
-                state = %{state | functions: Map.put(state.functions, for_function, func)}
-                {:ok, uv_index, state}
+                parent_uv_index = upvalue_index(state, parent.function, name)
+                put_upvalue(state, for_function, {:parent_upvalue, parent_uv_index, name})
 
               :not_found ->
                 :not_found
             end
 
           parent_uv_index ->
-            # Parent already has this upvalue — add reference in for_function
-            func = state.functions[for_function]
-            uv_index = length(func.upvalue_descriptors)
-
-            func = %{
-              func
-              | upvalue_descriptors:
-                  func.upvalue_descriptors ++
-                    [{:parent_upvalue, parent_uv_index, name}]
-            }
-
-            state = %{state | functions: Map.put(state.functions, for_function, func)}
-            {:ok, uv_index, state}
+            # Parent already has this upvalue — reference it from for_function
+            put_upvalue(state, for_function, {:parent_upvalue, parent_uv_index, name})
         end
 
       reg ->
-        # Found in parent's locals — add {:parent_local, reg, name} to for_function
-        func = state.functions[for_function]
-        uv_index = length(func.upvalue_descriptors)
-
-        func = %{
-          func
-          | upvalue_descriptors: func.upvalue_descriptors ++ [{:parent_local, reg, name}]
-        }
-
-        state = %{state | functions: Map.put(state.functions, for_function, func)}
-        {:ok, uv_index, state}
+        # Found in parent's locals — capture it directly
+        put_upvalue(state, for_function, {:parent_local, reg, name})
     end
+  end
+
+  # Index of the upvalue `function` holds for `name`, or nil. A function has
+  # at most one, because the parent-scope snapshot a function resolves
+  # against is fixed for its whole body: a name always denotes the same cell.
+  defp upvalue_index(state, function, name) do
+    Enum.find_index(state.functions[function].upvalue_descriptors, fn {_kind, _index, n} -> n == name end)
+  end
+
+  # Give `for_function` an upvalue for `descriptor` and return its index.
+  #
+  # An identical descriptor provably denotes the same cell — closure creation
+  # resolves `{:parent_local, reg, _}` through the one open-upvalue cell for
+  # `reg`, and `{:parent_upvalue, i, _}` forwards the enclosing closure's
+  # slot `i` — so a function that mentions the same free variable twice
+  # shares a single slot rather than carrying the capture twice. That is what
+  # PUC-Lua does: one slot per upvalue, not one per reference. Deduping on
+  # the whole tuple keeps shadowed same-name captures apart.
+  defp put_upvalue(state, for_function, descriptor) do
+    func = state.functions[for_function]
+    descriptors = func.upvalue_descriptors
+    {index, descriptors} = insert_upvalue(descriptors, descriptor, 0, [], descriptors)
+    func = %{func | upvalue_descriptors: descriptors}
+    {:ok, index, %{state | functions: Map.put(state.functions, for_function, func)}}
+  end
+
+  # One traversal for both outcomes: a hit yields the position and the
+  # untouched list, a miss appends off the reversed prefix already in hand.
+  # Neither path walks the list twice the way `length/1` plus `++` did.
+  defp insert_upvalue([], descriptor, index, acc, _all), do: {index, Enum.reverse([descriptor | acc])}
+
+  defp insert_upvalue([descriptor | _rest], descriptor, index, _acc, all), do: {index, all}
+
+  defp insert_upvalue([other | rest], descriptor, index, acc, all) do
+    insert_upvalue(rest, descriptor, index + 1, [other | acc], all)
   end
 
   # Shared helper: resolves a function body scope for Expr.Function, Statement.FuncDecl, etc.
