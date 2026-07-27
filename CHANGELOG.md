@@ -47,6 +47,18 @@ Everything else — the default sandbox, `_G`/`_ENV` semantics, metatables, and
 the standard-library surface — is compatible. The full breaking-change list
 is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
 
+## [Unreleased]
+
+### Changed
+- `Lua.new/1` is ~100x faster (roughly 40µs down to 0.4µs) for the default and
+  fully-custom-sandbox configurations. Installing the standard library is pure
+  and deterministic, so the boot-time VM template is now built once per node
+  and memoized in `:persistent_term`; every later `Lua.new/1` starts from the
+  shared template copy-on-write. In `:interactive` mode (dev, IEx, tests) the
+  cache self-invalidates when the modules that built it are recompiled; hosts
+  that hot-load new code in `:embedded` mode (releases) can force a rebuild
+  with `Lua.VM.Bootstrap.reset/0` (#398).
+
 ## [1.0.1] - 2026-07-16
 
 ### Fixed

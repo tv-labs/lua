@@ -8,6 +8,7 @@ defmodule Lua do
 
   alias Lua.Util
   alias Lua.VM.AssertionError
+  alias Lua.VM.Bootstrap
   alias Lua.VM.Display
   alias Lua.VM.Executor
   alias Lua.VM.InternalError
@@ -142,23 +143,51 @@ defmodule Lua do
         max_instructions: :infinity
       )
 
+    sandboxed = Keyword.fetch!(opts, :sandboxed)
     exclude = Keyword.fetch!(opts, :exclude)
     debug = Keyword.fetch!(opts, :debug)
     max_call_depth = validate_max_call_depth!(Keyword.fetch!(opts, :max_call_depth))
     max_string_bytes = validate_max_string_bytes!(Keyword.fetch!(opts, :max_string_bytes))
     max_instructions = validate_max_instructions!(Keyword.fetch!(opts, :max_instructions))
 
-    state = %{
-      Lua.VM.Stdlib.install(State.new())
-      | max_call_depth: max_call_depth,
-        max_string_bytes: max_string_bytes,
-        max_instructions: max_instructions
-    }
+    lua = template(sandboxed, exclude)
 
-    opts
-    |> Keyword.fetch!(:sandboxed)
+    %{
+      lua
+      | debug: debug,
+        state: %{
+          lua.state
+          | max_call_depth: max_call_depth,
+            max_string_bytes: max_string_bytes,
+            max_instructions: max_instructions
+        }
+    }
+  end
+
+  # A freshly built VM is a pure function of the sandbox options — the limits
+  # and `:debug` are patched onto the finished struct above, and every later
+  # mutation is copy-on-write — so the two shapes that dominate real use are
+  # memoized rather than rebuilt. Installing the standard library was four
+  # fifths of what `new/1` cost, and it produces the same value every time.
+  #
+  # The default arguments hit the fully-sandboxed template. Anything else pays
+  # only for its own sandbox pass, over the shared pre-sandbox install.
+  defp template(@default_sandbox, []) do
+    Bootstrap.fetch({__MODULE__, :default_lua}, fn -> sandbox_all(@default_sandbox, []) end)
+  end
+
+  defp template(sandboxed, exclude), do: sandbox_all(sandboxed, exclude)
+
+  defp sandbox_all(sandboxed, exclude) do
+    lua = %__MODULE__{state: base_state()}
+
+    sandboxed
     |> Enum.reject(fn path -> path in exclude end)
-    |> Enum.reduce(%__MODULE__{state: state, debug: debug}, &sandbox(&2, &1))
+    |> Enum.reduce(lua, &sandbox(&2, &1))
+  end
+
+  defp base_state do
+    Bootstrap.fetch({__MODULE__, :base_state}, fn -> Lua.VM.Stdlib.install(State.new()) end)
   end
 
   defp validate_max_call_depth!(:infinity), do: :infinity

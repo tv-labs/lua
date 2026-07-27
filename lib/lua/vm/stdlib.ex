@@ -18,54 +18,74 @@ defmodule Lua.VM.Stdlib do
   alias Lua.VM.TypeError
   alias Lua.VM.Value
 
+  # Installed in this order: it is the order `pairs(_G)` and
+  # `pairs(package.loaded)` report the library tables in.
+  @libraries [
+    Lua.VM.Stdlib.String,
+    Lua.VM.Stdlib.Math,
+    Lua.VM.Stdlib.Table,
+    Lua.VM.Stdlib.Utf8,
+    Lua.VM.Stdlib.Os,
+    Lua.VM.Stdlib.Debug
+  ]
+
   @doc """
   Installs the standard library into the given VM state.
   """
   @spec install(State.t()) :: State.t()
   def install(%State{} = state) do
-    state
-    |> State.register_function("type", &lua_type/2)
-    |> State.register_function("tostring", &lua_tostring/2)
-    |> State.register_function("tonumber", &lua_tonumber/2)
-    |> State.register_function("print", &lua_print/2)
-    |> State.register_function("error", &lua_error/2)
-    |> State.register_function("assert", &lua_assert/2)
-    |> State.register_function("pcall", &lua_pcall/2)
-    |> State.register_function("xpcall", &lua_xpcall/2)
-    |> State.register_function("rawget", &lua_rawget/2)
-    |> State.register_function("rawset", &lua_rawset/2)
-    |> State.register_function("rawlen", &lua_rawlen/2)
-    |> State.register_function("rawequal", &lua_rawequal/2)
-    |> State.register_function("next", &lua_next/2)
-    |> State.register_function("pairs", &lua_pairs/2)
-    |> State.register_function("ipairs", &lua_ipairs/2)
-    |> State.register_function("setmetatable", &lua_setmetatable/2)
-    |> State.register_function("getmetatable", &lua_getmetatable/2)
-    |> State.register_function("select", &lua_select/2)
-    |> State.register_function("load", &lua_load/2)
-    |> State.register_function("require", &lua_require/2)
-    |> State.register_function("collectgarbage", &lua_collectgarbage/2)
-    |> State.register_function("dofile", &lua_dofile/2)
-    |> State.set_global("_VERSION", "Lua 5.3")
-    |> install_package_table()
-    |> install_library(Lua.VM.Stdlib.String)
-    |> install_library(Lua.VM.Stdlib.Math)
-    |> install_library(Lua.VM.Stdlib.Table)
-    |> install_library(Lua.VM.Stdlib.Utf8)
-    |> install_library(Lua.VM.Stdlib.Os)
-    |> install_library(Lua.VM.Stdlib.Debug)
-    |> preload_stdlib_modules()
+    {state, loaded} =
+      state
+      |> State.set_globals(base_globals())
+      |> install_package_table()
+
+    @libraries
+    |> Enum.reduce(state, &install_library(&2, &1, loaded))
     |> install_unpack_alias()
     |> install_global_g()
   end
 
-  # Install a stdlib library module and register it in package.loaded
-  defp install_library(state, module) do
+  # The base globals, in the iteration order `pairs(_G)` reports them. Seeded
+  # in one `_G` update rather than one per name.
+  defp base_globals do
+    [
+      {"type", {:native_func, &lua_type/2}},
+      {"tostring", {:native_func, &lua_tostring/2}},
+      {"tonumber", {:native_func, &lua_tonumber/2}},
+      {"print", {:native_func, &lua_print/2}},
+      {"error", {:native_func, &lua_error/2}},
+      {"assert", {:native_func, &lua_assert/2}},
+      {"pcall", {:native_func, &lua_pcall/2}},
+      {"xpcall", {:native_func, &lua_xpcall/2}},
+      {"rawget", {:native_func, &lua_rawget/2}},
+      {"rawset", {:native_func, &lua_rawset/2}},
+      {"rawlen", {:native_func, &lua_rawlen/2}},
+      {"rawequal", {:native_func, &lua_rawequal/2}},
+      {"next", {:native_func, &lua_next/2}},
+      {"pairs", {:native_func, &lua_pairs/2}},
+      {"ipairs", {:native_func, &lua_ipairs/2}},
+      {"setmetatable", {:native_func, &lua_setmetatable/2}},
+      {"getmetatable", {:native_func, &lua_getmetatable/2}},
+      {"select", {:native_func, &lua_select/2}},
+      {"load", {:native_func, &lua_load/2}},
+      {"require", {:native_func, &lua_require/2}},
+      {"collectgarbage", {:native_func, &lua_collectgarbage/2}},
+      {"dofile", {:native_func, &lua_dofile/2}},
+      {"_VERSION", "Lua 5.3"}
+    ]
+  end
+
+  # Install a stdlib library module and register it in package.loaded.
+  #
+  # `loaded` is the `package.loaded` tref, resolved once by the caller —
+  # rediscovering it per library means re-reading the `package` global and its
+  # table for every module installed.
+  defp install_library(state, module, loaded) do
     state = module.install(state)
     name = module.lib_name()
 
     case State.get_global(state, name) do
-      {:tref, _} = tref -> cache_module_result(state, name, tref)
+      {:tref, _} = tref -> cache_in_loaded(state, loaded, name, tref)
       _ -> state
     end
   end
@@ -83,34 +103,12 @@ defmodule Lua.VM.Stdlib do
   defp install_global_g(state) do
     g_ref = State.g_ref(state)
 
-    # Expose _G to Lua under the name "_G"
-    state = State.set_global(state, "_G", g_ref)
-
-    # _ENV is also exposed at boot for backwards compatibility with code that
-    # references `_ENV` as a global. The compiler binds `_ENV` as a chunk-level
-    # local (register 0) at execute time, so this global is mostly for
-    # introspection; user-level `_ENV` reassignment goes to that local, not
+    # `_ENV` is exposed alongside `_G` at boot for backwards compatibility with
+    # code that references `_ENV` as a global. The compiler binds `_ENV` as a
+    # chunk-level local (register 0) at execute time, so this global is mostly
+    # for introspection; user-level `_ENV` reassignment goes to that local, not
     # this global.
-    State.set_global(state, "_ENV", g_ref)
-  end
-
-  # Pre-load any stdlib table globals into package.loaded so that
-  # require("string"), require("math"), etc. resolve to the existing global
-  # tables without triggering a filesystem search. This mirrors Lua 5.3's
-  # behaviour where package.loaded is pre-populated by the runtime.
-  #
-  # install_library/2 already caches the four installed modules (string, math,
-  # table, debug), so this pass is a safety net for any future stdlib tables
-  # that may be added as globals before this call.
-  defp preload_stdlib_modules(state) do
-    modules = ["string", "math", "table", "utf8", "debug"]
-
-    Enum.reduce(modules, state, fn name, acc ->
-      case State.get_global(acc, name) do
-        {:tref, _} = tref -> cache_module_result(acc, name, tref)
-        _ -> acc
-      end
-    end)
+    State.set_globals(state, [{"_G", g_ref}, {"_ENV", g_ref}])
   end
 
   # type(v) — returns the type of v as a string
@@ -667,8 +665,10 @@ defmodule Lua.VM.Stdlib do
 
     state = State.set_global(state, "package", package_tref)
 
-    # Cache "package" itself in package.loaded
-    cache_module_result(state, "package", package_tref)
+    # Cache "package" itself in package.loaded, and hand the caller the
+    # `loaded` tref so the library installs that follow do not each re-resolve
+    # it through the `package` global.
+    {cache_in_loaded(state, loaded_tref, "package", package_tref), loaded_tref}
   end
 
   # require(modname) — loads a Lua module
@@ -801,9 +801,12 @@ defmodule Lua.VM.Stdlib do
 
   # Cache the module result in package.loaded
   defp cache_module_result(state, modname, result) do
-    {:tref, loaded_id} = get_package_loaded_ref(state)
+    cache_in_loaded(state, get_package_loaded_ref(state), modname, result)
+  end
 
-    State.update_table(state, {:tref, loaded_id}, fn loaded_table ->
+  # Cache the module result in an already-resolved package.loaded table
+  defp cache_in_loaded(state, loaded_ref, modname, result) do
+    State.update_table(state, loaded_ref, fn loaded_table ->
       Table.put(loaded_table, modname, result)
     end)
   end

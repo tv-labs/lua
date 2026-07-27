@@ -222,6 +222,19 @@ defmodule Lua.VM.State do
   end
 
   @doc """
+  Sets a batch of global variables, left to right, in one `_G` update.
+
+  Equivalent to folding `set_global/3` over `pairs`, but the surrounding
+  `%State{}` and its `tables` map are rebuilt once instead of once per name —
+  which is what installing the standard library's several dozen globals used
+  to cost.
+  """
+  @spec set_globals(t(), [{binary(), term()}]) :: t()
+  def set_globals(%__MODULE__{g_ref: g_ref} = state, pairs) when is_list(pairs) and not is_nil(g_ref) do
+    update_table(state, g_ref, fn table -> Table.put_many(table, pairs) end)
+  end
+
+  @doc """
   Reads a global variable from the VM state. Returns `nil` if unset.
   """
   @spec get_global(t(), binary()) :: term()
