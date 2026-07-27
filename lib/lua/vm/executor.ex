@@ -498,12 +498,6 @@ defmodule Lua.VM.Executor do
     coerce_numeric_for_controls(init, limit, step, state)
   end
 
-  @doc false
-  @spec dispatcher_close_open_upvalues_at_or_above(State.t(), non_neg_integer()) :: State.t()
-  def dispatcher_close_open_upvalues_at_or_above(state, threshold) do
-    close_open_upvalues_at_or_above(state, threshold)
-  end
-
   # ── Dispatcher bridges: B5c-v2 ──────────────────────────────────────────
   #
   # `:self` method resolution. Wraps `index_value/6` so __index metamethod
@@ -630,18 +624,12 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  @doc false
-  @spec dispatcher_call_info(term(), term(), non_neg_integer()) :: call_frame()
-  def dispatcher_call_info(proto, name_hint, line) do
-    # Hot path: every Lua call pushes one of these. Keep it a flat 3-tuple
-    # carrying the raw `name_hint` tag, and defer the `hint_name`/
-    # `hint_namewhat` decoding to the cold readers (`frame_name/1`,
-    # `frame_namewhat/1`) that only run during traceback formatting and
-    # `debug.getinfo`. A tuple is ~4 words vs ~7 for the old 4-key map, and
-    # skips two function calls per call frame.
-    {proto.source, line, name_hint}
-  end
-
+  # Every Lua call pushes one call frame, so the runtime shape is a flat
+  # 3-tuple `{source, line, name_hint}` carrying the raw `name_hint` tag;
+  # the `hint_name` / `hint_namewhat` decoding is deferred to the cold
+  # readers (`frame_name/1`, `frame_namewhat/1`) that only run during
+  # traceback formatting and `debug.getinfo`. A tuple is ~4 words against
+  # ~7 for a 4-key map, and skips two function calls per frame.
   @typedoc false
   @type call_frame() :: {term(), non_neg_integer(), term()} | map()
 
