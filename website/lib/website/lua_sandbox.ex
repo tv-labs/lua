@@ -129,14 +129,7 @@ defmodule Website.LuaSandbox do
           # big binaries it is about to drop). Unlink — and flush an exit
           # signal that may already be queued — so a late `:killed` can't
           # propagate to us once we stop trapping.
-          Process.unlink(worker)
-
-          receive do
-            {:EXIT, ^worker, _} -> :ok
-          after
-            0 -> :ok
-          end
-
+          unlink_worker(worker)
           result
 
         # Worker hit the memory ceiling: max_heap_size kills it with
@@ -157,11 +150,31 @@ defmodule Website.LuaSandbox do
           exit(reason)
       after
         @run_timeout_ms ->
+          # `Process.exit/2` only *sends* the kill; the worker's exit signal
+          # comes back tens of microseconds later, which is long enough to
+          # land after the `after` clause below has restored `trap_exit`.
+          # An untrapped `:killed` would then take the caller down with it,
+          # so cut the link before returning rather than racing it.
           Process.exit(worker, :kill)
+          unlink_worker(worker)
           timeout_result(started)
       end
     after
       Process.flag(:trap_exit, prev_trap)
+    end
+  end
+
+  # Drop the link to `worker` and flush an exit signal that already made it
+  # into the mailbox. `Process.unlink/1` guarantees no exit signal from that
+  # link is delivered after it returns, so once this runs the caller is safe
+  # to stop trapping exits.
+  defp unlink_worker(worker) do
+    Process.unlink(worker)
+
+    receive do
+      {:EXIT, ^worker, _reason} -> :ok
+    after
+      0 -> :ok
     end
   end
 
