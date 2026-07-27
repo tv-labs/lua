@@ -62,6 +62,15 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
       op == Bytecode.op_test() -> [1]
       op == Bytecode.op_call_zero() -> [1]
       op == Bytecode.op_call_one() -> [1]
+      # Static-arity calls carry no `arg_count` operand: the dispatcher
+      # reads the arguments at `base + 1 .. base + arity`, so the arity is
+      # part of the opcode's register extent even though no slot spells it.
+      op == Bytecode.op_call_one_0() -> [1]
+      op == Bytecode.op_call_zero_0() -> [1]
+      op == Bytecode.op_call_one_1() -> :call_arity_1
+      op == Bytecode.op_call_zero_1() -> :call_arity_1
+      op == Bytecode.op_call_one_2() -> :call_arity_2
+      op == Bytecode.op_call_zero_2() -> :call_arity_2
       op == Bytecode.op_return_one() -> [1]
       op == Bytecode.op_return_zero() -> []
       # Table opcodes (B5b-v2).
@@ -183,6 +192,13 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
         body_bc = :erlang.element(4, instr)
         var_max = Enum.reduce(Tuple.to_list(var_regs_tuple), -1, &max/2)
         Enum.max([base + 2, var_max, max_register_used(body_bc)])
+
+      :call_arity_1 ->
+        # {tag, base, hint, line}: reads base (the callee) and base + 1.
+        :erlang.element(2, instr) + 1
+
+      :call_arity_2 ->
+        :erlang.element(2, instr) + 2
 
       :self ->
         # {tag, base, obj_reg, method, hint}: reads obj_reg, writes base

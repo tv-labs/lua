@@ -351,6 +351,23 @@ defmodule Lua.Compiler.BytecodeTest do
     end
   end
 
+  # Every shape a `:call` can encode to. The static-arity variants replace
+  # `@op_call_one` / `@op_call_zero` at the small argument counts, so a test
+  # that looks for "the call opcodes" has to accept all of them.
+  defp call_tags do
+    [
+      Bytecode.op_call_one(),
+      Bytecode.op_call_zero(),
+      Bytecode.op_call_multi(),
+      Bytecode.op_call_one_0(),
+      Bytecode.op_call_one_1(),
+      Bytecode.op_call_one_2(),
+      Bytecode.op_call_zero_0(),
+      Bytecode.op_call_zero_1(),
+      Bytecode.op_call_zero_2()
+    ]
+  end
+
   describe "call opcodes carry the source line" do
     test "@op_call_one bakes the line of the call site into its tuple" do
       # `pairs(x)` is a `:call` with result_count > 0 used as an rvalue,
@@ -371,7 +388,7 @@ defmodule Lua.Compiler.BytecodeTest do
         |> Tuple.to_list()
         |> Enum.filter(fn op ->
           tag = :erlang.element(1, op)
-          tag in [Bytecode.op_call_one(), Bytecode.op_call_zero(), Bytecode.op_call_multi()]
+          tag in call_tags()
         end)
 
       # Every call opcode carries a positive source line at its last slot.
@@ -418,7 +435,7 @@ defmodule Lua.Compiler.BytecodeTest do
       nested_call_lines =
         nested_body
         |> Tuple.to_list()
-        |> Enum.filter(fn op -> :erlang.element(1, op) == Bytecode.op_call_zero() end)
+        |> Enum.filter(fn op -> :erlang.element(1, op) == Bytecode.op_call_zero_1() end)
         |> Enum.map(fn op -> :erlang.element(tuple_size(op), op) end)
 
       assert nested_call_lines == [3]
