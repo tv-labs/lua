@@ -84,6 +84,10 @@ defmodule Lua.VM.Table do
   encode) get split storage with no extra effort.
   """
   @spec from_data(map()) :: t()
+  # Every `{}` constructor allocates through here; an empty map has nothing
+  # to sort and nothing to fold, so skip straight to the empty struct.
+  def from_data(data) when map_size(data) == 0, do: %__MODULE__{}
+
   def from_data(data) when is_map(data) do
     split_from_map(%__MODULE__{}, data)
   end
@@ -198,6 +202,27 @@ defmodule Lua.VM.Table do
     end
   end
 
+  # No dead keys means the resurrection branch cannot apply, so the write is
+  # either an in-place overwrite or a fresh append. This is the shape every
+  # `t.field = v` / `t[k] = v` on a table that has never had a key removed
+  # takes, so it skips the `dead` probe entirely.
+  defp insert_hash(%__MODULE__{data: data, order_tail: order_tail, dead: dead} = table, key, value)
+       when map_size(dead) == 0 do
+    table = if positive_int?(key), do: %{table | border: :dirty}, else: table
+
+    if :maps.is_key(key, data) do
+      %{table | data: :maps.put(key, value, data)}
+    else
+      %{
+        table
+        | data: :maps.put(key, value, data),
+          order_tail: [key | order_tail],
+          order_index: nil,
+          order_arr: nil
+      }
+    end
+  end
+
   defp insert_hash(%__MODULE__{data: data, order: order, order_tail: order_tail, dead: dead} = table, key, value) do
     # A positive-integer hash key sits adjacent to the probe range and can
     # change #t once a contiguous fill reaches it, so invalidate the cache.
@@ -205,7 +230,7 @@ defmodule Lua.VM.Table do
     table = if positive_int?(key), do: %{table | border: :dirty}, else: table
 
     cond do
-      Map.has_key?(dead, key) ->
+      :maps.is_key(key, dead) ->
         merged_order = order ++ Enum.reverse(order_tail)
         new_order = Enum.reject(merged_order, &(&1 === key))
 

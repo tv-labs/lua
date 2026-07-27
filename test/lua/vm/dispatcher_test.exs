@@ -1072,6 +1072,51 @@ defmodule Lua.VM.DispatcherTest do
       assert results == [18]
     end
 
+    test ":set_field — nil assignment deletes the key" do
+      {proto, results} =
+        run!("""
+        function f()
+          local t = { x = 1, y = 2 }
+          t.x = nil
+          local count = 0
+          for _ in pairs(t) do count = count + 1 end
+          return t.x, t.y, count
+        end
+        return f()
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [nil, 2, 1]
+    end
+
+    test ":set_field — __newindex function handler (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, v) t.x = v end
+        local log = {}
+        local t = setmetatable({}, {__newindex = function(_, k, v) log[k] = v + 1 end})
+        f(t, 41)
+        return rawget(t, "x"), log.x
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [nil, 42]
+    end
+
+    test ":set_field — __newindex table handler (slow-path bridge)" do
+      {proto, results} =
+        run!("""
+        function f(t, v) t.x = v end
+        local backing = {}
+        local t = setmetatable({}, {__newindex = backing})
+        f(t, 7)
+        return rawget(t, "x"), backing.x
+        """)
+
+      assert first_sub(proto).bytecode
+      assert results == [nil, 7]
+    end
+
     test ":get_table — integer-key fast path" do
       {proto, results} =
         run!("""

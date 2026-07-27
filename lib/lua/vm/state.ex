@@ -7,6 +7,15 @@ defmodule Lua.VM.State do
   alias Lua.VM.RuntimeError
   alias Lua.VM.Table
 
+  # `call_stack`, `call_depth` and `open_upvalues` are control state, not
+  # heap state. The interpreter keeps them here; the dispatcher threads
+  # them as loop parameters (the same discipline as `instruction_count`
+  # below) so an in-mode Lua call allocates no struct at all, and writes
+  # them back into these fields whenever execution leaves the dispatch
+  # loop — an `Executor` bridge, a native callback, a raise site. Anything
+  # outside the loop that reads them (`debug.getinfo`, `error(msg, level)`,
+  # traceback formatting, `check_call_depth!/1`) therefore still sees live
+  # values.
   defstruct call_stack: [],
             # Call depth tracked as an O(1) counter that moves in lockstep
             # with `call_stack` — `length(call_stack)` would be O(depth) per

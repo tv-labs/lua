@@ -187,9 +187,10 @@ defmodule Lua.VM.Executor do
 
   def call_function({:compiled_closure, callee_proto, callee_upvalues}, args, state) do
     # Compiled callees route through the dispatcher. The dispatcher manages
-    # its own register file setup, vararg routing, and open-upvalue save/
-    # restore — `Dispatcher.execute/4` mirrors the semantics of this
-    # function for the bytecode-encoded path.
+    # its own register file setup and vararg routing, and isolates open
+    # upvalues by threading them as a dispatch-loop parameter seeded empty
+    # at this boundary — `Dispatcher.execute/4` mirrors the semantics of
+    # this function for the bytecode-encoded path.
     Dispatcher.execute(callee_proto, args, callee_upvalues, state)
   end
 
@@ -498,12 +499,6 @@ defmodule Lua.VM.Executor do
     coerce_numeric_for_controls(init, limit, step, state)
   end
 
-  @doc false
-  @spec dispatcher_close_open_upvalues_at_or_above(State.t(), non_neg_integer()) :: State.t()
-  def dispatcher_close_open_upvalues_at_or_above(state, threshold) do
-    close_open_upvalues_at_or_above(state, threshold)
-  end
-
   # ── Dispatcher bridges: B5c-v2 ──────────────────────────────────────────
   #
   # `:self` method resolution. Wraps `index_value/6` so __index metamethod
@@ -579,14 +574,24 @@ defmodule Lua.VM.Executor do
     # Publish the source line baked into the call opcode by the encoder so
     # raise sites reading `current_position/0` — `error()`'s §6.1 prefix,
     # stdlib bad-argument raises — attribute to the right call site.
-    # Restored after the call so nested invocations don't leak.
-    prev_pos = Process.get(@position_key, @unset)
-    set_position(line, proto.source)
+    #
+    # Every compiled-mode stdlib call lands here, so the bridge talks to the
+    # process dictionary through the BIFs instead of the `Process.*`
+    # wrappers. The restore must run on raise too — not every entry into
+    # this bridge sits under `execute/5`'s `after restore_position/1` net
+    # (e.g. `Lua.call_function/3` invoking a compiled closure), so a
+    # raise-skipped restore would leak a stale position into later,
+    # unrelated evaluations' diagnostics.
+    prev_pos = :erlang.get(@position_key)
+    :erlang.put(@position_key, {line, proto.source})
 
     try do
       call_function(nf, args, state)
     after
-      restore_position(prev_pos)
+      case prev_pos do
+        :undefined -> :erlang.erase(@position_key)
+        pos -> :erlang.put(@position_key, pos)
+      end
     end
   end
 
@@ -622,18 +627,12 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  @doc false
-  @spec dispatcher_call_info(term(), term(), non_neg_integer()) :: call_frame()
-  def dispatcher_call_info(proto, name_hint, line) do
-    # Hot path: every Lua call pushes one of these. Keep it a flat 3-tuple
-    # carrying the raw `name_hint` tag, and defer the `hint_name`/
-    # `hint_namewhat` decoding to the cold readers (`frame_name/1`,
-    # `frame_namewhat/1`) that only run during traceback formatting and
-    # `debug.getinfo`. A tuple is ~4 words vs ~7 for the old 4-key map, and
-    # skips two function calls per call frame.
-    {proto.source, line, name_hint}
-  end
-
+  # Every Lua call pushes one call frame, so the runtime shape is a flat
+  # 3-tuple `{source, line, name_hint}` carrying the raw `name_hint` tag;
+  # the `hint_name` / `hint_namewhat` decoding is deferred to the cold
+  # readers (`frame_name/1`, `frame_namewhat/1`) that only run during
+  # traceback formatting and `debug.getinfo`. A tuple is ~4 words against
+  # ~7 for a 4-key map, and skips two function calls per frame.
   @typedoc false
   @type call_frame() :: {term(), non_neg_integer(), term()} | map()
 
@@ -949,7 +948,7 @@ defmodule Lua.VM.Executor do
          instruction_count
        ) do
     cell_ref = elem(upvalues, index)
-    value = Map.get(state.upvalue_cells, cell_ref)
+    value = :maps.get(cell_ref, state.upvalue_cells, nil)
     regs = put_elem(regs, dest, value)
     do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
   end
@@ -991,9 +990,9 @@ defmodule Lua.VM.Executor do
          instruction_count
        ) do
     value =
-      case Map.get(state.open_upvalues, reg) do
+      case :maps.get(reg, state.open_upvalues, nil) do
         nil -> elem(regs, reg)
-        cell_ref -> Map.get(state.upvalue_cells, cell_ref)
+        cell_ref -> :maps.get(cell_ref, state.upvalue_cells, nil)
       end
 
     regs = put_elem(regs, dest, value)
@@ -1043,7 +1042,7 @@ defmodule Lua.VM.Executor do
          instruction_count
        ) do
     state =
-      case Map.get(state.open_upvalues, reg) do
+      case :maps.get(reg, state.open_upvalues, nil) do
         nil ->
           state
 
@@ -1287,7 +1286,7 @@ defmodule Lua.VM.Executor do
     {captured_upvalues_reversed, state} =
       Enum.reduce(nested_proto.upvalue_descriptors, {[], state}, fn
         {:parent_local, reg, _name}, {cells, state} ->
-          case Map.get(state.open_upvalues, reg) do
+          case :maps.get(reg, state.open_upvalues, nil) do
             nil ->
               cell_ref = make_ref()
               value = elem(regs, reg)
@@ -3751,7 +3750,7 @@ defmodule Lua.VM.Executor do
   # environment lives in upvalue slot 0 when present (a chunk loaded via
   # `load(..., env)`), otherwise default to the global table `_G`.
   defp load_env_value(upvalues, state) when tuple_size(upvalues) > 0 do
-    Map.get(state.upvalue_cells, elem(upvalues, 0))
+    :maps.get(elem(upvalues, 0), state.upvalue_cells, nil)
   end
 
   defp load_env_value(_upvalues, state), do: State.g_ref(state)
