@@ -32,10 +32,12 @@ defmodule Lua.Compiler do
   def compile(%Chunk{} = chunk, opts \\ []) do
     # Scope resolution and codegen key per-node tables by `meta.id` (see
     # `Lua.AST.Ids`); without ids, structurally identical nodes (e.g. two
-    # empty loop bodies) would share one table entry and miscompile. Stamping
-    # here covers chunks that never went through the parser, such as those
-    # built with `Lua.AST.Builder`. Assignment is deterministic, so a parsed
-    # chunk (already stamped by `Lua.Parser`) re-stamps to the same ids.
+    # empty loop bodies) would share one table entry and miscompile. This is
+    # the single stamping point, so it covers parsed chunks and chunks built
+    # by hand (`Lua.AST.Builder`) alike. It cannot be skipped for an
+    # already-stamped chunk: a chunk carrying hand-built nodes spliced into a
+    # parsed one is partially stamped, and proving otherwise costs the walk
+    # this would save.
     chunk = Ids.assign(chunk)
 
     with :ok <- GotoValidation.validate(chunk),
