@@ -66,6 +66,19 @@ defmodule Lua.Compiler.Scope do
   end
 
   @doc """
+  Returns the `var_map` key that stands for `node`.
+
+  Parsed nodes carry a chunk-unique `meta.id` (see `Lua.AST.Ids`), so the key
+  is one integer and a lookup hashes one word. Hand-built AST nodes have no
+  id; those fall back to the node term itself, which is slower to hash but
+  just as unique. Codegen keys its reads through this same function, so both
+  sides agree whichever shape a node has.
+  """
+  @spec node_key(term()) :: term()
+  def node_key(%{meta: %{id: id}}) when is_integer(id), do: id
+  def node_key(node), do: node
+
+  @doc """
   Resolves variable scopes in the AST.
 
   Returns a state containing:
@@ -179,7 +192,7 @@ defmodule Lua.Compiler.Scope do
       end)
 
     # Store per-statement register assignments in var_map so codegen can find them
-    state = %{state | var_map: Map.put(state.var_map, local_stmt, reg_list)}
+    state = %{state | var_map: Map.put(state.var_map, node_key(local_stmt), reg_list)}
 
     # Update max_register in current function scope
     func_scope = state.functions[state.current_function]
@@ -196,16 +209,16 @@ defmodule Lua.Compiler.Scope do
     # Per Lua 5.3 §3.3.4, each branch of an `if` is its own block, so locals
     # declared inside it do not leak past `end`.
     state = resolve_expr(condition, state)
-    state = with_block_scope(state, {:block_close_threshold, then_block}, &resolve_block(then_block, &1))
+    state = with_block_scope(state, {:block_close_threshold, node_key(then_block)}, &resolve_block(then_block, &1))
 
     state =
       Enum.reduce(elseifs, state, fn {elseif_cond, elseif_block}, state ->
         state = resolve_expr(elseif_cond, state)
-        with_block_scope(state, {:block_close_threshold, elseif_block}, &resolve_block(elseif_block, &1))
+        with_block_scope(state, {:block_close_threshold, node_key(elseif_block)}, &resolve_block(elseif_block, &1))
       end)
 
     if else_block do
-      with_block_scope(state, {:block_close_threshold, else_block}, &resolve_block(else_block, &1))
+      with_block_scope(state, {:block_close_threshold, node_key(else_block)}, &resolve_block(else_block, &1))
     else
       state
     end
@@ -213,7 +226,7 @@ defmodule Lua.Compiler.Scope do
 
   defp resolve_statement(%Statement.While{condition: condition, body: body}, state) do
     state = resolve_expr(condition, state)
-    with_block_scope(state, {:block_close_threshold, body}, &resolve_block(body, &1))
+    with_block_scope(state, {:block_close_threshold, node_key(body)}, &resolve_block(body, &1))
   end
 
   defp resolve_statement(%Statement.Repeat{body: body, condition: condition}, state) do
@@ -223,7 +236,7 @@ defmodule Lua.Compiler.Scope do
     saved_locals = state.locals
     saved_next_register = state.next_register
 
-    state = %{state | var_map: Map.put(state.var_map, {:block_close_threshold, body}, saved_next_register)}
+    state = %{state | var_map: Map.put(state.var_map, {:block_close_threshold, node_key(body)}, saved_next_register)}
 
     state = resolve_block(body, state)
     state = resolve_expr(condition, state)
@@ -246,14 +259,14 @@ defmodule Lua.Compiler.Scope do
     state = %{state | locals: Map.put(state.locals, var, loop_var_reg)}
     state = %{state | next_register: loop_var_reg + 3}
 
-    state = %{state | var_map: Map.put(state.var_map, {:for_num_var_reg, for_stmt}, loop_var_reg)}
+    state = %{state | var_map: Map.put(state.var_map, {:for_num_var_reg, node_key(for_stmt)}, loop_var_reg)}
 
     # Stash the post-loop-variable watermark so codegen can close body-local
     # cells at the tail of each iteration. The loop variable's own cells are
     # swept by the per-iteration close in the executor's continuation handler
     # (keyed on `loop_var_reg`); the body-tail close handles inner-block
     # locals declared above this watermark.
-    state = %{state | var_map: Map.put(state.var_map, {:block_close_threshold, body}, state.next_register)}
+    state = %{state | var_map: Map.put(state.var_map, {:block_close_threshold, node_key(body)}, state.next_register)}
 
     func_scope = state.functions[state.current_function]
     func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
@@ -277,7 +290,7 @@ defmodule Lua.Compiler.Scope do
     # Resolve the target name (local/upvalue/global) and store under a namespaced
     # key so resolve_function_scope cannot overwrite it (it always stores the
     # function-scope reference under the bare `decl` key).
-    target_key = {:func_decl_target, decl}
+    target_key = {:func_decl_target, node_key(decl)}
 
     # Process the function body FIRST. The body may capture this scope's
     # locals (including `_ENV`); processing it before tagging the assignment
@@ -347,12 +360,12 @@ defmodule Lua.Compiler.Scope do
         {state, reg + 1, [reg | acc]}
       end)
 
-    state = %{state | var_map: Map.put(state.var_map, {:for_in_var_regs, for_stmt}, Enum.reverse(var_regs))}
+    state = %{state | var_map: Map.put(state.var_map, {:for_in_var_regs, node_key(for_stmt)}, Enum.reverse(var_regs))}
 
     # Stash the post-loop-variable watermark so codegen can close body-local
     # cells at the tail of each iteration. The loop variables' own cells are
     # swept by the per-iteration close in the executor's continuation handler.
-    state = %{state | var_map: Map.put(state.var_map, {:block_close_threshold, body}, state.next_register)}
+    state = %{state | var_map: Map.put(state.var_map, {:block_close_threshold, node_key(body)}, state.next_register)}
 
     func_scope = state.functions[state.current_function]
     func_scope = %{func_scope | max_register: max(func_scope.max_register, state.next_register)}
@@ -371,7 +384,7 @@ defmodule Lua.Compiler.Scope do
 
     # Store the register assignment in var_map so codegen can find the correct
     # register even when the same name is redefined later (e.g., two `local function f`)
-    state = %{state | var_map: Map.put(state.var_map, {:local_func_reg, local_func}, reg)}
+    state = %{state | var_map: Map.put(state.var_map, {:local_func_reg, node_key(local_func)}, reg)}
 
     # Update max_register in current function scope
     func_scope = state.functions[state.current_function]
@@ -405,7 +418,7 @@ defmodule Lua.Compiler.Scope do
     # cell over a register that goes out of scope here must be detached so
     # the next statement that reuses the slot does not read or write through
     # the stale cell — see locals.lua:148-154 for the symptom this prevents.
-    state = %{state | var_map: Map.put(state.var_map, {:do_close_threshold, do_stmt}, saved_next_register)}
+    state = %{state | var_map: Map.put(state.var_map, {:do_close_threshold, node_key(do_stmt)}, saved_next_register)}
 
     # Restore outer scope (inner locals don't leak out)
     %{state | locals: saved_locals, next_register: saved_next_register}
@@ -415,13 +428,14 @@ defmodule Lua.Compiler.Scope do
   # label closes any open-upvalue cell at or above this register, so locals
   # declared deeper in the blocks it leaves or re-enters get fresh cells
   # (Lua 5.3 §3.3.4). `next_register` counts locals only (not codegen temps),
-  # which is exactly the close threshold. Keyed by the label node, which is
-  # unique per position, so reused names across sibling blocks stay distinct.
+  # which is exactly the close threshold. Keyed by the label's node id, which
+  # is unique per position, so reused names across sibling blocks stay
+  # distinct.
   defp resolve_statement(%Statement.Label{} = label, state) do
     var_map =
       state.var_map
-      |> Map.put({:label_level, label}, state.next_register)
-      |> Map.put({:label_block, label}, state.block_path)
+      |> Map.put({:label_level, node_key(label)}, state.next_register)
+      |> Map.put({:label_block, node_key(label)}, state.block_path)
 
     %{state | var_map: var_map}
   end
@@ -430,7 +444,7 @@ defmodule Lua.Compiler.Scope do
   # emitted instruction and goto resolution can match it only against labels
   # visible from this block or an enclosing one (Lua 5.3 §3.3.4).
   defp resolve_statement(%Statement.Goto{} = goto, state) do
-    %{state | var_map: Map.put(state.var_map, {:goto_block, goto}, state.block_path)}
+    %{state | var_map: Map.put(state.var_map, {:goto_block, node_key(goto)}, state.block_path)}
   end
 
   # For now, stub out other statement types - we'll implement them incrementally
@@ -448,19 +462,19 @@ defmodule Lua.Compiler.Scope do
         # Not a local — check parent scopes for upvalue
         case find_upvalue(name, state.parent_scopes, state) do
           {:ok, upvalue_index, state} ->
-            %{state | var_map: Map.put(state.var_map, var, {:upvalue, upvalue_index})}
+            %{state | var_map: Map.put(state.var_map, node_key(var), {:upvalue, upvalue_index})}
 
           :not_found ->
             # Free name: compile as `_ENV.name`
             {env_ref, state} = resolve_env_ref(state)
-            %{state | var_map: Map.put(state.var_map, var, {:env_field, env_ref, name})}
+            %{state | var_map: Map.put(state.var_map, node_key(var), {:env_field, env_ref, name})}
         end
 
       reg ->
         if MapSet.member?(state.captured_locals, name) do
-          %{state | var_map: Map.put(state.var_map, var, {:captured_local, reg})}
+          %{state | var_map: Map.put(state.var_map, node_key(var), {:captured_local, reg})}
         else
-          %{state | var_map: Map.put(state.var_map, var, {:register, reg})}
+          %{state | var_map: Map.put(state.var_map, node_key(var), {:register, reg})}
         end
     end
   end
@@ -519,10 +533,10 @@ defmodule Lua.Compiler.Scope do
 
   # Resolve the head name of a multi-name FuncDecl the same way an
   # `Expr.Var` read is resolved. The result is stashed under
-  # `{:func_decl_head, decl}` so codegen can replay the lookup without
+  # `{:func_decl_head, node_key(decl)}` so codegen can replay the lookup without
   # re-reading the post-block locals snapshot.
   defp resolve_func_decl_head(name, decl, state) do
-    key = {:func_decl_head, decl}
+    key = {:func_decl_head, node_key(decl)}
 
     case Map.get(state.locals, name) do
       nil ->
@@ -664,7 +678,7 @@ defmodule Lua.Compiler.Scope do
   end
 
   # Shared helper: resolves a function body scope for Expr.Function, Statement.FuncDecl, etc.
-  # The `node` is used as the var_map key so codegen can look up the function scope.
+  # The `node`'s id is the var_map key so codegen can look up the function scope.
   defp resolve_function_scope(node, params, body, state) do
     func_key = make_ref()
     param_count = Enum.count(params, &(&1 != :vararg))
@@ -747,7 +761,7 @@ defmodule Lua.Compiler.Scope do
     state = %{state | functions: Map.put(state.functions, func_key, func_scope)}
 
     # Store the function key in var_map for this node
-    state = %{state | var_map: Map.put(state.var_map, node, func_key)}
+    state = %{state | var_map: Map.put(state.var_map, node_key(node), func_key)}
 
     # Detect which parent locals this inner function captures
     func_scope_final = state.functions[func_key]

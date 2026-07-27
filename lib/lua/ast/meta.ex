@@ -25,10 +25,21 @@ defmodule Lua.AST.Meta do
   @type t :: %__MODULE__{
           start: position() | nil,
           end: position() | nil,
-          metadata: map()
+          metadata: map(),
+          id: non_neg_integer() | nil
         }
 
-  defstruct start: nil, end: nil, metadata: %{}
+  @typedoc """
+  Chunk-unique identifier for the node carrying this metadata.
+
+  `Lua.AST.Ids.assign/1` stamps every node of a parsed chunk, including the
+  bodies of nested functions. Compiler passes that need a per-node table key
+  it by this integer instead of by the node term, so a lookup hashes one word
+  rather than a whole subtree. It is `nil` on hand-built AST nodes.
+  """
+  @type id :: non_neg_integer() | nil
+
+  defstruct start: nil, end: nil, metadata: %{}, id: nil
 
   @doc """
   Creates a new Meta struct with start and end positions.
@@ -42,7 +53,8 @@ defmodule Lua.AST.Meta do
       %Lua.AST.Meta{
         start: %{line: 1, column: 1, byte_offset: 0},
         end: %{line: 1, column: 5, byte_offset: 4},
-        metadata: %{}
+        metadata: %{},
+        id: nil
       }
   """
   @spec new(position() | nil, position() | nil, map()) :: t()
@@ -63,7 +75,8 @@ defmodule Lua.AST.Meta do
       %Lua.AST.Meta{
         start: %{line: 1, column: 1, byte_offset: 0},
         end: %{line: 1, column: 10, byte_offset: 9},
-        metadata: %{}
+        metadata: %{},
+        id: nil
       }
   """
   @spec merge(t(), t()) :: t()
