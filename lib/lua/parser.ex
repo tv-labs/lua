@@ -8,7 +8,6 @@ defmodule Lua.Parser do
   alias Lua.AST.Block
   alias Lua.AST.Chunk
   alias Lua.AST.Expr
-  alias Lua.AST.Ids
   alias Lua.AST.Meta
   alias Lua.AST.Statement
   alias Lua.Lexer
@@ -107,8 +106,8 @@ defmodule Lua.Parser do
   @doc """
   Parses a chunk (top-level block) from a token list.
 
-  Every node of the returned chunk carries a chunk-unique `meta.id`; see
-  `Lua.AST.Ids`.
+  Node ids are not stamped here; `Lua.Compiler.compile/2` stamps every chunk
+  it compiles, including chunks built without the parser. See `Lua.AST.Ids`.
   """
   @spec parse_chunk([token()]) :: {:ok, Chunk.t()} | {:error, term()}
   def parse_chunk(tokens) do
@@ -116,7 +115,7 @@ defmodule Lua.Parser do
       {:ok, block, rest} ->
         case rest do
           [{:eof, _}] ->
-            {:ok, Ids.assign(Chunk.new(block))}
+            {:ok, Chunk.new(block)}
 
           [{type, _, pos} | _] ->
             {:error, {:unexpected_token, type, pos, "Expected end of input"}}

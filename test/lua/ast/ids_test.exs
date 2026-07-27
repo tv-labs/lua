@@ -54,7 +54,7 @@ defmodule Lua.AST.IdsTest do
 
     test "keeps positions and comments already on a node" do
       {:ok, chunk} = Lua.Parser.parse_raw("-- leading\nlocal x = 1\n")
-      [local_stmt] = chunk.block.stmts
+      [local_stmt] = Ids.assign(chunk).block.stmts
 
       assert %{line: 2} = local_stmt.meta.start
       assert [%{text: " leading"}] = local_stmt.meta.metadata.leading_comments
@@ -63,8 +63,9 @@ defmodule Lua.AST.IdsTest do
 
     test "is idempotent in shape: re-assigning yields the same chunk" do
       {:ok, chunk} = Lua.Parser.parse_raw("local t = {1, 2, x = 3}\nreturn t.x\n")
+      stamped = Ids.assign(chunk)
 
-      assert Ids.assign(chunk) == chunk
+      assert Ids.assign(stamped) == stamped
     end
 
     test "numbers every node of the compilable surface, uniquely" do
@@ -90,6 +91,8 @@ defmodule Lua.AST.IdsTest do
   defp ids_for(source) do
     {:ok, chunk} = Lua.Parser.parse_raw(source)
 
-    Walker.reduce(chunk, [], fn node, acc -> [node.meta.id | acc] end)
+    chunk
+    |> Ids.assign()
+    |> Walker.reduce([], fn node, acc -> [node.meta.id | acc] end)
   end
 end

@@ -8,8 +8,8 @@ defmodule Lua.AST.Ids do
   node's whole subtree, so the deepest nodes (function bodies, blocks) — the
   ones that make the most useful keys — are also the most expensive ones.
 
-  `assign/1` walks a parsed chunk once and writes a distinct integer into
-  each node's `meta.id`, letting those tables key on a single word instead.
+  `assign/1` walks a chunk once and writes a distinct integer into each
+  node's `meta.id`, letting those tables key on a single word instead.
   Ids are unique across the whole chunk, including the bodies of nested
   functions.
   """
@@ -23,8 +23,10 @@ defmodule Lua.AST.Ids do
   @doc """
   Returns `chunk` with every reachable node stamped with a unique `meta.id`.
 
-  Nodes the parser built without metadata gain a `Lua.AST.Meta` carrying only
-  the id; nodes that already have one keep their positions and comments.
+  Nodes built without metadata gain a `Lua.AST.Meta` carrying only the id;
+  nodes that already have one keep their positions and comments. Ids are
+  reassigned from scratch on every call, so a partially stamped chunk comes
+  back fully and consistently numbered.
   """
   @spec assign(Chunk.t()) :: Chunk.t()
   def assign(%Chunk{} = chunk) do
