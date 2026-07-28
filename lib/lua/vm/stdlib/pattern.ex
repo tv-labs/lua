@@ -74,7 +74,16 @@ defmodule Lua.VM.Stdlib.Pattern do
   Global match - returns list of all matches as {start, stop, captures}.
   """
   def gmatch(subject, pattern) do
-    {_anchored, pattern_elems} = compile(pattern)
+    # Lua 5.3 §6.4 (`string.gmatch`): a leading `^` does not work as an anchor
+    # (it would prevent the iteration). PUC-Lua's gmatch_aux never strips
+    # it, so `match` sees it as an ordinary character — recompile the
+    # pattern with the caret kept as a literal.
+    pattern_elems =
+      case compile(pattern) do
+        {false, elems} -> elems
+        {true, _elems} -> compile_elements(pattern, [])
+      end
+
     gmatch_from(subject, 0, byte_size(subject), pattern_elems, [], -1)
   end
 
@@ -121,7 +130,7 @@ defmodule Lua.VM.Stdlib.Pattern do
   `gsub_stateful/5` instead.
   """
   def gsub(subject, pattern, repl, max_n \\ nil) do
-    {_anchored, pattern_elems} = compile(pattern)
+    {anchored, pattern_elems} = compile(pattern)
 
     stateful_repl =
       if is_function(repl, 1) do
@@ -130,8 +139,7 @@ defmodule Lua.VM.Stdlib.Pattern do
         repl
       end
 
-    {result, count, _state} =
-      gsub_from(subject, 0, byte_size(subject), pattern_elems, stateful_repl, max_n, 0, [], nil, false)
+    {result, count, _state} = do_gsub(subject, anchored, pattern_elems, stateful_repl, max_n, nil)
 
     {result, count}
   end
@@ -144,8 +152,35 @@ defmodule Lua.VM.Stdlib.Pattern do
   changes back out. String and table replacements are state-pass-through.
   """
   def gsub_stateful(subject, pattern, repl, state, max_n \\ nil) do
-    {_anchored, pattern_elems} = compile(pattern)
-    gsub_from(subject, 0, byte_size(subject), pattern_elems, repl, max_n, 0, [], state, false)
+    {anchored, pattern_elems} = compile(pattern)
+    do_gsub(subject, anchored, pattern_elems, repl, max_n, state)
+  end
+
+  # A `^`-anchored pattern matches only at the start of the subject
+  # (Lua 5.3 §6.4.1), so gsub performs at most one replacement there and
+  # keeps the remainder untouched — PUC-Lua str_gsub's `anchor` flag makes
+  # its scan loop run exactly once. An unanchored pattern scans every
+  # position via gsub_from/10.
+
+  defp do_gsub(subject, true, _pattern, _repl, max_n, state) when max_n != nil and max_n <= 0 do
+    {subject, 0, state}
+  end
+
+  defp do_gsub(subject, true, pattern, repl, _max_n, state) do
+    case match_pattern(subject, 0, pattern, subject) do
+      {:match, end_pos, captures} ->
+        whole_match = binary_part(subject, 0, end_pos)
+        {replacement, state} = apply_replacement(repl, whole_match, captures, state)
+        rest = binary_part(subject, end_pos, byte_size(subject) - end_pos)
+        {IO.iodata_to_binary([replacement, rest]), 1, state}
+
+      :nomatch ->
+        {subject, 0, state}
+    end
+  end
+
+  defp do_gsub(subject, false, pattern, repl, max_n, state) do
+    gsub_from(subject, 0, byte_size(subject), pattern, repl, max_n, 0, [], state, false)
   end
 
   # Lua 5.3.3+ semantics: an empty match that starts where the *previous*
