@@ -56,6 +56,10 @@ COPY website/priv priv
 COPY website/lib lib
 COPY website/assets assets
 
+# Recorded benchmark results, read at compile time by lib/website/benchmarks.ex
+# (@external_resource) to render /benchmarks. Compile fails loudly without it.
+COPY bench_results /app/bench_results
+
 # mix compile must run BEFORE assets.deploy because Phoenix's LiveView
 # colocated-hooks compiler generates files under _build/ that esbuild
 # resolves via NODE_PATH (`phoenix-colocated/website`).

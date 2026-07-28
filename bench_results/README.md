@@ -107,7 +107,31 @@ series grows one column per release.
 4. Write or extend a report named `<topic>-<YYYY-MM-DD>.md` quoting
    **medians**, not averages — several workloads have allocation-driven GC
    pauses that pull the mean around.
-5. Add a row to the Contents table above, and update the hosted page at
-   `website/priv/static/benchmarks.html` if the headline story changed.
+5. Add a row to the Contents table above.
 6. Do not edit `benchmarks/BASELINE.md`. It is the historical 1.0.0 gate
    record; a newer report supersedes it by saying so.
+
+### What updates itself
+
+The hosted page at [`/benchmarks`](../website/lib/website_web/controllers/page_html/benchmarks.html.heex)
+reads these directories directly, so steps 1–5 are the whole job:
+
+- **A new `<version>/summary.json` becomes a new column.** Version directories
+  are found by glob and ordered with `Version.compare/2` — no list to extend.
+- **A new `versions-<date>.md` becomes the linked report**, and its date becomes
+  the page's dated eyebrow. The newest report filename wins.
+- **Headline tiles and the "still behind Luerl" figures re-derive** from the new
+  column, including the "N× faster than <previous release>" deltas.
+
+Two things still need a human:
+
+- **A new workload needs a row spec** in `Website.Benchmarks` (`@rows`) before it
+  appears — which cases are worth showing, and under what name, is editorial.
+  A version that lacks a workload another version has renders as `—`.
+- **The prose** — the headline claim and the analysis paragraphs — is written,
+  not generated. Re-read it when the story changes.
+
+`Website.Benchmarks` registers each `summary.json` as an `@external_resource`,
+so editing recorded results recompiles the page in dev. The container build
+copies this directory in (see `Dockerfile`); compilation fails loudly rather
+than shipping an empty page if it is missing.

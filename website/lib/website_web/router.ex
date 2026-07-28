@@ -23,6 +23,7 @@ defmodule DemoWeb.Router do
 
     get "/", PageController, :home
     get "/about", PageController, :about
+    get "/benchmarks", PageController, :benchmarks
     live "/playground", PlaygroundLive, :index
     live "/playground/:example", PlaygroundLive, :example
     live "/tour", TourLive, :index

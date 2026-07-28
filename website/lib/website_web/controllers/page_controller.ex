@@ -1,6 +1,8 @@
 defmodule DemoWeb.PageController do
   use DemoWeb, :controller
 
+  alias Website.Benchmarks
+
   def home(conn, _params) do
     %{source: fib_source} = hd(Website.LuaSandbox.home_snippets())
 
@@ -13,6 +15,19 @@ defmodule DemoWeb.PageController do
 
   def about(conn, _params) do
     render(conn, :about, page_title: "About")
+  end
+
+  def benchmarks(conn, _params) do
+    render(conn, :benchmarks,
+      page_title: "Benchmarks",
+      versions: Benchmarks.versions(),
+      latest: Benchmarks.latest(),
+      rows: Benchmarks.rows(),
+      chart_rows: Benchmarks.chart_rows(),
+      headline: Benchmarks.headline(),
+      report: Benchmarks.report(),
+      report_date: Benchmarks.report_date()
+    )
   end
 
   def health(conn, _params) do

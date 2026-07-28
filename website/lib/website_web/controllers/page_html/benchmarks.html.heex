@@ -1,0 +1,280 @@
+<Layouts.app flash={@flash} active={:benchmarks}>
+  <%!-- ============== HERO ============== --%>
+  <section class="relative overflow-hidden">
+    <div
+      aria-hidden="true"
+      class="absolute inset-0 -z-10 [background:radial-gradient(60%_50%_at_50%_0%,oklch(58%_0.233_277.117/0.18),transparent_70%)]"
+    >
+    </div>
+
+    <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 pt-14 pb-10 sm:pt-16">
+      <p class="text-xs uppercase tracking-[0.12em] font-semibold text-base-content/50 mb-3">
+        tv-labs/lua &middot; full-mode benchee &middot; {@report_date}
+      </p>
+      <h1 class="text-3xl sm:text-4xl font-bold tracking-tight leading-[1.1]">
+        Lua on the BEAM: {Enum.join(@versions, " → ")}
+      </h1>
+      <p class="mt-5 text-base-content/70 leading-relaxed max-w-2xl">
+        {length(@versions)} releases of the <code class="text-primary">lua</code>
+        Elixir library, measured on the same machine in the same sitting, with Luerl run inside
+        every benchmark as a same-run control. {List.first(@versions)} <em>was</em>
+        a thin wrapper over Luerl; {@headline.previous} introduced the native VM; {@latest} is the
+        current release.
+      </p>
+      <p class="mt-3 text-base-content/70 leading-relaxed max-w-2xl">
+        <strong class="text-base-content">The headline:</strong>
+        {@latest} is the first release faster than Luerl on most workloads — and
+        <code class="text-primary">Lua.new()</code>
+        is now effectively free.
+      </p>
+    </div>
+  </section>
+
+  <%!-- ============== HEADLINE TILES ============== --%>
+  <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+    <div class="grid gap-4 sm:grid-cols-3">
+      <.stat_tile
+        label="Lua.new() median"
+        value={@headline.new_median}
+        delta={"#{@headline.new_speedup}× faster than #{@headline.previous} (#{@headline.new_median_prev})"}
+      >
+        Steady-state, default options, under <code>mix run</code>. ~100× credible in an
+        <code>:embedded</code>
+        release; ~5× when passing custom sandbox options.
+      </.stat_tile>
+
+      <.stat_tile
+        label="Lua.new() allocation"
+        value={@headline.new_memory}
+        delta={"#{@headline.new_memory_factor}× less than #{@headline.previous} (#{@headline.new_memory_prev})"}
+      >
+        Memoized boot-time VM template; one-time ~7&nbsp;ms cold build per node.
+      </.stat_tile>
+
+      <.stat_tile
+        label="fibonacci fib(30) median"
+        value={@headline.fib_median}
+        delta={"#{@headline.fib_speedup}× faster than same-run Luerl"}
+      >
+        Was {@headline.fib_prev_ratio}× <em>slower</em>
+        on {@headline.previous} ({@headline.fib_median_prev}). Allocation: {@headline.fib_memory} vs Luerl's {@headline.fib_memory_control}.
+      </.stat_tile>
+    </div>
+  </section>
+
+  <%!-- ============== RATIO PLOT ============== --%>
+  <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 mt-14">
+    <h2 class="text-xl font-bold tracking-tight">Runtime vs Luerl, per workload</h2>
+    <p class="mt-1 text-sm text-base-content/70 max-w-2xl leading-relaxed">
+      Each dot is a release's compiled-chunk median divided by the Luerl median from the same
+      run — left of the parity line is faster than Luerl. Hover a dot for the underlying
+      medians. Log scale.
+    </p>
+
+    <div class="mt-5 rounded-2xl border border-base-300/60 bg-base-200/40 p-5 sm:p-6">
+      <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-base-content/70 mb-5">
+        <span
+          :for={{version, index} <- Enum.with_index(@versions)}
+          class="inline-flex items-center gap-2"
+        >
+          <span
+            class="size-2.5 rounded-full bg-primary"
+            style={"opacity: #{Benchmarks.version_weight(index, length(@versions))}"}
+          >
+          </span>
+          {version}<span :if={index == 0} class="text-base-content/50">
+            &nbsp;(Luerl wrapper)
+          </span>
+        </span>
+        <span class="text-base-content/50">│ line = Luerl parity (1.0)</span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <div class="min-w-[34rem]">
+          <div class="flex justify-between text-xs text-base-content/50 mb-1 pl-[13.5rem]">
+            <span>← faster than Luerl</span>
+            <span>slower than Luerl →</span>
+          </div>
+
+          <div
+            :for={row <- @chart_rows}
+            class="grid grid-cols-[13.5rem_1fr] items-center gap-3 min-h-[2.15rem]"
+          >
+            <div class="text-right text-sm leading-tight">
+              <span class={row.warn? && "text-error"}>
+                {row.label}<span :if={row.warn?} aria-hidden="true">&nbsp;⚠</span>
+              </span>
+              <span class="block text-xs text-base-content/50">{row.sub}</span>
+            </div>
+
+            <div class="relative h-[2.15rem] border-b border-base-300/50">
+              <div
+                :for={{tick, _label} <- Benchmarks.ticks()}
+                :if={tick != 1.0}
+                class="absolute inset-y-0 w-px bg-base-300/60"
+                style={"left: #{Benchmarks.plot_x(tick)}%"}
+              >
+              </div>
+              <div
+                class="absolute inset-y-0 w-px bg-base-content/25"
+                style={"left: #{Benchmarks.plot_x(1.0)}%"}
+              >
+              </div>
+
+              <span
+                :for={{version, index} <- Enum.with_index(@versions)}
+                :if={Benchmarks.ratio(row, version)}
+                class="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary ring-2 ring-base-100"
+                style={"left: #{Benchmarks.plot_x(Benchmarks.ratio(row, version))}%; opacity: #{Benchmarks.version_weight(index, length(@versions))}"}
+                title={dot_title(row, version)}
+              >
+              </span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-[13.5rem_1fr] gap-3 mt-1.5">
+            <span></span>
+            <div class="relative h-5 text-xs text-base-content/50 tabular-nums">
+              <span
+                :for={{tick, label} <- Benchmarks.ticks()}
+                class="absolute -translate-x-1/2"
+                style={"left: #{Benchmarks.plot_x(tick)}%"}
+              >
+                {label}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%!-- ============== MEDIANS TABLE ============== --%>
+  <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 mt-14">
+    <h2 class="text-xl font-bold tracking-tight">Medians across releases</h2>
+    <p class="mt-1 text-sm text-base-content/70 max-w-2xl leading-relaxed">
+      Compiled-chunk path (the production embedding path: compile once, run many). Ratio column
+      is {@latest} ÷ same-run Luerl; green means faster than Luerl.
+    </p>
+
+    <div class="mt-5 overflow-x-auto rounded-2xl border border-base-300/60 bg-base-200/40">
+      <table class="table table-sm">
+        <thead>
+          <tr class="text-xs uppercase tracking-[0.06em] text-base-content/50">
+            <th>Workload</th>
+            <th :for={version <- @versions} class="text-right">{version}</th>
+            <th class="text-right">{@latest} vs Luerl</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr :for={row <- @rows} class="[&>td]:tabular-nums [&>td]:text-right">
+            <td class="!text-left">
+              <span class={row.warn? && "text-error"}>
+                {row.label}<span :if={row.warn?} aria-hidden="true">&nbsp;⚠</span>
+              </span>
+              <span :if={row.dagger?} aria-hidden="true">†</span>
+            </td>
+            <td
+              :for={version <- @versions}
+              class={Benchmarks.best?(row, version) && "font-bold"}
+            >
+              {Benchmarks.value(row, version) || "—"}
+            </td>
+            <td><.ratio value={Benchmarks.ratio(row, @latest)} /></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="mt-3 text-xs text-base-content/50 max-w-2xl leading-relaxed">
+      † {@latest} builds PUC-Lua-conformant position-prefixed error messages; Luerl returns the
+      bare error value, doing less work per raise.
+    </p>
+  </section>
+
+  <%!-- ============== WHERE WE'RE BEHIND ============== --%>
+  <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 mt-14">
+    <div class="rounded-2xl border border-warning/30 bg-warning/10 p-5 sm:p-6">
+      <h2 class="font-semibold">Where {@latest} is still behind Luerl</h2>
+      <div class="mt-3 space-y-2.5 text-sm text-base-content/75 leading-relaxed">
+        <p>
+          <strong class="text-base-content">
+            pcall raise + catch ({@headline.raise_ratio}× slower).
+          </strong>
+          Partly apples-to-oranges: {@latest} builds position-prefixed error messages
+          (<code>"&lt;eval&gt;:1: negative"</code>, the PUC-Lua-conformant behavior) where Luerl
+          returns the bare value — it does strictly more work per raise. Still, it regressed at {@headline.previous} ({@headline.raise_prev_ratio}×) and has only partially recovered.
+        </p>
+        <p>
+          <strong class="text-base-content">
+            varargs + multiple returns ({@headline.varargs_ratio}× slower, ~1.9× the allocation).
+          </strong>
+          A genuine gap with no conformance excuse — the clearest optimization target for 1.1.x.
+        </p>
+        <p>
+          <strong class="text-base-content">Host-boundary decode of large lists.</strong>
+          Not in the chart (its own harness): decoding a 4,096-element integer list is ~13× slower
+          than the {List.first(@versions)}/Luerl era; long-string lists ~25×. String-keyed maps
+          moved the other way (1.24× faster). Worth a look before 1.1.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <%!-- ============== HOW TO READ ============== --%>
+  <section class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 mt-14">
+    <h2 class="text-xl font-bold tracking-tight">How to read these numbers</h2>
+    <ul class="mt-4 space-y-3 text-sm text-base-content/75 leading-relaxed list-disc pl-5">
+      <li>
+        <strong class="text-base-content">
+          {List.first(@versions)} is not an independent series.
+        </strong>
+        It wraps <code>luerl 1.5.1</code>; its own no-sandbox instantiation lands within ~1% of raw <code>:luerl.init()</code>. Its dots hugging the parity line is by construction, and it's
+        why the Luerl control column is meaningful across all {length(@versions)} runs.
+      </li>
+      <li>
+        <strong class="text-base-content">Discipline:</strong>
+        Apple M4 · Elixir 1.20.0 / OTP 29 · <code>LUA_BENCH_MODE=full</code>
+        (10&nbsp;s measure, 2&nbsp;s warmup, 1&nbsp;s memory) · one <code>mix run</code>
+        at a time on a quiet machine · medians quoted, not averages. C Lua (luaport) was
+        unavailable; Luerl is the reference.
+      </li>
+      <li>
+        <strong class="text-base-content">The suite got wider for this report.</strong>
+        patterns, metamethods, pcall/varargs, and <code>Lua.new</code>
+        workloads are new — chosen to make the suite representative of real Lua (pattern engine,
+        <code>:</code>
+        method dispatch, protected calls), not just of what was optimized.
+      </li>
+      <li>
+        <strong class="text-base-content">Coroutines are not benchmarked</strong>
+        — they are an intentional 1.0 capability exclusion in the library, not an omission from
+        the suite.
+      </li>
+      <li>
+        <strong class="text-base-content">Sub-microsecond rows</strong>
+        (<code>Lua.new()</code> on {@latest}) show large Benchee deviation percentages due to
+        batching at that timescale; medians are stable across runs.
+      </li>
+    </ul>
+
+    <p class="mt-8 pt-6 border-t border-base-300/60 text-sm text-base-content/60 leading-relaxed">
+      Full report with per-workload analysis and reproduction instructions:
+      <a
+        href={"https://github.com/tv-labs/lua/blob/main/bench_results/#{@report}"}
+        target="_blank"
+        rel="noopener"
+        class="link link-primary"
+      >
+        bench_results/{@report}
+      </a>
+      in <a
+        href="https://github.com/tv-labs/lua"
+        target="_blank"
+        rel="noopener"
+        class="link link-hover"
+      >tv-labs/lua</a>. Raw Benchee outputs and parsed JSON are committed alongside, one directory
+      per released version.
+    </p>
+  </section>
+</Layouts.app>
