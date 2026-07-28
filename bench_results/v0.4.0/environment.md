@@ -12,10 +12,9 @@
 ## Worktree setup
 
 ```
-git -C /Users/dave/code/tvlabs/lua worktree add --detach \
-  /private/tmp/claude-501/-Users-dave-code-tvlabs-lua/baeced00-0f95-4dc6-8d8e-c16607ffb143/scratchpad/bench-v0.4.0 v0.4.0
+git -C <repo> worktree add --detach <worktree> v0.4.0
 
-cp -R /Users/dave/code/tvlabs/lua/benchmarks <worktree>/benchmarks
+cp -R <repo>/benchmarks <worktree>/benchmarks
 
 # mix.exs deps edit (worktree only): added
 #   {:benchee, "~> 1.3", only: :benchmark}
@@ -45,8 +44,7 @@ Excluded: `dispatcher_vs_interpreter.exs` (crashes on v0.4.0), `array_vs_map_pro
 ## Cleanup
 
 ```
-git -C /Users/dave/code/tvlabs/lua worktree remove --force \
-  /private/tmp/claude-501/-Users-dave-code-tvlabs-lua/baeced00-0f95-4dc6-8d8e-c16607ffb143/scratchpad/bench-v0.4.0
+git -C <repo> worktree remove --force <worktree>
 ```
 
 ## Results
