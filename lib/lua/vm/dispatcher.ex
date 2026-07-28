@@ -138,6 +138,21 @@ defmodule Lua.VM.Dispatcher do
   @op_get_field_upvalue 68
   @op_set_field_upvalue 69
 
+  # Static-arity call variants. Same semantics as `@op_call_one` /
+  # `@op_call_zero`; the encoder picks them whenever the argument count is
+  # one of the small ones that dominate real programs, and the handler then
+  # reads the arguments at constant offsets into the caller's registers.
+  @op_call_one_0 70
+  @op_call_one_1 71
+  @op_call_one_2 72
+  @op_call_zero_0 73
+  @op_call_zero_1 74
+  @op_call_zero_2 75
+
+  # Self-recursive call. The callee is the prototype currently running, so
+  # the loop already holds everything the call needs.
+  @op_call_self 76
+
   @doc """
   Execute a compiled prototype against `args` and `state`.
   """
@@ -893,9 +908,7 @@ defmodule Lua.VM.Dispatcher do
       # setelement write when it sees it.
 
       {@op_call_zero, base, arg_count, name_hint, line} ->
-        func_value = :erlang.element(base + 1, regs)
-
-        case func_value do
+        case :erlang.element(base + 1, regs) do
           {:compiled_closure, callee_proto, callee_upvalues} ->
             callee_regs = init_callee_regs(callee_proto, regs, base + 1, arg_count)
             # Compiled callees may be vararg functions. Testing `is_vararg`
@@ -925,40 +938,29 @@ defmodule Lua.VM.Dispatcher do
               %{}
             )
 
-          {:lua_closure, _, _} = closure ->
-            args = collect_args(regs, base + 1, arg_count)
-            call_info = {proto.source, 0, name_hint}
-            instruction_count = tick(state, instruction_count, cs, cd)
-            ckdepth(state, cs, cd)
-
-            state = %{
-              state
-              | call_stack: [call_info | cs],
-                call_depth: cd + 1,
-                instruction_count: instruction_count
-            }
-
-            {_results, state} = Executor.call_function(closure, args, state)
-            instruction_count = state.instruction_count
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
-
-          _ ->
-            args = collect_args(regs, base + 1, arg_count)
-
-            state = %{state | call_stack: cs, call_depth: cd, instruction_count: instruction_count}
-
-            {_results, state} =
-              Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
-
-            instruction_count = state.instruction_count
-
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+          func_value ->
+            call_zero_bridge(
+              func_value,
+              collect_args(regs, base + 1, arg_count),
+              name_hint,
+              line,
+              code,
+              pc,
+              regs,
+              upvalues,
+              proto,
+              state,
+              cont,
+              frames,
+              instruction_count,
+              cs,
+              cd,
+              ou
+            )
         end
 
       {@op_call_one, base, arg_count, name_hint, line} ->
-        func_value = :erlang.element(base + 1, regs)
-
-        case func_value do
+        case :erlang.element(base + 1, regs) do
           {:compiled_closure, callee_proto, callee_upvalues} ->
             callee_regs = init_callee_regs(callee_proto, regs, base + 1, arg_count)
 
@@ -990,50 +992,407 @@ defmodule Lua.VM.Dispatcher do
               %{}
             )
 
-          {:lua_closure, _, _} = closure ->
-            args = collect_args(regs, base + 1, arg_count)
+          func_value ->
+            call_one_bridge(
+              func_value,
+              collect_args(regs, base + 1, arg_count),
+              base,
+              name_hint,
+              line,
+              code,
+              pc,
+              regs,
+              upvalues,
+              proto,
+              state,
+              cont,
+              frames,
+              instruction_count,
+              cs,
+              cd,
+              ou
+            )
+        end
+
+      # ── Static-arity calls ──────────────────────────────────────────
+      #
+      # Same semantics as `@op_call_one` / `@op_call_zero`, with the
+      # argument count fixed at encode time. The arguments come out of the
+      # caller's registers at constant offsets and the callee's register
+      # file is one literal tuple: no copy loop, no clamp against the
+      # callee's parameter count, no blank tuple to overwrite. `name_hint`
+      # and `line` ride along unchanged, so tracebacks and native-call
+      # error attribution are identical to the generic forms.
+
+      {@op_call_one_0, base, name_hint, line} ->
+        case :erlang.element(base + 1, regs) do
+          {:compiled_closure, callee_proto, callee_upvalues} ->
+            callee_regs = mkregs0(regs_size(callee_proto))
+
+            callee_proto =
+              if callee_proto.is_vararg,
+                do: %{callee_proto | varargs: []},
+                else: callee_proto
+
+            frame = {code, pc + 1, regs, upvalues, proto, cont, base, ou}
             call_info = {proto.source, 0, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
-            state = %{
-              state
-              | call_stack: [call_info | cs],
-                call_depth: cd + 1,
-                instruction_count: instruction_count
-            }
+            dispatch(
+              callee_proto.bytecode,
+              1,
+              callee_regs,
+              callee_upvalues,
+              callee_proto,
+              state,
+              [],
+              [frame | frames],
+              instruction_count,
+              [call_info | cs],
+              cd + 1,
+              %{}
+            )
 
-            {results, state} = Executor.call_function(closure, args, state)
-            instruction_count = state.instruction_count
-
-            first =
-              case results do
-                [v | _] -> v
-                [] -> nil
-              end
-
-            regs = :erlang.setelement(base + 1, regs, first)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
-
-          _ ->
-            args = collect_args(regs, base + 1, arg_count)
-
-            state = %{state | call_stack: cs, call_depth: cd, instruction_count: instruction_count}
-
-            {results, state} =
-              Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
-
-            instruction_count = state.instruction_count
-
-            first =
-              case results do
-                [v | _] -> v
-                [] -> nil
-              end
-
-            regs = :erlang.setelement(base + 1, regs, first)
-            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+          func_value ->
+            call_one_bridge(
+              func_value,
+              [],
+              base,
+              name_hint,
+              line,
+              code,
+              pc,
+              regs,
+              upvalues,
+              proto,
+              state,
+              cont,
+              frames,
+              instruction_count,
+              cs,
+              cd,
+              ou
+            )
         end
+
+      {@op_call_one_1, base, name_hint, line} ->
+        case :erlang.element(base + 1, regs) do
+          {:compiled_closure, callee_proto, callee_upvalues} ->
+            a1 = :erlang.element(base + 2, regs)
+            callee_regs = mkregs1(regs_size(callee_proto), callee_proto.param_count, a1)
+
+            callee_proto =
+              if callee_proto.is_vararg,
+                do: setup_vararg_proto(callee_proto, regs, base + 1, 1),
+                else: callee_proto
+
+            frame = {code, pc + 1, regs, upvalues, proto, cont, base, ou}
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count, cs, cd)
+            ckdepth(state, cs, cd)
+
+            dispatch(
+              callee_proto.bytecode,
+              1,
+              callee_regs,
+              callee_upvalues,
+              callee_proto,
+              state,
+              [],
+              [frame | frames],
+              instruction_count,
+              [call_info | cs],
+              cd + 1,
+              %{}
+            )
+
+          func_value ->
+            call_one_bridge(
+              func_value,
+              [:erlang.element(base + 2, regs)],
+              base,
+              name_hint,
+              line,
+              code,
+              pc,
+              regs,
+              upvalues,
+              proto,
+              state,
+              cont,
+              frames,
+              instruction_count,
+              cs,
+              cd,
+              ou
+            )
+        end
+
+      {@op_call_one_2, base, name_hint, line} ->
+        case :erlang.element(base + 1, regs) do
+          {:compiled_closure, callee_proto, callee_upvalues} ->
+            a1 = :erlang.element(base + 2, regs)
+            a2 = :erlang.element(base + 3, regs)
+            callee_regs = mkregs2(regs_size(callee_proto), callee_proto.param_count, a1, a2)
+
+            callee_proto =
+              if callee_proto.is_vararg,
+                do: setup_vararg_proto(callee_proto, regs, base + 1, 2),
+                else: callee_proto
+
+            frame = {code, pc + 1, regs, upvalues, proto, cont, base, ou}
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count, cs, cd)
+            ckdepth(state, cs, cd)
+
+            dispatch(
+              callee_proto.bytecode,
+              1,
+              callee_regs,
+              callee_upvalues,
+              callee_proto,
+              state,
+              [],
+              [frame | frames],
+              instruction_count,
+              [call_info | cs],
+              cd + 1,
+              %{}
+            )
+
+          func_value ->
+            call_one_bridge(
+              func_value,
+              [:erlang.element(base + 2, regs), :erlang.element(base + 3, regs)],
+              base,
+              name_hint,
+              line,
+              code,
+              pc,
+              regs,
+              upvalues,
+              proto,
+              state,
+              cont,
+              frames,
+              instruction_count,
+              cs,
+              cd,
+              ou
+            )
+        end
+
+      {@op_call_zero_0, base, name_hint, line} ->
+        case :erlang.element(base + 1, regs) do
+          {:compiled_closure, callee_proto, callee_upvalues} ->
+            callee_regs = mkregs0(regs_size(callee_proto))
+
+            callee_proto =
+              if callee_proto.is_vararg,
+                do: %{callee_proto | varargs: []},
+                else: callee_proto
+
+            frame = {code, pc + 1, regs, upvalues, proto, cont, :discard, ou}
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count, cs, cd)
+            ckdepth(state, cs, cd)
+
+            dispatch(
+              callee_proto.bytecode,
+              1,
+              callee_regs,
+              callee_upvalues,
+              callee_proto,
+              state,
+              [],
+              [frame | frames],
+              instruction_count,
+              [call_info | cs],
+              cd + 1,
+              %{}
+            )
+
+          func_value ->
+            call_zero_bridge(
+              func_value,
+              [],
+              name_hint,
+              line,
+              code,
+              pc,
+              regs,
+              upvalues,
+              proto,
+              state,
+              cont,
+              frames,
+              instruction_count,
+              cs,
+              cd,
+              ou
+            )
+        end
+
+      {@op_call_zero_1, base, name_hint, line} ->
+        case :erlang.element(base + 1, regs) do
+          {:compiled_closure, callee_proto, callee_upvalues} ->
+            a1 = :erlang.element(base + 2, regs)
+            callee_regs = mkregs1(regs_size(callee_proto), callee_proto.param_count, a1)
+
+            callee_proto =
+              if callee_proto.is_vararg,
+                do: setup_vararg_proto(callee_proto, regs, base + 1, 1),
+                else: callee_proto
+
+            frame = {code, pc + 1, regs, upvalues, proto, cont, :discard, ou}
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count, cs, cd)
+            ckdepth(state, cs, cd)
+
+            dispatch(
+              callee_proto.bytecode,
+              1,
+              callee_regs,
+              callee_upvalues,
+              callee_proto,
+              state,
+              [],
+              [frame | frames],
+              instruction_count,
+              [call_info | cs],
+              cd + 1,
+              %{}
+            )
+
+          func_value ->
+            call_zero_bridge(
+              func_value,
+              [:erlang.element(base + 2, regs)],
+              name_hint,
+              line,
+              code,
+              pc,
+              regs,
+              upvalues,
+              proto,
+              state,
+              cont,
+              frames,
+              instruction_count,
+              cs,
+              cd,
+              ou
+            )
+        end
+
+      {@op_call_zero_2, base, name_hint, line} ->
+        case :erlang.element(base + 1, regs) do
+          {:compiled_closure, callee_proto, callee_upvalues} ->
+            a1 = :erlang.element(base + 2, regs)
+            a2 = :erlang.element(base + 3, regs)
+            callee_regs = mkregs2(regs_size(callee_proto), callee_proto.param_count, a1, a2)
+
+            callee_proto =
+              if callee_proto.is_vararg,
+                do: setup_vararg_proto(callee_proto, regs, base + 1, 2),
+                else: callee_proto
+
+            frame = {code, pc + 1, regs, upvalues, proto, cont, :discard, ou}
+            call_info = {proto.source, 0, name_hint}
+            instruction_count = tick(state, instruction_count, cs, cd)
+            ckdepth(state, cs, cd)
+
+            dispatch(
+              callee_proto.bytecode,
+              1,
+              callee_regs,
+              callee_upvalues,
+              callee_proto,
+              state,
+              [],
+              [frame | frames],
+              instruction_count,
+              [call_info | cs],
+              cd + 1,
+              %{}
+            )
+
+          func_value ->
+            call_zero_bridge(
+              func_value,
+              [:erlang.element(base + 2, regs), :erlang.element(base + 3, regs)],
+              name_hint,
+              line,
+              code,
+              pc,
+              regs,
+              upvalues,
+              proto,
+              state,
+              cont,
+              frames,
+              instruction_count,
+              cs,
+              cd,
+              ou
+            )
+        end
+
+      # ── Self-recursive calls ────────────────────────────────────────
+      #
+      # The callee is the prototype this loop is already running, reached
+      # through the `local function` self-reference the compiler proved
+      # can never be rebound (`Lua.Compiler.Peephole`). There is no closure
+      # value to read and no upvalue cell to resolve: the frame keeps the
+      # caller's state, and the loop re-enters `proto.bytecode` with the
+      # same `upvalues` and a fresh register file.
+      #
+      # Everything else about the call is a generic call: a frame is
+      # pushed so tracebacks and `debug.getinfo` see the same stack, the
+      # instruction budget ticks, the depth check runs at the same point
+      # with the same depth, and the callee starts with an empty
+      # open-upvalue map while the caller's rides in the frame.
+
+      # `line` is carried for shape parity with the other call opcodes and
+      # for tooling that reads the encoded stream; the handler never needs
+      # it, because a self-call can never reach the native bridge that
+      # attributes errors to a source line, and the frame's own line slot
+      # is `0` for every dispatcher-side call.
+      {@op_call_self, base, arg_count, result_count, name_hint, _line} ->
+        callee_regs = init_callee_regs(proto, regs, base + 1, arg_count)
+
+        callee_proto =
+          if proto.is_vararg,
+            do: setup_vararg_proto(proto, regs, base + 1, arg_count),
+            else: proto
+
+        dest =
+          case result_count do
+            0 -> :discard
+            1 -> base
+            _ -> {:multi, base, result_count}
+          end
+
+        frame = {code, pc + 1, regs, upvalues, proto, cont, dest, ou}
+        call_info = {proto.source, 0, name_hint}
+        instruction_count = tick(state, instruction_count, cs, cd)
+        ckdepth(state, cs, cd)
+
+        dispatch(
+          callee_proto.bytecode,
+          1,
+          callee_regs,
+          upvalues,
+          callee_proto,
+          state,
+          [],
+          [frame | frames],
+          instruction_count,
+          [call_info | cs],
+          cd + 1,
+          %{}
+        )
 
       # ── Returns ─────────────────────────────────────────────────────
       #
@@ -2079,14 +2438,250 @@ defmodule Lua.VM.Dispatcher do
     clear_nils(:erlang.setelement(dest + 1, regs, nil), dest + 1, n - 1)
   end
 
+  # ── Non-dispatcher callees ──────────────────────────────────────────────
+  #
+  # Everything that is not a `:compiled_closure` leaves the dispatch loop:
+  # interpreted Lua closures through `Executor.call_function/3`, natives and
+  # callables through `Executor.dispatcher_call_function/6`. Both grow the
+  # Erlang stack by one frame at the mode boundary. Factored out of the call
+  # handlers so the generic and static-arity opcodes share one copy —
+  # `line` reaches the native bridge for error attribution exactly as it did
+  # when these branches were inline.
+
+  defp call_zero_bridge(
+         {:lua_closure, _, _} = closure,
+         args,
+         name_hint,
+         _line,
+         code,
+         pc,
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         instruction_count,
+         cs,
+         cd,
+         ou
+       ) do
+    call_info = {proto.source, 0, name_hint}
+    instruction_count = tick(state, instruction_count, cs, cd)
+    ckdepth(state, cs, cd)
+
+    state = %{
+      state
+      | call_stack: [call_info | cs],
+        call_depth: cd + 1,
+        instruction_count: instruction_count
+    }
+
+    {_results, state} = Executor.call_function(closure, args, state)
+    instruction_count = state.instruction_count
+    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+  end
+
+  defp call_zero_bridge(
+         func_value,
+         args,
+         name_hint,
+         line,
+         code,
+         pc,
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         instruction_count,
+         cs,
+         cd,
+         ou
+       ) do
+    state = %{state | call_stack: cs, call_depth: cd, instruction_count: instruction_count}
+
+    {_results, state} = Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
+
+    instruction_count = state.instruction_count
+    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+  end
+
+  defp call_one_bridge(
+         {:lua_closure, _, _} = closure,
+         args,
+         base,
+         name_hint,
+         _line,
+         code,
+         pc,
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         instruction_count,
+         cs,
+         cd,
+         ou
+       ) do
+    call_info = {proto.source, 0, name_hint}
+    instruction_count = tick(state, instruction_count, cs, cd)
+    ckdepth(state, cs, cd)
+
+    state = %{
+      state
+      | call_stack: [call_info | cs],
+        call_depth: cd + 1,
+        instruction_count: instruction_count
+    }
+
+    {results, state} = Executor.call_function(closure, args, state)
+    instruction_count = state.instruction_count
+    regs = :erlang.setelement(base + 1, regs, first_result(results))
+    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+  end
+
+  defp call_one_bridge(
+         func_value,
+         args,
+         base,
+         name_hint,
+         line,
+         code,
+         pc,
+         regs,
+         upvalues,
+         proto,
+         state,
+         cont,
+         frames,
+         instruction_count,
+         cs,
+         cd,
+         ou
+       ) do
+    state = %{state | call_stack: cs, call_depth: cd, instruction_count: instruction_count}
+
+    {results, state} = Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
+
+    instruction_count = state.instruction_count
+    regs = :erlang.setelement(base + 1, regs, first_result(results))
+    dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+  end
+
+  defp first_result([v | _]), do: v
+  defp first_result([]), do: nil
+
   defp init_callee_regs(callee_proto, src_regs, src_off, arg_count) do
     # Exact-sized like `init_regs/2`; runs on every compiled-closure call,
     # so sizing to the callee's honest register peak (no slack) is what keeps
     # deep recursion off a per-frame over-allocation (issue #324).
-    regs = Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count))
-    copy_n = min(arg_count, callee_proto.param_count)
-    copy_regs(src_regs, src_off, regs, 0, copy_n)
+    param_count = callee_proto.param_count
+
+    mkregs(
+      max(callee_proto.max_registers, param_count),
+      min(arg_count, param_count),
+      src_regs,
+      src_off
+    )
   end
+
+  # ── Callee register files ───────────────────────────────────────────────
+  #
+  # Building the callee's register tuple as `Tuple.duplicate/2` plus one
+  # `setelement` per argument allocates it `1 + copied` times over: every
+  # `setelement` copies the whole tuple. The generated clauses below build
+  # the finished tuple in a single literal construction for the small
+  # (size, parameter-count) shapes ordinary Lua functions have. A
+  # parameterless shape allocates nothing at all — an all-`nil` tuple is a
+  # compile-time literal.
+  #
+  # `size` is the callee's register-file width, `params` the number of
+  # arguments actually landing in parameter slots (already clamped to the
+  # callee's `param_count` by the caller), `src`/`off` the caller's register
+  # tuple and the 0-based index of the first argument in it. Shapes past the
+  # generated bounds fall back to duplicate-and-copy; vararg overflow is
+  # separate machinery (`setup_vararg_proto/4`) and unaffected, as is the
+  # `grow_regs/2` growth contract for multi-return and vararg writes.
+  @mkregs_max_size 16
+  @mkregs_max_params 6
+
+  for size <- 1..@mkregs_max_size, params <- 0..min(size, @mkregs_max_params) do
+    src = Macro.var(:src, __MODULE__)
+    off = Macro.var(:off, __MODULE__)
+
+    slots =
+      Enum.map(1..params//1, fn i ->
+        quote(do: :erlang.element(unquote(i) + unquote(off), unquote(src)))
+      end) ++ List.duplicate(nil, size - params)
+
+    head_src = if params == 0, do: quote(do: _src), else: src
+    head_off = if params == 0, do: quote(do: _off), else: off
+
+    defp mkregs(unquote(size), unquote(params), unquote(head_src), unquote(head_off)) do
+      unquote({:{}, [], slots})
+    end
+  end
+
+  defp mkregs(size, params, src, off) do
+    copy_regs(src, off, Tuple.duplicate(nil, size), 0, params)
+  end
+
+  # Static-arity constructors. The arguments arrive already read out of the
+  # caller's registers, so the only run-time inputs are the callee's file
+  # width and its parameter count — the second clause of each size covers
+  # every callee that takes at least that many parameters, which is why no
+  # `min/2` clamp is needed. Surplus arguments (callee declares fewer
+  # parameters than the call site passes) are dropped here exactly as
+  # `copy_regs/5` dropped them.
+  @compile {:inline, regs_size: 1}
+  defp regs_size(%{max_registers: max_registers, param_count: param_count}) do
+    max(max_registers, param_count)
+  end
+
+  for size <- 1..@mkregs_max_size do
+    nils = List.duplicate(nil, size)
+    a1 = Macro.var(:a1, __MODULE__)
+    a2 = Macro.var(:a2, __MODULE__)
+
+    defp mkregs0(unquote(size)), do: unquote({:{}, [], nils})
+
+    defp mkregs1(unquote(size), 0, _a1), do: unquote({:{}, [], nils})
+
+    defp mkregs1(unquote(size), _params, unquote(a1)), do: unquote({:{}, [], [a1 | List.duplicate(nil, size - 1)]})
+
+    defp mkregs2(unquote(size), 0, _a1, _a2), do: unquote({:{}, [], nils})
+
+    defp mkregs2(unquote(size), 1, unquote(a1), _a2), do: unquote({:{}, [], [a1 | List.duplicate(nil, size - 1)]})
+
+    if size >= 2 do
+      defp mkregs2(unquote(size), _params, unquote(a1), unquote(a2)),
+        do: unquote({:{}, [], [a1, a2 | List.duplicate(nil, size - 2)]})
+    end
+  end
+
+  # Wide-register-file fallbacks. `size` is `max(max_registers, param_count)`,
+  # so a callee with `params` parameters always has room for them.
+  defp mkregs0(size), do: Tuple.duplicate(nil, size)
+
+  defp mkregs1(size, params, a1) when params >= 1 do
+    :erlang.setelement(1, Tuple.duplicate(nil, size), a1)
+  end
+
+  defp mkregs1(size, _params, _a1), do: Tuple.duplicate(nil, size)
+
+  defp mkregs2(size, params, a1, a2) when params >= 2 do
+    :erlang.setelement(2, :erlang.setelement(1, Tuple.duplicate(nil, size), a1), a2)
+  end
+
+  defp mkregs2(size, params, a1, _a2) when params >= 1 do
+    :erlang.setelement(1, Tuple.duplicate(nil, size), a1)
+  end
+
+  defp mkregs2(size, _params, _a1, _a2), do: Tuple.duplicate(nil, size)
 
   defp copy_regs(_src, _src_i, dst, _dst_i, 0), do: dst
 

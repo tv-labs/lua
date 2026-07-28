@@ -28,17 +28,17 @@ defmodule Lua.Compiler.PeepholeTest do
     proto
   end
 
-  defp run(source, opts) do
+  defp run(source, opts, lua \\ nil) do
     proto = compile!(source, opts)
     chunk = %Lua.Chunk{prototype: proto}
 
     fn ->
       result =
         try do
-          {results, _lua} = Lua.eval!(Lua.new(), chunk)
+          {results, _lua} = Lua.eval!(lua || Lua.new(), chunk)
           {:ok, results}
         rescue
-          e -> {:error, Lua.format_exception(e)}
+          e -> {:error, Lua.format_exception(e), Exception.message(e)}
         end
 
       send(self(), {:result, result})
@@ -78,6 +78,8 @@ defmodule Lua.Compiler.PeepholeTest do
   defp count_instructions(%Prototype{} = proto) do
     length(opcodes(proto))
   end
+
+  defp self_calls(%Prototype{} = proto), do: Enum.count(opcodes(proto), &(&1 == :call_self))
 
   # Walks a prototype tree pairwise, applying `fun` to each matched pair.
   defp zip_protos(%Prototype{} = a, %Prototype{} = b, fun) do
@@ -413,6 +415,152 @@ defmodule Lua.Compiler.PeepholeTest do
     end
   end
 
+  describe "self-recursive call fusion" do
+    test "a recursive local function calls itself without loading itself" do
+      proto =
+        compile!("""
+        local function fib(n)
+          if n < 2 then return n end
+          return fib(n-1) + fib(n-2)
+        end
+        return fib(15)
+        """)
+
+      [fib] = proto.prototypes
+
+      assert self_calls(proto) == 2
+      assert Enum.count(opcodes(fib), &(&1 == :call)) == 0
+      # The two `get_upvalue`s that loaded the closure are gone with them.
+      assert Enum.count(opcodes(fib), &(&1 == :get_upvalue)) == 0
+      assert tuple_size(fib.bytecode) == 8
+      assert Bytecode.fully_compiled?(proto)
+
+      assert {[610], _} =
+               Lua.eval!("local function fib(n) if n < 2 then return n end return fib(n-1) + fib(n-2) end return fib(15)")
+    end
+
+    test "covers the return-position and statement-call result shapes" do
+      tail = compile!("local function c(i, a) if i == 0 then return a end return c(i-1, a+i) end return c(10, 0)")
+
+      statement =
+        compile!("local n = 0 local function loop(i) if i == 0 then return end n = n + i loop(i-1) end loop(4) return n")
+
+      assert self_calls(tail) == 1
+      assert self_calls(statement) == 1
+
+      assert {[55], _} =
+               Lua.eval!("local function c(i, a) if i == 0 then return a end return c(i-1, a+i) end return c(10, 0)")
+
+      assert {[10], _} =
+               Lua.eval!(
+                 "local n = 0 local function loop(i) if i == 0 then return end n = n + i loop(i-1) end loop(4) return n"
+               )
+    end
+
+    # Each of these is a way the name could stop meaning "this function".
+    # The analysis has to see every one of them.
+    @refused [
+      {"mutual recursion",
+       "local isodd, iseven function isodd(n) if n == 0 then return false end return iseven(n-1) end " <>
+         "function iseven(n) if n == 0 then return true end return isodd(n-1) end return isodd(7)"},
+      {"the name is reassigned afterwards",
+       "local function f(n) if n == 0 then return 'f' end return f(n-1) end local a = f(2) f = function() return 'g' end return a, f(1)"},
+      {"the function is an anonymous value assigned to a pre-declared local",
+       "local f f = function(n) if n == 0 then return 0 end return f(n-1) end return f(3)"},
+      {"a closure captures the name and reassigns it",
+       "local function f(n) if n == 0 then return 0 end return f(n-1) end " <>
+         "local function rebind() f = function() return 99 end end local a = f(2) rebind() return a, f(2)"},
+      {"a closure captures the name without reassigning it",
+       "local function f(n) if n == 0 then return 0 end return f(n-1) end local function call() return f(2) end return call()"},
+      {"a closure declared inside the body captures the self-upvalue",
+       "local function f(n) local function g() return f end if n == 0 then return g end return f(n-1) end return type(f(3))"},
+      # Field accesses through the name fuse into `get_field_upvalue` /
+      # `set_field_upvalue` before the self-call analysis runs, so they
+      # index the closure straight out of its cell with no `get_upvalue`
+      # left to see — the analysis has to recognise the fused shapes on
+      # the self index as the value escaping a callee-only life.
+      {"a field read through the name",
+       "local function f(n) if n == 99 then return f.x end if n == 0 then return 0 end return f(n-1) end return f(3)"},
+      {"a field write through the name",
+       "local function f(n) if n == 99 then f.x = 1 return 0 end if n == 0 then return 0 end return f(n-1) end return f(3)"},
+      {"the function is passed as a value",
+       "local function f(n) if n == 0 then return 0 end return f(n-1) end local function apply(g) return g(2) end return apply(f)"},
+      {"the function is handed to pcall",
+       "local function f(n) if n == 0 then return 0 end return f(n-1) end return pcall(f, 3)"},
+      {"the body is vararg",
+       "local function f(...) if select('#', ...) == 0 then return 'done' end return f(select(2, ...)) end return f(1, 2)"},
+      {"the body uses goto",
+       "local function f(n) ::top:: if n > 0 then n = n - 1 goto top end return f end return type(f(3))"}
+    ]
+
+    for {label, source} <- @refused do
+      test "refuses when #{label}" do
+        source = unquote(source)
+
+        assert self_calls(compile!(source)) == 0
+        assert run(source, peephole: false) == run(source, peephole: true)
+      end
+    end
+
+    test "the interpreter runs the fused opcode too" do
+      # `and` / `or` still fall back to the interpreter, so this child
+      # prototype carries `:call_self` with no bytecode behind it.
+      source = """
+      local function f(n, flag)
+        if n == 0 then return 0 end
+        local x = flag and 1 or 2
+        return x + f(n-1, flag)
+      end
+      return f(3, true)
+      """
+
+      proto = compile!(source)
+      [f] = proto.prototypes
+
+      assert f.bytecode == nil
+      assert self_calls(proto) == 1
+      assert run(source, peephole: false) == run(source, peephole: true)
+      assert {[3], _} = Lua.eval!(source)
+    end
+  end
+
+  # `max_call_depth` has to be finite for the overflow shapes to terminate,
+  # and the fusion has to survive the shape — a self-recursive function
+  # handed straight to `pcall` escapes and keeps its generic call, so those
+  # programs wrap the recursion one level down.
+  defp bounded, do: Lua.new(max_call_depth: 200)
+
+  describe "differential: errors through fused self-calls" do
+    @through_self [
+      {"catchable stack overflow",
+       "local function outer() local function r(n) return 1 + r(n+1) end return r(1) end " <>
+         "local ok, err = pcall(outer) return ok, err"},
+      {"the depth the overflow trips at",
+       "local d = 0 local function outer() local function r(n) d = d + 1 return 1 + r(n+1) end return r(1) end " <>
+         "local ok = pcall(outer) return ok, d"},
+      {"an uncaught overflow's rendered traceback", "local function r(n) return 1 + r(n+1) end return r(1)"},
+      {"error() raised under the recursion",
+       "local function outer() local function r(n) if n == 0 then error('deep') end return 1 + r(n-1) end return r(3) end " <>
+         "local ok, err = pcall(outer) return ok, err"},
+      {"a type error raised under the recursion",
+       "local function outer() local function r(n) if n == 0 then return nil .. 'x' end return r(n-1) end return r(2) end return outer()"},
+      {"debug.traceback through the frames",
+       "local function outer() local function r(n) if n == 0 then return debug.traceback('T') end return r(n-1) end return r(3) end return outer()"},
+      {"debug.getinfo through the frames",
+       "local function outer() local function r(n) if n == 0 then return debug.getinfo(2).what end return r(n-1) end return r(2) end return outer()"}
+    ]
+
+    for {{label, source}, index} <- Enum.with_index(@through_self) do
+      test "#{label} is unchanged by the fusion" do
+        source = unquote(source)
+
+        assert self_calls(compile!(source)) > 0, "shape ##{unquote(index)} stopped fusing; it no longer tests anything"
+
+        assert run(source, [peephole: false], bounded()) == run(source, [peephole: true], bounded())
+      end
+    end
+  end
+
   # A corpus broad enough that a mis-scoped rewrite shows up somewhere:
   # every control-flow shape, closures over loop variables, metatables,
   # varargs, multi-return, coroutines, string building, and pcall.
@@ -528,7 +676,72 @@ defmodule Lua.Compiler.PeepholeTest do
     function f() written = 7 end
     f()
     return written, log[#log]
+    """,
+    # Self-recursion in every result shape the fusion accepts, next to the
+    # shapes it has to refuse — mutual recursion, a reassigned name, a
+    # pre-declared local holding an anonymous function, and a name a second
+    # closure captures.
+    "local function fib(n) if n < 2 then return n end return fib(n-1) + fib(n-2) end return fib(10)",
+    "local function c(i, a) if i == 0 then return a end return c(i-1, a+i) end return c(25, 0)",
+    "local n = 0 local function loop(i) if i == 0 then return end n = n + i loop(i-1) end loop(6) return n",
+    "local function f(n) if n == 0 then return 1, 2, 3 end return f(n-1) end return f(3)",
+    "local function f(n) if n == 0 then return 1, 2 end local a, b = f(n-1) return a + b end return f(2)",
+    "local function f(n) if n == 0 then return 0 end return f(n-1) end return {f(2), f(0)}",
     """
+    local isodd, iseven
+    function isodd(n) if n == 0 then return false end return iseven(n-1) end
+    function iseven(n) if n == 0 then return true end return isodd(n-1) end
+    return isodd(9), iseven(9)
+    """,
+    "local function f(n) if n == 0 then return 'f' end return f(n-1) end local a = f(3) f = function() return 'g' end return a, f(1)",
+    "local f f = function(n) if n == 0 then return 0 end return f(n-1) + 1 end return f(4)",
+    """
+    local function fact(n) if n <= 1 then return 1 end return n * fact(n-1) end
+    local function rebind() fact = function() return -1 end end
+    local before = fact(5)
+    rebind()
+    return before, fact(5)
+    """,
+    "local function f(n) if n == 0 then return 0 end return f(n-1) end return pcall(f, 3)",
+    "local function v(...) if select('#', ...) == 0 then return 'done' end return v(select(2, ...)) end return v(1, 2, 3)",
+    """
+    local t = {}
+    for i = 1, 3 do
+      local function f(n) if n == 0 then return i end return f(n-1) end
+      t[i] = f(2)
+    end
+    return t[1], t[2], t[3]
+    """,
+    # The same shape, but each closure outlives the iteration that made it.
+    # Storing it is a read of the name, so the fusion has to decline — and
+    # each surviving closure still has to see its own iteration's upvalue.
+    """
+    local fns = {}
+    for i = 1, 3 do
+      local function f(n) if n == 0 then return i end return f(n-1) end
+      fns[i] = f
+    end
+    return fns[1](2), fns[2](2), fns[3](2)
+    """,
+    """
+    local t = {}
+    local function f(n) if n == 0 then return 'base' end return f(n-1) end
+    t.f = f
+    return t.f(3), f(3)
+    """,
+    """
+    local function walk(node, depth)
+      if node == nil then return depth end
+      return walk(node.next, depth + 1)
+    end
+    return walk({next = {next = {next = nil}}}, 0)
+    """,
+    # Argument counts on both sides of the static-arity encoding boundary.
+    "local function a0() return 1 end local function a1(x) return x end local function a2(x, y) return x + y end " <>
+      "local function a3(x, y, z) return x + y + z end return a0(), a1(2), a2(3, 4), a3(5, 6, 7)",
+    "local function over(a, b) return a, b end return over(1, 2, 3, 4)",
+    "local function under(a, b, c) return a, b, c end return under(1)",
+    "print(1) print(1, 2) print(1, 2, 3) return 'printed'"
   ]
 
   describe "differential: peephole off vs on" do
@@ -581,10 +794,11 @@ defmodule Lua.Compiler.PeepholeTest do
       test "failure ##{index} renders identically #{inspect(String.slice(source, 0, 40))}" do
         source = unquote(source)
 
-        {{:error, off}, _} = run(source, peephole: false)
-        {{:error, on}, _} = run(source, peephole: true)
+        {{:error, off, off_message}, _} = run(source, peephole: false)
+        {{:error, on, on_message}, _} = run(source, peephole: true)
 
         assert off == on
+        assert off_message == on_message
       end
     end
   end

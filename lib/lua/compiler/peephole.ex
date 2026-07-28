@@ -25,6 +25,11 @@ defmodule Lua.Compiler.Peephole do
     6. **Redundant `close_upvalues` removal** in functions that create no
        closures — nothing in such a function can open an upvalue cell over
        one of its own registers, so there is never anything to close.
+    7. **Self-recursive call fusion.** A `local function` whose name can be
+       proved to be permanently bound to itself calls itself through
+       `:call_self`, which carries no callee: the engines recurse into the
+       prototype they are already running instead of loading the closure
+       out of its upvalue cell first.
 
   Both engines run the rewritten stream: the interpreter
   (`Lua.VM.Executor`) walks `instructions` directly, the dispatcher
@@ -130,6 +135,12 @@ defmodule Lua.Compiler.Peephole do
   # `{op, dest, a, constant}` shapes produced by rule 2.
   @compare_k_ops [:equal_k, :less_than_k, :less_equal_k]
 
+  # How far a rewrite may look ahead for the instruction it pairs with.
+  # Codegen separates a producer from its consumer by the instructions that
+  # build the other operands, so the pair is rarely adjacent, but it is
+  # always close.
+  @window 16
+
   @doc """
   Optimise a prototype and every prototype nested within it.
 
@@ -142,6 +153,7 @@ defmodule Lua.Compiler.Peephole do
   def optimize(%Prototype{} = proto) do
     prototypes = Enum.map(proto.prototypes, &optimize/1)
     instructions = optimize_instructions(proto.instructions, prototypes)
+    prototypes = fuse_self_calls(instructions, prototypes)
 
     %{
       proto
@@ -234,6 +246,389 @@ defmodule Lua.Compiler.Peephole do
   end
 
   defp collapse_roundtrip_pairs([instr | rest]), do: [instr | collapse_roundtrip_pairs(rest)]
+
+  # ── Rule 7: self-recursive call fusion ──────────────────────────────────
+  #
+  # `local function f(…) … f(…) … end` reaches its own name through an
+  # upvalue cell, so every self-call loads the closure out of the cell into
+  # a scratch register before calling it. When the cell provably can only
+  # ever hold the closure that is already running, the load is pure
+  # overhead and the call needs no closure value at all: both engines are
+  # already holding the prototype and its upvalue tuple. `:call_self` says
+  # exactly that, and the load disappears.
+  #
+  # The proof is deliberately narrow, and every step fails closed — any
+  # doubt leaves the generic `:call` in place:
+  #
+  #   * the parent binds the child with the shape codegen emits for
+  #     `local function`: a `:closure`, the copy into the local's register,
+  #     and the `set_open_upvalue` that publishes it to the body's cell;
+  #   * that register is written exactly twice in the whole parent — by the
+  #     binding itself — so no assignment anywhere can rebind the name;
+  #   * the parent only ever reads it to call it, and the scratch register
+  #     the closure passed through on its way there is overwritten before
+  #     anything reads it back, so the closure value never becomes an
+  #     operand of anything else;
+  #   * inside the child, the self-upvalue is likewise only ever loaded to
+  #     be called, is never assigned, and is captured by no nested
+  #     prototype — nothing can hand the value (or the cell behind it) to
+  #     `debug.setupvalue`;
+  #   * the child is not vararg, and contains no `goto`.
+  #
+  # Mutual recursion never qualifies: each name is a separate register bound
+  # to a different prototype, so the callee is never the caller. Neither does
+  # `local f; f = function() … f() … end` — an assignment publishes the
+  # closure to the cell without ever copying it into the local's register, so
+  # it is not the binding shape, and the `local f` declaration has already
+  # written that register anyway.
+
+  defp fuse_self_calls(instructions, prototypes) do
+    prototypes
+    |> Enum.with_index()
+    |> Enum.map(fn {child, index} ->
+      case self_upvalue(instructions, prototypes, child, index) do
+        {:ok, upvalue_index} ->
+          %{child | instructions: fuse_self_block(child.instructions, [], upvalue_index, child.prototypes)}
+
+        :error ->
+          child
+      end
+    end)
+  end
+
+  # The child's own upvalue index for its self-reference, when every step of
+  # the proof holds.
+  defp self_upvalue(instructions, prototypes, child, index) do
+    with false <- child.is_vararg,
+         false <- contains_goto?(child.instructions),
+         {:ok, reg, scratch, after_binding} <- binding_site(instructions, index),
+         {:ok, upvalue_index} <- self_descriptor(child, reg),
+         2 <- count_writes(instructions, reg),
+         true <- scratch_confined?(after_binding, scratch, prototypes),
+         true <- callee_only_register?(instructions, prototypes, reg, index),
+         true <- callee_only_upvalue?(child, upvalue_index) do
+      {:ok, upvalue_index}
+    else
+      _ -> :error
+    end
+  end
+
+  # The `local function` binding shape, before and after move elision.
+  # The trailing `set_open_upvalue` is what publishes the closure to the
+  # cell the body reads, so a binding without it cannot be self-recursive.
+  defp binding_site(instructions, index) do
+    Enum.find_value(blocks(instructions), :error, fn block -> binding_in_block(block, index) end)
+  end
+
+  defp binding_in_block(
+         [{:closure, scratch, index}, {:move, reg, scratch}, {:set_open_upvalue, reg, scratch} | rest],
+         index
+       ), do: {:ok, reg, scratch, rest}
+
+  defp binding_in_block([{:closure, reg, index}, {:set_open_upvalue, reg, reg} | rest], index), do: {:ok, reg, nil, rest}
+
+  defp binding_in_block([_instr | rest], index), do: binding_in_block(rest, index)
+  defp binding_in_block([], _index), do: nil
+
+  # The child's descriptor for the parent register it was bound to. Exactly
+  # one must match: descriptors are deduplicated per function, so two hits
+  # would mean a shape this analysis does not model.
+  defp self_descriptor(%Prototype{upvalue_descriptors: descriptors}, reg) do
+    descriptors
+    |> Enum.with_index()
+    |> Enum.filter(fn
+      {{:parent_local, ^reg, _name}, _index} -> true
+      _descriptor -> false
+    end)
+    |> case do
+      [{_descriptor, index}] -> {:ok, index}
+      _ -> :error
+    end
+  end
+
+  # The closure passes through a scratch register on its way into the
+  # local's. The binding is the last thing that may read it: the very next
+  # write to it — and codegen reuses call bases and temporaries eagerly, so
+  # there always is one — must come before any read. Running out of block
+  # without finding that write leaves the question open, which counts
+  # against the fusion. The move-elided shape has no scratch register.
+  defp scratch_confined?(_after_binding, nil, _prototypes), do: true
+
+  defp scratch_confined?(after_binding, scratch, prototypes) do
+    scan(after_binding, scratch, prototypes, false) === :killed
+  end
+
+  # Every read of the bound register in the parent is either part of the
+  # binding, or a load of the closure that is consumed as a callee and
+  # nothing else. A `:closure` for any *other* prototype that captures the
+  # register counts as a read, so a second function closing over the name
+  # ends the analysis here.
+  defp callee_only_register?(instructions, prototypes, reg, index) do
+    Enum.all?(blocks(instructions), fn block ->
+      callee_only_block?(block, prototypes, reg, index)
+    end)
+  end
+
+  defp callee_only_block?([], _prototypes, _reg, _index), do: true
+
+  defp callee_only_block?([instr | rest], prototypes, reg, index) do
+    cond do
+      binding_read?(instr, reg, index) ->
+        callee_only_block?(rest, prototypes, reg, index)
+
+      match?({:get_open_upvalue, _dest, ^reg}, instr) ->
+        callee_only?(rest, :erlang.element(2, instr), prototypes) and
+          callee_only_block?(rest, prototypes, reg, index)
+
+      reads_here?(instr, reg, prototypes) ->
+        false
+
+      true ->
+        callee_only_block?(rest, prototypes, reg, index)
+    end
+  end
+
+  defp binding_read?({:closure, _dest, index}, _reg, index), do: true
+  defp binding_read?({:set_open_upvalue, reg, _source}, reg, _index), do: true
+  defp binding_read?(_instr, _reg, _index), do: false
+
+  # The mirror image inside the child: the self-upvalue may be loaded only
+  # to be called, never assigned, and never captured by a nested prototype
+  # (which would put both the value and its cell within reach of code this
+  # analysis cannot see).
+  defp callee_only_upvalue?(%Prototype{} = child, upvalue_index) do
+    not captures_upvalue?(child.prototypes, upvalue_index) and
+      Enum.all?(blocks(child.instructions), fn block ->
+        callee_only_upvalue_block?(block, child.prototypes, upvalue_index)
+      end)
+  end
+
+  defp captures_upvalue?(prototypes, upvalue_index) do
+    Enum.any?(prototypes, fn %Prototype{upvalue_descriptors: descriptors} ->
+      Enum.any?(descriptors, &match?({:parent_upvalue, ^upvalue_index, _name}, &1))
+    end)
+  end
+
+  defp callee_only_upvalue_block?([], _prototypes, _upvalue_index), do: true
+
+  defp callee_only_upvalue_block?([{:set_upvalue, upvalue_index, _source} | _rest], _prototypes, upvalue_index), do: false
+
+  defp callee_only_upvalue_block?([{:get_upvalue, dest, upvalue_index} | rest], prototypes, upvalue_index) do
+    callee_only?(rest, dest, prototypes) and callee_only_upvalue_block?(rest, prototypes, upvalue_index)
+  end
+
+  # A field access fused against the self index (`f.x` / `f.x = v`, fused
+  # by rule 3 before this analysis runs) indexes the value in the cell
+  # without ever staging it in a register, so the `:get_upvalue` clause
+  # above never sees it. The value is participating in something other
+  # than a call, which is exactly what the proof forbids.
+  defp callee_only_upvalue_block?(
+         [{:get_field_upvalue, _dest, upvalue_index, _name, _hint} | _rest],
+         _prototypes,
+         upvalue_index
+       ), do: false
+
+  defp callee_only_upvalue_block?(
+         [{:set_field_upvalue, upvalue_index, _name, _value, _hint} | _rest],
+         _prototypes,
+         upvalue_index
+       ), do: false
+
+  defp callee_only_upvalue_block?([_instr | rest], prototypes, upvalue_index) do
+    callee_only_upvalue_block?(rest, prototypes, upvalue_index)
+  end
+
+  # True when the value just loaded into `reg` is consumed as the callee of
+  # a call and by nothing else. The first instruction that touches `reg`
+  # settles it: a call with `reg` as its base is the callee position, any
+  # other read is the value escaping, and an overwrite means nothing ever
+  # read it.
+  defp callee_only?([], _reg, _prototypes), do: false
+
+  defp callee_only?([instr | rest], reg, prototypes) do
+    cond do
+      match?({:call, ^reg, _arg_count, _result_count, _hint}, instr) -> true
+      reads?(instr, reg, prototypes) -> false
+      writes?(instr, reg) -> true
+      true -> callee_only?(rest, reg, prototypes)
+    end
+  end
+
+  # ── Rule 7: the rewrite ─────────────────────────────────────────────────
+  #
+  # The load and the call it feeds are rarely adjacent — the arguments are
+  # computed in between — so the call is searched for within the same
+  # bounded window `elide_move/3` uses, over instructions transparent to
+  # the scratch register. Dropping the load is invisible: the register it
+  # wrote is read by nothing but the call (proved above), and the load
+  # itself can neither raise nor be observed.
+
+  defp fuse_self_block([], _future, _upvalue_index, _prototypes), do: []
+
+  defp fuse_self_block([{:get_upvalue, reg, upvalue_index} = load | rest], future, upvalue_index, prototypes) do
+    case find_self_call(rest, reg, prototypes, @window, []) do
+      {:ok, call, skipped, after_call} ->
+        if self_call_safe?(call, reg, [after_call | future], prototypes) do
+          {:call, base, arg_count, result_count, hint} = call
+
+          Enum.reverse(skipped, [
+            {:call_self, base, arg_count, result_count, hint}
+            | fuse_self_block(after_call, future, upvalue_index, prototypes)
+          ])
+        else
+          [load | fuse_self_block(rest, future, upvalue_index, prototypes)]
+        end
+
+      :error ->
+        [load | fuse_self_block(rest, future, upvalue_index, prototypes)]
+    end
+  end
+
+  defp fuse_self_block([instr | rest], future, upvalue_index, prototypes) do
+    fused =
+      case bodies(instr) do
+        [] ->
+          instr
+
+        list ->
+          list
+          |> Enum.zip(body_futures(instr, [rest | future]))
+          |> Enum.map(fn {body, body_future} -> fuse_self_block(body, body_future, upvalue_index, prototypes) end)
+          |> then(&put_bodies(instr, &1))
+      end
+
+    [fused | fuse_self_block(rest, future, upvalue_index, prototypes)]
+  end
+
+  # A discarded self-call is the one shape that leaves the callee register
+  # holding whatever was there before instead of the closure. Every other
+  # result shape either writes the register back (`1`, `-2`, `n > 1`) or
+  # returns straight through the frame (`-1`), so nothing can observe the
+  # difference.
+  defp self_call_safe?({:call, base, _arg_count, 0, _hint}, base, future, prototypes) do
+    dead?(base, future, prototypes)
+  end
+
+  defp self_call_safe?(_call, _reg, _future, _prototypes), do: true
+
+  defp find_self_call(
+         [{:call, reg, arg_count, result_count, _hint} = call | after_call],
+         reg,
+         _prototypes,
+         _budget,
+         skipped
+       )
+       when is_integer(arg_count) and arg_count >= 0 and is_integer(result_count) and result_count >= -2 do
+    {:ok, call, skipped, after_call}
+  end
+
+  defp find_self_call([instr | rest], reg, prototypes, budget, skipped) when budget > 0 do
+    if transparent?(instr, reg, prototypes) do
+      find_self_call(rest, reg, prototypes, budget - 1, [instr | skipped])
+    else
+      :error
+    end
+  end
+
+  defp find_self_call(_instructions, _reg, _prototypes, _budget, _skipped), do: :error
+
+  # ── Instruction-tree walks ──────────────────────────────────────────────
+
+  # Every straight-line instruction list in a tree: the list itself and,
+  # recursively, each nested body. Analyses that ask per-block questions
+  # walk these instead of `reads?/3`'s folded-in view of nested bodies.
+  defp blocks(instructions) do
+    [instructions | Enum.flat_map(instructions, fn instr -> Enum.flat_map(bodies(instr), &blocks/1) end)]
+  end
+
+  defp count_writes(instructions, reg) do
+    Enum.reduce(blocks(instructions), 0, fn block, acc ->
+      acc + Enum.count(block, fn instr -> may_write_here?(instr, reg) end)
+    end)
+  end
+
+  # `reads?/3` folds the nested bodies of a branch or loop into its answer.
+  # The per-block walks above visit those bodies themselves, so here each
+  # instruction is asked only about its own operands.
+  defp reads_here?({:test, test_reg, _then_body, _else_body}, reg, _protos), do: test_reg === reg
+  defp reads_here?({:test_and, _dest, source, _body}, reg, _protos), do: source === reg
+  defp reads_here?({:test_or, _dest, source, _body}, reg, _protos), do: source === reg
+  defp reads_here?({:while_loop, _cond_body, test_reg, _body}, reg, _protos), do: test_reg === reg
+  defp reads_here?({:repeat_loop, _body, _cond_body, test_reg}, reg, _protos), do: test_reg === reg
+
+  defp reads_here?({:numeric_for, base, _loop_var, _body}, reg, _protos), do: reg >= base and reg <= base + 2
+  defp reads_here?({:generic_for, base, _var_regs, _body}, reg, _protos), do: reg >= base and reg <= base + 2
+  defp reads_here?(instr, reg, protos), do: reads?(instr, reg, protos)
+
+  # Tags whose whole write effect `writes?/2` models exactly.
+  @modelled_writers [
+                      :load_nil,
+                      :self,
+                      :load_constant,
+                      :load_boolean,
+                      :load_env,
+                      :move,
+                      :get_upvalue,
+                      :get_open_upvalue,
+                      :get_global,
+                      :new_table,
+                      :get_table,
+                      :get_field,
+                      :get_field_upvalue,
+                      :closure,
+                      :length,
+                      :not,
+                      :negate,
+                      :bitwise_not,
+                      :concatenate
+                    ] ++ @binary_ops ++ @arith_k_ops ++ @compare_ops ++ @compare_k_ops
+
+  # Tags that establish no register at all: stores write through a table,
+  # an upvalue cell, or nothing.
+  @non_writers [
+    :set_table,
+    :set_field,
+    :set_field_upvalue,
+    :set_upvalue,
+    :set_list,
+    :close_upvalues,
+    :source_line,
+    :return,
+    :return_vararg,
+    :goto,
+    :label
+  ]
+
+  # "Could executing this change what `reg` holds, directly or through its
+  # open-upvalue cell?" The mirror of `writes?/2`, which answers the narrow
+  # "kills the value on every path" question the liveness scan needs: this
+  # one over-reports, so an unrecognised shape ends the fusion rather than
+  # quietly invalidating its premise.
+  defp may_write_here?(:break, _reg), do: false
+  defp may_write_here?({:set_open_upvalue, cell_reg, _source}, reg), do: cell_reg === reg
+  defp may_write_here?({:call, base, _arg_count, _results, _hint}, reg), do: reg >= base
+  defp may_write_here?({:call_self, base, _arg_count, _results, _hint}, reg), do: reg >= base
+  defp may_write_here?({:vararg, base, _count}, reg), do: reg >= base
+
+  defp may_write_here?({:numeric_for, base, loop_var, _body}, reg),
+    do: (reg >= base and reg <= base + 2) or loop_var === reg
+
+  defp may_write_here?({:generic_for, base, _var_regs, _body}, reg), do: reg >= base
+  defp may_write_here?({:test_and, dest, _source, _body}, reg), do: dest === reg
+  defp may_write_here?({:test_or, dest, _source, _body}, reg), do: dest === reg
+
+  defp may_write_here?(instr, reg) when is_tuple(instr) do
+    tag = :erlang.element(1, instr)
+
+    cond do
+      tag in @non_writers -> false
+      tag in @modelled_writers -> writes?(instr, reg)
+      bodies(instr) != [] -> false
+      true -> true
+    end
+  end
+
+  defp may_write_here?(_instr, _reg), do: true
 
   # ── Rules 1–3: fusion ───────────────────────────────────────────────────
   #
@@ -393,8 +788,6 @@ defmodule Lua.Compiler.Peephole do
   # and they may not read or write `dest` (whose write is moving earlier).
   # Only straight-line shapes qualify, so no branch, loop, or `break` can
   # observe the reordering.
-
-  @window 16
 
   defp elide_move([producer | rest], future, prototypes) do
     with true <- coalescible?(producer),
@@ -696,6 +1089,12 @@ defmodule Lua.Compiler.Peephole do
 
   # Unrecognised shape — including `:goto` / `:label`, which only reach here
   # via the register-extent scan. Assume it observes everything.
+  #
+  # `:call_self` also lands here *deliberately*: it is emitted by the last
+  # rewrite in the pipeline, so no scan needs a precise answer today, and
+  # the reads-everything default fails closed if one ever sees it. Any
+  # reordering that runs another rewrite over fused instructions must give
+  # it a real clause rather than quietly ride on this catch-all.
   defp reads?(_instr, _reg, _protos), do: true
 
   defp captures?(prototypes, index, reg) do

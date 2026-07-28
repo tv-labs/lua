@@ -126,6 +126,10 @@ defmodule Lua.Compiler.Codegen do
   defp instruction_size({:vararg, base, _}), do: base + 1
   defp instruction_size({:self, base, _obj, _name, _hint}), do: base + 2
   defp instruction_size({:call, base, _ac, _rc, _hint}), do: base + 1
+
+  # `Lua.Compiler.Peephole` emits this: same register extent as `:call`,
+  # minus the callee the fused form no longer loads.
+  defp instruction_size({:call_self, base, _ac, _rc, _hint}), do: base + 1
   defp instruction_size({:source_line, _line, _src}), do: 0
   defp instruction_size({:close_upvalues, _threshold}), do: 0
   defp instruction_size({:label, _name, _level, _block_path}), do: 0

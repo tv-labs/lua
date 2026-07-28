@@ -125,6 +125,37 @@ defmodule Lua.Compiler.Bytecode do
   @op_get_field_upvalue 68
   @op_set_field_upvalue 69
 
+  # Static-arity call variants. `arg_count` is fixed at encode time for
+  # every ordinary call site, so the small arities that dominate real
+  # programs get their own tag: the dispatcher's handler then reads the
+  # arguments out of the caller's registers at constant offsets and builds
+  # the callee's register file as one literal tuple, with no argument-copy
+  # loop and no clamp against the callee's parameter count. Wider arities
+  # keep `@op_call_one` / `@op_call_zero`.
+  @op_call_one_0 70
+  @op_call_one_1 71
+  @op_call_one_2 72
+  @op_call_zero_0 73
+  @op_call_zero_1 74
+  @op_call_zero_2 75
+
+  # Self-recursive call: the callee is the prototype making the call, so the
+  # opcode carries no closure and the dispatcher recurses with the code,
+  # prototype, and upvalues it is already holding.
+  # `Lua.Compiler.Peephole` emits the instruction; codegen never does.
+  @op_call_self 76
+
+  # The call opcodes whose tuple is `{tag, base, name_hint}` before
+  # `annotate_line/2` bakes the source line in.
+  @static_arity_calls [
+    @op_call_one_0,
+    @op_call_one_1,
+    @op_call_one_2,
+    @op_call_zero_0,
+    @op_call_zero_1,
+    @op_call_zero_2
+  ]
+
   @doc """
   Compile a prototype, populating its `bytecode` field on success.
 
@@ -204,12 +235,17 @@ defmodule Lua.Compiler.Bytecode do
   # would otherwise leak `:0:`. Other opcodes pass through unchanged —
   # line attribution for non-call raise sites (binops, indexing, concat)
   # is deferred.
+  defp annotate_line({tag, base, hint}, line) when tag in @static_arity_calls, do: {tag, base, hint, line}
+
   defp annotate_line({@op_call_one, base, args, hint}, line), do: {@op_call_one, base, args, hint, line}
 
   defp annotate_line({@op_call_zero, base, args, hint}, line), do: {@op_call_zero, base, args, hint, line}
 
   defp annotate_line({@op_call_multi, base, args, results, hint}, line),
     do: {@op_call_multi, base, args, results, hint, line}
+
+  defp annotate_line({@op_call_self, base, args, results, hint}, line),
+    do: {@op_call_self, base, args, results, hint, line}
 
   defp annotate_line({@op_generic_for, base, var_regs, body}, line), do: {@op_generic_for, base, var_regs, body, line}
 
@@ -363,7 +399,18 @@ defmodule Lua.Compiler.Bytecode do
   #     `{:multi, _}` arg shape, negative arg count) → `:call_multi`.
   #     This is the B5c-v2 catch-all for the multi-return machinery.
   #
+  # The 0-, 1-, and 2-argument forms of each get a static-arity tag; they
+  # cover the overwhelming majority of call sites, and their handlers skip
+  # the argument-copy loop entirely.
+  #
   # `name_hint` is preserved on every shape for error attribution.
+  defp encode({:call, base, 0, 1, name_hint}), do: {:ok, {@op_call_one_0, base, name_hint}}
+  defp encode({:call, base, 1, 1, name_hint}), do: {:ok, {@op_call_one_1, base, name_hint}}
+  defp encode({:call, base, 2, 1, name_hint}), do: {:ok, {@op_call_one_2, base, name_hint}}
+  defp encode({:call, base, 0, 0, name_hint}), do: {:ok, {@op_call_zero_0, base, name_hint}}
+  defp encode({:call, base, 1, 0, name_hint}), do: {:ok, {@op_call_zero_1, base, name_hint}}
+  defp encode({:call, base, 2, 0, name_hint}), do: {:ok, {@op_call_zero_2, base, name_hint}}
+
   defp encode({:call, base, arg_count, 1, name_hint}) when is_integer(arg_count) and arg_count >= 0 do
     {:ok, {@op_call_one, base, arg_count, name_hint}}
   end
@@ -374,6 +421,14 @@ defmodule Lua.Compiler.Bytecode do
 
   defp encode({:call, base, arg_count, result_count, name_hint}) do
     {:ok, {@op_call_multi, base, arg_count, result_count, name_hint}}
+  end
+
+  # `:call_self` keeps one shape across every result count — the handler
+  # derives the frame's result destination the same way `@op_call_multi`
+  # does. Only the statically known argument counts the peephole fuses
+  # reach here; anything else would have kept its `:call`.
+  defp encode({:call_self, base, arg_count, result_count, name_hint}) when is_integer(arg_count) and arg_count >= 0 do
+    {:ok, {@op_call_self, base, arg_count, result_count, name_hint}}
   end
 
   # `:return` shapes:
@@ -683,4 +738,11 @@ defmodule Lua.Compiler.Bytecode do
   def op_equal_k, do: @op_equal_k
   def op_get_field_upvalue, do: @op_get_field_upvalue
   def op_set_field_upvalue, do: @op_set_field_upvalue
+  def op_call_one_0, do: @op_call_one_0
+  def op_call_one_1, do: @op_call_one_1
+  def op_call_one_2, do: @op_call_one_2
+  def op_call_zero_0, do: @op_call_zero_0
+  def op_call_zero_1, do: @op_call_zero_1
+  def op_call_zero_2, do: @op_call_zero_2
+  def op_call_self, do: @op_call_self
 end
