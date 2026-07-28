@@ -49,6 +49,8 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-07-28
+
 ### Changed
 - `Lua.new/1` is ~100x faster (roughly 40µs down to 0.4µs) for the default and
   fully-custom-sandbox configurations. Installing the standard library is pure
@@ -58,6 +60,23 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
   cache self-invalidates when the modules that built it are recompiled; hosts
   that hot-load new code in `:embedded` mode (releases) can force a rebuild
   with `Lua.VM.Bootstrap.reset/0` (#398).
+- The VM dispatcher and call convention were reworked to cut per-call and
+  per-iteration overhead: register files are built in a single allocation with
+  static-arity opcodes and `call_self` fusion (#405), and the dispatcher trims
+  work on the hot path for calls and loop iterations (#401).
+- The compiler gained a peephole pass that emits fused and constant opcodes
+  (#403), and now does more work once at compile time: node ids are stamped a
+  single time (#416), scope resolution is keyed by node id with deduplicated
+  upvalue descriptors (#400), and the lexer slices tokens directly from the
+  source binary instead of building per-character position maps (#399).
+
+### Fixed
+- Comments between a bare `return` and its terminator (`end`, `until`, or
+  end-of-chunk) now parse instead of raising a syntax error (#418).
+- Lua patterns honour the `^` anchor in `string.gsub` and treat a leading `^`
+  as a literal caret in `string.gmatch`, matching Lua 5.3 semantics (#406).
+- Encoding or decoding cyclic tables at the eval boundary no longer recurses
+  unboundedly (#407).
 
 ## [1.0.1] - 2026-07-16
 
@@ -649,6 +668,7 @@ API is intended to be stable. Please report any regressions before final.
 - Upgrade to Luerl 1.4.1
 - Tables must now be explicitly decoded when receiving as arguments `deflua` and other Elixir callbacks
 
+[1.0.2]: https://github.com/tv-labs/lua/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/tv-labs/lua/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/tv-labs/lua/compare/v0.4.0...v1.0.0
 [1.0.0-rc.3]: https://github.com/tv-labs/lua/compare/v1.0.0-rc.2...v1.0.0-rc.3
