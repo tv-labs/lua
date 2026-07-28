@@ -201,6 +201,39 @@ defmodule Lua.Parser.StatementTest do
              } = chunk
     end
 
+    test "parses a bare return followed by a comment before elseif/else" do
+      # A comment sits between an empty `return` and the block terminator.
+      # Comments are whitespace to Lua, so the return is still empty and the
+      # branch continues normally. Regression: the parser used to treat the
+      # comment token as the start of a return expression and fail with
+      # "Expected expression".
+      assert {:ok, chunk} =
+               Parser.parse("""
+               if x > 0 then
+                 return
+               -- leading comment on elseif
+               elseif x < 0 then
+                 return
+               -- leading comment on else
+               else
+                 return
+               -- trailing comment before end
+               end
+               """)
+
+      assert %{
+               block: %{
+                 stmts: [
+                   %Statement.If{
+                     then_block: %{stmts: [%Statement.Return{values: []}]},
+                     elseifs: [{%Expr.BinOp{op: :lt}, %{stmts: [%Statement.Return{values: []}]}}],
+                     else_block: %{stmts: [%Statement.Return{values: []}]}
+                   }
+                 ]
+               }
+             } = chunk
+    end
+
     test "parses if with elseif" do
       assert {:ok, chunk} =
                Parser.parse("""
