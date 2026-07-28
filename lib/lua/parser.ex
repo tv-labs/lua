@@ -252,7 +252,11 @@ defmodule Lua.Parser do
 
   # Placeholder implementations for statements (Phase 3)
   defp parse_return([{:keyword, :return, pos} | rest]) do
-    case peek(rest) do
+    # Comments are whitespace between the `return` keyword and the block
+    # terminator, so look past them when deciding whether this is a bare
+    # (valueless) return. For terminator/EOF the comment tokens stay in `rest`
+    # for the block parser to collect as orphaned/trailing comments.
+    case peek(skip_comments(rest)) do
       # End of block or statement
       {:keyword, terminator, _} when terminator in [:end, :else, :elseif, :until] ->
         {:ok, %Statement.Return{values: [], meta: Meta.new(pos)}, rest}
@@ -261,7 +265,7 @@ defmodule Lua.Parser do
         {:ok, %Statement.Return{values: [], meta: Meta.new(pos)}, rest}
 
       {:delimiter, :semicolon, _} ->
-        {_, rest2} = consume(rest)
+        {_, rest2} = consume(skip_comments(rest))
         {:ok, %Statement.Return{values: [], meta: Meta.new(pos)}, rest2}
 
       _ ->
