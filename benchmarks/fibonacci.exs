@@ -27,9 +27,13 @@ end
 call_fib = "return fib(30)"
 
 # --- This Lua implementation ---
+# The state returned by `load_chunk!/2` is threaded through each call rather
+# than discarded: a loaded chunk may be a reference *into* the state it was
+# loaded against, so dropping that state can invalidate the chunk. Threading it
+# is correct on every release and costs nothing.
 lua = Lua.new()
 {_, lua} = Lua.eval!(lua, fib_def)
-{fib_chunk, _} = Lua.load_chunk!(lua, call_fib)
+{fib_chunk, lua} = Lua.load_chunk!(lua, call_fib)
 
 # --- Luerl ---
 luerl_state = :luerl.init()

@@ -53,9 +53,13 @@ end
 call_closures = "return run_closures(100)"
 
 # --- This Lua implementation ---
+# The state returned by `load_chunk!/2` is threaded through each call rather
+# than discarded: a loaded chunk may be a reference *into* the state it was
+# loaded against, so dropping that state can invalidate the chunk. Threading it
+# is correct on every release and costs nothing.
 lua = Lua.new()
 {_, lua} = Lua.eval!(lua, closure_def)
-{closure_chunk, _} = Lua.load_chunk!(lua, call_closures)
+{closure_chunk, lua} = Lua.load_chunk!(lua, call_closures)
 
 # --- Luerl ---
 luerl_state = :luerl.init()

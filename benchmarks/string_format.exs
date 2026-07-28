@@ -78,11 +78,15 @@ call_width = "return run_width_format(1000)"
 call_many = "return run_many_specs(1000)"
 
 # --- This Lua implementation ---
+# The state returned by `load_chunk!/2` is threaded through each call rather
+# than discarded: a loaded chunk may be a reference *into* the state it was
+# loaded against, so dropping that state can invalidate the chunk. Threading it
+# is correct on every release and costs nothing.
 lua = Lua.new()
 {_, lua} = Lua.eval!(lua, string_def)
-{long_chunk, _} = Lua.load_chunk!(lua, call_long)
-{width_chunk, _} = Lua.load_chunk!(lua, call_width)
-{many_chunk, _} = Lua.load_chunk!(lua, call_many)
+{long_chunk, lua} = Lua.load_chunk!(lua, call_long)
+{width_chunk, lua} = Lua.load_chunk!(lua, call_width)
+{many_chunk, lua} = Lua.load_chunk!(lua, call_many)
 
 # --- Luerl ---
 luerl_state = :luerl.init()
