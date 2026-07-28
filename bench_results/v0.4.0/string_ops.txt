@@ -1,18 +1,3 @@
-zoxide: detected a possible configuration issue.
-Please ensure that zoxide is initialized right at the end of your shell configuration file (usually ~/.zshrc).
-
-If the issue persists, consider filing an issue at:
-https://github.com/ajeetdsouza/zoxide/issues
-
-Disable this message by setting _ZO_DOCTOR=0.
-
-     warning: this clause of defp format_error/2 is never used (or it will always fail/warn when invoked)
-     │
- 177 │   defp format_error(_, {:undefined, args}) do
-     │        ~
-     │
-     └─ lib/lua/util.ex:177:8: Lua.Util.format_error/2
-
 luaport not available ({:luaport, {~c"no such file or directory", ~c"luaport.app"}}) — skipping C Lua benchmarks
 
 === String Concatenation via table.concat (n=100) (mode: full) ===
