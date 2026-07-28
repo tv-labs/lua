@@ -56,7 +56,8 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
   0.6µs median, with per-call allocation down from ~92KB to under 1KB — and
   ~5.5x faster when a custom sandbox is passed (36.0µs down to 6.5µs), as
   measured by `benchmarks/vm_new.exs` under `mix run`
-  ([full figures](bench_results/versions-2026-07-28.md)). Installing the
+  ([full figures](https://github.com/tv-labs/lua/blob/main/bench_results/versions-2026-07-28.md)).
+  Installing the
   standard library is pure and deterministic, so the boot-time VM template is
   now built once per node and memoized in `:persistent_term`; every later
   `Lua.new/1` starts from the shared template copy-on-write. In `:interactive` mode (dev, IEx, tests) the
