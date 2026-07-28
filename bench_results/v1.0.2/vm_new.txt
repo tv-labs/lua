@@ -1,0 +1,65 @@
+zoxide: detected a possible configuration issue.
+Please ensure that zoxide is initialized right at the end of your shell configuration file (usually ~/.zshrc).
+
+If the issue persists, consider filing an issue at:
+https://github.com/ajeetdsouza/zoxide/issues
+
+Disable this message by setting _ZO_DOCTOR=0.
+
+
+=== VM instantiation: Lua.new/1 vs :luerl.init/0 (mode: full) ===
+
+Lua.new() one-time vs repeat cost (single samples, informational):
+  first call on this node : 6892.0 us
+  second call             : 1.0 us
+
+The first figure includes any one-time template build and first-time module
+loading. Benchee's steady-state numbers below are the per-request cost after
+that point.
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 52 s
+Excluding outliers: false
+
+Benchmarking lua (new) ...
+Benchmarking lua (new, custom exclude) ...
+Benchmarking lua (new, no sandbox) ...
+Benchmarking luerl (init) ...
+Calculating statistics...
+Formatting results...
+
+Name                                ips        average  deviation         median         99th %
+lua (new, no sandbox)            1.90 M        0.53 μs   ±805.41%        0.50 μs        0.63 μs
+lua (new)                        1.59 M        0.63 μs  ±1209.11%        0.58 μs        0.75 μs
+lua (new, custom exclude)       0.151 M        6.63 μs    ±88.13%        6.54 μs        8.79 μs
+luerl (init)                   0.0656 M       15.24 μs    ±36.68%       15.13 μs       22.42 μs
+
+Comparison: 
+lua (new, no sandbox)            1.90 M
+lua (new)                        1.59 M - 1.20x slower +0.104 μs
+lua (new, custom exclude)       0.151 M - 12.61x slower +6.10 μs
+luerl (init)                   0.0656 M - 29.00x slower +14.71 μs
+
+Memory usage statistics:
+
+Name                         Memory usage
+lua (new, no sandbox)             0.95 KB
+lua (new)                         0.88 KB - 0.92x memory usage -0.07813 KB
+lua (new, custom exclude)        22.57 KB - 23.68x memory usage +21.62 KB
+luerl (init)                     51.64 KB - 54.18x memory usage +50.69 KB
+
+**All measurements for memory usage were the same**

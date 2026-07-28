@@ -1,0 +1,58 @@
+zoxide: detected a possible configuration issue.
+Please ensure that zoxide is initialized right at the end of your shell configuration file (usually ~/.zshrc).
+
+If the issue persists, consider filing an issue at:
+https://github.com/ajeetdsouza/zoxide/issues
+
+Disable this message by setting _ZO_DOCTOR=0.
+
+     warning: this clause of defp format_error/2 is never used (or it will always fail/warn when invoked)
+     │
+ 177 │   defp format_error(_, {:undefined, args}) do
+     │        ~
+     │
+     └─ lib/lua/util.ex:177:8: Lua.Util.format_error/2
+
+luaport not available ({:luaport, {~c"no such file or directory", ~c"luaport.app"}}) — skipping C Lua benchmarks
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+luerl              9.11 K      109.76 μs    ±13.66%      106.50 μs      179.25 μs
+lua (eval)         8.85 K      113.01 μs    ±18.72%      108.58 μs      193.98 μs
+lua (chunk)        8.80 K      113.70 μs    ±14.10%      110.88 μs      195.87 μs
+
+Comparison: 
+luerl              9.11 K
+lua (eval)         8.85 K - 1.03x slower +3.25 μs
+lua (chunk)        8.80 K - 1.04x slower +3.94 μs
+
+Memory usage statistics:
+
+Name           Memory usage
+luerl             381.45 KB
+lua (eval)        382.52 KB - 1.00x memory usage +1.07 KB
+lua (chunk)       372.03 KB - 0.98x memory usage -9.42188 KB
+
+**All measurements for memory usage were the same**

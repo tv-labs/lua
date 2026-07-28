@@ -1,0 +1,99 @@
+zoxide: detected a possible configuration issue.
+Please ensure that zoxide is initialized right at the end of your shell configuration file (usually ~/.zshrc).
+
+If the issue persists, consider filing an issue at:
+https://github.com/ajeetdsouza/zoxide/issues
+
+Disable this message by setting _ZO_DOCTOR=0.
+
+luaport not available ({:luaport, {~c"no such file or directory", ~c"luaport.app"}}) — skipping C Lua benchmarks
+
+=== String Concatenation via table.concat (n=100) (mode: full) ===
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (chunk)       31.46 K       31.79 μs    ±14.86%       31.21 μs       41.21 μs
+lua (eval)        29.39 K       34.03 μs    ±10.70%       33.63 μs       42.46 μs
+luerl             24.71 K       40.47 μs     ±7.41%       40.17 μs       45.88 μs
+
+Comparison: 
+lua (chunk)       31.46 K
+lua (eval)        29.39 K - 1.07x slower +2.24 μs
+luerl             24.71 K - 1.27x slower +8.68 μs
+
+Memory usage statistics:
+
+Name           Memory usage
+lua (chunk)       147.68 KB
+lua (eval)        161.46 KB - 1.09x memory usage +13.78 KB
+luerl             172.42 KB - 1.17x memory usage +24.74 KB
+
+**All measurements for memory usage were the same**
+
+=== String Formatting via string.format (n=100) (mode: full) ===
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (chunk)       14.08 K       71.03 μs     ±8.11%       72.21 μs       80.46 μs
+lua (eval)        13.20 K       75.76 μs    ±16.78%       76.17 μs       92.94 μs
+luerl              9.54 K      104.79 μs     ±7.40%      103.04 μs      123.13 μs
+
+Comparison: 
+lua (chunk)       14.08 K
+lua (eval)        13.20 K - 1.07x slower +4.73 μs
+luerl              9.54 K - 1.48x slower +33.75 μs
+
+Memory usage statistics:
+
+Name           Memory usage
+lua (chunk)       241.46 KB
+lua (eval)        252.21 KB - 1.04x memory usage +10.75 KB
+luerl             588.84 KB - 2.44x memory usage +347.38 KB
+
+**All measurements for memory usage were the same**

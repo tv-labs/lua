@@ -1,0 +1,136 @@
+zoxide: detected a possible configuration issue.
+Please ensure that zoxide is initialized right at the end of your shell configuration file (usually ~/.zshrc).
+
+If the issue persists, consider filing an issue at:
+https://github.com/ajeetdsouza/zoxide/issues
+
+Disable this message by setting _ZO_DOCTOR=0.
+
+lua 1.0.2 — encode!/decode! decomposition
+(decode+deep_cast column: enabled)
+==================================================================================
+op       shape                     N     total_us   per_elem_ns
+encode   int_list                  8         0.81         101.5
+decode   int_list                  8         0.29          35.9
+dec+cast int_list                  8         0.33          40.9
+encode   int_list                 64        14.59         228.0
+decode   int_list                 64         4.94          77.1
+dec+cast int_list                 64         7.11         111.0
+encode   int_list                512       158.65         309.9
+decode   int_list                512        47.04          91.9
+dec+cast int_list                512        72.78         142.1
+encode   int_list               4096      1568.66         383.0
+decode   int_list               4096       565.55         138.1
+dec+cast int_list               4096       892.14         217.8
+----------------------------------------------------------------------------------
+encode   float_list                8         0.78          98.0
+decode   float_list                8         0.25          31.8
+dec+cast float_list                8         0.27          33.6
+encode   float_list               64        11.77         183.9
+decode   float_list               64         3.76          58.7
+dec+cast float_list               64         6.99         109.2
+encode   float_list              512       162.64         317.6
+decode   float_list              512        47.30          92.4
+dec+cast float_list              512        75.86         148.2
+encode   float_list             4096      1614.23         394.1
+decode   float_list             4096       547.77         133.7
+dec+cast float_list             4096       805.73         196.7
+----------------------------------------------------------------------------------
+encode   bool_list                 8         0.79          99.1
+decode   bool_list                 8         0.24          29.9
+dec+cast bool_list                 8         0.27          33.9
+encode   bool_list                64        14.65         228.8
+decode   bool_list                64         4.69          73.3
+dec+cast bool_list                64         6.88         107.4
+encode   bool_list               512       158.50         309.6
+decode   bool_list               512        45.36          88.6
+dec+cast bool_list               512        71.69         140.0
+encode   bool_list              4096      1572.86         384.0
+decode   bool_list              4096       581.14         141.9
+dec+cast bool_list              4096       792.78         193.6
+----------------------------------------------------------------------------------
+encode   short_string_list         8         0.78          97.8
+decode   short_string_list         8         0.24          30.0
+dec+cast short_string_list         8         0.27          34.2
+encode   short_string_list        64        11.49         179.6
+decode   short_string_list        64         3.51          54.9
+dec+cast short_string_list        64         6.93         108.3
+encode   short_string_list       512       162.32         317.0
+decode   short_string_list       512        48.13          94.0
+dec+cast short_string_list       512        74.26         145.0
+encode   short_string_list      4096      1664.81         406.4
+decode   short_string_list      4096       550.34         134.4
+dec+cast short_string_list      4096       810.06         197.8
+----------------------------------------------------------------------------------
+encode   long_string_list          8         0.79          98.9
+decode   long_string_list          8         0.25          31.1
+dec+cast long_string_list          8         0.26          33.0
+encode   long_string_list         64        11.67         182.4
+decode   long_string_list         64         3.66          57.3
+dec+cast long_string_list         64         6.75         105.5
+encode   long_string_list        512       169.63         331.3
+decode   long_string_list        512        47.95          93.7
+dec+cast long_string_list        512        75.67         147.8
+encode   long_string_list       4096      2667.06         651.1
+decode   long_string_list       4096      1339.42         327.0
+dec+cast long_string_list       4096      1705.52         416.4
+----------------------------------------------------------------------------------
+encode   string_map                8         0.72          89.9
+decode   string_map                8         0.11          13.2
+dec+cast string_map                8         0.21          26.1
+encode   string_map               64        12.18         190.3
+decode   string_map               64         0.74          11.6
+dec+cast string_map               64         3.58          56.0
+encode   string_map              512       103.35         201.9
+decode   string_map              512         9.32          18.2
+dec+cast string_map              512        39.57          77.3
+encode   string_map             4096      1046.22         255.4
+decode   string_map             4096        79.30          19.4
+dec+cast string_map             4096       343.00          83.7
+----------------------------------------------------------------------------------
+encode   int_map                   8         0.81         100.9
+decode   int_map                   8         0.25          31.6
+dec+cast int_map                   8         0.27          33.9
+encode   int_map                  64        11.36         177.6
+decode   int_map                  64         3.45          54.0
+dec+cast int_map                  64         5.64          88.1
+encode   int_map                 512       111.00         216.8
+decode   int_map                 512        32.55          63.6
+dec+cast int_map                 512        72.18         141.0
+encode   int_map                4096      1503.89         367.2
+decode   int_map                4096       599.78         146.4
+dec+cast int_map                4096       850.84         207.7
+----------------------------------------------------------------------------------
+encode   record_list               8         3.10         387.3
+decode   record_list               8         0.89         111.3
+dec+cast record_list               8         1.60         199.4
+encode   record_list              64        45.68         713.8
+decode   record_list              64        12.94         202.3
+dec+cast record_list              64        18.97         296.4
+encode   record_list             512       422.71         825.6
+decode   record_list             512       115.71         226.0
+dec+cast record_list             512       154.32         301.4
+encode   record_list            4096      3814.88         931.4
+decode   record_list            4096      1139.67         278.2
+dec+cast record_list            4096      1656.06         404.3
+----------------------------------------------------------------------------------
+nested chain (depth sweep) — isolates recursion/traversal from fan-out
+op       shape                     N     total_us   per_elem_ns
+encode   nested_chain              4         0.68         338.0
+decode   nested_chain              4         0.24         122.2
+dec+cast nested_chain              4         0.36         179.7
+encode   nested_chain             16         2.77        1387.2
+decode   nested_chain             16         1.11         552.9
+dec+cast nested_chain             16         1.54         768.1
+encode   nested_chain             64        10.94        5468.5
+decode   nested_chain             64         6.00        3002.0
+dec+cast nested_chain             64         8.37        4183.6
+encode   nested_chain            256        44.55       22273.9
+decode   nested_chain            256        28.00       13998.0
+dec+cast nested_chain            256        37.24       18618.2
+==================================================================================
+composite anchor — the PR's `original_nested` (matches the 18us/108us figure)
+op       shape                     N     total_us   per_elem_ns
+encode   original_nested          75        12.26        3065.6
+decode   original_nested          75         3.29         821.3
+dec+cast original_nested          75         5.66        1413.8
