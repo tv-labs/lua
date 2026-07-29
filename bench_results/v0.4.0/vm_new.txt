@@ -1,0 +1,56 @@
+=== VM instantiation: Lua.new/1 vs :luerl.init/0 (mode: full) ===
+
+Lua.new() one-time vs repeat cost (single samples, informational):
+  first call on this node : 10070.0 us
+  second call             : 48.0 us
+
+The first figure includes any one-time template build and first-time module
+loading. Benchee's steady-state numbers below are the per-request cost after
+that point.
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 52 s
+Excluding outliers: false
+
+Benchmarking lua (new) ...
+Benchmarking lua (new, custom exclude) ...
+Benchmarking lua (new, no sandbox) ...
+Benchmarking luerl (init) ...
+Calculating statistics...
+Formatting results...
+
+Name                                ips        average  deviation         median         99th %
+lua (new, no sandbox)           66.32 K       15.08 μs    ±21.55%       14.88 μs       22.58 μs
+luerl (init)                    64.85 K       15.42 μs    ±46.27%       15.04 μs       30.25 μs
+lua (new, custom exclude)       47.89 K       20.88 μs    ±63.00%       20.63 μs       31.67 μs
+lua (new)                       46.57 K       21.47 μs    ±15.57%       21.33 μs       31.25 μs
+
+Comparison: 
+lua (new, no sandbox)           66.32 K
+luerl (init)                    64.85 K - 1.02x slower +0.34 μs
+lua (new, custom exclude)       47.89 K - 1.38x slower +5.80 μs
+lua (new)                       46.57 K - 1.42x slower +6.40 μs
+
+Memory usage statistics:
+
+Name                         Memory usage
+lua (new, no sandbox)            51.77 KB
+luerl (init)                     51.64 KB - 1.00x memory usage -0.12500 KB
+lua (new, custom exclude)        72.27 KB - 1.40x memory usage +20.51 KB
+lua (new)                        73.78 KB - 1.43x memory usage +22.02 KB
+
+**All measurements for memory usage were the same**

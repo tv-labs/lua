@@ -1,0 +1,139 @@
+luaport not available ({:luaport, {~c"no such file or directory", ~c"luaport.app"}}) — skipping C Lua benchmarks
+
+=== string.format: long literal-heavy format string (n=1000) (mode: full) ===
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (eval)        1063.59        0.94 ms    ±10.28%        0.90 ms        1.17 ms
+lua (chunk)        966.41        1.03 ms     ±6.22%        1.03 ms        1.16 ms
+luerl              241.01        4.15 ms    ±10.25%        4.32 ms        4.71 ms
+
+Comparison: 
+lua (eval)        1063.59
+lua (chunk)        966.41 - 1.10x slower +0.0945 ms
+luerl              241.01 - 4.41x slower +3.21 ms
+
+Memory usage statistics:
+
+Name           Memory usage
+lua (eval)          3.27 MB
+lua (chunk)         3.26 MB - 1.00x memory usage -0.00974 MB
+luerl              22.59 MB - 6.92x memory usage +19.32 MB
+
+**All measurements for memory usage were the same**
+
+=== string.format: width-flagged specifiers (n=1000) (mode: full) ===
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (eval)         668.09        1.50 ms     ±2.73%        1.49 ms        1.62 ms
+lua (chunk)        662.60        1.51 ms     ±4.32%        1.50 ms        1.63 ms
+luerl              549.59        1.82 ms     ±5.86%        1.79 ms        2.09 ms
+
+Comparison: 
+lua (eval)         668.09
+lua (chunk)        662.60 - 1.01x slower +0.0124 ms
+luerl              549.59 - 1.22x slower +0.32 ms
+
+Memory usage statistics:
+
+Name           Memory usage
+lua (eval)          5.22 MB
+lua (chunk)         5.21 MB - 1.00x memory usage -0.01022 MB
+luerl               7.55 MB - 1.45x memory usage +2.33 MB
+
+**All measurements for memory usage were the same**
+
+=== string.format: many specifiers (n=1000) (mode: full) ===
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (eval)         418.38        2.39 ms     ±8.03%        2.39 ms        3.24 ms
+lua (chunk)        413.90        2.42 ms     ±8.21%        2.35 ms        3.05 ms
+luerl              358.58        2.79 ms     ±4.13%        2.82 ms        3.00 ms
+
+Comparison: 
+lua (eval)         418.38
+lua (chunk)        413.90 - 1.01x slower +0.0259 ms
+luerl              358.58 - 1.17x slower +0.40 ms
+
+Memory usage statistics:
+
+Name                average  deviation         median         99th %
+lua (eval)         14.86 MB     ±0.00%       14.86 MB       14.86 MB
+lua (chunk)        14.86 MB     ±0.00%       14.86 MB       14.86 MB
+luerl              13.76 MB     ±0.00%       13.76 MB       13.76 MB
+
+Comparison: 
+lua (eval)         14.86 MB
+lua (chunk)        14.86 MB - 1.00x memory usage -0.00894 MB
+luerl              13.76 MB - 0.93x memory usage -1.10735 MB

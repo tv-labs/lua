@@ -97,37 +97,30 @@ lua = Lua.new()
 # Pre-compile chunks per (operation, n) pair so the chunk path doesn't
 # pay the compile cost during measurement. Inputs ship through Benchee's
 # `inputs:` mechanism so all sizes share warmup/measurement state.
+#
+# The state returned by `load_chunk!/2` is threaded through every load rather
+# than discarded: a loaded chunk may be a reference *into* the state it was
+# loaded against, so dropping that state can invalidate the chunk. All five
+# chunk maps are therefore built against one accumulating state, and that final
+# state is the one the benchmarks below evaluate against.
 sizes = Bench.table_inputs()
 
-build_chunks =
-  Map.new(sizes, fn {label, n} ->
-    {chunk, _} = Lua.load_chunk!(lua, "return run_table_build(#{n})")
-    {label, {chunk, "return run_table_build(#{n})", n}}
-  end)
+load_chunks = fn lua, func ->
+  {loaded, lua} =
+    Enum.map_reduce(sizes, lua, fn {label, n}, acc ->
+      call = "return #{func}(#{n})"
+      {chunk, acc} = Lua.load_chunk!(acc, call)
+      {{label, {chunk, call, n}}, acc}
+    end)
 
-sort_chunks =
-  Map.new(sizes, fn {label, n} ->
-    {chunk, _} = Lua.load_chunk!(lua, "return run_table_sort(#{n})")
-    {label, {chunk, "return run_table_sort(#{n})", n}}
-  end)
+  {Map.new(loaded), lua}
+end
 
-sum_chunks =
-  Map.new(sizes, fn {label, n} ->
-    {chunk, _} = Lua.load_chunk!(lua, "return run_table_sum(#{n})")
-    {label, {chunk, "return run_table_sum(#{n})", n}}
-  end)
-
-map_reduce_chunks =
-  Map.new(sizes, fn {label, n} ->
-    {chunk, _} = Lua.load_chunk!(lua, "return run_table_map_reduce(#{n})")
-    {label, {chunk, "return run_table_map_reduce(#{n})", n}}
-  end)
-
-pairs_hash_chunks =
-  Map.new(sizes, fn {label, n} ->
-    {chunk, _} = Lua.load_chunk!(lua, "return run_table_pairs_hash(#{n})")
-    {label, {chunk, "return run_table_pairs_hash(#{n})", n}}
-  end)
+{build_chunks, lua} = load_chunks.(lua, "run_table_build")
+{sort_chunks, lua} = load_chunks.(lua, "run_table_sort")
+{sum_chunks, lua} = load_chunks.(lua, "run_table_sum")
+{map_reduce_chunks, lua} = load_chunks.(lua, "run_table_map_reduce")
+{pairs_hash_chunks, lua} = load_chunks.(lua, "run_table_pairs_hash")
 
 # --- Luerl ---
 luerl_state = :luerl.init()

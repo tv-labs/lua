@@ -63,6 +63,7 @@ defmodule DemoWeb.Layouts do
           <.nav_link href="/playground" active={@active == :playground}>Playground</.nav_link>
           <.nav_link href="/tour" active={@active == :tour}>Tour</.nav_link>
           <.nav_link href="/reference/opcodes" active={@active == :opcodes}>Opcodes</.nav_link>
+          <.nav_link href="/benchmarks" active={@active == :benchmarks}>Benchmarks</.nav_link>
           <.nav_link href="/about" active={@active == :about}>About</.nav_link>
           <a
             href="https://hexdocs.pm/lua"
@@ -144,6 +145,14 @@ defmodule DemoWeb.Layouts do
             </li>
             <li>
               <.link
+                navigate="/benchmarks"
+                class={@active == :benchmarks && "active text-primary bg-primary/10"}
+              >
+                Benchmarks
+              </.link>
+            </li>
+            <li>
+              <.link
                 navigate="/about"
                 class={@active == :about && "active text-primary bg-primary/10"}
               >
@@ -219,6 +228,11 @@ defmodule DemoWeb.Layouts do
                 class="text-base-content/70 hover:text-primary"
               >
                 Opcode reference
+              </.link>
+            </li>
+            <li>
+              <.link navigate={~p"/benchmarks"} class="text-base-content/70 hover:text-primary">
+                Benchmarks
               </.link>
             </li>
             <li>

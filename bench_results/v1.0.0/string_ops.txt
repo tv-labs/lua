@@ -1,0 +1,91 @@
+luaport not available ({:luaport, {~c"no such file or directory", ~c"luaport.app"}}) — skipping C Lua benchmarks
+
+=== String Concatenation via table.concat (n=100) (mode: full) ===
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (chunk)       27.97 K       35.76 μs     ±9.62%       35.67 μs       41.97 μs
+lua (eval)        25.79 K       38.77 μs    ±11.58%       38.58 μs       45.21 μs
+luerl             24.73 K       40.44 μs     ±7.76%       40.17 μs       46.08 μs
+
+Comparison: 
+lua (chunk)       27.97 K
+lua (eval)        25.79 K - 1.08x slower +3.01 μs
+luerl             24.73 K - 1.13x slower +4.68 μs
+
+Memory usage statistics:
+
+Name           Memory usage
+lua (chunk)       171.33 KB
+lua (eval)        180.13 KB - 1.05x memory usage +8.80 KB
+luerl             172.42 KB - 1.01x memory usage +1.09 KB
+
+**All measurements for memory usage were the same**
+
+=== String Formatting via string.format (n=100) (mode: full) ===
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (chunk)       12.44 K       80.35 μs     ±7.41%       80.21 μs       93.29 μs
+lua (eval)        11.53 K       86.74 μs    ±27.72%       85.58 μs      111.49 μs
+luerl              9.55 K      104.75 μs    ±11.48%      103.38 μs      122.63 μs
+
+Comparison: 
+lua (chunk)       12.44 K
+lua (eval)        11.53 K - 1.08x slower +6.39 μs
+luerl              9.55 K - 1.30x slower +24.39 μs
+
+Memory usage statistics:
+
+Name           Memory usage
+lua (chunk)       333.77 KB
+lua (eval)        343.45 KB - 1.03x memory usage +9.68 KB
+luerl             588.84 KB - 1.76x memory usage +255.07 KB
+
+**All measurements for memory usage were the same**

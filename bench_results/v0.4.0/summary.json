@@ -1,0 +1,1257 @@
+{
+  "fibonacci": {
+    "(single case)": {
+      "jobs": [
+        {
+          "name": "lua (chunk)",
+          "ips": "1.42",
+          "average": "703.34 ms",
+          "deviation": "±1.00%",
+          "median": "702.84 ms",
+          "p99": "715.45 ms",
+          "memory": "2.45 GB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "1.40",
+          "average": "712.63 ms",
+          "deviation": "±1.13%",
+          "median": "711.69 ms",
+          "p99": "732.64 ms",
+          "memory": "2.45 GB"
+        },
+        {
+          "name": "luerl",
+          "ips": "1.38",
+          "average": "724.80 ms",
+          "deviation": "±3.25%",
+          "median": "720.40 ms",
+          "p99": "801.56 ms",
+          "memory": "2.45 GB"
+        }
+      ],
+      "comparison": [
+        "lua (chunk)          1.42",
+        "lua (eval)           1.40 - 1.01x slower +9.29 ms",
+        "luerl                1.38 - 1.03x slower +21.46 ms"
+      ]
+    }
+  },
+  "closures": {
+    "(single case)": {
+      "jobs": [
+        {
+          "name": "lua (chunk)",
+          "ips": "2.69 K",
+          "average": "372.35 μs",
+          "deviation": "±7.42%",
+          "median": "368.92 μs",
+          "p99": "507.15 μs",
+          "memory": "1.89 MB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "2.52 K",
+          "average": "397.20 μs",
+          "deviation": "±8.30%",
+          "median": "390.13 μs",
+          "p99": "515.81 μs",
+          "memory": "1.90 MB"
+        },
+        {
+          "name": "luerl",
+          "ips": "2.50 K",
+          "average": "400.26 μs",
+          "deviation": "±9.75%",
+          "median": "391.42 μs",
+          "p99": "536.69 μs",
+          "memory": "1.90 MB"
+        }
+      ],
+      "comparison": [
+        "lua (chunk)        2.69 K",
+        "lua (eval)         2.52 K - 1.07x slower +24.85 μs",
+        "luerl              2.50 K - 1.07x slower +27.91 μs"
+      ]
+    }
+  },
+  "oop": {
+    "(single case)": {
+      "jobs": [
+        {
+          "name": "luerl",
+          "ips": "9.11 K",
+          "average": "109.76 μs",
+          "deviation": "±13.66%",
+          "median": "106.50 μs",
+          "p99": "179.25 μs",
+          "memory": "381.45 KB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "8.85 K",
+          "average": "113.01 μs",
+          "deviation": "±18.72%",
+          "median": "108.58 μs",
+          "p99": "193.98 μs",
+          "memory": "382.52 KB"
+        },
+        {
+          "name": "lua (chunk)",
+          "ips": "8.80 K",
+          "average": "113.70 μs",
+          "deviation": "±14.10%",
+          "median": "110.88 μs",
+          "p99": "195.87 μs",
+          "memory": "372.03 KB"
+        }
+      ],
+      "comparison": [
+        "luerl              9.11 K",
+        "lua (eval)         8.85 K - 1.03x slower +3.25 μs",
+        "lua (chunk)        8.80 K - 1.04x slower +3.94 μs"
+      ]
+    }
+  },
+  "string_ops": {
+    "String Concatenation via table.concat (n=100) (mode: full)": {
+      "jobs": [
+        {
+          "name": "lua (chunk)",
+          "ips": "25.94 K",
+          "average": "38.55 μs",
+          "deviation": "±12.21%",
+          "median": "38.38 μs",
+          "p99": "58.63 μs",
+          "memory": "161.98 KB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "25.35 K",
+          "average": "39.45 μs",
+          "deviation": "±6.04%",
+          "median": "39.54 μs",
+          "p99": "45.04 μs",
+          "memory": "172.77 KB"
+        },
+        {
+          "name": "luerl",
+          "ips": "25.19 K",
+          "average": "39.69 μs",
+          "deviation": "±19.25%",
+          "median": "39.42 μs",
+          "p99": "46.88 μs",
+          "memory": "172.42 KB"
+        }
+      ],
+      "comparison": [
+        "lua (chunk)       25.94 K",
+        "lua (eval)        25.35 K - 1.02x slower +0.89 μs",
+        "luerl             25.19 K - 1.03x slower +1.14 μs"
+      ]
+    },
+    "String Formatting via string.format (n=100) (mode: full)": {
+      "jobs": [
+        {
+          "name": "lua (chunk)",
+          "ips": "9.75 K",
+          "average": "102.58 μs",
+          "deviation": "±11.83%",
+          "median": "101.46 μs",
+          "p99": "124.58 μs",
+          "memory": "577.43 KB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "9.70 K",
+          "average": "103.12 μs",
+          "deviation": "±7.60%",
+          "median": "102.33 μs",
+          "p99": "124.83 μs",
+          "memory": "587.10 KB"
+        },
+        {
+          "name": "luerl",
+          "ips": "9.63 K",
+          "average": "103.90 μs",
+          "deviation": "±9.83%",
+          "median": "102.83 μs",
+          "p99": "127.33 μs",
+          "memory": "588.84 KB"
+        }
+      ],
+      "comparison": [
+        "lua (chunk)        9.75 K",
+        "lua (eval)         9.70 K - 1.01x slower +0.54 μs",
+        "luerl              9.63 K - 1.01x slower +1.31 μs"
+      ]
+    }
+  },
+  "string_format": {
+    "string.format: long literal-heavy format string (n=1000) (mode: full)": {
+      "jobs": [
+        {
+          "name": "lua (chunk)",
+          "ips": "249.24",
+          "average": "4.01 ms",
+          "deviation": "±6.43%",
+          "median": "3.91 ms",
+          "p99": "4.54 ms",
+          "memory": "20.36 MB"
+        },
+        {
+          "name": "luerl",
+          "ips": "242.35",
+          "average": "4.13 ms",
+          "deviation": "±6.17%",
+          "median": "4.25 ms",
+          "p99": "4.54 ms",
+          "memory": "22.59 MB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "187.95",
+          "average": "5.32 ms",
+          "deviation": "±9.84%",
+          "median": "5.58 ms",
+          "p99": "6.77 ms",
+          "memory": "20.38 MB"
+        }
+      ],
+      "comparison": [
+        "lua (chunk)        249.24",
+        "luerl              242.35 - 1.03x slower +0.114 ms",
+        "lua (eval)         187.95 - 1.33x slower +1.31 ms"
+      ]
+    },
+    "string.format: width-flagged specifiers (n=1000) (mode: full)": {
+      "jobs": [
+        {
+          "name": "lua (chunk)",
+          "ips": "582.97",
+          "average": "1.72 ms",
+          "deviation": "±3.52%",
+          "median": "1.72 ms",
+          "p99": "1.86 ms",
+          "memory": "7.53 MB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "576.12",
+          "average": "1.74 ms",
+          "deviation": "±8.52%",
+          "median": "1.70 ms",
+          "p99": "2.41 ms",
+          "memory": "7.55 MB"
+        },
+        {
+          "name": "luerl",
+          "ips": "572.77",
+          "average": "1.75 ms",
+          "deviation": "±8.30%",
+          "median": "1.73 ms",
+          "p99": "2.14 ms",
+          "memory": "7.55 MB"
+        }
+      ],
+      "comparison": [
+        "lua (chunk)        582.97",
+        "lua (eval)         576.12 - 1.01x slower +0.0204 ms",
+        "luerl              572.77 - 1.02x slower +0.0306 ms"
+      ]
+    },
+    "string.format: many specifiers (n=1000) (mode: full)": {
+      "jobs": [
+        {
+          "name": "lua (eval)",
+          "ips": "370.09",
+          "average": "2.70 ms",
+          "deviation": "±4.67%",
+          "median": "2.78 ms",
+          "p99": "2.89 ms",
+          "memory": "13.76 MB"
+        },
+        {
+          "name": "lua (chunk)",
+          "ips": "367.47",
+          "average": "2.72 ms",
+          "deviation": "±4.88%",
+          "median": "2.75 ms",
+          "p99": "2.99 ms",
+          "memory": "13.73 MB"
+        },
+        {
+          "name": "luerl",
+          "ips": "362.27",
+          "average": "2.76 ms",
+          "deviation": "±3.93%",
+          "median": "2.80 ms",
+          "p99": "2.99 ms",
+          "memory": "13.76 MB"
+        }
+      ],
+      "comparison": [
+        "lua (eval)         370.09",
+        "lua (chunk)        367.47 - 1.01x slower +0.0193 ms",
+        "luerl              362.27 - 1.02x slower +0.0584 ms"
+      ],
+      "memory_comparison": [
+        "lua (eval)         13.76 MB",
+        "lua (chunk)        13.73 MB - 1.00x memory usage -0.03384 MB",
+        "luerl              13.76 MB - 1.00x memory usage -0.00677 MB"
+      ]
+    }
+  },
+  "table_ops": {
+    "Table Build (mode: full)": {
+      "inputs": {
+        "With input large (n=1000)": {
+          "jobs": [
+            {
+              "name": "lua (eval)",
+              "ips": "6.50 K",
+              "average": "153.83 μs",
+              "deviation": "±11.45%",
+              "median": "151.96 μs",
+              "p99": "195.78 μs",
+              "memory": "993.93 KB"
+            },
+            {
+              "name": "luerl",
+              "ips": "6.44 K",
+              "average": "155.20 μs",
+              "deviation": "±14.07%",
+              "median": "152.33 μs",
+              "p99": "259.75 μs",
+              "memory": "996.96 KB"
+            },
+            {
+              "name": "lua (chunk)",
+              "ips": "6.35 K",
+              "average": "157.51 μs",
+              "deviation": "±18.23%",
+              "median": "149.92 μs",
+              "p99": "262.79 μs",
+              "memory": "983.38 KB"
+            }
+          ],
+          "comparison": [
+            "lua (eval)         6.50 K",
+            "luerl              6.44 K - 1.01x slower +1.37 μs",
+            "lua (chunk)        6.35 K - 1.02x slower +3.68 μs"
+          ]
+        },
+        "With input medium (n=100)": {
+          "jobs": [
+            {
+              "name": "luerl",
+              "ips": "59.29 K",
+              "average": "16.87 μs",
+              "deviation": "±38.96%",
+              "median": "16.25 μs",
+              "p99": "26.79 μs",
+              "memory": "110.78 KB"
+            },
+            {
+              "name": "lua (eval)",
+              "ips": "51.13 K",
+              "average": "19.56 μs",
+              "deviation": "±34.91%",
+              "median": "16.46 μs",
+              "p99": "41.71 μs",
+              "memory": "111.19 KB"
+            },
+            {
+              "name": "lua (chunk)",
+              "ips": "43.75 K",
+              "average": "22.86 μs",
+              "deviation": "±38.05%",
+              "median": "25.96 μs",
+              "p99": "47.33 μs",
+              "memory": "100.13 KB"
+            }
+          ],
+          "comparison": [
+            "luerl             59.29 K",
+            "lua (eval)        51.13 K - 1.16x slower +2.69 μs",
+            "lua (chunk)       43.75 K - 1.36x slower +5.99 μs"
+          ]
+        },
+        "With input small (n=10)": {
+          "jobs": [
+            {
+              "name": "lua (chunk)",
+              "ips": "405.22 K",
+              "average": "2.47 μs",
+              "deviation": "±243.17%",
+              "median": "2 μs",
+              "p99": "5.83 μs",
+              "memory": "12.45 KB"
+            },
+            {
+              "name": "luerl",
+              "ips": "321.06 K",
+              "average": "3.11 μs",
+              "deviation": "±187.65%",
+              "median": "3 μs",
+              "p99": "4.54 μs",
+              "memory": "22.62 KB"
+            },
+            {
+              "name": "lua (eval)",
+              "ips": "282.18 K",
+              "average": "3.54 μs",
+              "deviation": "±178.79%",
+              "median": "3.13 μs",
+              "p99": "9.29 μs",
+              "memory": "23.02 KB"
+            }
+          ],
+          "comparison": [
+            "lua (chunk)      405.22 K",
+            "luerl            321.06 K - 1.26x slower +0.65 μs",
+            "lua (eval)       282.18 K - 1.44x slower +1.08 μs"
+          ]
+        }
+      }
+    },
+    "Table Sort (mode: full)": {
+      "inputs": {
+        "With input large (n=1000)": {
+          "jobs": [
+            {
+              "name": "lua (chunk)",
+              "ips": "5.61 K",
+              "average": "178.37 μs",
+              "deviation": "±12.59%",
+              "median": "174.29 μs",
+              "p99": "234.12 μs",
+              "memory": "1.17 MB"
+            },
+            {
+              "name": "lua (eval)",
+              "ips": "5.45 K",
+              "average": "183.60 μs",
+              "deviation": "±106.15%",
+              "median": "177.67 μs",
+              "p99": "334.99 μs",
+              "memory": "1.18 MB"
+            },
+            {
+              "name": "luerl",
+              "ips": "4.88 K",
+              "average": "205.11 μs",
+              "deviation": "±25.14%",
+              "median": "180.59 μs",
+              "p99": "336.78 μs",
+              "memory": "1.18 MB"
+            }
+          ],
+          "comparison": [
+            "lua (chunk)        5.61 K",
+            "lua (eval)         5.45 K - 1.03x slower +5.23 μs",
+            "luerl              4.88 K - 1.15x slower +26.74 μs"
+          ]
+        },
+        "With input medium (n=100)": {
+          "jobs": [
+            {
+              "name": "luerl",
+              "ips": "51.03 K",
+              "average": "19.60 μs",
+              "deviation": "±20.90%",
+              "median": "19.08 μs",
+              "p99": "28.42 μs",
+              "memory": "133.34 KB"
+            },
+            {
+              "name": "lua (chunk)",
+              "ips": "47.42 K",
+              "average": "21.09 μs",
+              "deviation": "±42.23%",
+              "median": "18.04 μs",
+              "p99": "51.33 μs",
+              "memory": "122.98 KB"
+            },
+            {
+              "name": "lua (eval)",
+              "ips": "46.64 K",
+              "average": "21.44 μs",
+              "deviation": "±39.09%",
+              "median": "19.33 μs",
+              "p99": "45.92 μs",
+              "memory": "133.59 KB"
+            }
+          ],
+          "comparison": [
+            "luerl             51.03 K",
+            "lua (chunk)       47.42 K - 1.08x slower +1.49 μs",
+            "lua (eval)        46.64 K - 1.09x slower +1.85 μs"
+          ]
+        },
+        "With input small (n=10)": {
+          "jobs": [
+            {
+              "name": "lua (chunk)",
+              "ips": "324.41 K",
+              "average": "3.08 μs",
+              "deviation": "±194.26%",
+              "median": "2.54 μs",
+              "p99": "7.08 μs",
+              "memory": "15.84 KB"
+            },
+            {
+              "name": "luerl",
+              "ips": "271.87 K",
+              "average": "3.68 μs",
+              "deviation": "±124.45%",
+              "median": "3.54 μs",
+              "p99": "10 μs",
+              "memory": "25.98 KB"
+            },
+            {
+              "name": "lua (eval)",
+              "ips": "245.19 K",
+              "average": "4.08 μs",
+              "deviation": "±136.48%",
+              "median": "3.67 μs",
+              "p99": "8.25 μs",
+              "memory": "26.25 KB"
+            }
+          ],
+          "comparison": [
+            "lua (chunk)      324.41 K",
+            "luerl            271.87 K - 1.19x slower +0.60 μs",
+            "lua (eval)       245.19 K - 1.32x slower +1.00 μs"
+          ]
+        }
+      }
+    },
+    "Table Iterate/Sum (mode: full)": {
+      "inputs": {
+        "With input large (n=1000)": {
+          "jobs": [
+            {
+              "name": "lua (eval)",
+              "ips": "3.81 K",
+              "average": "262.24 μs",
+              "deviation": "±19.86%",
+              "median": "243.42 μs",
+              "p99": "444.12 μs",
+              "memory": "1.35 MB"
+            },
+            {
+              "name": "luerl",
+              "ips": "3.75 K",
+              "average": "266.52 μs",
+              "deviation": "±20.59%",
+              "median": "243.13 μs",
+              "p99": "416.21 μs",
+              "memory": "1.35 MB"
+            },
+            {
+              "name": "lua (chunk)",
+              "ips": "3.60 K",
+              "average": "278.11 μs",
+              "deviation": "±24.12%",
+              "median": "242.42 μs",
+              "p99": "456.96 μs",
+              "memory": "1.34 MB"
+            }
+          ],
+          "comparison": [
+            "lua (eval)         3.81 K",
+            "luerl              3.75 K - 1.02x slower +4.28 μs",
+            "lua (chunk)        3.60 K - 1.06x slower +15.87 μs"
+          ]
+        },
+        "With input medium (n=100)": {
+          "jobs": [
+            {
+              "name": "lua (eval)",
+              "ips": "37.84 K",
+              "average": "26.43 μs",
+              "deviation": "±9.28%",
+              "median": "26.08 μs",
+              "p99": "29.92 μs",
+              "memory": "149.42 KB"
+            },
+            {
+              "name": "luerl",
+              "ips": "37.50 K",
+              "average": "26.66 μs",
+              "deviation": "±86.90%",
+              "median": "26.21 μs",
+              "p99": "36.50 μs",
+              "memory": "149.28 KB"
+            },
+            {
+              "name": "lua (chunk)",
+              "ips": "35.12 K",
+              "average": "28.47 μs",
+              "deviation": "±26.41%",
+              "median": "25.17 μs",
+              "p99": "53.58 μs",
+              "memory": "139.25 KB"
+            }
+          ],
+          "comparison": [
+            "lua (eval)        37.84 K",
+            "luerl             37.50 K - 1.01x slower +0.24 μs",
+            "lua (chunk)       35.12 K - 1.08x slower +2.05 μs"
+          ]
+        },
+        "With input small (n=10)": {
+          "jobs": [
+            {
+              "name": "lua (chunk)",
+              "ips": "245.60 K",
+              "average": "4.07 μs",
+              "deviation": "±313.25%",
+              "median": "3.29 μs",
+              "p99": "9.79 μs",
+              "memory": "16.70 KB"
+            },
+            {
+              "name": "luerl",
+              "ips": "227.18 K",
+              "average": "4.40 μs",
+              "deviation": "±102.94%",
+              "median": "4.29 μs",
+              "p99": "10.88 μs",
+              "memory": "26.80 KB"
+            },
+            {
+              "name": "lua (eval)",
+              "ips": "206.12 K",
+              "average": "4.85 μs",
+              "deviation": "±120.13%",
+              "median": "4.33 μs",
+              "p99": "9.83 μs",
+              "memory": "27.20 KB"
+            }
+          ],
+          "comparison": [
+            "lua (chunk)      245.60 K",
+            "luerl            227.18 K - 1.08x slower +0.33 μs",
+            "lua (eval)       206.12 K - 1.19x slower +0.78 μs"
+          ]
+        }
+      }
+    },
+    "Table Map + Reduce (mode: full)": {
+      "inputs": {
+        "With input large (n=1000)": {
+          "jobs": [
+            {
+              "name": "lua (eval)",
+              "ips": "2.21 K",
+              "average": "452.53 μs",
+              "deviation": "±7.79%",
+              "median": "446.25 μs",
+              "p99": "614.89 μs",
+              "memory": "2.45 MB"
+            },
+            {
+              "name": "lua (chunk)",
+              "ips": "2.19 K",
+              "average": "455.66 μs",
+              "deviation": "±9.09%",
+              "median": "444.34 μs",
+              "p99": "628.64 μs",
+              "memory": "2.43 MB"
+            },
+            {
+              "name": "luerl",
+              "ips": "2.19 K",
+              "average": "456.58 μs",
+              "deviation": "±12.12%",
+              "median": "442.21 μs",
+              "p99": "659.87 μs",
+              "memory": "2.45 MB"
+            }
+          ],
+          "comparison": [
+            "lua (eval)         2.21 K",
+            "lua (chunk)        2.19 K - 1.01x slower +3.14 μs",
+            "luerl              2.19 K - 1.01x slower +4.05 μs"
+          ]
+        },
+        "With input medium (n=100)": {
+          "jobs": [
+            {
+              "name": "lua (chunk)",
+              "ips": "21.79 K",
+              "average": "45.90 μs",
+              "deviation": "±12.29%",
+              "median": "45.25 μs",
+              "p99": "53.13 μs",
+              "memory": "252.38 KB"
+            },
+            {
+              "name": "luerl",
+              "ips": "21.47 K",
+              "average": "46.58 μs",
+              "deviation": "±5.77%",
+              "median": "46.42 μs",
+              "p99": "52.54 μs",
+              "memory": "262.48 KB"
+            },
+            {
+              "name": "lua (eval)",
+              "ips": "21.44 K",
+              "average": "46.65 μs",
+              "deviation": "±6.16%",
+              "median": "46.50 μs",
+              "p99": "51.96 μs",
+              "memory": "263.02 KB"
+            }
+          ],
+          "comparison": [
+            "lua (chunk)       21.79 K",
+            "luerl             21.47 K - 1.01x slower +0.68 μs",
+            "lua (eval)        21.44 K - 1.02x slower +0.75 μs"
+          ]
+        },
+        "With input small (n=10)": {
+          "jobs": [
+            {
+              "name": "luerl",
+              "ips": "148.83 K",
+              "average": "6.72 μs",
+              "deviation": "±69.12%",
+              "median": "6.58 μs",
+              "p99": "14.71 μs",
+              "memory": "39.39 KB"
+            },
+            {
+              "name": "lua (chunk)",
+              "ips": "145.39 K",
+              "average": "6.88 μs",
+              "deviation": "±90.79%",
+              "median": "5.54 μs",
+              "p99": "14.96 μs",
+              "memory": "29.06 KB"
+            },
+            {
+              "name": "lua (eval)",
+              "ips": "131.69 K",
+              "average": "7.59 μs",
+              "deviation": "±88.05%",
+              "median": "6.71 μs",
+              "p99": "16.42 μs",
+              "memory": "39.80 KB"
+            }
+          ],
+          "comparison": [
+            "luerl            148.83 K",
+            "lua (chunk)      145.39 K - 1.02x slower +0.159 μs",
+            "lua (eval)       131.69 K - 1.13x slower +0.87 μs"
+          ]
+        }
+      }
+    },
+    "Table Pairs (hash) (mode: full)": {
+      "inputs": {
+        "With input large (n=1000)": {
+          "jobs": [
+            {
+              "name": "lua (eval)",
+              "ips": "760.68",
+              "average": "1.31 ms",
+              "deviation": "±5.02%",
+              "median": "1.32 ms",
+              "p99": "1.45 ms",
+              "memory": "2.48 MB"
+            },
+            {
+              "name": "lua (chunk)",
+              "ips": "759.91",
+              "average": "1.32 ms",
+              "deviation": "±5.40%",
+              "median": "1.32 ms",
+              "p99": "1.49 ms",
+              "memory": "2.47 MB"
+            },
+            {
+              "name": "luerl",
+              "ips": "754.19",
+              "average": "1.33 ms",
+              "deviation": "±6.28%",
+              "median": "1.33 ms",
+              "p99": "1.45 ms",
+              "memory": "2.48 MB"
+            }
+          ],
+          "comparison": [
+            "lua (eval)         760.68",
+            "lua (chunk)        759.91 - 1.00x slower +0.00133 ms",
+            "luerl              754.19 - 1.01x slower +0.0113 ms"
+          ]
+        },
+        "With input medium (n=100)": {
+          "jobs": [
+            {
+              "name": "lua (chunk)",
+              "ips": "10.96 K",
+              "average": "91.23 μs",
+              "deviation": "±12.10%",
+              "median": "89.92 μs",
+              "p99": "135.19 μs",
+              "memory": "238.58 KB"
+            },
+            {
+              "name": "lua (eval)",
+              "ips": "10.20 K",
+              "average": "97.99 μs",
+              "deviation": "±11.84%",
+              "median": "97.42 μs",
+              "p99": "138.25 μs",
+              "memory": "249.40 KB"
+            },
+            {
+              "name": "luerl",
+              "ips": "9.96 K",
+              "average": "100.37 μs",
+              "deviation": "±20.92%",
+              "median": "99.96 μs",
+              "p99": "144.67 μs",
+              "memory": "248.99 KB"
+            }
+          ],
+          "comparison": [
+            "lua (chunk)       10.96 K",
+            "lua (eval)        10.20 K - 1.07x slower +6.76 μs",
+            "luerl              9.96 K - 1.10x slower +9.14 μs"
+          ]
+        },
+        "With input small (n=10)": {
+          "jobs": [
+            {
+              "name": "lua (chunk)",
+              "ips": "126.80 K",
+              "average": "7.89 μs",
+              "deviation": "±150.76%",
+              "median": "6.50 μs",
+              "p99": "18.79 μs",
+              "memory": "25.83 KB"
+            },
+            {
+              "name": "luerl",
+              "ips": "125.64 K",
+              "average": "7.96 μs",
+              "deviation": "±72.08%",
+              "median": "7.29 μs",
+              "p99": "24.29 μs",
+              "memory": "36.16 KB"
+            },
+            {
+              "name": "lua (eval)",
+              "ips": "109.11 K",
+              "average": "9.17 μs",
+              "deviation": "±61.17%",
+              "median": "9.38 μs",
+              "p99": "28.33 μs",
+              "memory": "36.56 KB"
+            }
+          ],
+          "comparison": [
+            "lua (chunk)      126.80 K",
+            "luerl            125.64 K - 1.01x slower +0.0728 μs",
+            "lua (eval)       109.11 K - 1.16x slower +1.28 μs"
+          ]
+        }
+      }
+    }
+  },
+  "patterns": {
+    "patterns: find/match field extraction (n=200) (mode: full)": {
+      "jobs": [
+        {
+          "name": "lua (eval)",
+          "ips": "947.52",
+          "average": "1.06 ms",
+          "deviation": "±3.75%",
+          "median": "1.06 ms",
+          "p99": "1.18 ms",
+          "memory": "6.70 MB"
+        },
+        {
+          "name": "luerl",
+          "ips": "937.83",
+          "average": "1.07 ms",
+          "deviation": "±6.93%",
+          "median": "1.05 ms",
+          "p99": "1.22 ms",
+          "memory": "6.70 MB"
+        },
+        {
+          "name": "lua (chunk)",
+          "ips": "919.82",
+          "average": "1.09 ms",
+          "deviation": "±4.39%",
+          "median": "1.07 ms",
+          "p99": "1.22 ms",
+          "memory": "6.69 MB"
+        }
+      ],
+      "comparison": [
+        "lua (eval)         947.52",
+        "luerl              937.83 - 1.01x slower +0.0109 ms",
+        "lua (chunk)        919.82 - 1.03x slower +0.0318 ms"
+      ]
+    },
+    "patterns: find-based tokenizer (n=200) (mode: full)": {
+      "jobs": [
+        {
+          "name": "luerl",
+          "ips": "731.44",
+          "average": "1.37 ms",
+          "deviation": "±3.23%",
+          "median": "1.36 ms",
+          "p99": "1.51 ms",
+          "memory": "6.65 MB"
+        },
+        {
+          "name": "lua (chunk)",
+          "ips": "721.24",
+          "average": "1.39 ms",
+          "deviation": "±4.36%",
+          "median": "1.37 ms",
+          "p99": "1.57 ms",
+          "memory": "6.64 MB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "715.30",
+          "average": "1.40 ms",
+          "deviation": "±4.16%",
+          "median": "1.39 ms",
+          "p99": "1.49 ms",
+          "memory": "6.65 MB"
+        }
+      ],
+      "comparison": [
+        "luerl              731.44",
+        "lua (chunk)        721.24 - 1.01x slower +0.0193 ms",
+        "lua (eval)         715.30 - 1.02x slower +0.0308 ms"
+      ]
+    },
+    "patterns: gsub template substitution (n=200) (mode: full)": {
+      "jobs": [
+        {
+          "name": "luerl",
+          "ips": "452.66",
+          "average": "2.21 ms",
+          "deviation": "±4.59%",
+          "median": "2.21 ms",
+          "p99": "2.50 ms",
+          "memory": "11.75 MB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "446.40",
+          "average": "2.24 ms",
+          "deviation": "±8.19%",
+          "median": "2.19 ms",
+          "p99": "2.75 ms",
+          "memory": "11.75 MB"
+        },
+        {
+          "name": "lua (chunk)",
+          "ips": "436.67",
+          "average": "2.29 ms",
+          "deviation": "±10.44%",
+          "median": "2.21 ms",
+          "p99": "3.18 ms",
+          "memory": "11.74 MB"
+        }
+      ],
+      "comparison": [
+        "luerl              452.66",
+        "lua (eval)         446.40 - 1.01x slower +0.0310 ms",
+        "lua (chunk)        436.67 - 1.04x slower +0.0809 ms"
+      ],
+      "memory_comparison": [
+        "luerl              11.75 MB",
+        "lua (eval)         11.75 MB - 1.00x memory usage +0.00021 MB",
+        "lua (chunk)        11.74 MB - 1.00x memory usage -0.00975 MB"
+      ]
+    }
+  },
+  "metamethods": {
+    "metamethods: self-call method dispatch (n=200) (mode: full)": {
+      "jobs": [
+        {
+          "name": "lua (chunk)",
+          "ips": "2.04 K",
+          "average": "489.21 μs",
+          "deviation": "±10.11%",
+          "median": "476.58 μs",
+          "p99": "672.87 μs",
+          "memory": "1.42 MB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "1.99 K",
+          "average": "503.66 μs",
+          "deviation": "±9.40%",
+          "median": "488.92 μs",
+          "p99": "678.61 μs",
+          "memory": "1.43 MB"
+        },
+        {
+          "name": "luerl",
+          "ips": "1.98 K",
+          "average": "505.65 μs",
+          "deviation": "±10.20%",
+          "median": "492.79 μs",
+          "p99": "680.89 μs",
+          "memory": "1.43 MB"
+        }
+      ],
+      "comparison": [
+        "lua (chunk)        2.04 K",
+        "lua (eval)         1.99 K - 1.03x slower +14.45 μs",
+        "luerl              1.98 K - 1.03x slower +16.44 μs"
+      ]
+    },
+    "metamethods: 3-level __index chain (n=200) (mode: full)": {
+      "jobs": [
+        {
+          "name": "luerl",
+          "ips": "4.58 K",
+          "average": "218.46 μs",
+          "deviation": "±4.01%",
+          "median": "217.92 μs",
+          "p99": "233.19 μs",
+          "memory": "668.59 KB"
+        },
+        {
+          "name": "lua (chunk)",
+          "ips": "4.57 K",
+          "average": "219.03 μs",
+          "deviation": "±10.32%",
+          "median": "216.42 μs",
+          "p99": "254.20 μs",
+          "memory": "658.30 KB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "4.52 K",
+          "average": "221.04 μs",
+          "deviation": "±5.51%",
+          "median": "219.33 μs",
+          "p99": "245.33 μs",
+          "memory": "668.80 KB"
+        }
+      ],
+      "comparison": [
+        "luerl              4.58 K",
+        "lua (chunk)        4.57 K - 1.00x slower +0.57 μs",
+        "lua (eval)         4.52 K - 1.01x slower +2.57 μs"
+      ]
+    },
+    "metamethods: arithmetic/relational metamethods (n=200) (mode: full)": {
+      "jobs": [
+        {
+          "name": "luerl",
+          "ips": "519.76",
+          "average": "1.92 ms",
+          "deviation": "±9.38%",
+          "median": "1.88 ms",
+          "p99": "2.25 ms",
+          "memory": "6.24 MB"
+        },
+        {
+          "name": "lua (chunk)",
+          "ips": "513.47",
+          "average": "1.95 ms",
+          "deviation": "±15.04%",
+          "median": "1.88 ms",
+          "p99": "2.30 ms",
+          "memory": "6.23 MB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "508.61",
+          "average": "1.97 ms",
+          "deviation": "±10.60%",
+          "median": "1.89 ms",
+          "p99": "2.93 ms",
+          "memory": "6.24 MB"
+        }
+      ],
+      "comparison": [
+        "luerl              519.76",
+        "lua (chunk)        513.47 - 1.01x slower +0.0236 ms",
+        "lua (eval)         508.61 - 1.02x slower +0.0422 ms"
+      ]
+    }
+  },
+  "pcall_varargs": {
+    "call protocol: pcall, success path (n=500) (mode: full)": {
+      "jobs": [
+        {
+          "name": "luerl",
+          "ips": "3.44 K",
+          "average": "291.08 μs",
+          "deviation": "±3.72%",
+          "median": "289.67 μs",
+          "p99": "313 μs",
+          "memory": "1.11 MB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "3.42 K",
+          "average": "292.45 μs",
+          "deviation": "±3.54%",
+          "median": "291.17 μs",
+          "p99": "315.44 μs",
+          "memory": "1.11 MB"
+        },
+        {
+          "name": "lua (chunk)",
+          "ips": "3.40 K",
+          "average": "293.76 μs",
+          "deviation": "±7.51%",
+          "median": "290.50 μs",
+          "p99": "338.21 μs",
+          "memory": "1.10 MB"
+        }
+      ],
+      "comparison": [
+        "luerl              3.44 K",
+        "lua (eval)         3.42 K - 1.00x slower +1.36 μs",
+        "lua (chunk)        3.40 K - 1.01x slower +2.68 μs"
+      ]
+    },
+    "call protocol: pcall, raise + catch (n=500) (mode: full)": {
+      "jobs": [
+        {
+          "name": "luerl",
+          "ips": "2.13 K",
+          "average": "468.84 μs",
+          "deviation": "±5.39%",
+          "median": "466.38 μs",
+          "p99": "505.90 μs",
+          "memory": "1.55 MB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "2.13 K",
+          "average": "470.00 μs",
+          "deviation": "±3.58%",
+          "median": "467.50 μs",
+          "p99": "498.92 μs",
+          "memory": "1.55 MB"
+        },
+        {
+          "name": "lua (chunk)",
+          "ips": "2.11 K",
+          "average": "474.55 μs",
+          "deviation": "±9.26%",
+          "median": "469.29 μs",
+          "p99": "583.95 μs",
+          "memory": "1.54 MB"
+        }
+      ],
+      "comparison": [
+        "luerl              2.13 K",
+        "lua (eval)         2.13 K - 1.00x slower +1.15 μs",
+        "lua (chunk)        2.11 K - 1.01x slower +5.70 μs"
+      ]
+    },
+    "call protocol: varargs + multiple returns (n=500) (mode: full)": {
+      "jobs": [
+        {
+          "name": "luerl",
+          "ips": "418.17",
+          "average": "2.39 ms",
+          "deviation": "±4.44%",
+          "median": "2.36 ms",
+          "p99": "2.70 ms",
+          "memory": "8.73 MB"
+        },
+        {
+          "name": "lua (eval)",
+          "ips": "400.02",
+          "average": "2.50 ms",
+          "deviation": "±11.76%",
+          "median": "2.39 ms",
+          "p99": "3.48 ms",
+          "memory": "8.73 MB"
+        },
+        {
+          "name": "lua (chunk)",
+          "ips": "391.27",
+          "average": "2.56 ms",
+          "deviation": "±14.33%",
+          "median": "2.40 ms",
+          "p99": "3.52 ms",
+          "memory": "8.72 MB"
+        }
+      ],
+      "comparison": [
+        "luerl              418.17",
+        "lua (eval)         400.02 - 1.05x slower +0.109 ms",
+        "lua (chunk)        391.27 - 1.07x slower +0.164 ms"
+      ]
+    }
+  },
+  "vm_new": {
+    "VM instantiation: Lua.new/1 vs :luerl.init/0 (mode: full)": {
+      "jobs": [
+        {
+          "name": "lua (new, no sandbox)",
+          "ips": "66.32 K",
+          "average": "15.08 μs",
+          "deviation": "±21.55%",
+          "median": "14.88 μs",
+          "p99": "22.58 μs",
+          "memory": "51.77 KB"
+        },
+        {
+          "name": "luerl (init)",
+          "ips": "64.85 K",
+          "average": "15.42 μs",
+          "deviation": "±46.27%",
+          "median": "15.04 μs",
+          "p99": "30.25 μs",
+          "memory": "51.64 KB"
+        },
+        {
+          "name": "lua (new, custom exclude)",
+          "ips": "47.89 K",
+          "average": "20.88 μs",
+          "deviation": "±63.00%",
+          "median": "20.63 μs",
+          "p99": "31.67 μs",
+          "memory": "72.27 KB"
+        },
+        {
+          "name": "lua (new)",
+          "ips": "46.57 K",
+          "average": "21.47 μs",
+          "deviation": "±15.57%",
+          "median": "21.33 μs",
+          "p99": "31.25 μs",
+          "memory": "73.78 KB"
+        }
+      ],
+      "comparison": [
+        "lua (new, no sandbox)           66.32 K",
+        "luerl (init)                    64.85 K - 1.02x slower +0.34 μs",
+        "lua (new, custom exclude)       47.89 K - 1.38x slower +5.80 μs",
+        "lua (new)                       46.57 K - 1.42x slower +6.40 μs"
+      ]
+    },
+    "_cold_start": {
+      "first_call": "10070.0 us",
+      "second_call": "48.0 us"
+    }
+  },
+  "encode_decode": {
+    "raw": "lua 0.4.0 — encode!/decode! decomposition\n(decode+deep_cast column: enabled)\n==================================================================================\nop       shape                     N     total_us   per_elem_ns\nencode   int_list                  8         0.27          33.3\ndecode   int_list                  8         0.09          11.2\ndec+cast int_list                  8         0.11          13.7\nencode   int_list                 64         1.61          25.1\ndecode   int_list                 64         0.54           8.5\ndec+cast int_list                 64         0.96          15.0\nencode   int_list                512        26.38          51.5\ndecode   int_list                512         5.11          10.0\ndec+cast int_list                512         8.60          16.8\nencode   int_list               4096       226.97          55.4\ndecode   int_list               4096        43.47          10.6\ndec+cast int_list               4096        88.67          21.6\n----------------------------------------------------------------------------------\nencode   float_list                8         0.22          27.7\ndecode   float_list                8         0.09          11.2\ndec+cast float_list                8         0.11          13.2\nencode   float_list               64         1.64          25.7\ndecode   float_list               64         0.55           8.5\ndec+cast float_list               64         0.94          14.7\nencode   float_list              512        27.00          52.7\ndecode   float_list              512         5.85          11.4\ndec+cast float_list              512         9.00          17.6\nencode   float_list             4096       239.42          58.5\ndecode   float_list             4096        64.74          15.8\ndec+cast float_list             4096        98.40          24.0\n----------------------------------------------------------------------------------\nencode   bool_list                 8         0.21          26.4\ndecode   bool_list                 8         0.08          10.0\ndec+cast bool_list                 8         0.10          12.6\nencode   bool_list                64         1.60          25.0\ndecode   bool_list                64         0.56           8.7\ndec+cast bool_list                64         0.97          15.1\nencode   bool_list               512        25.68          50.1\ndecode   bool_list               512         4.80           9.4\ndec+cast bool_list               512         8.38          16.4\nencode   bool_list              4096       224.95          54.9\ndecode   bool_list              4096        38.99           9.5\ndec+cast bool_list              4096        84.05          20.5\n----------------------------------------------------------------------------------\nencode   short_string_list         8         0.21          26.7\ndecode   short_string_list         8         0.08          10.5\ndec+cast short_string_list         8         0.10          12.9\nencode   short_string_list        64         1.62          25.3\ndecode   short_string_list        64         0.55           8.6\ndec+cast short_string_list        64         0.98          15.4\nencode   short_string_list       512        26.45          51.7\ndecode   short_string_list       512         4.86           9.5\ndec+cast short_string_list       512         9.05          17.7\nencode   short_string_list      4096       202.93          49.5\ndecode   short_string_list      4096        43.46          10.6\ndec+cast short_string_list      4096        73.06          17.8\n----------------------------------------------------------------------------------\nencode   long_string_list          8         0.22          27.2\ndecode   long_string_list          8         0.08          10.4\ndec+cast long_string_list          8         0.10          12.7\nencode   long_string_list         64         1.67          26.1\ndecode   long_string_list         64         0.59           9.2\ndec+cast long_string_list         64         1.03          16.1\nencode   long_string_list        512        28.42          55.5\ndecode   long_string_list        512         5.16          10.1\ndec+cast long_string_list        512         9.09          17.7\nencode   long_string_list       4096       465.96         113.8\ndecode   long_string_list       4096        54.39          13.3\ndec+cast long_string_list       4096       108.40          26.5\n----------------------------------------------------------------------------------\nencode   string_map                8         0.52          65.3\ndecode   string_map                8         0.07           8.2\ndec+cast string_map                8         0.17          21.1\nencode   string_map               64         6.56         102.5\ndecode   string_map               64         0.40           6.2\ndec+cast string_map               64         3.21          50.2\nencode   string_map              512       113.10         220.9\ndecode   string_map              512         4.27           8.3\ndec+cast string_map              512        39.39          76.9\nencode   string_map             4096      1295.09         316.2\ndecode   string_map             4096        42.02          10.3\ndec+cast string_map             4096       367.76          89.8\n----------------------------------------------------------------------------------\nencode   int_map                   8         0.25          31.2\ndecode   int_map                   8         0.09          10.7\ndec+cast int_map                   8         0.10          12.9\nencode   int_map                  64         3.56          55.6\ndecode   int_map                  64         0.57           8.9\ndec+cast int_map                  64         0.97          15.1\nencode   int_map                 512        51.12          99.8\ndecode   int_map                 512         4.79           9.4\ndec+cast int_map                 512         8.76          17.1\nencode   int_map                4096       443.17         108.2\ndecode   int_map                4096        40.30           9.8\ndec+cast int_map                4096        87.24          21.3\n----------------------------------------------------------------------------------\nencode   record_list               8         2.07         258.7\ndecode   record_list               8         0.40          49.9\ndec+cast record_list               8         0.80         100.1\nencode   record_list              64        31.54         492.8\ndecode   record_list              64         4.54          70.9\ndec+cast record_list              64         7.32         114.4\nencode   record_list             512       287.96         562.4\ndecode   record_list             512        52.67         102.9\ndec+cast record_list             512        77.64         151.6\nencode   record_list            4096      2346.38         572.8\ndecode   record_list            4096       406.88          99.3\ndec+cast record_list            4096       658.70         160.8\n----------------------------------------------------------------------------------\nnested chain (depth sweep) — isolates recursion/traversal from fan-out\nop       shape                     N     total_us   per_elem_ns\nencode   nested_chain              4         0.51         257.3\ndecode   nested_chain              4         0.12          61.7\ndec+cast nested_chain              4         0.24         118.7\nencode   nested_chain             16         2.06        1032.0\ndecode   nested_chain             16         0.63         314.9\ndec+cast nested_chain             16         1.10         550.2\nencode   nested_chain             64         8.53        4265.3\ndecode   nested_chain             64         4.16        2079.7\ndec+cast nested_chain             64         6.63        3317.0\nencode   nested_chain            256        34.34       17170.4\ndecode   nested_chain            256        37.82       18909.7\ndec+cast nested_chain            256        47.43       23716.3\n==================================================================================\ncomposite anchor — the PR's `original_nested` (matches the 18us/108us figure)\nop       shape                     N     total_us   per_elem_ns\nencode   original_nested          75         3.48         870.0\ndecode   original_nested          75         0.58         145.4\ndec+cast original_nested          75         1.32         329.3\n"
+  }
+}

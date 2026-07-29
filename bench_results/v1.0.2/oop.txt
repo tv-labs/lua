@@ -1,0 +1,43 @@
+luaport not available ({:luaport, {~c"no such file or directory", ~c"luaport.app"}}) — skipping C Lua benchmarks
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (chunk)       10.47 K       95.55 μs    ±13.61%       93.21 μs      154.21 μs
+lua (eval)        10.27 K       97.33 μs    ±13.81%       94.67 μs      153.75 μs
+luerl              7.14 K      140.03 μs    ±21.43%      133.50 μs      231.96 μs
+
+Comparison: 
+lua (chunk)       10.47 K
+lua (eval)        10.27 K - 1.02x slower +1.78 μs
+luerl              7.14 K - 1.47x slower +44.48 μs
+
+Memory usage statistics:
+
+Name           Memory usage
+lua (chunk)       368.40 KB
+lua (eval)        378.94 KB - 1.03x memory usage +10.54 KB
+luerl             381.45 KB - 1.04x memory usage +13.05 KB
+
+**All measurements for memory usage were the same**

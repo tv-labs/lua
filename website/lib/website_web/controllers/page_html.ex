@@ -6,7 +6,55 @@ defmodule DemoWeb.PageHTML do
   """
   use DemoWeb, :html
 
+  alias Website.Benchmarks
+
   embed_templates "page_html/*"
+
+  attr :label, :string, required: true
+  attr :value, :string, required: true
+  attr :delta, :string, default: nil
+  slot :inner_block, required: true
+
+  def stat_tile(assigns) do
+    ~H"""
+    <div class="rounded-2xl border border-base-300/60 bg-base-200/50 p-5">
+      <div class="text-xs uppercase tracking-[0.07em] font-semibold text-base-content/50">
+        {@label}
+      </div>
+      <div class="text-3xl font-bold tracking-tight tabular-nums mt-1">{@value}</div>
+      <div :if={@delta} class="text-sm font-semibold text-success">{@delta}</div>
+      <div class="text-xs text-base-content/70 leading-relaxed mt-2 [&_code]:text-primary [&_code]:bg-base-300/40 [&_code]:px-1 [&_code]:rounded">
+        {render_slot(@inner_block)}
+      </div>
+    </div>
+    """
+  end
+
+  attr :value, :float, default: nil
+
+  def ratio(assigns) do
+    ~H"""
+    <span :if={is_nil(@value)}>—</span>
+    <span :if={@value} class={["font-semibold", (@value <= 1 && "text-success") || "text-error"]}>
+      {:erlang.float_to_binary(@value, decimals: 2)}×
+    </span>
+    """
+  end
+
+  @doc """
+  Hover text for a dot in the ratio plot.
+  """
+  def dot_title(row, version) do
+    values = row.values[version]
+
+    """
+    #{row.label} — #{version}
+    chunk median: #{values.value}
+    same-run Luerl: #{values.control}
+    ratio: #{values.ratio}× #{ratio_word(values.ratio)}
+    """
+    |> String.trim()
+  end
 
   attr :icon, :string, required: true
   attr :title, :string, required: true
@@ -29,6 +77,10 @@ defmodule DemoWeb.PageHTML do
     </div>
     """
   end
+
+  defp ratio_word(ratio) when ratio < 1, do: "(faster)"
+  defp ratio_word(ratio) when ratio > 1, do: "(slower)"
+  defp ratio_word(_ratio), do: ""
 
   defp accent_bg("primary"), do: "bg-primary/15"
   defp accent_bg("secondary"), do: "bg-secondary/15"

@@ -1,0 +1,136 @@
+luaport not available ({:luaport, {~c"no such file or directory", ~c"luaport.app"}}) — skipping C Lua benchmarks
+
+=== metamethods: self-call method dispatch (n=200) (mode: full) ===
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (eval)         2.10 K      476.79 μs    ±13.40%      462.04 μs      730.43 μs
+luerl              2.05 K      487.93 μs     ±8.87%      474.63 μs      657.89 μs
+lua (chunk)        2.04 K      490.34 μs     ±7.16%      485.83 μs      642.74 μs
+
+Comparison: 
+lua (eval)         2.10 K
+luerl              2.05 K - 1.02x slower +11.14 μs
+lua (chunk)        2.04 K - 1.03x slower +13.55 μs
+
+Memory usage statistics:
+
+Name           Memory usage
+lua (eval)          1.37 MB
+luerl               1.43 MB - 1.04x memory usage +0.0544 MB
+lua (chunk)         1.36 MB - 0.99x memory usage -0.01070 MB
+
+**All measurements for memory usage were the same**
+
+=== metamethods: 3-level __index chain (n=200) (mode: full) ===
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (chunk)        5.24 K      190.75 μs     ±4.32%      190.08 μs      206.47 μs
+lua (eval)         5.09 K      196.41 μs     ±6.91%      194.58 μs      221.08 μs
+luerl              4.60 K      217.23 μs     ±4.39%         216 μs      233.25 μs
+
+Comparison: 
+lua (chunk)        5.24 K
+lua (eval)         5.09 K - 1.03x slower +5.65 μs
+luerl              4.60 K - 1.14x slower +26.48 μs
+
+Memory usage statistics:
+
+Name           Memory usage
+lua (chunk)       576.76 KB
+lua (eval)        587.70 KB - 1.02x memory usage +10.95 KB
+luerl             668.59 KB - 1.16x memory usage +91.83 KB
+
+**All measurements for memory usage were the same**
+
+=== metamethods: arithmetic/relational metamethods (n=200) (mode: full) ===
+
+Operating System: macOS
+CPU Information: Apple M4
+Number of Available Cores: 10
+Available memory: 32 GB
+Elixir 1.20.0
+Erlang 29.0
+JIT enabled: true
+
+Benchmark suite executing with the following configuration:
+warmup: 2 s
+time: 10 s
+memory time: 1 s
+reduction time: 0 ns
+parallel: 1
+inputs: none specified
+Estimated total run time: 39 s
+Excluding outliers: false
+
+Benchmarking lua (chunk) ...
+Benchmarking lua (eval) ...
+Benchmarking luerl ...
+Calculating statistics...
+Formatting results...
+
+Name                  ips        average  deviation         median         99th %
+lua (eval)         533.57        1.87 ms     ±5.87%        1.92 ms        2.18 ms
+luerl              528.86        1.89 ms     ±5.87%        1.85 ms        2.20 ms
+lua (chunk)        521.21        1.92 ms    ±12.56%        1.93 ms        3.10 ms
+
+Comparison: 
+lua (eval)         533.57
+luerl              528.86 - 1.01x slower +0.0167 ms
+lua (chunk)        521.21 - 1.02x slower +0.0444 ms
+
+Memory usage statistics:
+
+Name           Memory usage
+lua (eval)          5.71 MB
+luerl               6.24 MB - 1.09x memory usage +0.53 MB
+lua (chunk)         5.70 MB - 1.00x memory usage -0.01050 MB
+
+**All measurements for memory usage were the same**

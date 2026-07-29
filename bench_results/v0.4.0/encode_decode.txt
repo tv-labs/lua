@@ -1,0 +1,128 @@
+lua 0.4.0 — encode!/decode! decomposition
+(decode+deep_cast column: enabled)
+==================================================================================
+op       shape                     N     total_us   per_elem_ns
+encode   int_list                  8         0.27          33.3
+decode   int_list                  8         0.09          11.2
+dec+cast int_list                  8         0.11          13.7
+encode   int_list                 64         1.61          25.1
+decode   int_list                 64         0.54           8.5
+dec+cast int_list                 64         0.96          15.0
+encode   int_list                512        26.38          51.5
+decode   int_list                512         5.11          10.0
+dec+cast int_list                512         8.60          16.8
+encode   int_list               4096       226.97          55.4
+decode   int_list               4096        43.47          10.6
+dec+cast int_list               4096        88.67          21.6
+----------------------------------------------------------------------------------
+encode   float_list                8         0.22          27.7
+decode   float_list                8         0.09          11.2
+dec+cast float_list                8         0.11          13.2
+encode   float_list               64         1.64          25.7
+decode   float_list               64         0.55           8.5
+dec+cast float_list               64         0.94          14.7
+encode   float_list              512        27.00          52.7
+decode   float_list              512         5.85          11.4
+dec+cast float_list              512         9.00          17.6
+encode   float_list             4096       239.42          58.5
+decode   float_list             4096        64.74          15.8
+dec+cast float_list             4096        98.40          24.0
+----------------------------------------------------------------------------------
+encode   bool_list                 8         0.21          26.4
+decode   bool_list                 8         0.08          10.0
+dec+cast bool_list                 8         0.10          12.6
+encode   bool_list                64         1.60          25.0
+decode   bool_list                64         0.56           8.7
+dec+cast bool_list                64         0.97          15.1
+encode   bool_list               512        25.68          50.1
+decode   bool_list               512         4.80           9.4
+dec+cast bool_list               512         8.38          16.4
+encode   bool_list              4096       224.95          54.9
+decode   bool_list              4096        38.99           9.5
+dec+cast bool_list              4096        84.05          20.5
+----------------------------------------------------------------------------------
+encode   short_string_list         8         0.21          26.7
+decode   short_string_list         8         0.08          10.5
+dec+cast short_string_list         8         0.10          12.9
+encode   short_string_list        64         1.62          25.3
+decode   short_string_list        64         0.55           8.6
+dec+cast short_string_list        64         0.98          15.4
+encode   short_string_list       512        26.45          51.7
+decode   short_string_list       512         4.86           9.5
+dec+cast short_string_list       512         9.05          17.7
+encode   short_string_list      4096       202.93          49.5
+decode   short_string_list      4096        43.46          10.6
+dec+cast short_string_list      4096        73.06          17.8
+----------------------------------------------------------------------------------
+encode   long_string_list          8         0.22          27.2
+decode   long_string_list          8         0.08          10.4
+dec+cast long_string_list          8         0.10          12.7
+encode   long_string_list         64         1.67          26.1
+decode   long_string_list         64         0.59           9.2
+dec+cast long_string_list         64         1.03          16.1
+encode   long_string_list        512        28.42          55.5
+decode   long_string_list        512         5.16          10.1
+dec+cast long_string_list        512         9.09          17.7
+encode   long_string_list       4096       465.96         113.8
+decode   long_string_list       4096        54.39          13.3
+dec+cast long_string_list       4096       108.40          26.5
+----------------------------------------------------------------------------------
+encode   string_map                8         0.52          65.3
+decode   string_map                8         0.07           8.2
+dec+cast string_map                8         0.17          21.1
+encode   string_map               64         6.56         102.5
+decode   string_map               64         0.40           6.2
+dec+cast string_map               64         3.21          50.2
+encode   string_map              512       113.10         220.9
+decode   string_map              512         4.27           8.3
+dec+cast string_map              512        39.39          76.9
+encode   string_map             4096      1295.09         316.2
+decode   string_map             4096        42.02          10.3
+dec+cast string_map             4096       367.76          89.8
+----------------------------------------------------------------------------------
+encode   int_map                   8         0.25          31.2
+decode   int_map                   8         0.09          10.7
+dec+cast int_map                   8         0.10          12.9
+encode   int_map                  64         3.56          55.6
+decode   int_map                  64         0.57           8.9
+dec+cast int_map                  64         0.97          15.1
+encode   int_map                 512        51.12          99.8
+decode   int_map                 512         4.79           9.4
+dec+cast int_map                 512         8.76          17.1
+encode   int_map                4096       443.17         108.2
+decode   int_map                4096        40.30           9.8
+dec+cast int_map                4096        87.24          21.3
+----------------------------------------------------------------------------------
+encode   record_list               8         2.07         258.7
+decode   record_list               8         0.40          49.9
+dec+cast record_list               8         0.80         100.1
+encode   record_list              64        31.54         492.8
+decode   record_list              64         4.54          70.9
+dec+cast record_list              64         7.32         114.4
+encode   record_list             512       287.96         562.4
+decode   record_list             512        52.67         102.9
+dec+cast record_list             512        77.64         151.6
+encode   record_list            4096      2346.38         572.8
+decode   record_list            4096       406.88          99.3
+dec+cast record_list            4096       658.70         160.8
+----------------------------------------------------------------------------------
+nested chain (depth sweep) — isolates recursion/traversal from fan-out
+op       shape                     N     total_us   per_elem_ns
+encode   nested_chain              4         0.51         257.3
+decode   nested_chain              4         0.12          61.7
+dec+cast nested_chain              4         0.24         118.7
+encode   nested_chain             16         2.06        1032.0
+decode   nested_chain             16         0.63         314.9
+dec+cast nested_chain             16         1.10         550.2
+encode   nested_chain             64         8.53        4265.3
+decode   nested_chain             64         4.16        2079.7
+dec+cast nested_chain             64         6.63        3317.0
+encode   nested_chain            256        34.34       17170.4
+decode   nested_chain            256        37.82       18909.7
+dec+cast nested_chain            256        47.43       23716.3
+==================================================================================
+composite anchor — the PR's `original_nested` (matches the 18us/108us figure)
+op       shape                     N     total_us   per_elem_ns
+encode   original_nested          75         3.48         870.0
+decode   original_nested          75         0.58         145.4
+dec+cast original_nested          75         1.32         329.3

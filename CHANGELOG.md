@@ -52,11 +52,15 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
 ## [1.0.2] - 2026-07-28
 
 ### Changed
-- `Lua.new/1` is ~100x faster (roughly 40µs down to 0.4µs) for the default and
-  fully-custom-sandbox configurations. Installing the standard library is pure
-  and deterministic, so the boot-time VM template is now built once per node
-  and memoized in `:persistent_term`; every later `Lua.new/1` starts from the
-  shared template copy-on-write. In `:interactive` mode (dev, IEx, tests) the
+- `Lua.new/1` is ~60x faster for the default configuration — 36.7µs down to
+  0.6µs median, with per-call allocation down from ~92KB to under 1KB — and
+  ~5.5x faster when a custom sandbox is passed (36.0µs down to 6.5µs), as
+  measured by `benchmarks/vm_new.exs` under `mix run`
+  ([full figures](https://github.com/tv-labs/lua/blob/main/bench_results/versions-2026-07-28.md)).
+  Installing the
+  standard library is pure and deterministic, so the boot-time VM template is
+  now built once per node and memoized in `:persistent_term`; every later
+  `Lua.new/1` starts from the shared template copy-on-write. In `:interactive` mode (dev, IEx, tests) the
   cache self-invalidates when the modules that built it are recompiled; hosts
   that hot-load new code in `:embedded` mode (releases) can force a rebuild
   with `Lua.VM.Bootstrap.reset/0` (#398).

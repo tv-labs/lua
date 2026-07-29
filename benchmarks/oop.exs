@@ -1,14 +1,21 @@
 # Run with: mix run benchmarks/oop.exs
 #
-# Benchmarks object-oriented patterns using Lua tables and metatables.
-# Uses assignment-style method definitions (e.g. Animal.speak = function(self) ... end)
-# which are compatible with this Lua implementation's current feature set.
-# Creates 50 Animal instances per iteration and calls a method on each.
+# Benchmarks the shallow, construction-dominated end of Lua OOP: 50 instances
+# per iteration, each built with two field writes and a `setmetatable`, then
+# sent one method whose body concatenates two of its fields.
+#
+# Methods are defined and invoked in assignment/field-call style
+# (`Animal.speak = function(self) ... end`, called as `Animal.speak(a)`) rather
+# than with the `:` sugar. That is not a language limitation — `:` method
+# definitions and self-calls work — it holds dispatch to its simplest form so
+# this workload stays dominated by construction cost. The dispatch-heavy
+# counterpart (`:` self-calls, multi-level `__index` chains, arithmetic
+# metamethods) is benchmarks/metamethods.exs.
 #
 # Patterns tested:
 #   - Table creation and field assignment
-#   - setmetatable / __index prototype chain lookup
-#   - Closure creation per object (factory pattern variant)
+#   - setmetatable, plus __index lookup one level up the prototype chain
+#   - String concatenation and tostring inside a method body
 #
 # Compares:
 #   - This Lua implementation (eval with string, eval with pre-compiled chunk)
@@ -60,9 +67,13 @@ end
 call_oop = "return run_oop(50)"
 
 # --- This Lua implementation ---
+# The state returned by `load_chunk!/2` is threaded through each call rather
+# than discarded: a loaded chunk may be a reference *into* the state it was
+# loaded against, so dropping that state can invalidate the chunk. Threading it
+# is correct on every release and costs nothing.
 lua = Lua.new()
 {_, lua} = Lua.eval!(lua, oop_def)
-{oop_chunk, _} = Lua.load_chunk!(lua, call_oop)
+{oop_chunk, lua} = Lua.load_chunk!(lua, call_oop)
 
 # --- Luerl ---
 luerl_state = :luerl.init()
