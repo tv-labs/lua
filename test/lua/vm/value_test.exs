@@ -80,6 +80,15 @@ defmodule Lua.VM.ValueTest do
       assert table.data["status"] == "married"
     end
 
+    test "keeps boolean keys as booleans" do
+      {{:tref, id}, state} = Value.encode(%{true => "yes", false => "no"}, new_state())
+
+      table = Map.fetch!(state.tables, id)
+      assert table.data[true] == "yes"
+      assert table.data[false] == "no"
+      refute Map.has_key?(table.data, "true")
+    end
+
     test "encodes empty map" do
       {{:tref, id}, state} = Value.encode(%{}, new_state())
 
@@ -120,6 +129,14 @@ defmodule Lua.VM.ValueTest do
       table = Map.fetch!(state.tables, id)
       assert table.data["name"] == "Bob"
       assert table.data["age"] == 25
+    end
+
+    test "keeps boolean keys of a keyword-shaped list as booleans" do
+      {{:tref, id}, state} = Value.encode([{true, "yes"}, {false, "no"}], new_state())
+
+      table = Map.fetch!(state.tables, id)
+      assert table.data[true] == "yes"
+      assert table.data[false] == "no"
     end
 
     test "recursively encodes list elements" do

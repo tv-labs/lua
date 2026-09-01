@@ -268,7 +268,7 @@ defmodule Lua.VM.Value do
   def encode(map, state, fun_wrapper) when is_map(map) do
     {data, state} =
       Enum.reduce(map, {%{}, state}, fn {k, v}, {data, state} ->
-        key = if is_atom(k), do: Atom.to_string(k), else: k
+        key = table_key(k)
         {encoded_v, state} = encode(v, state, fun_wrapper)
         {Map.put(data, key, encoded_v), state}
       end)
@@ -280,7 +280,7 @@ defmodule Lua.VM.Value do
     if keyword_list?(list) do
       {data, state} =
         Enum.reduce(list, {%{}, state}, fn {k, v}, {data, state} ->
-          key = Atom.to_string(k)
+          key = table_key(k)
           {encoded_v, state} = encode(v, state, fun_wrapper)
           {Map.put(data, key, encoded_v), state}
         end)
@@ -323,6 +323,12 @@ defmodule Lua.VM.Value do
 
     {Enum.reverse(reversed), state}
   end
+
+  # Atom keys become Lua strings, except `true`/`false`: those are Lua
+  # booleans, and a boolean key must stay a boolean key.
+  defp table_key(key) when is_boolean(key), do: key
+  defp table_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp table_key(key), do: key
 
   defp keyword_list?([{k, _v} | rest]) when is_atom(k), do: keyword_list?(rest)
   defp keyword_list?([]), do: true
