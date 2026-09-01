@@ -68,6 +68,20 @@ defmodule Lua.VM.FloatDivZeroTest do
     test "NaN compared to a number is unequal" do
       assert run!("return 0/0 == 1") == [false]
     end
+
+    test "NaN is a float number" do
+      assert run!("return type(0/0), math.type(0/0), tostring(0/0)") == ["number", "float", "nan"]
+    end
+
+    test "NaN crosses the host boundary as :nan and back" do
+      {[:nan], lua} = Lua.eval!(Lua.new(), "return 0/0")
+
+      assert {:nan, lua} = Lua.encode!(lua, :nan)
+      assert Lua.decode!(lua, :nan) == :nan
+
+      lua = Lua.set!(lua, [:nan], :nan)
+      assert {[true, "number"], _lua} = Lua.eval!(lua, "return nan ~= nan, type(nan)")
+    end
   end
 
   describe "non-zero divisors still divide normally" do

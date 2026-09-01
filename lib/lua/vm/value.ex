@@ -18,6 +18,7 @@ defmodule Lua.VM.Value do
   def type_name(v) when is_boolean(v), do: "boolean"
   def type_name(v) when is_integer(v), do: "number"
   def type_name(v) when is_float(v), do: "number"
+  def type_name(:nan), do: "number"
   def type_name(v) when is_binary(v), do: "string"
   def type_name({:tref, _}), do: "table"
   def type_name({:lua_closure, _, _}), do: "function"
@@ -54,6 +55,7 @@ defmodule Lua.VM.Value do
     end
   end
 
+  def to_string(:nan), do: "nan"
   def to_string(v) when is_binary(v), do: v
 
   def to_string({:tref, id}), do: "table: 0x#{address(id)}"
@@ -232,6 +234,7 @@ defmodule Lua.VM.Value do
   def encode(nil, state, _fun_wrapper), do: {nil, state}
   def encode(value, state, _fun_wrapper) when is_boolean(value), do: {value, state}
   def encode(value, state, _fun_wrapper) when is_number(value), do: {value, state}
+  def encode(:nan, state, _fun_wrapper), do: {:nan, state}
   def encode(value, state, _fun_wrapper) when is_binary(value), do: {value, state}
   def encode(value, state, _fun_wrapper) when is_atom(value), do: {Atom.to_string(value), state}
 
@@ -268,7 +271,7 @@ defmodule Lua.VM.Value do
   def encode(map, state, fun_wrapper) when is_map(map) do
     {data, state} =
       Enum.reduce(map, {%{}, state}, fn {k, v}, {data, state} ->
-        key = if is_atom(k), do: Atom.to_string(k), else: k
+        key = table_key(k)
         {encoded_v, state} = encode(v, state, fun_wrapper)
         {Map.put(data, key, encoded_v), state}
       end)
@@ -280,7 +283,7 @@ defmodule Lua.VM.Value do
     if keyword_list?(list) do
       {data, state} =
         Enum.reduce(list, {%{}, state}, fn {k, v}, {data, state} ->
-          key = Atom.to_string(k)
+          key = table_key(k)
           {encoded_v, state} = encode(v, state, fun_wrapper)
           {Map.put(data, key, encoded_v), state}
         end)
@@ -323,6 +326,12 @@ defmodule Lua.VM.Value do
 
     {Enum.reverse(reversed), state}
   end
+
+  # Atom keys become Lua strings, except `true`/`false`: those are Lua
+  # booleans, and a boolean key must stay a boolean key.
+  defp table_key(key) when is_boolean(key), do: key
+  defp table_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp table_key(key), do: key
 
   defp keyword_list?([{k, _v} | rest]) when is_atom(k), do: keyword_list?(rest)
   defp keyword_list?([]), do: true

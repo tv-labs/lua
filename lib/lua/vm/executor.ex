@@ -467,13 +467,9 @@ defmodule Lua.VM.Executor do
     raise_index_type_error(value, nil, proto.source, name_hint, state)
   end
 
-  # The `_proto` parameter is unused today because `try_unary_metamethod`
-  # doesn't thread a `source` through; B5d-v2 will route `__len` errors
-  # back to `proto.source` (matching the other bridges' attribution),
-  # so the parameter stays in the signature for forward-compat.
   @doc false
   @spec dispatcher_length(term(), State.t(), term()) :: {term(), State.t()}
-  def dispatcher_length(value, state, _proto) do
+  def dispatcher_length(value, state, proto) do
     try_unary_metamethod("__len", value, state, fn ->
       case value do
         {:tref, id} ->
@@ -487,9 +483,21 @@ defmodule Lua.VM.Executor do
           length(v)
 
         _ ->
-          0
+          raise_length_type_error(value, nil, proto.source, state)
       end
     end)
+  end
+
+  # Lua 5.3 §3.4.7: `#` is defined for strings and tables only; any other
+  # operand without a `__len` metamethod is a type error, never 0.
+  defp raise_length_type_error(value, line, source, state) do
+    raise TypeError,
+      value: "attempt to get length of a #{Value.type_name(value)} value",
+      line: line,
+      source: source,
+      error_kind: :length_non_table,
+      value_type: value_type(value),
+      state: state
   end
 
   @doc false
@@ -2597,7 +2605,7 @@ defmodule Lua.VM.Executor do
             length(v)
 
           _ ->
-            0
+            raise_length_type_error(value, line, proto.source, state)
         end
       end)
 

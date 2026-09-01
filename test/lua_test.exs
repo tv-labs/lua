@@ -710,11 +710,24 @@ defmodule LuaTest do
       assert {[true], _lua} = Lua.eval!(lua, "return not value")
     end
 
+    test "boolean table keys survive a round trip" do
+      lua = Lua.set!(Lua.new(), [:flags], %{true => "yes", false => "no"})
+
+      assert {["yes", "no"], lua} = Lua.eval!(lua, "return flags[true], flags[false]")
+      assert Enum.sort(Lua.get!(lua, [:flags])) == [{false, "no"}, {true, "yes"}]
+    end
+
     test "it raises for values that cannot be encoded" do
       error = "Lua runtime error: Failed to encode {:foo, :bar}"
 
       assert_raise Lua.RuntimeException, error, fn ->
         Lua.encode!(Lua.new(), {:foo, :bar})
+      end
+    end
+
+    test "Lua.set!/3 raises the same error for values that cannot be encoded" do
+      assert_raise Lua.RuntimeException, ~r/Failed to encode #PID/, fn ->
+        Lua.set!(Lua.new(), [:pid], self())
       end
     end
 

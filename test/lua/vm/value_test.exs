@@ -38,6 +38,12 @@ defmodule Lua.VM.ValueTest do
       assert {"hello", _state} = Value.encode(:hello, new_state())
       assert {"Elixir.MyApp", _state} = Value.encode(MyApp, new_state())
     end
+
+    test "the nan sentinel passes through as a number" do
+      assert {:nan, _state} = Value.encode(:nan, new_state())
+      assert Value.decode(:nan, new_state()) == :nan
+      assert Value.type_name(:nan) == "number"
+    end
   end
 
   describe "encode/2 functions" do
@@ -80,6 +86,15 @@ defmodule Lua.VM.ValueTest do
       assert table.data["status"] == "married"
     end
 
+    test "keeps boolean keys as booleans" do
+      {{:tref, id}, state} = Value.encode(%{true => "yes", false => "no"}, new_state())
+
+      table = Map.fetch!(state.tables, id)
+      assert table.data[true] == "yes"
+      assert table.data[false] == "no"
+      refute Map.has_key?(table.data, "true")
+    end
+
     test "encodes empty map" do
       {{:tref, id}, state} = Value.encode(%{}, new_state())
 
@@ -120,6 +135,14 @@ defmodule Lua.VM.ValueTest do
       table = Map.fetch!(state.tables, id)
       assert table.data["name"] == "Bob"
       assert table.data["age"] == 25
+    end
+
+    test "keeps boolean keys of a keyword-shaped list as booleans" do
+      {{:tref, id}, state} = Value.encode([{true, "yes"}, {false, "no"}], new_state())
+
+      table = Map.fetch!(state.tables, id)
+      assert table.data[true] == "yes"
+      assert table.data[false] == "no"
     end
 
     test "recursively encodes list elements" do

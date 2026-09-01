@@ -14,6 +14,7 @@ defmodule Lua.Util do
   def encoded?(true), do: true
   def encoded?(binary) when is_binary(binary), do: true
   def encoded?(number) when is_number(number), do: true
+  def encoded?(:nan), do: true
   def encoded?({:tref, _}), do: true
   def encoded?({:lua_closure, _, _}), do: true
   def encoded?({:compiled_closure, _, _}), do: true
