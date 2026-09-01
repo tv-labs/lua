@@ -603,6 +603,10 @@ defmodule Lua.VM.Stdlib.Math do
     {["float"], state}
   end
 
+  defp math_type([:nan], state) do
+    {["float"], state}
+  end
+
   defp math_type([_x], state) do
     {[nil], state}
   end

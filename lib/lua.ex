@@ -999,6 +999,10 @@ defmodule Lua do
     {nil, lua}
   end
 
+  def encode!(%__MODULE__{} = lua, :nan) do
+    {:nan, lua}
+  end
+
   def encode!(%__MODULE__{} = lua, value) when is_atom(value) and not is_boolean(value) do
     {Atom.to_string(value), lua}
   end

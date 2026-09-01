@@ -18,6 +18,7 @@ defmodule Lua.VM.Value do
   def type_name(v) when is_boolean(v), do: "boolean"
   def type_name(v) when is_integer(v), do: "number"
   def type_name(v) when is_float(v), do: "number"
+  def type_name(:nan), do: "number"
   def type_name(v) when is_binary(v), do: "string"
   def type_name({:tref, _}), do: "table"
   def type_name({:lua_closure, _, _}), do: "function"
@@ -54,6 +55,7 @@ defmodule Lua.VM.Value do
     end
   end
 
+  def to_string(:nan), do: "nan"
   def to_string(v) when is_binary(v), do: v
 
   def to_string({:tref, id}), do: "table: 0x#{address(id)}"
@@ -232,6 +234,7 @@ defmodule Lua.VM.Value do
   def encode(nil, state, _fun_wrapper), do: {nil, state}
   def encode(value, state, _fun_wrapper) when is_boolean(value), do: {value, state}
   def encode(value, state, _fun_wrapper) when is_number(value), do: {value, state}
+  def encode(:nan, state, _fun_wrapper), do: {:nan, state}
   def encode(value, state, _fun_wrapper) when is_binary(value), do: {value, state}
   def encode(value, state, _fun_wrapper) when is_atom(value), do: {Atom.to_string(value), state}
 

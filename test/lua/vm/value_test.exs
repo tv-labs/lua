@@ -38,6 +38,12 @@ defmodule Lua.VM.ValueTest do
       assert {"hello", _state} = Value.encode(:hello, new_state())
       assert {"Elixir.MyApp", _state} = Value.encode(MyApp, new_state())
     end
+
+    test "the nan sentinel passes through as a number" do
+      assert {:nan, _state} = Value.encode(:nan, new_state())
+      assert Value.decode(:nan, new_state()) == :nan
+      assert Value.type_name(:nan) == "number"
+    end
   end
 
   describe "encode/2 functions" do

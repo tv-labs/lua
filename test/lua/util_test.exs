@@ -14,6 +14,7 @@ defmodule Lua.UtilTest do
       assert Lua.Util.encoded?(0)
       assert Lua.Util.encoded?(Enum.random(1..1000))
       assert Lua.Util.encoded?(:rand.uniform())
+      assert Lua.Util.encoded?(:nan)
 
       # tref
       {{:tref, _} = table, _lua} = Lua.encode!(Lua.new(), %{a: 1, b: 2})
