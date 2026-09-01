@@ -352,7 +352,7 @@ defmodule Lua do
       if Util.encoded?(value) do
         {value, lua.state}
       else
-        Value.encode(value, lua.state, &wrap_callback(&1, function_name, scope))
+        encode_value!(value, lua.state, &wrap_callback(&1, function_name, scope))
       end
 
     state = do_set_nested(state, keys, encoded)
@@ -1013,14 +1013,15 @@ defmodule Lua do
     if Util.encoded?(value) do
       {value, lua}
     else
-      {encoded, state} = Value.encode(value, state, &wrap_callback(&1, :anonymous, []))
+      {encoded, state} = encode_value!(value, state, &wrap_callback(&1, :anonymous, []))
       {encoded, %{lua | state: state}}
     end
-  rescue
-    _e in [ArgumentError] ->
-      reraise Lua.RuntimeException, "Failed to encode #{inspect(value)}", __STACKTRACE__
+  end
 
-    _e in [FunctionClauseError] ->
+  defp encode_value!(value, state, fun_wrapper) do
+    Value.encode(value, state, fun_wrapper)
+  rescue
+    _e in [ArgumentError, FunctionClauseError] ->
       reraise Lua.RuntimeException, "Failed to encode #{inspect(value)}", __STACKTRACE__
   end
 

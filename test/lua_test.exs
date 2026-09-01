@@ -725,6 +725,12 @@ defmodule LuaTest do
       end
     end
 
+    test "Lua.set!/3 raises the same error for values that cannot be encoded" do
+      assert_raise Lua.RuntimeException, ~r/Failed to encode #PID/, fn ->
+        Lua.set!(Lua.new(), [:pid], self())
+      end
+    end
+
     test "it raises for values that cannot be decoded" do
       error = "Lua runtime error: Failed to decode {}"
 
