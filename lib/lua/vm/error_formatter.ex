@@ -282,6 +282,10 @@ defmodule Lua.VM.ErrorFormatter do
     "Relational operators (< <= > >=) only compare two numbers or two strings. Convert one operand so both sides share a type."
   end
 
+  defp build_suggestion(:type_error, :length_non_table, value_type) do
+    "The length operator (#) only works on strings and tables. Make sure the value is a string or table, not a #{format_type_name(value_type)}."
+  end
+
   defp build_suggestion(:type_error, :length_not_integer, _value_type) do
     "The length operation returned a non-integer value. If you defined a __len metamethod, make sure it returns an integer."
   end
