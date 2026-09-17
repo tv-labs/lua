@@ -81,4 +81,65 @@ defmodule Lua.VM.Stdlib.OsTest do
       end
     end
   end
+
+  # Lua 5.3 §6.9: date-table fields passed to os.time need not be within their
+  # valid ranges; they are normalised the way C mktime does.
+  describe "os.time field normalization" do
+    test "day = 0 is the last day of the previous month" do
+      assert normalize("year=2026, month=9, day=0") == {2026, 8, 31, 12, 0, 0}
+      assert normalize("year=2026, month=3, day=0") == {2026, 2, 28, 12, 0, 0}
+      assert normalize("year=2028, month=3, day=0") == {2028, 2, 29, 12, 0, 0}
+    end
+
+    test "day = 0 of month 1 rolls back into December of the previous year" do
+      assert normalize("year=2026, month=1, day=0") == {2025, 12, 31, 12, 0, 0}
+    end
+
+    test "month past December rolls into the next year" do
+      assert normalize("year=2026, month=13, day=1") == {2027, 1, 1, 12, 0, 0}
+      assert normalize("year=2026, month=12 + 1, day=0") == {2026, 12, 31, 12, 0, 0}
+      assert normalize("year=2026, month=14, day=1") == {2027, 2, 1, 12, 0, 0}
+      assert normalize("year=2026, month=24, day=1") == {2027, 12, 1, 12, 0, 0}
+      assert normalize("year=2026, month=25, day=0") == {2027, 12, 31, 12, 0, 0}
+      assert normalize("year=2026, month=25, day=1") == {2028, 1, 1, 12, 0, 0}
+      assert normalize("year=2026, month=100, day=1") == {2034, 4, 1, 12, 0, 0}
+    end
+
+    test "month below January rolls into the previous year" do
+      assert normalize("year=2026, month=0, day=1") == {2025, 12, 1, 12, 0, 0}
+      assert normalize("year=2026, month=-1, day=1") == {2025, 11, 1, 12, 0, 0}
+      assert normalize("year=2026, month=-13, day=1") == {2024, 11, 1, 12, 0, 0}
+    end
+
+    test "day past the end of the month overflows into the next month" do
+      assert normalize("year=2026, month=2, day=30") == {2026, 3, 2, 12, 0, 0}
+      assert normalize("year=2028, month=2, day=30") == {2028, 3, 1, 12, 0, 0}
+      assert normalize("year=2026, month=1, day=32") == {2026, 2, 1, 12, 0, 0}
+      assert normalize("year=2026, month=1, day=400") == {2027, 2, 4, 12, 0, 0}
+    end
+
+    test "negative day counts back across months and years" do
+      assert normalize("year=2026, month=1, day=-40") == {2025, 11, 21, 12, 0, 0}
+    end
+
+    test "time fields overflow and underflow across days" do
+      assert normalize("year=2026, month=12, day=31, hour=25") == {2027, 1, 1, 1, 0, 0}
+      assert normalize("year=2026, month=1, day=1, hour=0, min=0, sec=-10") == {2025, 12, 31, 23, 59, 50}
+      assert normalize("year=2026, month=1, day=1, hour=0, min=90") == {2026, 1, 1, 1, 30, 0}
+    end
+
+    test "in-range fields are unchanged" do
+      assert normalize("year=2000, month=1, day=1, hour=0, min=0, sec=0") == {2000, 1, 1, 0, 0, 0}
+    end
+  end
+
+  defp normalize(fields) do
+    code = """
+    local t = os.date("!*t", os.time({#{fields}}))
+    return t.year, t.month, t.day, t.hour, t.min, t.sec
+    """
+
+    {[year, month, day, hour, min, sec], _} = Lua.eval!(code)
+    {year, month, day, hour, min, sec}
+  end
 end

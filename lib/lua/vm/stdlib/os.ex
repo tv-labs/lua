@@ -214,9 +214,17 @@ defmodule Lua.VM.Stdlib.Os do
     end
   end
 
+  # Lua 5.3 §6.9: date-table fields need not be within their valid ranges —
+  # C mktime normalises them (day = 0 is the last day of the previous month,
+  # month = 13 is January of the next year, hour = 25 rolls into the next day).
+  # Fold the month into the year, anchor on the 1st of that month, then add the
+  # remaining fields as a signed offset in seconds.
   defp naive_to_epoch(%{year: y, month: mo, day: d, hour: h, minute: mi, second: s}) do
-    {:ok, naive} = NaiveDateTime.new(y, mo, d, h, mi, s)
-    naive |> DateTime.from_naive!("Etc/UTC") |> DateTime.to_unix(:second)
+    months = y * 12 + (mo - 1)
+    first_of_month = Date.new!(Integer.floor_div(months, 12), Integer.mod(months, 12) + 1, 1)
+    base = first_of_month |> DateTime.new!(~T[00:00:00], "Etc/UTC") |> DateTime.to_unix(:second)
+
+    base + (d - 1) * 86_400 + h * 3_600 + mi * 60 + s
   end
 
   defp strip_utc_flag("!" <> rest), do: {rest, true}
