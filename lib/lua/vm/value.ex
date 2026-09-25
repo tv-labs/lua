@@ -294,11 +294,12 @@ defmodule Lua.VM.Value do
       # with a raw `FunctionClauseError`. Refuse it with an actionable message
       # instead, mirroring the struct and cyclic-tref clauses above.
       decoded_pair_list?(list) ->
-        raise Lua.RuntimeException,
-              "cannot encode a list of {key, value} pairs into a Lua value. This is the " <>
-                "shape `decode/2` produces for a table, and it does not round-trip back " <>
-                "into the VM. Convert it to a map first (e.g. `Map.new/1`), which encodes " <>
-                "as a Lua table."
+        raise Lua.RuntimeException, """
+        cannot encode a list of {key, value} pairs into a Lua value. This is the \
+        shape `decode/2` produces for a table, and it does not round-trip back \
+        into the VM. Convert it to a map first (e.g. `Map.new/1`), which encodes \
+        as a Lua table.\
+        """
 
       true ->
         {data, state} =
