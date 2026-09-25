@@ -130,6 +130,16 @@ defmodule Lua.VM.ValueTest do
       inner_table = Map.fetch!(state.tables, inner_id)
       assert inner_table.data["x"] == 1
     end
+
+    test "refuses a decoded table (list of {key, value} pairs) with a clear error" do
+      assert_raise Lua.RuntimeException, ~r/list of \{key, value\} pairs/, fn ->
+        Value.encode([{"x", 1}, {"y", 2}], new_state())
+      end
+
+      assert_raise Lua.RuntimeException, ~r/list of \{key, value\} pairs/, fn ->
+        Value.encode([{1, "a"}, {2, "b"}], new_state())
+      end
+    end
   end
 
   describe "encode_list/2" do

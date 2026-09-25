@@ -277,25 +277,40 @@ defmodule Lua.VM.Value do
   end
 
   def encode(list, state, fun_wrapper) when is_list(list) do
-    if keyword_list?(list) do
-      {data, state} =
-        Enum.reduce(list, {%{}, state}, fn {k, v}, {data, state} ->
-          key = Atom.to_string(k)
-          {encoded_v, state} = encode(v, state, fun_wrapper)
-          {Map.put(data, key, encoded_v), state}
-        end)
+    cond do
+      keyword_list?(list) ->
+        {data, state} =
+          Enum.reduce(list, {%{}, state}, fn {k, v}, {data, state} ->
+            key = Atom.to_string(k)
+            {encoded_v, state} = encode(v, state, fun_wrapper)
+            {Map.put(data, key, encoded_v), state}
+          end)
 
-      State.alloc_table(state, data)
-    else
-      {data, state} =
-        list
-        |> Enum.with_index(1)
-        |> Enum.reduce({%{}, state}, fn {v, idx}, {data, state} ->
-          {encoded_v, state} = encode(v, state, fun_wrapper)
-          {Map.put(data, idx, encoded_v), state}
-        end)
+        State.alloc_table(state, data)
 
-      State.alloc_table(state, data)
+      # `decode/2` returns a table as a list of `{key, value}` pairs with
+      # binary/number keys. That shape has no positional encoding (each pair
+      # is a bare 2-tuple matching no `encode/3` clause), so it would crash
+      # with a raw `FunctionClauseError`. Refuse it with an actionable message
+      # instead, mirroring the struct and cyclic-tref clauses above.
+      decoded_pair_list?(list) ->
+        raise Lua.RuntimeException, """
+        cannot encode a list of {key, value} pairs into a Lua value. This is the \
+        shape `decode/2` produces for a table, and it does not round-trip back \
+        into the VM. Convert it to a map first (e.g. `Map.new/1`), which encodes \
+        as a Lua table.\
+        """
+
+      true ->
+        {data, state} =
+          list
+          |> Enum.with_index(1)
+          |> Enum.reduce({%{}, state}, fn {v, idx}, {data, state} ->
+            {encoded_v, state} = encode(v, state, fun_wrapper)
+            {Map.put(data, idx, encoded_v), state}
+          end)
+
+        State.alloc_table(state, data)
     end
   end
 
@@ -327,6 +342,14 @@ defmodule Lua.VM.Value do
   defp keyword_list?([{k, _v} | rest]) when is_atom(k), do: keyword_list?(rest)
   defp keyword_list?([]), do: true
   defp keyword_list?(_), do: false
+
+  # A non-empty list where every element is a `{key, value}` pair with a binary
+  # or number key: exactly what `decode/2` returns for a Lua table. The empty
+  # list is already handled by `keyword_list?/1`, so this never matches `[]`.
+  defp decoded_pair_list?([{k, _v} | rest]) when is_binary(k) or is_number(k), do: decoded_pair_list?(rest)
+
+  defp decoded_pair_list?([]), do: true
+  defp decoded_pair_list?(_), do: false
 
   # --- Decoding (Lua VM → Elixir) ---
 
