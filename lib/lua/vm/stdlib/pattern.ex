@@ -13,7 +13,9 @@ defmodule Lua.VM.Stdlib.Pattern do
   - Escape: % + non-alphanumeric = literal
   """
 
+  alias Lua.VM.Limits
   alias Lua.VM.RuntimeError
+  alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
 
   @doc """
@@ -160,7 +162,7 @@ defmodule Lua.VM.Stdlib.Pattern do
   # (Lua 5.3 §6.4.1), so gsub performs at most one replacement there and
   # keeps the remainder untouched — PUC-Lua str_gsub's `anchor` flag makes
   # its scan loop run exactly once. An unanchored pattern scans every
-  # position via gsub_from/10.
+  # position via gsub_from/11.
 
   defp do_gsub(subject, true, _pattern, _repl, max_n, state) when max_n != nil and max_n <= 0 do
     {subject, 0, state}
@@ -170,9 +172,9 @@ defmodule Lua.VM.Stdlib.Pattern do
     case match_pattern(subject, 0, pattern, subject) do
       {:match, end_pos, captures} ->
         whole_match = binary_part(subject, 0, end_pos)
-        {replacement, state} = apply_replacement(repl, whole_match, captures, state)
+        {replacement, state} = apply_replacement(repl, whole_match, captures, 0, state)
         rest = binary_part(subject, end_pos, byte_size(subject) - end_pos)
-        {IO.iodata_to_binary([replacement, rest]), 1, state}
+        finish_gsub([replacement], rest, byte_size(replacement), 1, state)
 
       :nomatch ->
         {subject, 0, state}
@@ -180,7 +182,7 @@ defmodule Lua.VM.Stdlib.Pattern do
   end
 
   defp do_gsub(subject, false, pattern, repl, max_n, state) do
-    gsub_from(subject, 0, byte_size(subject), pattern, repl, max_n, 0, [], state, false)
+    gsub_from(subject, 0, byte_size(subject), pattern, repl, max_n, 0, [], 0, state, false)
   end
 
   # Lua 5.3.3+ semantics: an empty match that starts where the *previous*
@@ -192,35 +194,40 @@ defmodule Lua.VM.Stdlib.Pattern do
   # The flag `skip_empty?` is set after every matched-and-applied replacement;
   # the next iteration is allowed to fire an empty match only after we've
   # advanced past that boundary.
+  #
+  # `size` is the byte count accumulated in `acc`. Replacements can grow the
+  # result without bound relative to the subject, so it is checked against
+  # the string ceiling as each one is produced (see apply_replacement/5) and
+  # once more, with the unmatched remainder, before the result is built.
 
-  defp gsub_from(subject, pos, len, _pattern, _repl, max_n, count, acc, state, _skip_empty?)
+  defp gsub_from(subject, pos, len, _pattern, _repl, max_n, count, acc, size, state, _skip_empty?)
        when pos > len or (max_n != nil and count >= max_n) do
     # Append remaining subject (clamp pos so we never read past end_of_string)
     remaining =
       if pos < len, do: binary_part(subject, pos, len - pos), else: ""
 
-    {IO.iodata_to_binary([Enum.reverse(acc), remaining]), count, state}
+    finish_gsub(acc, remaining, size, count, state)
   end
 
-  defp gsub_from(subject, pos, len, pattern, repl, max_n, count, acc, state, skip_empty?) do
+  defp gsub_from(subject, pos, len, pattern, repl, max_n, count, acc, size, state, skip_empty?) do
     case match_pattern(subject, pos, pattern, subject) do
       {:match, end_pos, _captures} when skip_empty? and end_pos == pos ->
         # Empty match immediately after a previous match — skip without
         # replacing, advance by one byte (or terminate at end of subject).
         if pos < len do
           char = <<:binary.at(subject, pos)>>
-          gsub_from(subject, pos + 1, len, pattern, repl, max_n, count, [char | acc], state, false)
+          gsub_from(subject, pos + 1, len, pattern, repl, max_n, count, [char | acc], size + 1, state, false)
         else
-          {IO.iodata_to_binary(Enum.reverse(acc)), count, state}
+          finish_gsub(acc, "", size, count, state)
         end
 
       {:match, end_pos, captures} ->
         if max_n != nil and count >= max_n do
           remaining = binary_part(subject, pos, len - pos)
-          {IO.iodata_to_binary([Enum.reverse(acc), remaining]), count, state}
+          finish_gsub(acc, remaining, size, count, state)
         else
           whole_match = binary_part(subject, pos, max(end_pos - pos, 0))
-          {replacement, state} = apply_replacement(repl, whole_match, captures, state)
+          {replacement, state} = apply_replacement(repl, whole_match, captures, size, state)
           empty_match? = end_pos == pos
           next_pos = if empty_match?, do: pos + 1, else: end_pos
           prefix = if empty_match? and pos < len, do: <<:binary.at(subject, pos)>>, else: ""
@@ -239,6 +246,7 @@ defmodule Lua.VM.Stdlib.Pattern do
             max_n,
             count + 1,
             [prefix, replacement | acc],
+            size + byte_size(replacement) + byte_size(prefix),
             state,
             not empty_match?
           )
@@ -247,19 +255,46 @@ defmodule Lua.VM.Stdlib.Pattern do
       :nomatch ->
         if pos < len do
           char = <<:binary.at(subject, pos)>>
-          gsub_from(subject, pos + 1, len, pattern, repl, max_n, count, [char | acc], state, false)
+          gsub_from(subject, pos + 1, len, pattern, repl, max_n, count, [char | acc], size + 1, state, false)
         else
-          {IO.iodata_to_binary(Enum.reverse(acc)), count, state}
+          finish_gsub(acc, "", size, count, state)
         end
     end
   end
 
-  defp apply_replacement(repl, whole_match, captures, state) when is_binary(repl) do
-    # Replace %0 with whole match, %1-%9 with captures
-    {replace_captures(repl, whole_match, captures), state}
+  defp finish_gsub(acc, remaining, size, count, state) do
+    check_result_size!(size + byte_size(remaining), state)
+    {IO.iodata_to_binary([Enum.reverse(acc), remaining]), count, state}
   end
 
-  defp apply_replacement(repl, whole_match, captures, state) when is_function(repl, 2) do
+  # The non-stateful `gsub/4` entry calls with `state == nil` and falls back
+  # to the default ceiling.
+  defp check_result_size!(size, %State{max_string_bytes: max}) when size <= max, do: :ok
+
+  defp check_result_size!(size, %State{max_string_bytes: max} = state) do
+    Limits.check_string_size!(size, max, state)
+  end
+
+  defp check_result_size!(size, nil), do: Limits.check_string_size!(size)
+
+  # Produces the replacement for one match, refusing it when it would take
+  # the result — `size` bytes so far — past the string ceiling.
+  defp apply_replacement(repl, whole_match, captures, size, state) when is_binary(repl) do
+    # Replace %0 with whole match, %1-%9 with captures. A replacement with
+    # no `%` comes back as the same binary; otherwise the expansion is
+    # iodata, sized and checked before it is flattened.
+    case replace_captures(repl, whole_match, captures) do
+      literal when is_binary(literal) ->
+        check_result_size!(size + byte_size(literal), state)
+        {literal, state}
+
+      expansion ->
+        check_result_size!(size + IO.iodata_length(expansion), state)
+        {IO.iodata_to_binary(expansion), state}
+    end
+  end
+
+  defp apply_replacement(repl, whole_match, captures, size, state) when is_function(repl, 2) do
     args = if captures == [], do: [whole_match], else: captures
     {result, state} = repl.(args, state)
 
@@ -272,17 +307,21 @@ defmodule Lua.VM.Stdlib.Pattern do
         other -> raise_invalid_replacement(other, state)
       end
 
+    check_result_size!(size + byte_size(replacement), state)
     {replacement, state}
   end
 
-  defp apply_replacement(_repl, whole_match, _captures, state), do: {whole_match, state}
+  defp apply_replacement(_repl, whole_match, _captures, size, state) do
+    check_result_size!(size + byte_size(whole_match), state)
+    {whole_match, state}
+  end
 
   # The callback may have made heap mutations (global/table/upvalue/metatable
   # writes) that thread back through `state` before returning an invalid value.
   # Ferry the freshest `state` out on the raise so a protected unwind keeps
   # those effects (Lua 5.3 §2.3). The non-stateful `gsub/4` entry calls with
   # `state == nil`, so only attach when a real `%State{}` is in scope.
-  defp raise_invalid_replacement(other, %Lua.VM.State{} = state) do
+  defp raise_invalid_replacement(other, %State{} = state) do
     raise RuntimeError, value: "invalid replacement value (a #{Util.typeof(other)})", state: state
   end
 
@@ -290,9 +329,24 @@ defmodule Lua.VM.Stdlib.Pattern do
     raise RuntimeError, value: "invalid replacement value (a #{Util.typeof(other)})"
   end
 
-  defp replace_captures("", _whole, _captures), do: ""
+  # Builds iodata rather than a binary: literal runs and captures are
+  # referenced, not copied, so a replacement that repeats `%0` many times
+  # stays the size of the replacement string until its expanded size has
+  # been checked. A replacement with no `%` comes back as-is.
+  defp replace_captures(repl, whole, captures), do: literal_run(repl, repl, 0, whole, captures)
 
-  defp replace_captures("%" <> <<c, rest::binary>>, whole, captures) when c in ?0..?9 do
+  # Scans to the next `%`; the `len` bytes of `run` before it are one piece.
+  defp literal_run(<<?%, rest::binary>>, run, len, whole, captures) do
+    [binary_part(run, 0, len), replace_directive(rest, whole, captures)]
+  end
+
+  defp literal_run(<<_byte, rest::binary>>, run, len, whole, captures) do
+    literal_run(rest, run, len + 1, whole, captures)
+  end
+
+  defp literal_run(<<>>, run, _len, _whole, _captures), do: run
+
+  defp replace_directive(<<c, rest::binary>>, whole, captures) when c in ?0..?9 do
     idx = c - ?0
 
     value =
@@ -313,23 +367,15 @@ defmodule Lua.VM.Stdlib.Pattern do
           raise RuntimeError, value: "invalid capture index %#{idx} in replacement string"
       end
 
-    capture_to_binary(value) <> replace_captures(rest, whole, captures)
+    [capture_to_binary(value), replace_captures(rest, whole, captures)]
   end
 
-  defp replace_captures("%%" <> rest, whole, captures) do
-    "%" <> replace_captures(rest, whole, captures)
+  defp replace_directive("%" <> rest, whole, captures) do
+    ["%", replace_captures(rest, whole, captures)]
   end
 
-  defp replace_captures("%" <> <<_c, _rest::binary>>, _whole, _captures) do
+  defp replace_directive(_other, _whole, _captures) do
     raise RuntimeError, value: "invalid use of '%' in replacement string"
-  end
-
-  defp replace_captures("%", _whole, _captures) do
-    raise RuntimeError, value: "invalid use of '%' in replacement string"
-  end
-
-  defp replace_captures(<<c, rest::binary>>, whole, captures) do
-    <<c>> <> replace_captures(rest, whole, captures)
   end
 
   # Captures from `()` (position captures) are integers; everything else is

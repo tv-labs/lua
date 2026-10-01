@@ -23,8 +23,8 @@ defmodule Lua.VM.State do
             # means no limit. See `check_call_depth!/1`.
             call_depth: 0,
             max_call_depth: :infinity,
-            # Ceiling for any single string the VM will build (`..`,
-            # `string.rep`, `load` reader chunks). Defaults to the practical
+            # Ceiling for any single string the VM will build (`..` and the
+            # string-building stdlib functions). Defaults to the practical
             # bound in `Lua.VM.Limits`. Embedders running the VM under a
             # process heap cap (`:max_heap_size`) should set this below that
             # cap so an allocation bomb is refused deterministically instead

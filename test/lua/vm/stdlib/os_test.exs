@@ -54,6 +54,31 @@ defmodule Lua.VM.Stdlib.OsTest do
       assert s == "2000-01-01"
     end
 
+    test "os.date expands every directive and leaves the rest of the format alone" do
+      # 946684800 is Saturday 2000-01-01 00:00:00 UTC.
+      cases = [
+        {~S|"!%c"|, "Sat Jan 01 00:00:00 2000"},
+        {~S|"!%A %a %B %b"|, "Saturday Sat January Jan"},
+        {~S|"!%y %j %p %x %X"|, "00 001 AM 01/01/00 00:00:00"},
+        {~S|"![%H:%M:%S]"|, "[00:00:00]"},
+        {~S|"!%Y%m%d"|, "20000101"},
+        # `%%` is a literal percent, and does not start a directive with
+        # the byte after it.
+        {~S|"!%%"|, "%"},
+        {~S|"!%%Y"|, "%Y"},
+        # Unknown directives, a `%` before a newline, and a trailing lone
+        # `%` pass through unchanged.
+        {~S|"!%Q"|, "%Q"},
+        {~S|"!a%\nb"|, "a%\nb"},
+        {~S|"!100%"|, "100%"},
+        {~S|"!"|, ""}
+      ]
+
+      for {format, expected} <- cases do
+        assert {[^expected], _} = Lua.eval!("return os.date(#{format}, 946684800)")
+      end
+    end
+
     test "os.date with *t returns a broken-down time table" do
       code = """
       local t = os.date("!*t", 946684800)

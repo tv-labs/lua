@@ -103,7 +103,8 @@ defmodule Lua do
         true
 
   * `:max_string_bytes` - (default 256 MiB) ceiling for any single string the VM will build,
-    whether via `..`, `string.rep`, or a `load` reader. An oversized result raises a catchable
+    whether via `..`, `string.rep`, `string.format`, `string.gsub`, `string.pack`,
+    `table.concat`, `os.date`, or a `load` reader. An oversized result raises a catchable
     `"resulting string too large"` error — the size is computed *before* allocating, so the
     bomb is refused rather than detected after the fact. Accepts a positive integer or
     `:infinity` for no limit (matching `:max_call_depth` and `:max_instructions`).

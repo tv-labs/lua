@@ -1,7 +1,7 @@
 defmodule Lua.VM.Limits do
   @moduledoc """
-  Practical resource ceilings for stdlib operations whose output size is a
-  function of a numeric argument.
+  Practical resource ceilings for stdlib operations whose output can be far
+  larger than their arguments.
 
   These guard against denial-of-service via a single oversized allocation
   (e.g. `string.rep("x", 1e15)`, `table.unpack(t, 1, 1e12)`). Each call
@@ -45,18 +45,22 @@ defmodule Lua.VM.Limits do
   given ceiling (a state's `max_string_bytes`, defaulting to the practical
   bound here). Raises a catchable "resulting string too large" runtime
   error otherwise.
+
+  Pass `state` when Lua code ran between the native call's entry and this
+  check (a `string.gsub` callback, a `table.concat` `__index`): the raise
+  then carries it, so a protected call keeps that code's heap effects.
   """
   # `max` may be `:infinity` (from `Lua.new(max_string_bytes: :infinity)`).
   # Erlang term ordering places every number below every atom, so an integer
   # `bytes <= :infinity` is always true and the check passes unconditionally —
   # no separate clause is needed.
-  @spec check_string_size!(integer(), pos_integer() | :infinity) :: :ok
-  def check_string_size!(bytes, max \\ @max_string_bytes)
+  @spec check_string_size!(integer(), pos_integer() | :infinity, Lua.VM.State.t() | nil) :: :ok
+  def check_string_size!(bytes, max \\ @max_string_bytes, state \\ nil)
 
-  def check_string_size!(bytes, max) when is_integer(bytes) and bytes <= max, do: :ok
+  def check_string_size!(bytes, max, _state) when is_integer(bytes) and bytes <= max, do: :ok
 
-  def check_string_size!(_bytes, _max) do
-    raise RuntimeError, value: "resulting string too large"
+  def check_string_size!(_bytes, _max, state) do
+    raise RuntimeError, value: "resulting string too large", state: state
   end
 
   @doc """

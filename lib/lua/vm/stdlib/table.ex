@@ -244,7 +244,16 @@ defmodule Lua.VM.Stdlib.Table do
           |> then(fn {acc, st} -> {Enum.reverse(acc), st} end)
       end
 
-    {[Enum.join(elements, sep)], state}
+    # A table can hold one string many times for a few words each, so the
+    # joined size is unrelated to the table's own footprint. Sum the pieces
+    # and refuse an oversized result before the join allocates it.
+    separator_bytes = max(j - i, 0) * byte_size(sep)
+    Limits.check_string_size!(IO.iodata_length(elements) + separator_bytes, state.max_string_bytes, state)
+
+    # concat_value/2 made every element a binary, so with no separator the
+    # list is already the result's iodata.
+    result = if sep == "", do: IO.iodata_to_binary(elements), else: Enum.join(elements, sep)
+    {[result], state}
   end
 
   defp table_concat([tref | _], _state) do

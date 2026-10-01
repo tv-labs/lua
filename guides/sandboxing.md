@@ -94,7 +94,7 @@ These guards are always on and need no configuration. They cover:
 
 | Operation | Guard | Error (catchable with `pcall`) |
 | :-------- | :---- | :----------------------------- |
-| `string.rep`, the `..` operator | result larger than the string ceiling (default ~256 MiB) | `resulting string too large` |
+| `string.rep`, the `..` operator, `string.format`, `string.gsub`, `string.pack`, `table.concat`, `os.date` | result larger than the string ceiling (default ~256 MiB) | `resulting string too large` |
 | `string.format` width/precision | field wider than 99 | `invalid conversion` |
 | `table.unpack` | more than 10M results | `too many results to unpack` |
 | `table.concat`, `table.move` | range wider than 10M | `range too large` |
