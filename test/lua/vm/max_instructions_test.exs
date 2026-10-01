@@ -13,6 +13,7 @@ defmodule Lua.VM.MaxInstructionsTest do
   alias Lua.Parser
   alias Lua.RuntimeException
   alias Lua.VM.Dispatcher
+  alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Stdlib
 
@@ -154,54 +155,59 @@ defmodule Lua.VM.MaxInstructionsTest do
       {:ok, [closure], state} = Lua.VM.execute(proto, state)
       {:compiled_closure, callee_proto, upvalues} = closure
 
-      assert_raise Lua.VM.RuntimeError, ~r/instruction budget exceeded/, fn ->
+      assert_raise RuntimeError, ~r/instruction budget exceeded/, fn ->
         Dispatcher.execute(callee_proto, [], upvalues, state)
       end
     end
   end
 
   describe "cross-engine mutual recursion" do
+    # Compiles `code` and strips the bytecode from its first function, so
+    # that function runs on the interpreter as a `:lua_closure` while every
+    # other function stays a dispatcher `:compiled_closure`.
+    defp split_engines!(code) do
+      {:ok, ast} = Parser.parse(code)
+      {:ok, proto} = Compiler.compile(ast, source: "test.lua")
+      [first | rest] = proto.prototypes
+      %{proto | prototypes: [%{first | bytecode: nil} | rest]}
+    end
+
     test "the budget bounds recursion that alternates execution engines" do
-      # A function whose body contains a short-circuit `and`/`or` cannot be
-      # bytecode-encoded, so it stays an interpreted `:lua_closure`; a plain
-      # body compiles to a `:compiled_closure`. Pairing them in unbounded
+      # `ping` is interpreted and `pong` compiled. Pairing them in unbounded
       # mutual recursion with no loop on either side forces a hand-off between
       # the interpreter and the dispatcher on every call. The budget must span
       # those hand-offs rather than resetting at each boundary, so this
       # raises the budget error rather than recursing until `max_call_depth`
       # (which defaults to `:infinity`) or forever.
-      lua = Lua.new(max_instructions: 1000)
+      proto =
+        split_engines!("""
+        local pong
+        local function ping(n)
+          return pong(n)
+        end
+        pong = function(n) return ping(n) end
+        return ping(1)
+        """)
 
-      code = """
-      local pong
-      -- short-circuit `and` keeps this body off the bytecode path: interpreted closure.
-      local function ping(n)
-        return n and pong(n)
-      end
-      -- Plain body: compiles to a dispatcher closure.
-      pong = function(n) return ping(n) end
-      return ping(1)
-      """
+      state = %{Stdlib.install(State.new()) | max_instructions: 1000}
 
-      assert_raise RuntimeException, ~r/instruction budget exceeded/, fn ->
-        eval!(lua, code)
+      assert_raise RuntimeError, ~r/instruction budget exceeded/, fn ->
+        Lua.VM.execute(proto, state)
       end
     end
 
     test "the alternating pair is genuinely split across both engines" do
-      # Guards the regression test above: if a compiler change ever tagged
-      # both functions into the same engine, the cross-engine assertion
-      # would silently degrade into a same-engine one. Assert the split
-      # holds by inspecting the closure tags the chunk produces.
-      {:ok, ast} =
-        Parser.parse("""
+      # Guards the regression test above: if the split ever stopped holding,
+      # the cross-engine assertion would silently degrade into a same-engine
+      # one. Assert the split by inspecting the closure tags it produces.
+      proto =
+        split_engines!("""
         local pong
-        local function ping(n) return n and pong end
+        local function ping(n) return pong end
         pong = function(n) return ping end
         return ping, pong
         """)
 
-      {:ok, proto} = Compiler.compile(ast, source: "test.lua")
       state = Stdlib.install(State.new())
 
       {:ok, [ping, pong], _state} = Lua.VM.execute(proto, state)

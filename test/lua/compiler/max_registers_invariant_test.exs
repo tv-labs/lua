@@ -129,6 +129,9 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
       op == Bytecode.op_equal_k() -> [1, 2]
       op == Bytecode.op_get_field_upvalue() -> [1]
       op == Bytecode.op_set_field_upvalue() -> [3]
+      # Short-circuit `and` / `or`: {tag, dest, source, body_bc}.
+      op == Bytecode.op_test_and() -> :short_circuit
+      op == Bytecode.op_test_or() -> :short_circuit
       true -> raise "register_positions/1 is missing a case for opcode #{inspect(op)}"
     end
   end
@@ -193,6 +196,12 @@ defmodule Lua.Compiler.MaxRegistersInvariantTest do
         body_bc = :erlang.element(4, instr)
         var_max = Enum.reduce(Tuple.to_list(var_regs_tuple), -1, &max/2)
         Enum.max([base + 2, var_max, max_register_used(body_bc)])
+
+      :short_circuit ->
+        # Writes dest, reads source, recurses into the right operand's body.
+        dest = :erlang.element(2, instr)
+        source = :erlang.element(3, instr)
+        Enum.max([dest, source, max_register_used(:erlang.element(4, instr))])
 
       :call_arity_1 ->
         # {tag, base, hint, line}: reads base (the callee) and base + 1.

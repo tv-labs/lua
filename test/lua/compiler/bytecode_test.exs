@@ -26,6 +26,18 @@ defmodule Lua.Compiler.BytecodeTest do
     proto
   end
 
+  # Current codegen emits no opcode the encoder rejects, so the fallback
+  # path is exercised with a synthetic prototype: `:set_list` with
+  # `count == 0` is the one shape the encoder refuses (see below).
+  defp uncovered(children \\ []) do
+    %Prototype{
+      instructions: [{:set_list, 0, 1, 0, 0}, {:return, 0, 0}],
+      prototypes: children,
+      max_registers: 2,
+      source: "test-synthetic"
+    }
+  end
+
   describe "supported-opcode coverage" do
     test "a pure-arithmetic function compiles to bytecode" do
       proto = compile!("function f(a, b) return a + b - 1 end")
@@ -176,13 +188,10 @@ defmodule Lua.Compiler.BytecodeTest do
       assert result.bytecode == nil
     end
 
-    test "short-circuit and/or falls back (test_and/test_or not covered)" do
-      # `:test_and` / `:test_or` carry a nested continuation body the encoder
-      # does not lower yet, so a function using short-circuit `and`/`or` keeps
-      # its prototype on the interpreter.
+    test "short-circuit and/or compiles (test_and/test_or)" do
       proto = compile!("function f(a, b) return a and b or 0 end")
       [fn_proto] = proto.prototypes
-      assert fn_proto.bytecode == nil
+      assert is_tuple(fn_proto.bytecode)
     end
   end
 
@@ -205,14 +214,10 @@ defmodule Lua.Compiler.BytecodeTest do
 
   describe "cascade independence" do
     test "child prototype compiles even when sibling falls back" do
-      # `pure` is pure arithmetic (covered). `impure` uses short-circuit
-      # `and`/`or` (`:test_and` / `:test_or`), which the encoder does not yet
-      # cover, so it stays on the interpreter.
-      proto =
-        compile!("""
-        function pure(a, b) return a + b end
-        function impure(a, b) return a and b or 0 end
-        """)
+      # `pure` is pure arithmetic (covered). Its sibling holds an opcode the
+      # encoder rejects, so it stays on the interpreter.
+      chunk = compile!("function pure(a, b) return a + b end")
+      proto = Bytecode.compile(%{chunk | prototypes: chunk.prototypes ++ [uncovered()]})
 
       [pure_proto, impure_proto] = proto.prototypes
       assert is_tuple(pure_proto.bytecode)
@@ -220,18 +225,10 @@ defmodule Lua.Compiler.BytecodeTest do
     end
 
     test "deeply-nested function compiles even when its parent falls back" do
-      # The outer `make` uses short-circuit `and`/`or` (fallback), but the
-      # inner adder is a pure-arithmetic single-result function (compiles).
-      proto =
-        compile!("""
-        function make(a, b)
-          local guard = a and b or 0
-          local function add(x, y) return x + y + guard end
-          return add
-        end
-        """)
-
-      [make_proto] = proto.prototypes
+      # The outer `make` holds an opcode the encoder rejects (fallback), but
+      # the inner adder is a pure-arithmetic single-result function (compiles).
+      %Prototype{prototypes: [add_source]} = compile!("function add(x, y) return x + y end")
+      make_proto = Bytecode.compile(uncovered([%{add_source | bytecode: nil}]))
       [add_proto] = make_proto.prototypes
 
       assert make_proto.bytecode == nil
@@ -242,9 +239,7 @@ defmodule Lua.Compiler.BytecodeTest do
   describe "fully_compiled?/1 coverage guard" do
     # A representative corpus exercising every covered opcode family. Each
     # program must compile end-to-end — root chunk and every nested function —
-    # so the dispatcher never silently falls back to the interpreter. The only
-    # documented exception is short-circuit `and`/`or` (`:test_and` /
-    # `:test_or`), asserted separately below.
+    # so the dispatcher never silently falls back to the interpreter.
     @corpus [
       {"goto forward", "local x = 1 goto skip x = 99 ::skip:: return x"},
       {"goto backward loop", "local i = 0 ::top:: i = i + 1 if i < 5 then goto top end return i"},
@@ -264,7 +259,8 @@ defmodule Lua.Compiler.BytecodeTest do
        "local function counter() local n = 0 return function() n = n + 1 return n end end local c = counter() c() return c()"},
       {"varargs + multi-return", "local function f(...) return ... end return f(1, 2, 3)"},
       {"method call (self)", "local t = {v = 10} function t:get() return self.v end return t:get()"},
-      {"string concat", ~s{local function f(a, b) return a .. b end return f("x", "y")}}
+      {"string concat", ~s{local function f(a, b) return a .. b end return f("x", "y")}},
+      {"short-circuit and/or", "local function f(a, b) return a and b or 0 end return f(1, 2)"}
     ]
 
     for {label, src} <- @corpus do
@@ -273,12 +269,9 @@ defmodule Lua.Compiler.BytecodeTest do
       end
     end
 
-    test "short-circuit and/or is the remaining documented exception" do
-      # `:test_and` / `:test_or` (short-circuit `and`/`or`) are the only
-      # opcodes current codegen emits that the dispatcher does not yet cover,
-      # so a function using them still falls back to the interpreter. (goto /
-      # label are now covered — see the corpus above.)
-      refute Bytecode.fully_compiled?(compile!("local function f(a, b) return a and b or 0 end return f(1, 2)"))
+    test "a tree with one fallen-back prototype is not fully compiled" do
+      chunk = compile!("local function f(a, b) return a + b end return f(1, 2)")
+      refute Bytecode.fully_compiled?(Bytecode.compile(%{chunk | prototypes: chunk.prototypes ++ [uncovered()]}))
     end
   end
 
@@ -335,17 +328,8 @@ defmodule Lua.Compiler.BytecodeTest do
     end
 
     test "fallback returns a Prototype with bytecode: nil, never an error" do
-      # The encoder must not crash on any well-formed prototype. Short-circuit
-      # `and`/`or` (`:test_and` / `:test_or`) stays on the interpreter, so use
-      # it to exercise the fallback path.
-      proto =
-        compile!("""
-        function f(a, b)
-          return a and b or 0
-        end
-        """)
-
-      [fn_proto] = proto.prototypes
+      # The encoder must not crash on any well-formed prototype.
+      [fn_proto] = Bytecode.compile(uncovered([uncovered()])).prototypes
       assert %Prototype{} = fn_proto
       assert fn_proto.bytecode == nil
     end

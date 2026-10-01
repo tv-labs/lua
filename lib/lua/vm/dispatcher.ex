@@ -153,6 +153,12 @@ defmodule Lua.VM.Dispatcher do
   # the loop already holds everything the call needs.
   @op_call_self 76
 
+  # Short-circuit `and` / `or`: `{tag, dest, source, body}`. When `source`
+  # decides the result it is copied into `dest`; otherwise `body` (the right
+  # operand, ending in a write to `dest`) runs as a nested block.
+  @op_test_and 77
+  @op_test_or 78
+
   @doc """
   Execute a compiled prototype against `args` and `state`.
   """
@@ -892,6 +898,56 @@ defmodule Lua.VM.Dispatcher do
           end
 
         dispatch(branch, 1, regs, upvalues, proto, state, [{code, pc + 1} | cont], frames, instruction_count, cs, cd, ou)
+
+      # `and` / `or` resume exactly like `:test`: the nested body ends and
+      # `finish_body` pops the `{code, pc + 1}` marker. When the left operand
+      # decides the result, no body runs and nothing is pushed.
+
+      {@op_test_and, dest, source, body} ->
+        case :erlang.element(source + 1, regs) do
+          v when v === nil or v === false ->
+            regs = :erlang.setelement(dest + 1, regs, v)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+          _ ->
+            dispatch(
+              body,
+              1,
+              regs,
+              upvalues,
+              proto,
+              state,
+              [{code, pc + 1} | cont],
+              frames,
+              instruction_count,
+              cs,
+              cd,
+              ou
+            )
+        end
+
+      {@op_test_or, dest, source, body} ->
+        case :erlang.element(source + 1, regs) do
+          v when v === nil or v === false ->
+            dispatch(
+              body,
+              1,
+              regs,
+              upvalues,
+              proto,
+              state,
+              [{code, pc + 1} | cont],
+              frames,
+              instruction_count,
+              cs,
+              cd,
+              ou
+            )
+
+          v ->
+            regs = :erlang.setelement(dest + 1, regs, v)
+            dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+        end
 
       # ── Calls ───────────────────────────────────────────────────────
       #

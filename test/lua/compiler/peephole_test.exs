@@ -503,8 +503,8 @@ defmodule Lua.Compiler.PeepholeTest do
     end
 
     test "the interpreter runs the fused opcode too" do
-      # `and` / `or` still fall back to the interpreter, so this child
-      # prototype carries `:call_self` with no bytecode behind it.
+      # Strip `f`'s bytecode so the interpreter, not the dispatcher, runs the
+      # `:call_self` the peephole left in its instructions.
       source = """
       local function f(n, flag)
         if n == 0 then return 0 end
@@ -516,11 +516,12 @@ defmodule Lua.Compiler.PeepholeTest do
 
       proto = compile!(source)
       [f] = proto.prototypes
-
-      assert f.bytecode == nil
       assert self_calls(proto) == 1
+
+      interpreted = %{proto | prototypes: [%{f | bytecode: nil}]}
+      state = Lua.VM.Stdlib.install(Lua.VM.State.new())
+      assert {:ok, [3], _state} = Lua.VM.execute(interpreted, state)
       assert run(source, peephole: false) == run(source, peephole: true)
-      assert {[3], _} = Lua.eval!(source)
     end
   end
 

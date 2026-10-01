@@ -145,6 +145,12 @@ defmodule Lua.Compiler.Bytecode do
   # `Lua.Compiler.Peephole` emits the instruction; codegen never does.
   @op_call_self 76
 
+  # Short-circuit `and` / `or`. Each carries the right operand's code as a
+  # nested body: the dispatcher runs it only when the left operand does not
+  # decide the result, and otherwise copies the left operand into `dest`.
+  @op_test_and 77
+  @op_test_or 78
+
   # The call opcodes whose tuple is `{tag, base, name_hint}` before
   # `annotate_line/2` bakes the source line in.
   @static_arity_calls [
@@ -188,8 +194,7 @@ defmodule Lua.Compiler.Bytecode do
   encoding — i.e. nothing in the tree fell back to the interpreter.
 
   Use this after `compile/1` to assert dispatcher coverage. A `false` result
-  means at least one prototype contains an opcode the encoder still rejects
-  (today: `:goto` / `:label`).
+  means at least one prototype contains an opcode the encoder rejects.
   """
   @spec fully_compiled?(Prototype.t()) :: boolean()
   def fully_compiled?(%Prototype{bytecode: nil}), do: false
@@ -290,6 +295,20 @@ defmodule Lua.Compiler.Bytecode do
     with {:ok, body_enc} <- encode_list(loop_body, [], current_line),
          {:ok, cond_enc} <- encode_list(cond_body, [], current_line) do
       {:ok, {@op_repeat_loop, test_reg, List.to_tuple(body_enc), List.to_tuple(cond_enc)}}
+    end
+  end
+
+  defp encode({:test_and, dest, source, body}, current_line) do
+    case encode_list(body, [], current_line) do
+      {:ok, body_enc} -> {:ok, {@op_test_and, dest, source, List.to_tuple(body_enc)}}
+      :fallback -> :fallback
+    end
+  end
+
+  defp encode({:test_or, dest, source, body}, current_line) do
+    case encode_list(body, [], current_line) do
+      {:ok, body_enc} -> {:ok, {@op_test_or, dest, source, List.to_tuple(body_enc)}}
+      :fallback -> :fallback
     end
   end
 
@@ -745,4 +764,6 @@ defmodule Lua.Compiler.Bytecode do
   def op_call_zero_1, do: @op_call_zero_1
   def op_call_zero_2, do: @op_call_zero_2
   def op_call_self, do: @op_call_self
+  def op_test_and, do: @op_test_and
+  def op_test_or, do: @op_test_or
 end
