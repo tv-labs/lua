@@ -457,19 +457,19 @@ defmodule Lua.VM.Stdlib do
   # chunk ends when it returns nil, an empty string, or no value.
   # Returns the compiled function, or (nil, error message) on failure.
   defp lua_load([chunk | rest], state) when is_binary(chunk) do
-    compile_loaded_chunk(chunk, load_env_arg(rest, state), state)
+    compile_loaded_chunk(chunk, load_env_arg(rest, state), state, chunk_id(rest))
   end
 
   defp lua_load([{:lua_closure, _, _} = reader | rest], state) do
-    load_from_reader(reader, load_env_arg(rest, state), state)
+    load_from_reader(reader, load_env_arg(rest, state), state, chunk_id(rest))
   end
 
   defp lua_load([{:compiled_closure, _, _} = reader | rest], state) do
-    load_from_reader(reader, load_env_arg(rest, state), state)
+    load_from_reader(reader, load_env_arg(rest, state), state, chunk_id(rest))
   end
 
   defp lua_load([{:native_func, _} = reader | rest], state) do
-    load_from_reader(reader, load_env_arg(rest, state), state)
+    load_from_reader(reader, load_env_arg(rest, state), state, chunk_id(rest))
   end
 
   defp lua_load([_other | _], state) do
@@ -486,10 +486,10 @@ defmodule Lua.VM.Stdlib do
   # it signals end-of-chunk (nil or ""). Bails out with `(nil, error_msg)`
   # if the reader ever returns a non-string non-nil value, mirroring the
   # behavior of Lua 5.3's reference implementation.
-  defp load_from_reader(reader, env, state) do
+  defp load_from_reader(reader, env, state, id) do
     case collect_reader_chunks(reader, state, [], 0) do
       {:ok, source, state} ->
-        compile_loaded_chunk(source, env, state)
+        compile_loaded_chunk(source, env, state, id)
 
       {:error, msg, state} ->
         {[nil, msg], state}
@@ -531,12 +531,26 @@ defmodule Lua.VM.Stdlib do
     end
   end
 
-  defp compile_loaded_chunk(source, env, state) do
+  # The name a loaded chunk goes by in its error messages and tracebacks, from
+  # load's chunkname as Lua's luaO_chunkid shows it: "@file" is the file,
+  # "=name" is used as is, any other string is [string "its first line"].
+  # Without a chunkname the chunk keeps the compiler's default.
+  defp chunk_id([name | _]) when is_binary(name) do
+    case name do
+      "@" <> file -> file
+      "=" <> as_is -> as_is
+      text -> ~s([string "#{text |> String.split("\n") |> hd() |> String.slice(0, 60)}"])
+    end
+  end
+
+  defp chunk_id(_), do: nil
+
+  defp compile_loaded_chunk(source, env, state, id) do
     case Lua.Parser.parse(source) do
       {:ok, ast} ->
         # Compiler currently never returns errors, always succeeds — see
         # `Lua.Compiler.compile!/2` for the matching note.
-        {:ok, prototype} = Lua.Compiler.compile(ast)
+        {:ok, prototype} = if id, do: Lua.Compiler.compile(ast, source: id), else: Lua.Compiler.compile(ast)
 
         # A loaded chunk's sole upvalue is `_ENV`. Back it with a real cell
         # holding `env` so `load_env` sources it (instead of `_G`), the chunk's
@@ -558,7 +572,7 @@ defmodule Lua.VM.Stdlib do
 
       {:error, reason} ->
         error_msg = format_parse_error(reason)
-        {[nil, error_msg], state}
+        {[nil, if(id, do: id <> ": " <> error_msg, else: error_msg)], state}
     end
   end
 

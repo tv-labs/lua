@@ -181,4 +181,42 @@ defmodule Lua.Language.LoadTest do
       assert {[true, true], _} = Lua.eval!(lua, code)
     end
   end
+
+  describe "chunkname" do
+    # Lua 5.4 §6.1 / luaO_chunkid: "@name" is a file and "=name" is used as is, so errors raised in the chunk
+    # name it; any other chunkname is shown as [string "..."].
+    test "an error in a chunk loaded as @file names the file and its line", %{lua: lua} do
+      code = """
+      local f = load("local x = 1\\nerror('boom')", "@plants.lua")
+      return select(2, pcall(f))
+      """
+
+      assert {["plants.lua:2: boom"], _} = Lua.eval!(lua, code)
+    end
+
+    test "=name is used as it is", %{lua: lua} do
+      code = """
+      return select(2, pcall(load("error('x')", "=stdin")))
+      """
+
+      assert {["stdin:1: x"], _} = Lua.eval!(lua, code)
+    end
+
+    test "any other chunkname is shown as a string chunk", %{lua: lua} do
+      code = """
+      return select(2, pcall(load("error('x')", "return 1")))
+      """
+
+      assert {[~s([string "return 1"]:1: x)], _} = Lua.eval!(lua, code)
+    end
+
+    test "a syntax error names the chunk too", %{lua: lua} do
+      code = """
+      return select(2, load("return +", "@bad.lua"))
+      """
+
+      assert {[message], _} = Lua.eval!(lua, code)
+      assert message =~ "bad.lua"
+    end
+  end
 end
