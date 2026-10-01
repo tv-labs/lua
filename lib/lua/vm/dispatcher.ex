@@ -44,6 +44,14 @@ defmodule Lua.VM.Dispatcher do
   @max_int 0x7FFFFFFFFFFFFFFF
   @min_int -0x8000000000000000
 
+  # The bounds of a BEAM small integer on a 64-bit VM (2^59 - 1 and -2^59).
+  # `@max_int` / `@min_int` are bignums, so comparing a result against them
+  # costs a bignum comparison. The integer fast paths of `+`, `-` and `*`
+  # test these small bounds first: any result inside them is already in
+  # int64 range, and only a result outside them pays the full check.
+  @small_max 0x7FFFFFFFFFFFFFF
+  @small_min -0x800000000000000
+
   @op_load_constant 1
   @op_load_boolean 2
   @op_load_nil 3
@@ -424,7 +432,12 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_integer(va) and is_integer(vb) ->
             sum = va + vb
-            wrapped = if sum >= @min_int and sum <= @max_int, do: sum, else: Numeric.to_signed_int64(sum)
+
+            wrapped =
+              if (sum <= @small_max and sum >= @small_min) or (sum >= @min_int and sum <= @max_int),
+                do: sum,
+                else: Numeric.to_signed_int64(sum)
+
             regs = :erlang.setelement(dest + 1, regs, wrapped)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
 
@@ -445,7 +458,12 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_integer(va) and is_integer(vb) ->
             diff = va - vb
-            wrapped = if diff >= @min_int and diff <= @max_int, do: diff, else: Numeric.to_signed_int64(diff)
+
+            wrapped =
+              if (diff <= @small_max and diff >= @small_min) or (diff >= @min_int and diff <= @max_int),
+                do: diff,
+                else: Numeric.to_signed_int64(diff)
+
             regs = :erlang.setelement(dest + 1, regs, wrapped)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
 
@@ -466,7 +484,12 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_integer(va) and is_integer(vb) ->
             prod = va * vb
-            wrapped = if prod >= @min_int and prod <= @max_int, do: prod, else: Numeric.to_signed_int64(prod)
+
+            wrapped =
+              if (prod <= @small_max and prod >= @small_min) or (prod >= @min_int and prod <= @max_int),
+                do: prod,
+                else: Numeric.to_signed_int64(prod)
+
             regs = :erlang.setelement(dest + 1, regs, wrapped)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
 
@@ -493,7 +516,12 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_integer(va) and is_integer(k) ->
             sum = va + k
-            wrapped = if sum >= @min_int and sum <= @max_int, do: sum, else: Numeric.to_signed_int64(sum)
+
+            wrapped =
+              if (sum <= @small_max and sum >= @small_min) or (sum >= @min_int and sum <= @max_int),
+                do: sum,
+                else: Numeric.to_signed_int64(sum)
+
             regs = :erlang.setelement(dest + 1, regs, wrapped)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
 
@@ -513,7 +541,12 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_integer(va) and is_integer(k) ->
             diff = va - k
-            wrapped = if diff >= @min_int and diff <= @max_int, do: diff, else: Numeric.to_signed_int64(diff)
+
+            wrapped =
+              if (diff <= @small_max and diff >= @small_min) or (diff >= @min_int and diff <= @max_int),
+                do: diff,
+                else: Numeric.to_signed_int64(diff)
+
             regs = :erlang.setelement(dest + 1, regs, wrapped)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
 
@@ -533,7 +566,12 @@ defmodule Lua.VM.Dispatcher do
         cond do
           is_integer(va) and is_integer(k) ->
             prod = va * k
-            wrapped = if prod >= @min_int and prod <= @max_int, do: prod, else: Numeric.to_signed_int64(prod)
+
+            wrapped =
+              if (prod <= @small_max and prod >= @small_min) or (prod >= @min_int and prod <= @max_int),
+                do: prod,
+                else: Numeric.to_signed_int64(prod)
+
             regs = :erlang.setelement(dest + 1, regs, wrapped)
             dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
 
