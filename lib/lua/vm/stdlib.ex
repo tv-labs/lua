@@ -189,12 +189,13 @@ defmodule Lua.VM.Stdlib do
   # Per Lua 5.3 §6.1 the raised value passes through pcall/xpcall verbatim,
   # and string messages gain a `source:line:` prefix unless `level == 0`.
   # The prefixed view lives in `:lua_value` (Lua-facing only); `:value`
-  # stays raw so host rendering is untouched. Levels >= 2 (attribute to the
-  # caller's caller) need per-frame lines the call stack does not carry and
-  # are treated as level 1 for now.
+  # stays raw so host rendering is untouched. Level 2 names the line the
+  # erroring function was called from, level 3 its caller's, and so on: each
+  # call-stack frame records its call site. A level past the stack omits the
+  # prefix, as PUC Lua does.
   defp lua_error([message | rest], state) do
-    {line, source} = Executor.current_position()
     level = error_level(rest)
+    {line, source} = error_position(level, state)
 
     raise RuntimeError,
       value: message,
@@ -209,8 +210,18 @@ defmodule Lua.VM.Stdlib do
     raise RuntimeError, value: nil, line: line, source: source, state: state
   end
 
-  defp error_level([level | _]) when is_number(level), do: level
+  defp error_level([level | _]) when is_integer(level), do: level
+  defp error_level([level | _]) when is_float(level), do: trunc(level)
   defp error_level(_), do: 1
+
+  defp error_position(level, state) when level >= 2 do
+    case Enum.at(state.call_stack, level - 2) do
+      {source, line, _name} when is_integer(line) and line > 0 -> {line, source}
+      _ -> {nil, nil}
+    end
+  end
+
+  defp error_position(_level, _state), do: Executor.current_position()
 
   # §6.1 position prefix: only string messages, only when `level ~= 0`, and
   # only when the executor recorded a usable position. A `{nil, _}` position

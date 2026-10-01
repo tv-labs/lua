@@ -121,16 +121,16 @@ defmodule Lua.ErrorGalleryTest do
      Lua runtime error: runtime error: stack overflow
 
      Stack trace:
-       gallery.lua:0: in function 'f'
-       gallery.lua:0: in function 'f'
-       gallery.lua:0: in function 'f'
-       gallery.lua:0: in function 'f'
-       gallery.lua:0: in function 'f'
-       gallery.lua:0: in function 'f'
-       gallery.lua:0: in function 'f'
+       gallery.lua:1: in function 'f'
+       gallery.lua:1: in function 'f'
+       gallery.lua:1: in function 'f'
+       gallery.lua:1: in function 'f'
+       gallery.lua:1: in function 'f'
+       gallery.lua:1: in function 'f'
+       gallery.lua:1: in function 'f'
        ... 20 more frames ...
-       gallery.lua:0: in function 'f'
-       gallery.lua:0: in function 'f'
+       gallery.lua:1: in function 'f'
+       gallery.lua:1: in function 'f'
        gallery.lua:2: in function 'f'\
      """}
   ]

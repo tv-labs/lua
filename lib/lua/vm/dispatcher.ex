@@ -919,7 +919,7 @@ defmodule Lua.VM.Dispatcher do
                 else: callee_proto
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, :discard, ou}
-            call_info = {proto.source, 0, name_hint}
+            call_info = {proto.source, line, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
@@ -973,7 +973,7 @@ defmodule Lua.VM.Dispatcher do
             # `return_one/7` skips Map.fetch! lookups and lets the BEAM
             # bind everything in a single `move` per slot.
             frame = {code, pc + 1, regs, upvalues, proto, cont, base, ou}
-            call_info = {proto.source, 0, name_hint}
+            call_info = {proto.source, line, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
@@ -1035,7 +1035,7 @@ defmodule Lua.VM.Dispatcher do
                 else: callee_proto
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, base, ou}
-            call_info = {proto.source, 0, name_hint}
+            call_info = {proto.source, line, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
@@ -1088,7 +1088,7 @@ defmodule Lua.VM.Dispatcher do
                 else: callee_proto
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, base, ou}
-            call_info = {proto.source, 0, name_hint}
+            call_info = {proto.source, line, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
@@ -1142,7 +1142,7 @@ defmodule Lua.VM.Dispatcher do
                 else: callee_proto
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, base, ou}
-            call_info = {proto.source, 0, name_hint}
+            call_info = {proto.source, line, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
@@ -1194,7 +1194,7 @@ defmodule Lua.VM.Dispatcher do
                 else: callee_proto
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, :discard, ou}
-            call_info = {proto.source, 0, name_hint}
+            call_info = {proto.source, line, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
@@ -1246,7 +1246,7 @@ defmodule Lua.VM.Dispatcher do
                 else: callee_proto
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, :discard, ou}
-            call_info = {proto.source, 0, name_hint}
+            call_info = {proto.source, line, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
@@ -1299,7 +1299,7 @@ defmodule Lua.VM.Dispatcher do
                 else: callee_proto
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, :discard, ou}
-            call_info = {proto.source, 0, name_hint}
+            call_info = {proto.source, line, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
@@ -1354,12 +1354,9 @@ defmodule Lua.VM.Dispatcher do
       # with the same depth, and the callee starts with an empty
       # open-upvalue map while the caller's rides in the frame.
 
-      # `line` is carried for shape parity with the other call opcodes and
-      # for tooling that reads the encoded stream; the handler never needs
-      # it, because a self-call can never reach the native bridge that
-      # attributes errors to a source line, and the frame's own line slot
-      # is `0` for every dispatcher-side call.
-      {@op_call_self, base, arg_count, result_count, name_hint, _line} ->
+      # `line` goes in the frame's call info, as for every call opcode, so
+      # `error(msg, level)` can name the line a function was called from.
+      {@op_call_self, base, arg_count, result_count, name_hint, line} ->
         callee_regs = init_callee_regs(proto, regs, base + 1, arg_count)
 
         callee_proto =
@@ -1375,7 +1372,7 @@ defmodule Lua.VM.Dispatcher do
           end
 
         frame = {code, pc + 1, regs, upvalues, proto, cont, dest, ou}
-        call_info = {proto.source, 0, name_hint}
+        call_info = {proto.source, line, name_hint}
         instruction_count = tick(state, instruction_count, cs, cd)
         ckdepth(state, cs, cd)
 
@@ -1866,7 +1863,7 @@ defmodule Lua.VM.Dispatcher do
               end
 
             frame = {code, pc + 1, regs, upvalues, proto, cont, dest, ou}
-            call_info = {proto.source, 0, name_hint}
+            call_info = {proto.source, line, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
@@ -1887,7 +1884,7 @@ defmodule Lua.VM.Dispatcher do
 
           {:lua_closure, _, _} = closure ->
             args = collect_args(regs, base + 1, total_args)
-            call_info = {proto.source, 0, name_hint}
+            call_info = {proto.source, line, name_hint}
             instruction_count = tick(state, instruction_count, cs, cd)
             ckdepth(state, cs, cd)
 
@@ -2452,7 +2449,7 @@ defmodule Lua.VM.Dispatcher do
          {:lua_closure, _, _} = closure,
          args,
          name_hint,
-         _line,
+         line,
          code,
          pc,
          regs,
@@ -2466,7 +2463,7 @@ defmodule Lua.VM.Dispatcher do
          cd,
          ou
        ) do
-    call_info = {proto.source, 0, name_hint}
+    call_info = {proto.source, line, name_hint}
     instruction_count = tick(state, instruction_count, cs, cd)
     ckdepth(state, cs, cd)
 
@@ -2513,7 +2510,7 @@ defmodule Lua.VM.Dispatcher do
          args,
          base,
          name_hint,
-         _line,
+         line,
          code,
          pc,
          regs,
@@ -2527,7 +2524,7 @@ defmodule Lua.VM.Dispatcher do
          cd,
          ou
        ) do
-    call_info = {proto.source, 0, name_hint}
+    call_info = {proto.source, line, name_hint}
     instruction_count = tick(state, instruction_count, cs, cd)
     ckdepth(state, cs, cd)
 

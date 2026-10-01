@@ -203,6 +203,45 @@ defmodule Lua.VM.PcallErrorValueTest do
 
         assert results == [false, "hi"]
       end
+
+      test "level 2 blames the caller's line" do
+        {results, _state} =
+          run(
+            """
+            local function check(x)
+              if not x then error("bad input", 2) end
+            end
+            local ok, err = pcall(function()
+              check(false)
+            end)
+            return err
+            """,
+            @engine
+          )
+
+        assert results == ["test.lua:5: bad input"]
+      end
+
+      test "level 3 blames the caller's caller" do
+        {results, _state} =
+          run(
+            """
+            local function check(x)
+              if not x then error("deep", 3) end
+            end
+            local function validate(x)
+              check(x)
+            end
+            local ok, err = pcall(function()
+              validate(false)
+            end)
+            return err
+            """,
+            @engine
+          )
+
+        assert results == ["test.lua:8: deep"]
+      end
     end
 
     describe "xpcall hands the raw value to the handler (#{engine} engine)" do
