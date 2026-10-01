@@ -16,6 +16,7 @@ defmodule Lua.VM.Stdlib.String.Pack do
 
   import Bitwise, only: [<<<: 2, &&&: 2]
 
+  alias Lua.VM.Limits
   alias Lua.VM.RuntimeError
 
   # Platform constants. We run on the 64-bit BEAM, so these match the
@@ -42,10 +43,15 @@ defmodule Lua.VM.Stdlib.String.Pack do
 
   # ---- public entry points ------------------------------------------------
 
-  @doc "Implements string.pack(fmt, ...)."
-  def pack(fmt, args) when is_binary(fmt) do
+  @doc """
+  Implements string.pack(fmt, ...).
+
+  `max_bytes` is the string ceiling (a state's `max_string_bytes`); a
+  result that would outgrow it raises "resulting string too large".
+  """
+  def pack(fmt, args, max_bytes) when is_binary(fmt) do
     ops = parse(fmt)
-    do_pack(ops, args, <<>>)
+    do_pack(ops, args, <<>>, max_bytes)
   end
 
   @doc "Implements string.unpack(fmt, s [, pos])."
@@ -328,46 +334,49 @@ defmodule Lua.VM.Stdlib.String.Pack do
 
   # ---- pack driver -------------------------------------------------------
 
-  defp do_pack(ops, args, acc) do
-    do_pack_loop(ops, args, acc, 0)
-  end
+  # `acc` is the packed output so far; its size is the position alignment
+  # is computed from.
+  defp do_pack([], _args, acc, _max_bytes), do: acc
 
-  defp do_pack_loop([], _args, acc, _pos), do: acc
-
-  defp do_pack_loop([{:align, alignment} | ops], args, acc, pos) do
-    fill = rem(alignment - rem(pos, alignment), alignment)
+  defp do_pack([{:align, alignment} | ops], args, acc, max_bytes) do
+    fill = rem(alignment - rem(byte_size(acc), alignment), alignment)
+    check_room!(acc, fill, max_bytes)
     pad = :binary.copy(<<0>>, fill)
-    do_pack_loop(ops, args, acc <> pad, pos + fill)
+    do_pack(ops, args, acc <> pad, max_bytes)
   end
 
-  defp do_pack_loop([{:padding, n} | ops], args, acc, pos) do
-    do_pack_loop(ops, args, acc <> :binary.copy(<<0>>, n), pos + n)
+  defp do_pack([{:padding, n} | ops], args, acc, max_bytes) do
+    check_room!(acc, n, max_bytes)
+    do_pack(ops, args, acc <> :binary.copy(<<0>>, n), max_bytes)
   end
 
-  defp do_pack_loop([{:int, signed?, size, endian} | ops], [val | rest], acc, pos) do
+  defp do_pack([{:int, signed?, size, endian} | ops], [val | rest], acc, max_bytes) do
     n = to_integer(val, "string.pack")
     bytes = encode_int(n, size, signed?, endian)
-    do_pack_loop(ops, rest, acc <> bytes, pos + size)
+    check_room!(acc, size, max_bytes)
+    do_pack(ops, rest, acc <> bytes, max_bytes)
   end
 
-  defp do_pack_loop([{:float, size, endian} | ops], [val | rest], acc, pos) do
+  defp do_pack([{:float, size, endian} | ops], [val | rest], acc, max_bytes) do
     f = to_float(val, "string.pack")
     bytes = encode_float(f, size, endian)
-    do_pack_loop(ops, rest, acc <> bytes, pos + size)
+    check_room!(acc, size, max_bytes)
+    do_pack(ops, rest, acc <> bytes, max_bytes)
   end
 
-  defp do_pack_loop([{:fixed_string, n} | ops], [val | rest], acc, pos) do
+  defp do_pack([{:fixed_string, n} | ops], [val | rest], acc, max_bytes) do
     s = to_string_arg(val, "string.pack")
 
     if byte_size(s) > n do
       raise_runtime("string longer than given size")
     end
 
+    check_room!(acc, n, max_bytes)
     padded = s <> :binary.copy(<<0>>, n - byte_size(s))
-    do_pack_loop(ops, rest, acc <> padded, pos + n)
+    do_pack(ops, rest, acc <> padded, max_bytes)
   end
 
-  defp do_pack_loop([{:lstring, prefix_size, endian} | ops], [val | rest], acc, pos) do
+  defp do_pack([{:lstring, prefix_size, endian} | ops], [val | rest], acc, max_bytes) do
     s = to_string_arg(val, "string.pack")
     len = byte_size(s)
 
@@ -379,22 +388,31 @@ defmodule Lua.VM.Stdlib.String.Pack do
     end
 
     prefix = encode_int(len, prefix_size, false, endian)
-    do_pack_loop(ops, rest, acc <> prefix <> s, pos + prefix_size + len)
+    check_room!(acc, prefix_size + len, max_bytes)
+    do_pack(ops, rest, acc <> prefix <> s, max_bytes)
   end
 
-  defp do_pack_loop([{:zstring} | ops], [val | rest], acc, pos) do
+  defp do_pack([{:zstring} | ops], [val | rest], acc, max_bytes) do
     s = to_string_arg(val, "string.pack")
 
     if String.contains?(s, <<0>>) do
       raise_runtime("string contains zeros")
     end
 
-    do_pack_loop(ops, rest, acc <> s <> <<0>>, pos + byte_size(s) + 1)
+    check_room!(acc, byte_size(s) + 1, max_bytes)
+    do_pack(ops, rest, acc <> s <> <<0>>, max_bytes)
   end
 
-  defp do_pack_loop([_op | _], [], _acc, _pos) do
+  defp do_pack([_op | _], [], _acc, _max_bytes) do
     raise_runtime("bad argument to 'pack' (no value)")
   end
+
+  # `@max_total_size` bounds only what the format parser will read, so a
+  # `c<n>` field or a run of string arguments can still ask for far more
+  # than the VM allows. Checking before the next `n` bytes are built refuses
+  # that request instead of allocating it.
+  defp check_room!(acc, n, max_bytes) when byte_size(acc) + n <= max_bytes, do: :ok
+  defp check_room!(acc, n, max_bytes), do: Limits.check_string_size!(byte_size(acc) + n, max_bytes)
 
   # ---- unpack driver -----------------------------------------------------
 

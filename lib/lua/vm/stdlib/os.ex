@@ -25,6 +25,7 @@ defmodule Lua.VM.Stdlib.Os do
   @behaviour Lua.VM.Stdlib.Library
 
   alias Lua.VM.ArgumentError
+  alias Lua.VM.Limits
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
@@ -148,7 +149,7 @@ defmodule Lua.VM.Stdlib.Os do
 
     case format do
       "*t" -> date_table(dt, state)
-      _ -> {[strftime(format, dt)], state}
+      _ -> {[strftime(format, dt, state.max_string_bytes)], state}
     end
   end
 
@@ -250,10 +251,25 @@ defmodule Lua.VM.Stdlib.Os do
     {[tref], state}
   end
 
-  defp strftime(format, %DateTime{} = dt) do
-    Regex.replace(~r/%./, format, fn directive ->
-      directive_value(directive, dt)
-    end)
+  # A directive can expand well past its two format bytes (`%c` becomes 24),
+  # so a long format multiplies. The format is walked one directive at a
+  # time and the running size checked as each expands, so an oversized
+  # result is refused partway rather than built.
+  defp strftime(format, %DateTime{} = dt, max_bytes), do: expand_directives(format, dt, max_bytes, 0, [])
+
+  defp expand_directives(format, dt, max_bytes, size, acc) do
+    case :binary.split(format, "%") do
+      [literal, <<c, rest::binary>>] ->
+        value = directive_value(<<?%, c>>, dt)
+        size = size + byte_size(literal) + byte_size(value)
+        Limits.check_string_size!(size, max_bytes)
+        expand_directives(rest, dt, max_bytes, size, [acc, literal, value])
+
+      # No directive left: the rest, a trailing lone `%` included, is literal.
+      _no_directive ->
+        Limits.check_string_size!(size + byte_size(format), max_bytes)
+        IO.iodata_to_binary([acc, format])
+    end
   end
 
   defp directive_value("%Y", dt), do: Integer.to_string(dt.year)

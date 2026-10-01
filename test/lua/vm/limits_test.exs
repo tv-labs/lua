@@ -94,6 +94,138 @@ defmodule Lua.VM.LimitsTest do
       assert message =~ "resulting string too large"
     end
 
+    test "table.concat honors a lowered ceiling", %{small: small} do
+      # 32 references to one 64-byte string: the table holds 64 bytes of
+      # string data, the joined result would be 2048.
+      repeated = ~s|local s = string.rep("x", 64) local t = {} for i = 1, 32 do t[i] = s end return table.concat(t)|
+      assert pcall_error(small, repeated) =~ "resulting string too large"
+
+      # The elements alone fit (600 bytes); the separators push it over.
+      separated = ~s|local t = {} for i = 1, 600 do t[i] = "x" end return table.concat(t, "--")|
+      assert pcall_error(small, separated) =~ "resulting string too large"
+    end
+
+    test "table.concat keeps __index side effects when the ceiling trips", %{small: small} do
+      code = """
+      local reads = 0
+      local s = string.rep("x", 64)
+      local t = setmetatable({}, {__index = function()
+        reads = reads + 1
+        return s
+      end})
+      local ok, err = pcall(table.concat, t, "", 1, 32)
+      return ok, tostring(err), reads
+      """
+
+      assert {[false, message, 32], _} = Lua.eval!(small, code)
+      assert message =~ "resulting string too large"
+    end
+
+    test "table.concat still builds a result exactly at the ceiling", %{small: small} do
+      code = ~s|local s = string.rep("x", 64) local t = {} for i = 1, 16 do t[i] = s end return #table.concat(t)|
+      assert {[1024], _} = Lua.eval!(small, code)
+    end
+
+    test "string.gsub honors a lowered ceiling for string and table replacements", %{small: small} do
+      for repl <- [~s|string.rep("y", 32)|, ~s|{x = string.rep("y", 32)}|] do
+        code = ~s|return string.gsub(string.rep("x", 64), ".", #{repl})|
+        assert pcall_error(small, code) =~ "resulting string too large"
+      end
+    end
+
+    test "string.gsub counts capture expansions against the ceiling", %{small: small} do
+      # One match, one replacement: `%0%0` doubles the 600-byte match.
+      assert pcall_error(small, ~s|return string.gsub(string.rep("x", 600), ".+", "%0%0")|) =~
+               "resulting string too large"
+    end
+
+    test "string.gsub honors a lowered ceiling for an anchored pattern", %{small: small} do
+      code = ~s|return string.gsub(string.rep("x", 1024), "^x", string.rep("y", 1024))|
+      assert pcall_error(small, code) =~ "resulting string too large"
+    end
+
+    test "string.gsub counts the unmatched remainder against the ceiling", %{small: small} do
+      # Replacements stop after one (max_n = 1) at 1001 bytes; the 99
+      # untouched bytes that follow take the result to 1100.
+      code = ~s|return string.gsub(string.rep("x", 100), "x", string.rep("y", 1001), 1)|
+      assert pcall_error(small, code) =~ "resulting string too large"
+    end
+
+    test "string.gsub still builds a result exactly at the ceiling", %{small: small} do
+      assert {[1024, 512], _} =
+               Lua.eval!(small, ~s|local s, n = string.gsub(string.rep("x", 512), ".", "yy") return #s, n|)
+
+      # A full-size subject is fine when the replacements shrink it.
+      assert {["", 1024], _} = Lua.eval!(small, ~s|return string.gsub(string.rep("x", 1024), "x", "")|)
+    end
+
+    test "string.gsub keeps callback side effects when the ceiling trips", %{small: small} do
+      code = """
+      local calls = 0
+      local y = string.rep("y", 32)
+      local ok, err = pcall(string.gsub, string.rep("x", 64), ".", function()
+        calls = calls + 1
+        return y
+      end)
+      return ok, tostring(err), calls
+      """
+
+      # 32 replacements fill the ceiling exactly; the 33rd is refused.
+      assert {[false, message, 33], _} = Lua.eval!(small, code)
+      assert message =~ "resulting string too large"
+    end
+
+    test "string.format honors a lowered ceiling", %{small: small} do
+      code = ~s|local s = string.rep("x", 1024) return string.format("%s%s", s, s)|
+      assert pcall_error(small, code) =~ "resulting string too large"
+
+      at_ceiling = ~s|local s = string.rep("x", 512) return #string.format("%s%s", s, s)|
+      assert {[1024], _} = Lua.eval!(small, at_ceiling)
+    end
+
+    test "string.format counts width padding against the ceiling", %{small: small} do
+      # Each field pads to 64 bytes: 16 land exactly on the ceiling, 17 go
+      # over. `%64s` pads a string; `%064d` zero-fills after a minus sign.
+      for spec <- ["%64s", "%064d"] do
+        padded = fn fields ->
+          ~s|local t = {} for i = 1, #{fields} do t[i] = -i end return #string.format(string.rep("#{spec}", #{fields}), table.unpack(t))|
+        end
+
+        assert {[1024], _} = Lua.eval!(small, padded.(16))
+        assert pcall_error(small, padded.(17)) =~ "resulting string too large"
+      end
+    end
+
+    test "string.pack honors a lowered ceiling", %{small: small} do
+      # A fixed-size field is padded to its declared width.
+      assert pcall_error(small, ~s|return string.pack("c2048", "")|) =~ "resulting string too large"
+
+      # Variable-length fields: the same argument packed twice, and a
+      # length prefix that tips an otherwise in-bounds string over.
+      assert pcall_error(small, ~s|local s = string.rep("x", 600) return string.pack("zz", s, s)|) =~
+               "resulting string too large"
+
+      assert pcall_error(small, ~s|return string.pack("s", string.rep("x", 1020))|) =~
+               "resulting string too large"
+
+      # An eight-byte integer after 1020 bytes: 1028.
+      assert pcall_error(small, ~s|return string.pack("c1020j", "", 0)|) =~ "resulting string too large"
+
+      assert {[1024], _} = Lua.eval!(small, ~s|return #string.pack("c1024", "")|)
+    end
+
+    test "os.date honors a lowered ceiling", %{small: small} do
+      # `%c` expands 2 format bytes into 24.
+      assert pcall_error(small, ~s|return os.date(string.rep("%c", 100))|) =~ "resulting string too large"
+
+      # `%Y` at the epoch is 4 bytes: 256 of them land exactly on the
+      # ceiling, 257 go over.
+      assert {[1024], _} = Lua.eval!(small, ~s|return #os.date(string.rep("%Y", 256), 0)|)
+
+      assert pcall_error(small, ~s|return os.date(string.rep("%Y", 257), 0)|) =~
+               "resulting string too large"
+    end
+
     test "the default ceiling is unchanged", %{lua: lua} do
       # 1 MB is far under the 256 MiB default; must build fine.
       assert {[1_048_576], _} = Lua.eval!(lua, ~s|return #string.rep("x", 2^20)|)
@@ -116,6 +248,9 @@ defmodule Lua.VM.LimitsTest do
       assert {[8192], _} = Lua.eval!(unbounded, ~s|return #string.rep("x", 8192)|)
       assert {[result], _} = Lua.eval!(unbounded, ~s|return string.rep("x", 4) .. "y"|)
       assert result == "xxxxy"
+
+      assert {[2048], _} =
+               Lua.eval!(unbounded, ~s|return #(string.gsub(string.rep("x", 64), ".", string.rep("y", 32)))|)
     end
   end
 
