@@ -144,29 +144,35 @@ defmodule Lua.Language.Stdlib.DebugTest do
   end
 
   test "debug.getupvalue names captured upvalues and bounds-checks", %{lua: lua} do
-    # Every nested function captures `_ENV` as upvalue 1; explicit captures
-    # follow in declaration order. `debug.getupvalue(_, 3)` is out of range.
+    # `inner` uses no global, so it has no `_ENV` upvalue and `x` is slot 1.
     code = """
     local x = 10
     local function outer() return function() return x end end
     local inner = outer()
-    local env_name = debug.getupvalue(inner, 1)
-    local name, val = debug.getupvalue(inner, 2)
-    return env_name, name, val, debug.getupvalue(inner, 3)
+    local name, val = debug.getupvalue(inner, 1)
+    return name, val, debug.getupvalue(inner, 2)
     """
 
-    assert {["_ENV", "x", 10, nil], _} = Lua.eval!(lua, code)
+    assert {["x", 10, nil], _} = Lua.eval!(lua, code)
   end
 
   test "debug.setupvalue mutates an upvalue and returns its name", %{lua: lua} do
     code = """
     local x = 1
     local function getx() return x end
-    local name = debug.setupvalue(getx, 2, 99)
+    local name = debug.setupvalue(getx, 1, 99)
     return name, getx()
     """
 
     assert {["x", 99], _} = Lua.eval!(lua, code)
+  end
+
+  test "debug.setupvalue in a later evaluation changes the closure's variable", %{lua: lua} do
+    # `getc` uses no global, so it has no `_ENV` upvalue and `c` is slot 1.
+    {_, lua} = Lua.eval!(lua, "local c = 1 function getc() return c end")
+    assert {["c"], lua} = Lua.eval!(lua, "return debug.setupvalue(getc, 1, 99)")
+
+    assert {[99], _} = Lua.eval!(lua, "return getc()")
   end
 
   test "debug.getupvalue returns nil for non-closures", %{lua: lua} do

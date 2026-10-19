@@ -66,13 +66,12 @@ defmodule Lua.VM.DisplayTest do
 
   describe "Lua.VM.Display.Closure inspect" do
     test "wraps Lua closures returned in default decode mode" do
-      {[c], _} = Lua.eval!(Lua.new(), "return function(a, b) return a + b end")
+      {[c], _} = Lua.eval!(Lua.new(), "local k = 1 return function(a, b) return a + b + k end")
 
       assert %Closure{source: "<eval>", line: 1, arity: 2, vararg?: false, ref: ref} = c
       assert match?({:lua_closure, _, _}, ref) or match?({:compiled_closure, _, _}, ref)
 
-      # The closure captures `_ENV` as an upvalue, surfaced in the inspect output.
-      assert inspect(c) == "#Lua.Closure<source: \"<eval>\", line: 1, arity: 2, upvalues: [_ENV]>"
+      assert inspect(c) == "#Lua.Closure<source: \"<eval>\", line: 1, arity: 2, upvalues: [k]>"
     end
 
     test "wraps Lua closures returned in decode: false mode" do
