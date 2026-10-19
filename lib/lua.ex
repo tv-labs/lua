@@ -1193,12 +1193,11 @@ defmodule Lua do
   evaluations. Calling it after every evaluation is cheap: by default it
   does nothing until enough new objects have been allocated, and then
   usually traces only the objects created since the previous collection.
-  See `Lua.VM.GC` for the pacing rules.
 
   Anything reachable from globals, metatables, private storage, Elixir
-  callbacks or `:keep` survives. A table or function reference held only by Elixir code is
-  **not** a root and may dangle afterwards — pass it in `:keep`, or store
-  it in a global first.
+  callbacks or `:keep` survives. A table or function reference held only
+  by Elixir code is **not** a root and may dangle afterwards — pass it in
+  `:keep`, or store it in a global first.
 
   Must be called between evaluations, not from inside an Elixir callback
   that Lua is running.
@@ -1206,9 +1205,15 @@ defmodule Lua do
   ## Options
 
     * `:keep` - (default `[]`) extra values to treat as roots.
-    * `:mode` - (default `:auto`) `:auto` paces itself; `:minor` collects
-      only the objects created since the last collection; `:major` traces
-      the whole heap.
+    * `:mode` - (default `:auto`) one of:
+      * `:auto` - does nothing until 1,000 tables, closure cells and
+        userdata have been allocated since the last collection, then runs
+        a minor collection, followed by a major one if the heap has doubled
+        since the last major collection. The first `:auto` collection on a
+        state is always major.
+      * `:minor` - frees only unreachable objects created since the last
+        collection. Older garbage waits for a major collection.
+      * `:major` - traces and frees the whole heap.
 
         iex> lua = Lua.new()
         iex> {_, lua} = Lua.eval!(lua, "for i = 1, 100 do local t = {i} end")
