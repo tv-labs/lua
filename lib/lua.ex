@@ -11,6 +11,7 @@ defmodule Lua do
   alias Lua.VM.Bootstrap
   alias Lua.VM.Display
   alias Lua.VM.Executor
+  alias Lua.VM.GC
   alias Lua.VM.InternalError
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
@@ -849,8 +850,8 @@ defmodule Lua do
   end
 
   defp do_call_function({:native_func, fun}, args, state) do
-    {results, new_state} = fun.(args, state)
-    {:ok, List.wrap(results), new_state}
+    {results, new_state} = fun.(args, State.enter_host(state))
+    {:ok, List.wrap(results), State.exit_host(new_state, state)}
   rescue
     e -> {:error, e, recover_state(e, state)}
   end
@@ -866,9 +867,9 @@ defmodule Lua do
       end)
 
     {results, _regs, new_state} =
-      Executor.execute(proto.instructions, callee_regs, upvalues, proto, state)
+      Executor.execute(proto.instructions, callee_regs, upvalues, proto, State.enter_host(state))
 
-    {:ok, results, new_state}
+    {:ok, results, State.exit_host(new_state, state)}
   rescue
     e -> {:error, e, recover_state(e, state)}
   end
@@ -876,8 +877,8 @@ defmodule Lua do
   defp do_call_function({:compiled_closure, _, _} = closure, args, state) do
     # Compiled callees route through the dispatcher; same observable
     # contract as the interpreter branch above.
-    {results, new_state} = Executor.call_function(closure, args, state)
-    {:ok, results, new_state}
+    {results, new_state} = Executor.call_function(closure, args, State.enter_host(state))
+    {:ok, results, State.exit_host(new_state, state)}
   rescue
     e -> {:error, e, recover_state(e, state)}
   end
@@ -1182,6 +1183,48 @@ defmodule Lua do
   @spec delete_private(t(), term()) :: t()
   def delete_private(%__MODULE__{state: state} = lua, key) do
     %{lua | state: State.delete_private(state, key)}
+  end
+
+  @doc """
+  Frees tables, closure cells and userdata that Lua can no longer reach.
+
+  The VM has no automatic collector, so a long-lived state that keeps
+  running code grows without bound unless this is called between
+  evaluations. Calling it after every evaluation is cheap: by default it
+  does nothing until enough new objects have been allocated, and then
+  usually traces only the objects created since the previous collection.
+  See `Lua.VM.GC` for the pacing rules.
+
+  Anything reachable from globals, metatables, private storage, Elixir
+  callbacks or `:keep` survives. A table or function reference held only by Elixir code is
+  **not** a root and may dangle afterwards — pass it in `:keep`, or store
+  it in a global first.
+
+  Must be called between evaluations, not from inside an Elixir callback
+  that Lua is running.
+
+  ## Options
+
+    * `:keep` - (default `[]`) extra values to treat as roots.
+    * `:mode` - (default `:auto`) `:auto` paces itself; `:minor` collects
+      only the objects created since the last collection; `:major` traces
+      the whole heap.
+
+        iex> lua = Lua.new()
+        iex> {_, lua} = Lua.eval!(lua, "for i = 1, 100 do local t = {i} end")
+        iex> lua = Lua.gc(lua, mode: :major)
+        iex> {[42], _} = Lua.eval!(lua, "return 42")
+  """
+  @spec gc(t(), keyword()) :: t()
+  def gc(%__MODULE__{state: state} = lua, opts \\ []) do
+    opts = Keyword.validate!(opts, keep: [], mode: :auto)
+    mode = Keyword.fetch!(opts, :mode)
+
+    if mode not in [:auto, :minor, :major] do
+      raise ArgumentError, ":mode must be :auto, :minor or :major, got: #{inspect(mode)}"
+    end
+
+    %{lua | state: GC.collect(state, Keyword.fetch!(opts, :keep), mode)}
   end
 
   # Note: These functions are called from load_api and always go through set!/3's

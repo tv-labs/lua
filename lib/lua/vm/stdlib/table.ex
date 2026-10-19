@@ -348,7 +348,7 @@ defmodule Lua.VM.Stdlib.Table do
     # the hash portion or any other key.
     updated = Table.replace_sequence(table, sorted)
 
-    {[], %{state | tables: Map.put(state.tables, id, updated)}}
+    {[], State.put_table(state, id, updated)}
   end
 
   # Metatable-backed path: read via __index and write back via __newindex

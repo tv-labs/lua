@@ -398,7 +398,7 @@ defmodule Lua.VM.Dispatcher do
             state =
               case :erlang.map_get(:metatable, table) do
                 nil ->
-                  %{state | tables: :maps.put(id, Table.put(table, name, value), state.tables)}
+                  State.put_table(state, id, Table.put(table, name, value))
 
                 _ ->
                   Executor.dispatcher_set_field(table_val, name, value, sync(state, cs, cd), proto, name_hint)
@@ -1504,7 +1504,7 @@ defmodule Lua.VM.Dispatcher do
             state =
               case :erlang.map_get(:metatable, table) do
                 nil ->
-                  %{state | tables: :maps.put(id, Table.put(table, name, value), state.tables)}
+                  State.put_table(state, id, Table.put(table, name, value))
 
                 _ ->
                   Executor.dispatcher_set_field(table_val, name, value, sync(state, cs, cd), proto, name_hint)
