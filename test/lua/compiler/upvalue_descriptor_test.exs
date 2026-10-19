@@ -26,8 +26,8 @@ defmodule Lua.Compiler.UpvalueDescriptorTest do
         return f()
         """)
 
-      assert f.upvalue_descriptors == [{:parent_local, 0, "_ENV"}, {:parent_local, 1, "x"}]
-      assert f.upvalue_names == ["_ENV", "x"]
+      assert f.upvalue_descriptors == [{:parent_local, 1, "x"}]
+      assert f.upvalue_names == ["x"]
     end
 
     test "a global referenced many times gets one _ENV slot" do
@@ -50,7 +50,7 @@ defmodule Lua.Compiler.UpvalueDescriptorTest do
         return fib(10)
         """)
 
-      assert fib.upvalue_descriptors == [{:parent_local, 0, "_ENV"}, {:parent_local, 1, "fib"}]
+      assert fib.upvalue_descriptors == [{:parent_local, 1, "fib"}]
     end
 
     test "a grandparent capture is deduped at every level" do
@@ -65,8 +65,8 @@ defmodule Lua.Compiler.UpvalueDescriptorTest do
 
       [inner] = outer.prototypes
 
-      assert outer.upvalue_descriptors == [{:parent_local, 0, "_ENV"}, {:parent_local, 1, "a"}]
-      assert inner.upvalue_descriptors == [{:parent_upvalue, 0, "_ENV"}, {:parent_upvalue, 1, "a"}]
+      assert outer.upvalue_descriptors == [{:parent_local, 1, "a"}]
+      assert inner.upvalue_descriptors == [{:parent_upvalue, 0, "a"}]
     end
 
     test "shadowed captures of the same name stay in their own function's list" do
@@ -86,13 +86,8 @@ defmodule Lua.Compiler.UpvalueDescriptorTest do
 
       [inner] = outer.prototypes
 
-      assert outer.upvalue_descriptors == [{:parent_local, 0, "_ENV"}, {:parent_local, 1, "x"}]
-
-      assert inner.upvalue_descriptors == [
-               {:parent_upvalue, 0, "_ENV"},
-               {:parent_local, 0, "seen"},
-               {:parent_local, 1, "x"}
-             ]
+      assert outer.upvalue_descriptors == [{:parent_local, 1, "x"}]
+      assert inner.upvalue_descriptors == [{:parent_local, 0, "seen"}, {:parent_local, 1, "x"}]
 
       assert {[5], _} =
                Lua.eval!("""
@@ -104,6 +99,46 @@ defmodule Lua.Compiler.UpvalueDescriptorTest do
                end
                return outer()()
                """)
+    end
+
+    test "a closure captures _ENV only when it uses a global, in first-use order" do
+      [h] =
+        prototypes_of("""
+        local c = 1
+        local function h() return c, print end
+        return h()
+        """)
+
+      assert h.upvalue_descriptors == [{:parent_local, 1, "c"}, {:parent_local, 0, "_ENV"}]
+    end
+
+    test "a nested function reaches _ENV through a parent that does not use it" do
+      source = """
+      local function outer()
+        return function() return type(print) end
+      end
+      return outer()()
+      """
+
+      [outer] = prototypes_of(source)
+      [inner] = outer.prototypes
+
+      assert outer.upvalue_descriptors == [{:parent_local, 0, "_ENV"}]
+      assert inner.upvalue_descriptors == [{:parent_upvalue, 0, "_ENV"}]
+      assert {["function"], _} = Lua.eval!(source)
+    end
+
+    test "a function with an _ENV parameter does not capture the chunk's _ENV" do
+      [f] =
+        prototypes_of("""
+        local function f(_ENV) return function() return x end end
+        return f({x = 7})()
+        """)
+
+      [inner] = f.prototypes
+
+      assert f.upvalue_descriptors == []
+      assert inner.upvalue_descriptors == [{:parent_local, 0, "_ENV"}]
     end
 
     test "no prototype in the compilable surface carries a duplicate descriptor" do
@@ -149,12 +184,7 @@ defmodule Lua.Compiler.UpvalueDescriptorTest do
       return table.concat(out, ",")
       """
 
-      # PUC-Lua prints "a,b": it only gives a closure an `_ENV` upvalue when
-      # the closure actually references a global. This VM currently hands
-      # `_ENV` to every nested function, so slot 1 is always `_ENV`. This
-      # assertion pins that divergence on purpose — aligning `_ENV` capture
-      # with PUC-Lua should update it to "a,b", not read as a regression.
-      assert {["_ENV,a,b"], _} = Lua.eval!(code)
+      assert {["a,b"], _} = Lua.eval!(code)
     end
   end
 

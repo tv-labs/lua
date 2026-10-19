@@ -42,8 +42,8 @@ defmodule Lua.Compiler.Instruction do
 
   # Field access through an upvalue-held table, fusing a `get_upvalue` with
   # the `get_field` / `set_field` that consumes it. Every read or write of a
-  # global is exactly that pair (`_ENV` is an upvalue in every function but
-  # the chunk), so the fused form halves their instruction count.
+  # global outside the chunk is exactly that pair (a nested function reaches
+  # `_ENV` through an upvalue), so the fused form halves their instruction count.
   # `Lua.Compiler.Peephole` emits these; codegen never does.
   def get_field_upvalue(dest, index, name, name_hint \\ nil), do: {:get_field_upvalue, dest, index, name, name_hint}
 

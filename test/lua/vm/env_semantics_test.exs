@@ -12,9 +12,8 @@ defmodule Lua.VM.EnvSemanticsTest do
   # In our implementation, the chunk reserves register 0 for `_ENV` and
   # binds it to `_G` at startup via the `:load_env` opcode. Free names in
   # the chunk compile to `_ENV.name` (`get_field`/`set_field` against
-  # register 0). Nested functions inherit `_ENV` via the standard upvalue
-  # chain, allocated eagerly during scope resolution so every function
-  # has access regardless of which free names it references.
+  # register 0). A nested function captures `_ENV` through the standard
+  # upvalue chain on its first free-name reference, as PUC-Lua does.
 
   setup do
     %{lua: Lua.new(sandboxed: [])}
