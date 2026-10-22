@@ -353,6 +353,93 @@ defmodule Lua.VM.GCTest do
     end
   end
 
+  describe "gc_reentrant/2" do
+    @churn """
+    function churn()
+      local t = {}
+      for i = 1, 200 do t[i] = {i} end
+      published = {from_churn = true}
+      return #t
+    end
+    """
+
+    # `host()` reenters Lua while its caller is suspended, as a host that serves another call
+    # during a wait does, and reports the heap around the collection.
+    defp reentering(name, function) do
+      owner = self()
+
+      Lua.set!(Lua.new(), [name], fn _args, lua ->
+        {n, collected} =
+          Lua.gc_reentrant(lua, fn lua ->
+            {:ok, [n], lua} = Lua.call_function(lua, [function], [])
+            send(owner, {:before, Map.keys(lua.state.tables)})
+            {n, lua}
+          end)
+
+        send(owner, {:after, Map.keys(collected.state.tables)})
+        {[n], collected}
+      end)
+    end
+
+    test "frees what the reentrant call left and keeps the suspended caller's objects" do
+      {_, lua} = Lua.eval!(reentering(:host, :churn), @churn)
+      lua = Lua.gc(lua, mode: :major)
+
+      {[7, 200, true], lua} =
+        Lua.eval!(lua, """
+        local before = {value = 7}
+        local n = host()
+        return before.value, n, published.from_churn
+        """)
+
+      assert_received {:before, before}
+      assert_received {:after, kept}
+      assert length(before) - length(kept) >= 200
+      assert lua.state.entry_depth == 0
+
+      # Never more aggressive than a full trace of the finished state.
+      live = Map.keys(Lua.gc(lua, mode: :major).state.tables)
+      assert Enum.reject(live, &(&1 in kept or &1 >= lua.state.gc_young_from)) == []
+    end
+
+    test "nests: an inner collection keeps the middle call's objects" do
+      lua = reentering(:inner_host, :churn)
+
+      lua =
+        Lua.set!(lua, [:outer_host], fn _args, lua ->
+          Lua.gc_reentrant(lua, fn lua ->
+            {:ok, results, lua} = Lua.call_function(lua, [:middle], [])
+            {results, lua}
+          end)
+        end)
+
+      {_, lua} =
+        Lua.eval!(
+          lua,
+          @churn <>
+            """
+            function middle()
+              local mine = {value = 5}
+              local n = inner_host()
+              return mine.value + n
+            end
+            """
+        )
+
+      assert {[205, 9], _} =
+               Lua.eval!(lua, "local outer = {value = 9} local r = outer_host() return r, outer.value")
+    end
+
+    test "refuses a function that returns at another entry depth" do
+      lua =
+        Lua.set!(Lua.new(), [:host], fn _args, lua ->
+          Lua.gc_reentrant(lua, fn _lua -> {[], Lua.new()} end)
+        end)
+
+      assert_raise Lua.RuntimeException, ~r/same entry depth/, fn -> Lua.eval!(lua, "host()") end
+    end
+  end
+
   test "is allowed again after a call returns or raises" do
     {_, lua} = Lua.eval!(Lua.new(), "function boom() error('x') end")
     {[false, _], lua} = Lua.eval!(lua, "return pcall(boom)")

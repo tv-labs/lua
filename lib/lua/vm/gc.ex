@@ -44,6 +44,14 @@ defmodule Lua.VM.GC do
   an Elixir callback that Lua is running. This is also why in-Lua
   `collectgarbage("collect")` stays a no-op.
 
+  `reentrant/3` is the one exception. A host that serves another call
+  while Lua waits in a callback runs that call on the suspended state.
+  The suspended frames can only hold objects that existed before the call
+  began, so `fence/1` first promotes every object to the old generation.
+  Once the reentrant call returns to the fenced entry depth, a minor
+  collection frees only what that call allocated and left unreachable;
+  everything older is assumed live.
+
   ## Roots
 
   `_G`, the type metatables, every private value, any open upvalue cells,
@@ -82,6 +90,35 @@ defmodule Lua.VM.GC do
 
   def collect(%State{} = state, keep, :minor), do: minor(state, keep)
   def collect(%State{} = state, keep, :major), do: major(state, keep)
+
+  @doc """
+  Promotes every object to the old generation, so that a later minor
+  collection traces and frees only objects allocated after this point.
+  Frees nothing, so it is safe while Lua code is running.
+  """
+  @spec fence(State.t()) :: State.t()
+  def fence(%State{gc: gc} = state) do
+    %{
+      state
+      | gc_young_from: state.table_next_id,
+        gc_remembered: %{},
+        gc: %{gc | old_cells: state.upvalue_cells, userdata_from: state.userdata_next_id}
+    }
+  end
+
+  @doc """
+  Minor-collects `state` after a reentrant call made on `fenced` returns.
+
+  `state` must be back at `fenced`'s entry depth: every frame the call
+  started has returned, and the frames suspended at the fence held only
+  objects that existed before it.
+  """
+  @spec reentrant(State.t(), State.t(), [term()]) :: State.t()
+  def reentrant(%State{entry_depth: depth} = state, %State{entry_depth: depth}, keep), do: minor(state, keep)
+
+  def reentrant(%State{}, %State{}, _keep) do
+    raise ArgumentError, "a reentrant call must return its state at the same entry depth it started from"
+  end
 
   defp young_count(%State{gc: gc} = state) do
     state.table_next_id - state.gc_young_from +

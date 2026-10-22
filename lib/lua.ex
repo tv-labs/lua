@@ -1232,6 +1232,38 @@ defmodule Lua do
     %{lua | state: GC.collect(state, Keyword.fetch!(opts, :keep), mode)}
   end
 
+  @doc """
+  Runs `fun` as a reentrant call on `lua`, then frees what it allocated and left unreachable.
+
+  `Lua.gc/2` cannot run while Lua code is running. A host that serves
+  another call while Lua waits in an Elixir callback would otherwise keep
+  every reentrant call's garbage until the outer evaluation returns. Wrap
+  each reentrant call in this function instead: it fences the heap, calls
+  `fun` with the fenced state, and runs a minor collection that frees only
+  objects allocated during `fun`. Objects the suspended frames hold
+  predate the fence and survive.
+
+  `fun` returns `{result, lua}`, and its state must be back at the entry
+  depth it was given, with every frame it started returned. Values in
+  `result` are kept, as are globals, private values and anything reachable
+  from them.
+
+      iex> lua = Lua.set!(Lua.new(), [:serve], fn _args, lua ->
+      ...>   Lua.gc_reentrant(lua, fn lua ->
+      ...>     {:ok, results, lua} = Lua.call_function(lua, [:handle], [])
+      ...>     {results, lua}
+      ...>   end)
+      ...> end)
+      iex> {_, lua} = Lua.eval!(lua, "function handle() local t = {} for i = 1, 10 do t[i] = {} end return #t end")
+      iex> {[10], _} = Lua.eval!(lua, "return serve()")
+  """
+  @spec gc_reentrant(t(), (t() -> {result, t()})) :: {result, t()} when result: term()
+  def gc_reentrant(%__MODULE__{state: state} = lua, fun) when is_function(fun, 1) do
+    fenced = GC.fence(state)
+    {result, %__MODULE__{} = lua} = fun.(%{lua | state: fenced})
+    {result, %{lua | state: GC.reentrant(lua.state, fenced, [result])}}
+  end
+
   # Note: These functions are called from load_api and always go through set!/3's
   # arity-2 clause, which wraps the state as %Lua{} before calling. So `lua` is
   # already a %Lua{} struct — do NOT call wrap() again.
