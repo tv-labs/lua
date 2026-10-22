@@ -3526,19 +3526,19 @@ defmodule Lua.VM.Executor do
     case table.metatable do
       nil ->
         updated = Table.put(table, key, value)
-        %{state | tables: Map.put(state.tables, id, updated)}
+        State.put_table(state, id, updated)
 
       {:tref, mt_id} ->
         if Table.has_key?(table, key) do
           updated = Table.put(table, key, value)
-          %{state | tables: Map.put(state.tables, id, updated)}
+          State.put_table(state, id, updated)
         else
           mt = Map.fetch!(state.tables, mt_id)
 
           case Map.get(mt.data, "__newindex") do
             nil ->
               updated = Table.put(table, key, value)
-              %{state | tables: Map.put(state.tables, id, updated)}
+              State.put_table(state, id, updated)
 
             {:tref, _} = newindex_table ->
               table_newindex(newindex_table, key, value, state, depth + 1)

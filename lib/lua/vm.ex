@@ -51,8 +51,8 @@ defmodule Lua.VM do
 
     # Execute the prototype instructions
     {results, _final_regs, final_state} =
-      Executor.execute(proto.instructions, registers, [], proto, state)
+      Executor.execute(proto.instructions, registers, [], proto, State.enter_host(state))
 
-    {:ok, results, final_state}
+    {:ok, results, State.exit_host(final_state, state)}
   end
 end

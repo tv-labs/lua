@@ -23,6 +23,9 @@ defmodule Lua.VM.State do
             # means no limit. See `check_call_depth!/1`.
             call_depth: 0,
             max_call_depth: :infinity,
+            # `Lua.VM.GC` refuses to collect while host entry points are active.
+            # `call_stack` cannot replace this count: some native callbacks see it empty.
+            entry_depth: 0,
             # Ceiling for any single string the VM will build (`..`,
             # `string.rep`, `load` reader chunks). Defaults to the practical
             # bound in `Lua.VM.Limits`. Embedders running the VM under a
@@ -59,6 +62,10 @@ defmodule Lua.VM.State do
             # require globals to be a real Lua table so `_ENV` reassignment
             # can redirect global access.
             g_ref: nil,
+            # The write barrier reads `gc_young_from` and `gc_remembered`; only a collection reads `gc`.
+            gc_young_from: 0,
+            gc_remembered: %{},
+            gc: %{old_cells: %{}, userdata_from: 0, major_at: 0},
             # Memoizes parsed `string.format` templates (format string ->
             # compiled segment list) so a format string reused across calls —
             # the common `for ... string.format(FMT, ...)` loop shape — is
@@ -71,6 +78,7 @@ defmodule Lua.VM.State do
           call_stack: list(),
           call_depth: non_neg_integer(),
           max_call_depth: pos_integer() | :infinity,
+          entry_depth: non_neg_integer(),
           max_string_bytes: pos_integer() | :infinity,
           max_instructions: pos_integer() | :infinity,
           instruction_count: non_neg_integer(),
@@ -83,6 +91,13 @@ defmodule Lua.VM.State do
           private: map(),
           multi_return_count: non_neg_integer(),
           g_ref: nil | {:tref, non_neg_integer()},
+          gc_young_from: non_neg_integer(),
+          gc_remembered: %{optional(non_neg_integer()) => true},
+          gc: %{
+            old_cells: %{optional(reference()) => term()},
+            userdata_from: non_neg_integer(),
+            major_at: non_neg_integer()
+          },
           format_cache: %{optional(binary()) => list()}
         }
 
@@ -170,9 +185,10 @@ defmodule Lua.VM.State do
 
   | kept from `raised` (heap)              | restored from `entry` (control) |
   |----------------------------------------|---------------------------------|
-  | `tables`, `table_next_id`              | `call_stack`, `call_depth`      |
+  | `tables`, `table_next_id`              | `call_stack`, `call_depth`, `entry_depth` |
   | `userdata`, `userdata_next_id`         | `open_upvalues`                 |
   | `metatables`, `upvalue_cells`, `private` | `multi_return_count`          |
+  | `gc_remembered`                        |                                 |
 
   The instruction tally `instruction_count` is also carried forward (monotonic max), not
   reset to the entry value: the work a protected call burned must still count
@@ -200,6 +216,7 @@ defmodule Lua.VM.State do
         metatables: raised.metatables,
         upvalue_cells: raised.upvalue_cells,
         private: raised.private,
+        gc_remembered: raised.gc_remembered,
         instruction_count: max(entry.instruction_count, raised.instruction_count)
     }
   end
@@ -293,7 +310,49 @@ defmodule Lua.VM.State do
   """
   @spec update_table(t(), {:tref, non_neg_integer()}, (Table.t() -> Table.t())) :: t()
   def update_table(state, {:tref, id}, fun) do
-    %{state | tables: Map.update!(state.tables, id, fun)}
+    put_table(state, id, fun.(Map.fetch!(state.tables, id)))
+  end
+
+  @doc """
+  Marks `state` as running Lua code for a host entry point.
+
+  `Lua.VM.GC` refuses to collect while any entry is in progress. Pair each
+  call with `exit_host/2` on the success path. The error path needs no
+  pair: `unwind_to/2` restores `entry_depth` from the pre-call state.
+  """
+  @spec enter_host(t()) :: t()
+  def enter_host(%__MODULE__{entry_depth: depth} = state), do: %{state | entry_depth: depth + 1}
+
+  @doc """
+  Restores the `entry_depth` of `entry` onto `state` after a host entry point returns.
+  """
+  @spec exit_host(t(), t()) :: t()
+  def exit_host(%__MODULE__{} = state, %__MODULE__{entry_depth: depth}), do: %{state | entry_depth: depth}
+
+  @doc """
+  Stores `table` under `id`, recording the write for `Lua.VM.GC`.
+
+  Every write to an existing table must go through here (or
+  `update_table/3`): a minor collection traces young objects only from
+  the tables this barrier remembers, so a write that bypasses it can let
+  a live young table be freed. Writes to young tables, and repeat writes
+  to an already remembered one, resolve in a function-head guard.
+  """
+  @spec put_table(t(), non_neg_integer(), Table.t()) :: t()
+  def put_table(%__MODULE__{gc_young_from: young_from} = state, id, table) when id >= young_from do
+    %{state | tables: :maps.put(id, table, state.tables)}
+  end
+
+  def put_table(%__MODULE__{gc_remembered: remembered} = state, id, table) when is_map_key(remembered, id) do
+    %{state | tables: :maps.put(id, table, state.tables)}
+  end
+
+  def put_table(%__MODULE__{} = state, id, table) do
+    %{
+      state
+      | tables: :maps.put(id, table, state.tables),
+        gc_remembered: :maps.put(id, true, state.gc_remembered)
+    }
   end
 
   @doc """

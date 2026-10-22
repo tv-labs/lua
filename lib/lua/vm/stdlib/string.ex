@@ -1075,20 +1075,21 @@ defmodule Lua.VM.Stdlib.String do
   # string.gmatch(s, pattern) - returns iterator function
   defp string_gmatch([s, pattern | _], state) when is_binary(s) and is_binary(pattern) do
     # Pre-compute all matches, return an iterator that yields them one by one
+    # The collector frees the cursor cell together with the iterator.
     matches = Pattern.gmatch(s, pattern)
     idx_ref = make_ref()
-    state = %{state | private: Map.put(state.private, idx_ref, {matches, 0})}
+    state = %{state | upvalue_cells: Map.put(state.upvalue_cells, idx_ref, {matches, 0})}
 
     iter_func =
       {:native_func,
        fn _args, st ->
-         {match_list, current_idx} = Map.get(st.private, idx_ref)
+         {match_list, current_idx} = Map.fetch!(st.upvalue_cells, idx_ref)
 
          if current_idx >= length(match_list) do
            {[nil], st}
          else
            result = Enum.at(match_list, current_idx)
-           st = %{st | private: Map.put(st.private, idx_ref, {match_list, current_idx + 1})}
+           st = %{st | upvalue_cells: Map.put(st.upvalue_cells, idx_ref, {match_list, current_idx + 1})}
            {result, st}
          end
        end}

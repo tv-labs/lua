@@ -362,7 +362,7 @@ defmodule Lua.VM.Stdlib do
         {table, state}
       else
         flushed = Table.flush_order(table)
-        {flushed, %{state | tables: Map.put(state.tables, id, flushed)}}
+        {flushed, State.put_table(state, id, flushed)}
       end
 
     case Table.next_entry(table, key) do
