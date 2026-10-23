@@ -361,3 +361,68 @@ coroutine phase builds on this).
   VM value tags). A native fun captured in a register keeps the snapshot
   in-memory-only (fine between processes on one node; not persistable).
   Document this on `Lua.VM.Continuation`.
+
+## Implementation notes
+
+Refinements made while building this (the design above held; these are
+the deltas):
+
+- **Layer stack is innermost-first, built by appending.** Catch sites
+  fire innermost-first as the `Suspend` exception propagates outward, so
+  each site *appends* its layer (`layers ++ [layer]`), keeping the head
+  the machine to run first. The initial draft prepended, which left the
+  stack outermost-first and resumed the wrong machine — caught by the
+  VM-level smoke test before any public API existed.
+- **The heap flows through the states, not the layers.**
+  `Continuation.run/3` seeds the innermost layer from the host's
+  `%Lua{}` state (`seed_first/2`: `instruction_count`, plus
+  `open_upvalues` for executor layers); each layer's completion state
+  feeds the next-outer layer, with `transition/2` popping
+  `call_stack`/`call_depth` only for executor layers parked at the
+  compiled-closure bridge (`pop_call_frame: true`). Dispatcher layers
+  need no transition — their bridges continue with loop-carried
+  `cs`/`cd`/`ou`.
+- **`seed_first/2` has a catch-all** for the degenerate
+  `%{engine: :pending_call}` layer (a native suspended when called
+  directly via `Lua.call_function/3`): resume values are the results,
+  nothing to seed.
+- **A `deflua`/callback returning `{:suspended, values, lua}` is a
+  boundary error.** That tuple means a *re-entrant* call suspended (the
+  deflua called `Lua.call_function/3` on a Lua closure that parked);
+  returning it cannot compose the inner continuation with the outer
+  machine (resume would drop the inner machine's captured state), so
+  `execute_function/4` and `wrap_callback/3` convert it to the boundary
+  `Lua.VM.RuntimeError` instead of the generic "must return encoded
+  data" validation error.
+- **`run_xpcall_handler` converts a suspending handler** into the
+  boundary `RuntimeError` (its catch-all would otherwise swallow the
+  suspend as a handler failure).
+- **`parse_and_execute_module` gained an `else` clause** mapping
+  `Lua.VM.execute/3`'s new `{:suspended, _, _, state}` return to the
+  boundary `RuntimeError` (a suspend inside a `require`d module crosses
+  the `require` native boundary).
+- **Suspend values are validated exactly like normal returns**
+  (`Util.list_encoded?/1`, same "deflua functions must return encoded
+  data" message) in `execute_function/4` and both `wrap_callback/3`
+  arities; `{:suspend, data}` (no state) raises with the call-entry
+  state, `{:suspend, data, %Lua{}}` with the threaded state.
+- **`eval!` suspend values get the full result treatment**: decoded
+  (`Value.decode_list/2`) and display-wrapped (`Display.wrap_results/3`)
+  under the `:decode` option, in both the string and chunk clauses.
+- **Audit sweep beyond the plan table**: `Lua.VM.Stdlib` re-entrant
+  call sites are guarded with `Suspend.guard/1` — `load` reader
+  (`collect_reader_chunks`), `require` preload loader
+  (`load_from_preload`), `__tostring` (`value_to_string_with_mt`),
+  `table.sort` comparator (`invoke_compare`), `string.gsub` replacement
+  fn. Executor guards: `call_value` (covers generic-for iterators,
+  `__call`, `dispatcher_call_value`), `invoke_metamethod`, and the
+  `__index`/`__newindex`/`__call` sites (`call_mm` ×3, index/newindex
+  wrappers).
+- **Verification**: `mix test` 2917 passed (baseline 2870 + 44 new
+  tests + 3 new doctests), 0 failures; lua53 suite unchanged at
+  20/29 (`coroutine.lua` still a documented whole-file skip);
+  `mix compile --warnings-as-errors` clean; `mix format` clean.
+- **Pre-existing quirk (not a regression)**: a generic-for whose
+  iterator expression is a bare function literal (`for i in function()
+  ... end`) fails with "attempt to call a number value" on `main` too;
+  suspend tests use the standard call form (`for i in iter()`).
