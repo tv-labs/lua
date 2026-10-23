@@ -5,7 +5,7 @@ issue: null
 pr: null
 branch: feat/deflua-suspend-resume
 base: main
-status: ready
+status: in-progress
 direction: A
 ---
 
