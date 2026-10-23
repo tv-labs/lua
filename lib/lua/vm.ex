@@ -10,13 +10,21 @@ defmodule Lua.VM do
   """
 
   alias Lua.Compiler.Prototype
+  alias Lua.VM.Continuation
   alias Lua.VM.Executor
   alias Lua.VM.State
+  alias Lua.VM.Suspend
 
   @doc """
   Executes a compiled prototype.
 
-  Returns {:ok, results, state} on success.
+  Returns `{:ok, results, state}` on success, or `{:suspended, values,
+  continuation, state}` when a native callback suspends execution with
+  `{:suspend, values}` — `continuation` captures the parked machines and
+  `values` are the encoded values yielded to the host. A bare `Suspend`
+  that reaches this boundary without captured layers (a suspend in a
+  metamethod/iterator context, where no machine frame can be parked) is
+  raised as a `Lua.VM.RuntimeError` boundary error.
 
   ## Options
 
@@ -28,7 +36,8 @@ defmodule Lua.VM do
       function — must pass `false` so the module body accumulates against the
       one per-evaluation budget instead of resetting it.
   """
-  @spec execute(Prototype.t(), State.t(), keyword()) :: {:ok, list(), State.t()}
+  @spec execute(Prototype.t(), State.t(), keyword()) ::
+          {:ok, list(), State.t()} | {:suspended, list(), Continuation.t(), State.t()}
   def execute(%Prototype{} = proto, state \\ State.new(), opts \\ []) do
     # Size the register file to the prototype's honest register peak, with no
     # slack buffer — same contract as every other call frame. `max_registers`
@@ -50,9 +59,22 @@ defmodule Lua.VM do
     state = if Keyword.get(opts, :reset_instructions, true), do: %{state | instruction_count: 0}, else: state
 
     # Execute the prototype instructions
-    {results, _final_regs, final_state} =
-      Executor.execute(proto.instructions, registers, [], proto, state)
+    try do
+      {results, _final_regs, final_state} =
+        Executor.execute(proto.instructions, registers, [], proto, state)
 
-    {:ok, results, final_state}
+      {:ok, results, final_state}
+    rescue
+      e in Suspend ->
+        case e.layers do
+          nil ->
+            # No catch site captured a machine (metamethod/iterator
+            # context): the suspend is not resumable.
+            Suspend.raise_boundary!(e, fallback_state: state)
+
+          layers ->
+            {:suspended, e.values, %Continuation{layers: layers}, e.state || state}
+        end
+    end
   end
 end

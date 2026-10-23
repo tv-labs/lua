@@ -234,6 +234,26 @@ defmodule Lua.API do
   > reset this attribute after every function definition, so there is no need to
   > manually reset it yourself
 
+  ## Suspending execution
+
+  A `deflua` can suspend the running Lua evaluation by returning
+  `{:suspend, values}` (or `{:suspend, values, lua}` to thread state, like a
+  normal return). `Lua.eval!/2` / `Lua.call_function/3` then return
+  `{:suspended, values, lua}` instead of raising, and the host resumes the
+  parked machine with `Lua.resume/2` — the values passed to `resume/2`
+  become the suspended call's results inside Lua.
+
+      deflua yield(value), state do
+        {:suspend, [value], state}
+      end
+
+  Suspend values must be encoded Lua values, exactly like normal return
+  values. A suspend that cannot be resumed — across a `pcall` boundary, a
+  metamethod, a `table.sort` comparator, a `string.gsub` replacement
+  function, or a `deflua` that re-enters Lua and returns the inner
+  `{:suspended, ...}` tuple — is reported as the catchable Lua error
+  `"attempt to suspend across a native call boundary"`.
+
   """
   defmacro deflua(fa, state, rest) do
     name =

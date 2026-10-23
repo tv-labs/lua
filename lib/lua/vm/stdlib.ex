@@ -14,6 +14,7 @@ defmodule Lua.VM.Stdlib do
   alias Lua.VM.ProtectedCall
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
+  alias Lua.VM.Suspend
   alias Lua.VM.Table
   alias Lua.VM.TypeError
   alias Lua.VM.Value
@@ -253,6 +254,13 @@ defmodule Lua.VM.Stdlib do
     {results, state} = Executor.call_function(func, args, state)
     {[true | results], state}
   rescue
+    # A suspend crossing the pcall boundary cannot be resumed: the Elixir
+    # frame between the pcall'd closure's machine and the outer machine is
+    # not capturable. It becomes an ordinary protected error (the Lua 5.2
+    # "yield across a C-call boundary" divergence).
+    e in Suspend ->
+      {[false, Suspend.boundary_message()], State.unwind_to(state, e.state)}
+
     e in [RuntimeError, AssertionError, TypeError, ArgumentError] ->
       {[false, ProtectedCall.error_value(e)], State.unwind_to(state, e.state)}
 
@@ -273,6 +281,11 @@ defmodule Lua.VM.Stdlib do
     {results, state} = Executor.call_function(func, args, state)
     {[true | results], state}
   rescue
+    # Same boundary as pcall: a suspend is reported to the message handler
+    # like any other error value.
+    e in Suspend ->
+      run_xpcall_handler(handler, Suspend.boundary_message(), State.unwind_to(state, e.state))
+
     e in [RuntimeError, AssertionError, TypeError, ArgumentError] ->
       run_xpcall_handler(handler, ProtectedCall.error_value(e), State.unwind_to(state, e.state))
 
@@ -289,6 +302,12 @@ defmodule Lua.VM.Stdlib do
     {handler_results, state} = Executor.call_function(handler, [error_msg], state)
     {[false | handler_results], state}
   rescue
+    # A handler that suspends crosses the same native boundary: report it
+    # as an ordinary boundary error rather than swallowing the suspend as
+    # a handler failure.
+    e in Suspend ->
+      raise RuntimeError, value: Suspend.boundary_message(), state: e.state
+
     e ->
       {[false, error_msg], State.unwind_to(state, raised_state(e))}
   end
@@ -503,7 +522,9 @@ defmodule Lua.VM.Stdlib do
   defp load_env_arg(_rest, state), do: State.g_ref(state)
 
   defp collect_reader_chunks(reader, state, acc, size) do
-    {results, state} = Executor.call_function(reader, [], state)
+    # A reader that suspends cannot be resumed here: the loop's own frame is
+    # not a VM machine frame, so there is no continuation to capture.
+    {results, state} = Suspend.guard(fn -> Executor.call_function(reader, [], state) end)
 
     case results do
       [] ->
@@ -735,7 +756,9 @@ defmodule Lua.VM.Stdlib do
   # and cache its result, mirroring `parse_and_execute_module`.
   defp load_from_preload(modname, loader, state) do
     state = cache_module_result(state, modname, true)
-    {results, state} = Executor.call_function(loader, [modname], state)
+    # A preload loader that suspends cannot be resumed here — same native
+    # boundary as a re-entrant deflua.
+    {results, state} = Suspend.guard(fn -> Executor.call_function(loader, [modname], state) end)
 
     result =
       case results do
@@ -793,6 +816,12 @@ defmodule Lua.VM.Stdlib do
       state = cache_module_result(state, modname, result)
       {[result], state}
     else
+      # A suspend inside a required module crosses the `require` native
+      # boundary — no continuation can be captured for the module's
+      # machine, so it is a boundary error.
+      {:suspended, _, _, suspended_state} ->
+        raise RuntimeError, value: Suspend.boundary_message(), state: suspended_state
+
       {:error, msg} ->
         raise RuntimeError,
           value: "error loading module '#{modname}' from file '#{file_path}':\n#{msg}"
@@ -849,7 +878,11 @@ defmodule Lua.VM.Stdlib do
                 {Value.to_string(value), state}
 
               tostring_fn ->
-                {results, state} = Executor.call_function(tostring_fn, [value], state)
+                # A __tostring metamethod that suspends cannot be resumed:
+                # tostring's own frame is not capturable.
+                {results, state} =
+                  Suspend.guard(fn -> Executor.call_function(tostring_fn, [value], state) end)
+
                 {List.first(results) || "nil", state}
             end
 

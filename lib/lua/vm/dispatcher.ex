@@ -26,6 +26,7 @@ defmodule Lua.VM.Dispatcher do
   alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
+  alias Lua.VM.Suspend
   alias Lua.VM.Table
 
   # Mirror of the interpreter's concat ceiling, inlined as a compile-time
@@ -171,6 +172,67 @@ defmodule Lua.VM.Dispatcher do
   @spec execute(Prototype.t(), [term()], tuple(), State.t()) :: {[term()], State.t()}
   def execute(%Prototype{} = proto, args, upvalues, %State{} = state) when is_tuple(upvalues) do
     do_execute_top(proto, args, upvalues, state)
+  end
+
+  @doc false
+  # Re-enters the dispatch loop at a captured continuation layer: the resume
+  # `values` are placed as the suspended call's results exactly as the parked
+  # bridge's post-call code would have placed them (`:zero` discards,
+  # `{:one, base}` keeps one, `{:multi, base, count}` spreads via
+  # `apply_multi_call_result/15`). The caller (`Lua.VM.Continuation.run/3`)
+  # seeds `state.instruction_count` from the layer for the innermost machine
+  # and from the inner layer's completion state for outer ones.
+  @spec resume_layer(map(), [term()], State.t()) ::
+          {:ok, [term()], State.t()} | {:suspended, [term()], [map()], State.t()}
+  def resume_layer(layer, values, state) do
+    %{
+      code: code,
+      pc: pc,
+      regs: regs,
+      upvalues: upvalues,
+      proto: proto,
+      cont: cont,
+      frames: frames,
+      cs: cs,
+      cd: cd,
+      ou: ou,
+      placement: placement
+    } = layer
+
+    instruction_count = state.instruction_count
+
+    {results, state} =
+      case placement do
+        :zero ->
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+        {:one, base} ->
+          regs = :erlang.setelement(base + 1, regs, first_result(values))
+          dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
+
+        {:multi, base, result_count} ->
+          apply_multi_call_result(
+            result_count,
+            base,
+            values,
+            code,
+            pc + 1,
+            regs,
+            upvalues,
+            proto,
+            state,
+            cont,
+            frames,
+            instruction_count,
+            cs,
+            cd,
+            ou
+          )
+      end
+
+    {:ok, results, state}
+  rescue
+    e in Suspend -> {:suspended, e.values, e.layers, e.state || state}
   end
 
   defp do_execute_top(proto, args, upvalues, state) do
@@ -1898,7 +1960,30 @@ defmodule Lua.VM.Dispatcher do
                 instruction_count: instruction_count
             }
 
-            {results, state} = Executor.call_function(closure, args, state)
+            {results, state} =
+              try do
+                Executor.call_function(closure, args, state)
+              rescue
+                e in Suspend ->
+                  layer =
+                    dispatcher_layer(
+                      {:multi, base, result_count},
+                      code,
+                      pc,
+                      regs,
+                      upvalues,
+                      proto,
+                      cont,
+                      frames,
+                      cs,
+                      cd,
+                      ou,
+                      instruction_count
+                    )
+
+                  reraise bridge_suspend(e, layer, :closure), __STACKTRACE__
+              end
+
             instruction_count = state.instruction_count
 
             apply_multi_call_result(
@@ -1925,7 +2010,28 @@ defmodule Lua.VM.Dispatcher do
             state = %{state | call_stack: cs, call_depth: cd, instruction_count: instruction_count}
 
             {results, state} =
-              Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
+              try do
+                Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
+              rescue
+                e in Suspend ->
+                  layer =
+                    dispatcher_layer(
+                      {:multi, base, result_count},
+                      code,
+                      pc,
+                      regs,
+                      upvalues,
+                      proto,
+                      cont,
+                      frames,
+                      cs,
+                      cd,
+                      ou,
+                      instruction_count
+                    )
+
+                  reraise bridge_suspend(e, layer, :native), __STACKTRACE__
+              end
 
             instruction_count = state.instruction_count
 
@@ -2477,7 +2583,17 @@ defmodule Lua.VM.Dispatcher do
         instruction_count: instruction_count
     }
 
-    {_results, state} = Executor.call_function(closure, args, state)
+    {_results, state} =
+      try do
+        Executor.call_function(closure, args, state)
+      rescue
+        e in Suspend ->
+          layer =
+            dispatcher_layer(:zero, code, pc, regs, upvalues, proto, cont, frames, cs, cd, ou, instruction_count)
+
+          reraise bridge_suspend(e, layer, :closure), __STACKTRACE__
+      end
+
     instruction_count = state.instruction_count
     dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
   end
@@ -2502,7 +2618,16 @@ defmodule Lua.VM.Dispatcher do
        ) do
     state = %{state | call_stack: cs, call_depth: cd, instruction_count: instruction_count}
 
-    {_results, state} = Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
+    {_results, state} =
+      try do
+        Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
+      rescue
+        e in Suspend ->
+          layer =
+            dispatcher_layer(:zero, code, pc, regs, upvalues, proto, cont, frames, cs, cd, ou, instruction_count)
+
+          reraise bridge_suspend(e, layer, :native), __STACKTRACE__
+      end
 
     instruction_count = state.instruction_count
     dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
@@ -2538,7 +2663,17 @@ defmodule Lua.VM.Dispatcher do
         instruction_count: instruction_count
     }
 
-    {results, state} = Executor.call_function(closure, args, state)
+    {results, state} =
+      try do
+        Executor.call_function(closure, args, state)
+      rescue
+        e in Suspend ->
+          layer =
+            dispatcher_layer({:one, base}, code, pc, regs, upvalues, proto, cont, frames, cs, cd, ou, instruction_count)
+
+          reraise bridge_suspend(e, layer, :closure), __STACKTRACE__
+      end
+
     instruction_count = state.instruction_count
     regs = :erlang.setelement(base + 1, regs, first_result(results))
     dispatch(code, pc + 1, regs, upvalues, proto, state, cont, frames, instruction_count, cs, cd, ou)
@@ -2565,7 +2700,16 @@ defmodule Lua.VM.Dispatcher do
        ) do
     state = %{state | call_stack: cs, call_depth: cd, instruction_count: instruction_count}
 
-    {results, state} = Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
+    {results, state} =
+      try do
+        Executor.dispatcher_call_function(func_value, args, state, proto, name_hint, line)
+      rescue
+        e in Suspend ->
+          layer =
+            dispatcher_layer({:one, base}, code, pc, regs, upvalues, proto, cont, frames, cs, cd, ou, instruction_count)
+
+          reraise bridge_suspend(e, layer, :native), __STACKTRACE__
+      end
 
     instruction_count = state.instruction_count
     regs = :erlang.setelement(base + 1, regs, first_result(results))
@@ -2574,6 +2718,53 @@ defmodule Lua.VM.Dispatcher do
 
   defp first_result([v | _]), do: v
   defp first_result([]), do: nil
+
+  # Builds this machine's continuation layer for a bridge call with the
+  # given result placement (`:zero` discards the results, `{:one, base}`
+  # keeps one, `{:multi, base, count}` spreads). Built only on the suspend
+  # path — the happy path pays nothing for it.
+  defp dispatcher_layer(placement, code, pc, regs, upvalues, proto, cont, frames, cs, cd, ou, instruction_count) do
+    %{
+      engine: :dispatcher,
+      code: code,
+      pc: pc,
+      regs: regs,
+      upvalues: upvalues,
+      proto: proto,
+      cont: cont,
+      frames: frames,
+      cs: cs,
+      cd: cd,
+      ou: ou,
+      placement: placement,
+      instruction_count: instruction_count
+    }
+  end
+
+  # Catch-site logic for `Lua.VM.Suspend` at a dispatcher call bridge. The
+  # bridge is an engine boundary: a suspend carrying layers means the bridged
+  # callee's machine captured itself, so push this machine's layer on top —
+  # resume unwinds the stack innermost-first. A bare suspend means the bridged
+  # native itself suspended (capture this machine as the innermost layer);
+  # on a closure bridge that cannot legitimately happen (the nested machine's
+  # own catch sites always capture first), so it is a boundary error. For a
+  # native bridge carrying layers, the native re-entered Lua and the inner
+  # machine suspended — a re-entrant boundary that cannot resume — so it is
+  # also a boundary error.
+  #
+  # Returns the `Lua.VM.Suspend` exception to reraise (layer stack updated),
+  # or raises the boundary `Lua.VM.RuntimeError`.
+  defp bridge_suspend(%Suspend{layers: nil} = e, layer, :native), do: %{e | layers: [layer]}
+
+  defp bridge_suspend(%Suspend{} = e, _layer, :native), do: Suspend.raise_boundary!(e, fallback_state: e.state)
+
+  # Append, not prepend: catch sites fire innermost-first as the exception
+  # propagates outward, so the layer stack stays innermost-first — resume
+  # runs the head layer first.
+  defp bridge_suspend(%Suspend{layers: layers} = e, layer, :closure) when is_list(layers),
+    do: %{e | layers: layers ++ [layer]}
+
+  defp bridge_suspend(%Suspend{} = e, _layer, :closure), do: Suspend.raise_boundary!(e, fallback_state: e.state)
 
   defp init_callee_regs(callee_proto, src_regs, src_off, arg_count) do
     # Exact-sized like `init_regs/2`; runs on every compiled-closure call,

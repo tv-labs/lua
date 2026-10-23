@@ -22,6 +22,7 @@ defmodule Lua.VM.Executor do
   alias Lua.VM.Numeric
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
+  alias Lua.VM.Suspend
   alias Lua.VM.Table
   alias Lua.VM.TypeError
   alias Lua.VM.Value
@@ -102,6 +103,53 @@ defmodule Lua.VM.Executor do
     after
       restore_position(prev)
     end
+  end
+
+  @doc false
+  # Re-enters the interpreter at a captured continuation layer: the resume
+  # `values` become the suspended call's results, placed by
+  # `continue_after_call/12` with the captured `base`/`result_count` so
+  # single/multi/vararg/tail placements all resume correctly. The caller
+  # (`Lua.VM.Continuation.run/3`) seeds `state.instruction_count` from the
+  # layer for the innermost machine and from the inner layer's completion
+  # state for outer ones.
+  @spec resume_layer(map(), [term()], State.t()) ::
+          {:ok, [term()], State.t()} | {:suspended, [term()], [map()], State.t()}
+  def resume_layer(layer, values, state) do
+    %{
+      rest: rest,
+      regs: regs,
+      upvalues: upvalues,
+      proto: proto,
+      cont: cont,
+      frames: frames,
+      line: line,
+      base: base,
+      result_count: result_count,
+      open_upvalues: open_upvalues
+    } = layer
+
+    state = %{state | open_upvalues: open_upvalues}
+
+    {results, _regs, state} =
+      continue_after_call(
+        values,
+        regs,
+        rest,
+        upvalues,
+        proto,
+        state,
+        cont,
+        frames,
+        line,
+        state.instruction_count,
+        base,
+        result_count
+      )
+
+    {:ok, results, state}
+  rescue
+    e in Suspend -> {:suspended, e.values, e.layers, e.state || state}
   end
 
   defp set_position(line, source) do
@@ -241,7 +289,7 @@ defmodule Lua.VM.Executor do
               state: state
 
           call_mm ->
-            call_function(call_mm, [other | args], state)
+            Suspend.guard(fn -> call_function(call_mm, [other | args], state) end)
         end
     end
   end
@@ -622,7 +670,7 @@ defmodule Lua.VM.Executor do
               state: state
 
           call_mm ->
-            call_function(call_mm, [other | args], state)
+            Suspend.guard(fn -> call_function(call_mm, [other | args], state) end)
         end
     end
   end
@@ -1412,7 +1460,48 @@ defmodule Lua.VM.Executor do
             instruction_count: instruction_count
         }
 
-        {results, state} = Dispatcher.execute(callee_proto, args, callee_upvalues, state)
+        {results, state} =
+          try do
+            Dispatcher.execute(callee_proto, args, callee_upvalues, state)
+          rescue
+            e in Suspend ->
+              # A suspend escaping the dispatcher carries the inner machine's
+              # captured layers: this interpreter machine was parked at the
+              # compiled-closure call, so push its layer on top and keep
+              # propagating. Resume unwinds the stack innermost-first and
+              # injects each layer's results into the next-outer pending call.
+              # A bare suspend cannot legitimately reach here (the callee is
+              # a compiled closure, not a native); treat it as a boundary
+              # error.
+              case e.layers do
+                nil ->
+                  Suspend.raise_boundary!(e, fallback_state: state, line: line, source: proto.source)
+
+                layers ->
+                  layer = %{
+                    engine: :executor,
+                    rest: rest,
+                    regs: regs,
+                    upvalues: upvalues,
+                    proto: proto,
+                    cont: cont,
+                    frames: frames,
+                    line: line,
+                    instruction_count: instruction_count,
+                    base: base,
+                    result_count: result_count,
+                    open_upvalues: state.open_upvalues,
+                    pop_call_frame: true
+                  }
+
+                  # Append, not prepend: catch sites fire innermost-first as
+                  # the exception propagates outward, so prepending would
+                  # leave the stack outermost-first — resume must run the
+                  # innermost (head) layer first.
+                  reraise %{e | layers: layers ++ [layer]}, __STACKTRACE__
+              end
+          end
+
         instruction_count = state.instruction_count
         state = %{state | call_stack: tl(state.call_stack), call_depth: state.call_depth - 1}
 
@@ -1523,7 +1612,41 @@ defmodule Lua.VM.Executor do
                   value: "native function returned invalid result: #{inspect(other)}, expected {results, state}"
             end
           rescue
-            e -> reraise annotate_frame_state(e, state), __STACKTRACE__
+            e in Suspend ->
+              # A bare suspend means this native callback itself suspended:
+              # capture the whole machine (remaining instructions, registers,
+              # CPS continuation stack, call frames) as the innermost
+              # continuation layer and keep propagating to the boundary. A
+              # suspend that already carries layers came from a nested
+              # execution inside the callback — a re-entrant native
+              # boundary that cannot be resumed — so it becomes a catchable
+              # Lua error (Lua 5.2-style "yield across a C-call boundary").
+              case e.layers do
+                nil ->
+                  layer = %{
+                    engine: :executor,
+                    rest: rest,
+                    regs: regs,
+                    upvalues: upvalues,
+                    proto: proto,
+                    cont: cont,
+                    frames: frames,
+                    line: line,
+                    instruction_count: instruction_count,
+                    base: base,
+                    result_count: result_count,
+                    open_upvalues: state.open_upvalues,
+                    pop_call_frame: false
+                  }
+
+                  reraise %{e | layers: [layer]}, __STACKTRACE__
+
+                _ ->
+                  Suspend.raise_boundary!(e, fallback_state: state, line: line, source: proto.source)
+              end
+
+            e ->
+              reraise annotate_frame_state(e, state), __STACKTRACE__
           after
             restore_position(prev_pos)
           end
@@ -1584,7 +1707,10 @@ defmodule Lua.VM.Executor do
               call_mm ->
                 args = collect_args(regs, base + 1, total_args)
                 state = %{state | instruction_count: instruction_count}
-                {results, state} = call_function(call_mm, [other | args], state)
+
+                {results, state} =
+                  Suspend.guard(fn -> call_function(call_mm, [other | args], state) end)
+
                 instruction_count = state.instruction_count
 
                 continue_after_call(
@@ -3176,7 +3302,16 @@ defmodule Lua.VM.Executor do
 
   # ── call_value — invoke a function for generic_for iterator ───────────────
 
-  defp call_value({:lua_closure, callee_proto, callee_upvalues}, args, _proto, state, _line) do
+  # Metamethod (`__call`) and generic-for iterator invocations have no
+  # continuation capture at their call site, so a suspend escaping the
+  # callee is a boundary error, not a resumable suspension.
+  defp call_value(callable, args, proto, state, line) do
+    do_call_value(callable, args, proto, state, line)
+  rescue
+    e in Suspend -> Suspend.raise_boundary!(e, fallback_state: state)
+  end
+
+  defp do_call_value({:lua_closure, callee_proto, callee_upvalues}, args, _proto, state, _line) do
     callee_regs =
       Tuple.duplicate(nil, max(callee_proto.max_registers, callee_proto.param_count))
 
@@ -3221,13 +3356,13 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  defp call_value({:compiled_closure, _, _} = closure, args, _proto, state, _line) do
+  defp do_call_value({:compiled_closure, _, _} = closure, args, _proto, state, _line) do
     # Compiled-closure callees for generic_for iterators reuse the same
     # dispatcher bridge as `call_function/3`.
     call_function(closure, args, state)
   end
 
-  defp call_value({:native_func, fun}, args, proto, state, line) do
+  defp do_call_value({:native_func, fun}, args, proto, state, line) do
     # Same source-position bridge as the `:call` opcode's native dispatch.
     # Used by `for` loop iteration when the iterator is native.
     prev_pos = Process.get(@position_key, @unset)
@@ -3253,7 +3388,7 @@ defmodule Lua.VM.Executor do
     end
   end
 
-  defp call_value(nil, _args, proto, state, line) do
+  defp do_call_value(nil, _args, proto, state, line) do
     raise TypeError,
       value: "attempt to call a nil value",
       source: proto.source,
@@ -3264,7 +3399,7 @@ defmodule Lua.VM.Executor do
       state: state
   end
 
-  defp call_value(other, args, proto, state, line) do
+  defp do_call_value(other, args, proto, state, line) do
     case get_metatable(other, state) do
       nil ->
         raise TypeError,
@@ -3365,7 +3500,9 @@ defmodule Lua.VM.Executor do
             table_index(idx_tbl, key, state)
 
           func when is_tuple(func) ->
-            {results, state} = call_function(func, [value, key], state)
+            {results, state} =
+              Suspend.guard(fn -> call_function(func, [value, key], state) end)
+
             {List.first(results), state}
         end
     end
@@ -3487,7 +3624,9 @@ defmodule Lua.VM.Executor do
                 table_index(index_table, key, state, depth + 1)
 
               func when is_tuple(func) ->
-                {results, state} = call_function(func, [{:tref, id}, key], state)
+                {results, state} =
+                  Suspend.guard(fn -> call_function(func, [{:tref, id}, key], state) end)
+
                 {List.first(results), state}
             end
         end
@@ -3544,7 +3683,9 @@ defmodule Lua.VM.Executor do
               table_newindex(newindex_table, key, value, state, depth + 1)
 
             func when is_tuple(func) ->
-              {_results, state} = call_function(func, [{:tref, id}, key, value], state)
+              {_results, state} =
+                Suspend.guard(fn -> call_function(func, [{:tref, id}, key, value], state) end)
+
               state
           end
         end
