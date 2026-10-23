@@ -2,10 +2,10 @@
 id: A51
 title: "Suspend/resume: deflua returns {:suspend, values}, Lua.eval!/call_function surface {:suspended, values, lua}, Lua.resume/2 continues"
 issue: null
-pr: null
+pr: 434
 branch: feat/deflua-suspend-resume
 base: main
-status: in-progress
+status: review
 direction: A
 ---
 
