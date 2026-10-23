@@ -37,6 +37,7 @@ defmodule Lua.VM.Stdlib.String do
   alias Lua.VM.Stdlib.Pattern
   alias Lua.VM.Stdlib.String.Pack
   alias Lua.VM.Stdlib.Util
+  alias Lua.VM.Suspend
 
   @impl true
   def lib_name, do: "string"
@@ -1126,7 +1127,9 @@ defmodule Lua.VM.Stdlib.String do
 
         match?({:lua_closure, _, _}, repl) or match?({:compiled_closure, _, _}, repl) or match?({:native_func, _}, repl) ->
           fn args, st ->
-            {results, st} = Executor.call_function(repl, args, st)
+            # A replacement function that suspends cannot be resumed: the
+            # pattern engine's iteration frame is not capturable.
+            {results, st} = Suspend.guard(fn -> Executor.call_function(repl, args, st) end)
             result = List.first(results)
             value = if result == nil or result == false, do: false, else: result
             {value, st}

@@ -9,11 +9,13 @@ defmodule Lua do
   alias Lua.Util
   alias Lua.VM.AssertionError
   alias Lua.VM.Bootstrap
+  alias Lua.VM.Continuation
   alias Lua.VM.Display
   alias Lua.VM.Executor
   alias Lua.VM.InternalError
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
+  alias Lua.VM.Suspend
   alias Lua.VM.Table
   alias Lua.VM.TypeError
   alias Lua.VM.Value
@@ -25,7 +27,10 @@ defmodule Lua do
   # for future-proofing. Suppress dialyzer warnings on those defensive branches.
   @dialyzer {:no_match, eval!: 2, eval!: 3, parse_chunk: 1}
 
-  defstruct [:state, debug: false]
+  # `:continuation` holds a `Lua.VM.Continuation.t()` while the VM is parked
+  # at a suspend point (a `deflua`/Elixir callback returned `{:suspend,
+  # values}`); it is `nil` during normal execution. Resume with `Lua.resume/2`.
+  defstruct [:state, :continuation, debug: false]
 
   @default_sandbox [
     [:io, :stdin],
@@ -499,6 +504,18 @@ defmodule Lua do
       iex> {[4], _} = Lua.eval!(~LUA[return 2 + 2]c)
 
 
+  If a `deflua`/Elixir callback suspends execution by returning
+  `{:suspend, values}` (or `{:suspend, values, lua}`), evaluation parks
+  instead of running to completion: `eval!/2` returns
+  `{:suspended, values, lua}` where `lua` carries a continuation. Resume
+  with `Lua.resume/2`; the values you pass become the suspended call's
+  results inside Lua.
+
+      iex> lua = Lua.new() |> Lua.set!([:yield], fn [v], lua -> {:suspend, [v], lua} end)
+      iex> {:suspended, [1], lua} = Lua.eval!(lua, "return yield(1) + 1")
+      iex> {:ok, [2], _lua} = Lua.resume(lua, [1])
+
+
   ### Options
   * `:decode` - (default `true`) By default, all values returned from Lua scripts are decoded.
                 This may not be desirable if you need to modify a table reference or access a function call.
@@ -509,10 +526,13 @@ defmodule Lua do
                 is a pre-compiled `t:Lua.Chunk.t/0`, `:source` is accepted but ignored — the
                 chunk already carries the source name it was compiled with.
   """
-  @spec eval!(String.t() | Lua.Chunk.t()) :: {[term()], t()}
+  @spec eval!(String.t() | Lua.Chunk.t()) :: {[term()], t()} | {:suspended, [term()], t()}
+
   @spec eval!(t() | String.t() | Lua.Chunk.t(), String.t() | Lua.Chunk.t() | keyword()) ::
-          {[term()], t()}
-  @spec eval!(t(), String.t() | Lua.Chunk.t(), keyword()) :: {[term()], t()}
+          {[term()], t()} | {:suspended, [term()], t()}
+
+  @spec eval!(t(), String.t() | Lua.Chunk.t(), keyword()) ::
+          {[term()], t()} | {:suspended, [term()], t()}
   def eval!(script) do
     eval!(new(), script, [])
   end
@@ -532,18 +552,33 @@ defmodule Lua do
       {:ok, ast} ->
         case Lua.Compiler.compile(ast, source: opts[:source]) do
           {:ok, proto} ->
-            {:ok, results, new_state} = Lua.VM.execute(proto, state)
+            case Lua.VM.execute(proto, state) do
+              {:ok, results, new_state} ->
+                results =
+                  if opts[:decode] do
+                    Value.decode_list(results, new_state)
+                  else
+                    results
+                  end
 
-            results =
-              if opts[:decode] do
-                Value.decode_list(results, new_state)
-              else
-                results
-              end
+                results = Display.wrap_results(results, new_state, opts[:decode])
 
-            results = Display.wrap_results(results, new_state, opts[:decode])
+                {results, %{lua | state: new_state}}
 
-            {results, %{lua | state: new_state}}
+              {:suspended, values, continuation, new_state} ->
+                # Suspend values cross the same boundary as results: decode
+                # and display-wrap them under the same `:decode` option.
+                values =
+                  if opts[:decode] do
+                    Value.decode_list(values, new_state)
+                  else
+                    values
+                  end
+
+                values = Display.wrap_results(values, new_state, opts[:decode])
+
+                {:suspended, values, %{lua | state: new_state, continuation: continuation}}
+            end
 
           {:error, msg} ->
             raise Lua.CompilerException, msg
@@ -567,6 +602,14 @@ defmodule Lua do
     e in [RuntimeError, TypeError, AssertionError] ->
       reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__, lua.debug)
 
+    # Defensive: `Lua.VM.execute/3` converts every Suspend it sees (a
+    # captured one into `{:suspended, ...}`, a bare one into a boundary
+    # error), so a Suspend here means a boundary was missed.
+    e in Suspend ->
+      reraise Lua.RuntimeException,
+              RuntimeError.exception(value: Suspend.boundary_message(), state: e.state),
+              prune_lua_internals(__STACKTRACE__, lua.debug)
+
     e ->
       reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__, lua.debug)
   end
@@ -577,18 +620,31 @@ defmodule Lua do
     # and that name wins. Pass `:source` at `load_chunk!/2`/compile time to set it.
     opts = Keyword.validate!(opts, decode: true, source: nil)
 
-    {:ok, results, new_state} = Lua.VM.execute(proto, state)
+    case Lua.VM.execute(proto, state) do
+      {:ok, results, new_state} ->
+        results =
+          if opts[:decode] do
+            Value.decode_list(results, new_state)
+          else
+            results
+          end
 
-    results =
-      if opts[:decode] do
-        Value.decode_list(results, new_state)
-      else
-        results
-      end
+        results = Display.wrap_results(results, new_state, opts[:decode])
 
-    results = Display.wrap_results(results, new_state, opts[:decode])
+        {results, %{lua | state: new_state}}
 
-    {results, %{lua | state: new_state}}
+      {:suspended, values, continuation, new_state} ->
+        values =
+          if opts[:decode] do
+            Value.decode_list(values, new_state)
+          else
+            values
+          end
+
+        values = Display.wrap_results(values, new_state, opts[:decode])
+
+        {:suspended, values, %{lua | state: new_state, continuation: continuation}}
+    end
   rescue
     e in [Lua.RuntimeException, Lua.CompilerException] ->
       reraise e, __STACKTRACE__
@@ -603,6 +659,12 @@ defmodule Lua do
     # picks up `:line`, `:source`, and `:call_stack`.
     e in [RuntimeError, TypeError, AssertionError] ->
       reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__, lua.debug)
+
+    # Defensive: see the string clause.
+    e in Suspend ->
+      reraise Lua.RuntimeException,
+              RuntimeError.exception(value: Suspend.boundary_message(), state: e.state),
+              prune_lua_internals(__STACKTRACE__, lua.debug)
 
     e ->
       reraise Lua.RuntimeException, e, prune_lua_internals(__STACKTRACE__, lua.debug)
@@ -761,7 +823,7 @@ defmodule Lua do
 
   """
   @spec call_function(t(), term(), [term()]) ::
-          {:ok, [term()], t()} | {:error, Exception.t(), t()}
+          {:ok, [term()], t()} | {:error, Exception.t(), t()} | {:suspended, [term()], t()}
   def call_function(%__MODULE__{} = lua, name, args) do
     finish_call(lua, resolve_and_call(lua, name, args))
   end
@@ -775,6 +837,12 @@ defmodule Lua do
   # this boundary.
   defp finish_call(%__MODULE__{} = lua, {:ok, results, new_state}) do
     {:ok, results, %{lua | state: new_state}}
+  end
+
+  # A suspended call parks the machine: the continuation rides on the
+  # returned `%Lua{}` and `Lua.resume/2` re-enters it.
+  defp finish_call(%__MODULE__{} = lua, {:suspended, values, continuation, new_state}) do
+    {:suspended, values, %{lua | state: new_state, continuation: continuation}}
   end
 
   # Already a host-facing exception (a nested eval, or a compiler error from
@@ -852,7 +920,22 @@ defmodule Lua do
     {results, new_state} = fun.(args, state)
     {:ok, List.wrap(results), new_state}
   rescue
-    e -> {:error, e, recover_state(e, state)}
+    e in Suspend ->
+      case e.layers do
+        # The native itself suspended, called directly through this
+        # programmatic boundary (no Lua machine around it): resume
+        # returns the resume values as the call results.
+        nil ->
+          {:suspended, e.values, %Continuation{layers: [%{engine: :pending_call}]}, e.state || recover_state(e, state)}
+
+        # The native re-entered Lua and the inner machine suspended — a
+        # re-entrant boundary that cannot be resumed from here.
+        _ ->
+          {:error, RuntimeError.exception(value: Suspend.boundary_message(), state: e.state), recover_state(e, state)}
+      end
+
+    e ->
+      {:error, e, recover_state(e, state)}
   end
 
   defp do_call_function({:lua_closure, proto, upvalues}, args, state) do
@@ -870,7 +953,17 @@ defmodule Lua do
 
     {:ok, results, new_state}
   rescue
-    e -> {:error, e, recover_state(e, state)}
+    e in Suspend ->
+      case e.layers do
+        nil ->
+          {:error, RuntimeError.exception(value: Suspend.boundary_message(), state: e.state), recover_state(e, state)}
+
+        layers ->
+          {:suspended, e.values, %Continuation{layers: layers}, e.state || recover_state(e, state)}
+      end
+
+    e ->
+      {:error, e, recover_state(e, state)}
   end
 
   defp do_call_function({:compiled_closure, _, _} = closure, args, state) do
@@ -879,7 +972,17 @@ defmodule Lua do
     {results, new_state} = Executor.call_function(closure, args, state)
     {:ok, results, new_state}
   rescue
-    e -> {:error, e, recover_state(e, state)}
+    e in Suspend ->
+      case e.layers do
+        nil ->
+          {:error, RuntimeError.exception(value: Suspend.boundary_message(), state: e.state), recover_state(e, state)}
+
+        layers ->
+          {:suspended, e.values, %Continuation{layers: layers}, e.state || recover_state(e, state)}
+      end
+
+    e ->
+      {:error, e, recover_state(e, state)}
   end
 
   # A resolved tuple that isn't one of the callable shapes above — e.g. a
@@ -918,16 +1021,97 @@ defmodule Lua do
   end
   ```
   """
-  @spec call_function!(t(), term(), [term()]) :: {[term()], t()}
+  @spec call_function!(t(), term(), [term()]) :: {[term()], t()} | {:suspended, [term()], t()}
   def call_function!(%__MODULE__{} = lua, func, args) do
     # Unlike `call_function/3`, the raising variant keeps the rich
     # `ErrorFormatter` render: re-raising the original VM exception through
     # `Lua.RuntimeException` runs `Exception.message/1` (the terminal renderer)
     # and copies its `:line` / `:source` / `:call_stack` onto the wrapper.
     case resolve_and_call(lua, func, args) do
-      {:ok, ret, new_state} -> {ret, %{lua | state: new_state}}
-      {:error, e, _new_state} when is_exception(e) -> raise Lua.RuntimeException, e
-      {:error, reason, new_state} -> raise Lua.RuntimeException, {:lua_error, reason, new_state}
+      {:ok, ret, new_state} ->
+        {ret, %{lua | state: new_state}}
+
+      {:suspended, values, continuation, new_state} ->
+        {:suspended, values, %{lua | state: new_state, continuation: continuation}}
+
+      {:error, e, _new_state} when is_exception(e) ->
+        raise Lua.RuntimeException, e
+
+      {:error, reason, new_state} ->
+        raise Lua.RuntimeException, {:lua_error, reason, new_state}
+    end
+  end
+
+  @doc """
+  Resumes a suspended evaluation, returning the final values and the
+  updated Lua environment.
+
+  A `deflua`/Elixir callback suspends execution by returning
+  `{:suspend, values}` (or `{:suspend, values, lua}`); `Lua.eval!/2` and
+  `Lua.call_function/3` then return `{:suspended, values, lua}` with a
+  continuation stored on the `%Lua{}`. `resume/2` re-enters the parked
+  machine: `values` are the encoded Lua values that become the suspended
+  call's results (the same encoding convention as `call_function/3`
+  arguments — plain Elixir values like numbers, strings, and booleans).
+
+      iex> lua = Lua.new() |> Lua.set!([:yield], fn [v], lua -> {:suspend, [v], lua} end)
+      iex> {:suspended, [1], lua} = Lua.eval!(lua, "return yield(1) * 10")
+      iex> {:ok, [10], _lua} = Lua.resume(lua, [1])
+
+  A resumed evaluation may suspend again — `resume/2` returns
+  `{:suspended, values, lua}` with a fresh continuation — or raise a Lua
+  error, which this protected boundary returns as `{:error, exception,
+  lua}` (the continuation is cleared in every outcome). Heap effects made
+  before the suspend are kept; effects made before a post-resume error are
+  kept too, matching `pcall` semantics.
+
+  Raises `ArgumentError` when the `%Lua{}` carries no continuation.
+
+  A suspend that cannot be resumed — across a `pcall` boundary, a
+  metamethod, a `table.sort` comparator, a `string.gsub` replacement
+  function, or a re-entrant native call — is reported as an ordinary
+  catchable Lua error: `"attempt to suspend across a native call
+  boundary"`.
+  """
+  @spec resume(t(), [term()]) ::
+          {:ok, [term()], t()} | {:error, Exception.t(), t()} | {:suspended, [term()], t()}
+  def resume(%__MODULE__{continuation: nil}, _values) do
+    raise ArgumentError, "no suspended continuation: the Lua VM is not parked at a suspend point"
+  end
+
+  def resume(%__MODULE__{continuation: %Continuation{} = continuation, state: state} = lua, values) do
+    case Continuation.run(continuation, values, state) do
+      {:ok, results, new_state} ->
+        {:ok, results, %{lua | state: new_state, continuation: nil}}
+
+      {:suspended, values, layers, new_state} ->
+        {:suspended, values, %{lua | state: new_state, continuation: %Continuation{layers: layers}}}
+    end
+  rescue
+    e in [Lua.RuntimeException, Lua.CompilerException] ->
+      reraise e, __STACKTRACE__
+
+    e ->
+      {:error, Lua.RuntimeException.exception(e), %{lua | state: recover_state(e, lua.state), continuation: nil}}
+  end
+
+  @doc """
+  The raising variant of `resume/2`.
+
+  Returns the final values (or `{:suspended, values, lua}` when the
+  resumed evaluation suspends again) and raises `Lua.RuntimeException` on
+  a Lua error.
+
+      iex> lua = Lua.new() |> Lua.set!([:yield], fn [v], lua -> {:suspend, [v], lua} end)
+      iex> {:suspended, _, lua} = Lua.eval!(lua, "return yield(1)")
+      iex> {[42], _lua} = Lua.resume!(lua, [42])
+  """
+  @spec resume!(t(), [term()]) :: {[term()], t()} | {:suspended, [term()], t()}
+  def resume!(%__MODULE__{} = lua, values) do
+    case resume(lua, values) do
+      {:ok, results, lua} -> {results, lua}
+      {:suspended, values, lua} -> {:suspended, values, lua}
+      {:error, e, _lua} -> raise e
     end
   end
 
@@ -1244,6 +1428,42 @@ defmodule Lua do
           scope: module.scope(),
           message: "maps must be explicitly encoded to tables using Lua.encode!/2"
 
+      # Suspend: the callback parks the machine. Raising `Lua.VM.Suspend`
+      # unwinds to the nearest VM call boundary, which captures the machine
+      # state as a resumable continuation. Validated exactly like normal
+      # returns.
+      {:suspend, data} ->
+        data = List.wrap(data)
+
+        if not Util.list_encoded?(data) do
+          raise Lua.RuntimeException,
+            function: function_name,
+            scope: module.scope(),
+            message: "deflua functions must return encoded data, got #{inspect(data)}"
+        end
+
+        raise Suspend, values: data, state: lua.state
+
+      {:suspend, data, %Lua{} = returned_lua} ->
+        data = List.wrap(data)
+
+        if not Util.list_encoded?(data) do
+          raise Lua.RuntimeException,
+            function: function_name,
+            scope: module.scope(),
+            message: "deflua functions must return encoded data, got #{inspect(data)}"
+        end
+
+        raise Suspend, values: data, state: returned_lua.state
+
+      # A deflua that re-enters Lua (`Lua.call_function/3` on a closure
+      # that suspends) gets `{:suspended, values, lua}` back. Returning it
+      # cannot compose the inner continuation with the outer machine —
+      # resuming would drop the inner machine's captured state — so it is
+      # the Lua 5.2-style boundary error, not a silent propagation.
+      {:suspended, _values, %Lua{} = returned_lua} ->
+        raise RuntimeError, value: Suspend.boundary_message(), state: returned_lua.state
+
       {:error, reason} ->
         raise RuntimeError, value: reason
 
@@ -1301,9 +1521,17 @@ defmodule Lua do
   defp wrap_callback(func, function_name, scope) when is_function(func, 1) do
     {:native_func,
      fn args, state ->
-       return = List.wrap(func.(args))
-       validate_encoded!(return, function_name, scope)
-       {return, state}
+       case func.(args) do
+         {:suspend, data} ->
+           data = List.wrap(data)
+           validate_encoded!(data, function_name, scope)
+           raise Suspend, values: data, state: state
+
+         return ->
+           return = List.wrap(return)
+           validate_encoded!(return, function_name, scope)
+           {return, state}
+       end
      end}
   end
 
@@ -1311,6 +1539,21 @@ defmodule Lua do
     {:native_func,
      fn args, state ->
        case func.(args, wrap(state)) do
+         {:suspend, data} ->
+           data = List.wrap(data)
+           validate_encoded!(data, function_name, scope)
+           raise Suspend, values: data, state: state
+
+         {:suspend, data, %__MODULE__{} = returned_lua} ->
+           data = List.wrap(data)
+           validate_encoded!(data, function_name, scope)
+           raise Suspend, values: data, state: returned_lua.state
+
+         # See execute_function/4: a re-entrant suspend is a boundary
+         # error, not a propagation.
+         {:suspended, _values, %__MODULE__{} = returned_lua} ->
+           raise RuntimeError, value: Suspend.boundary_message(), state: returned_lua.state
+
          {:error, reason, %__MODULE__{} = returned_lua} ->
            raise RuntimeError, value: reason, state: returned_lua.state
 

@@ -34,6 +34,7 @@ defmodule Lua.VM.Stdlib.Table do
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Stdlib.Util
+  alias Lua.VM.Suspend
   alias Lua.VM.Table
 
   # ltablib.c sort rejects arrays whose length reaches INT_MAX (2^31 - 1)
@@ -417,7 +418,9 @@ defmodule Lua.VM.Stdlib.Table do
   end
 
   defp invoke_compare(comp, a, b, state) do
-    {results, state} = Executor.call_function(comp, [a, b], state)
+    # A comparator that suspends cannot be resumed: the insertion-sort
+    # frame driving it is not capturable.
+    {results, state} = Suspend.guard(fn -> Executor.call_function(comp, [a, b], state) end)
     {!!List.first(results), state}
   end
 
