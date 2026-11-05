@@ -7,6 +7,14 @@ defmodule Lua.VM.State do
   alias Lua.VM.RuntimeError
   alias Lua.VM.Table
 
+  # How many ticks pass between reads of the clock while a deadline is set: a
+  # tick is a loop iteration or a call, so this bounds the overrun to roughly
+  # a few hundred of them without reading the clock on every one.
+  @deadline_stride 256
+
+  @doc false
+  def deadline_stride, do: @deadline_stride
+
   # `call_stack`, `call_depth` and `open_upvalues` are control state, not
   # heap state. The interpreter keeps them here; the dispatcher threads
   # them as loop parameters (the same discipline as `instruction_count`
@@ -40,6 +48,13 @@ defmodule Lua.VM.State do
             # `line`-off-State discipline so the default `:infinity` path
             # carries no per-instruction struct rebuild. See `tick!/2`.
             max_instructions: :infinity,
+            # `deadline` is a `System.monotonic_time(:millisecond)` instant after
+            # which execution raises a catchable `"deadline exceeded"` error;
+            # `:infinity` (the default) means none. Host-set per call with
+            # `Lua.set_deadline/2`, and checked by `tick!/2` at the same
+            # boundaries as the instruction budget, sampling the clock every
+            # `@deadline_stride` ticks. `:passed` once a tick found it passed.
+            deadline: :infinity,
             # `instruction_count` carries the running tally ACROSS engine boundaries
             # only. The interpreter and dispatcher each thread their tally as
             # a loop parameter; at an `Executor`↔`Dispatcher` hand-off (where
@@ -81,6 +96,7 @@ defmodule Lua.VM.State do
           entry_depth: non_neg_integer(),
           max_string_bytes: pos_integer() | :infinity,
           max_instructions: pos_integer() | :infinity,
+          deadline: integer() | :infinity | :passed,
           instruction_count: non_neg_integer(),
           metatables: map(),
           upvalue_cells: map(),
@@ -156,12 +172,37 @@ defmodule Lua.VM.State do
   threaded `instruction_count` is not otherwise in `%State{}`), so `unwind_to/2` can
   carry it forward and a caught budget error stays spent — a protected call
   cannot refund the work it burned.
+
+  With a `deadline` set, the tally also counts when `max_instructions` is
+  `:infinity`, and every `@deadline_stride` ticks the monotonic clock is read:
+  once it reaches the deadline, a catchable `"deadline exceeded"` runtime
+  error is raised the same way, and the state it carries has `deadline:
+  :passed`. `unwind_to/2` keeps `:passed`, and every later tick raises at
+  once, so a protected call that traps the error is interrupted again on its
+  next tick and the error reaches the host's own call — the behaviour of a
+  `lua_sethook` count hook in reference Lua. The host's next
+  `Lua.set_deadline/2` replaces it.
   """
   @spec tick!(t(), non_neg_integer()) :: non_neg_integer()
-  def tick!(%__MODULE__{max_instructions: :infinity}, instruction_count), do: instruction_count
+  def tick!(%__MODULE__{max_instructions: :infinity, deadline: :infinity}, instruction_count), do: instruction_count
 
-  def tick!(%__MODULE__{max_instructions: max}, instruction_count) when instruction_count + 1 < max,
+  def tick!(%__MODULE__{max_instructions: max, deadline: :infinity}, instruction_count) when instruction_count + 1 < max,
     do: instruction_count + 1
+
+  def tick!(%__MODULE__{deadline: :passed} = state, instruction_count),
+    do: deadline_exceeded!(state, instruction_count + 1)
+
+  # `:infinity` sorts above every integer, so an unbounded budget always passes this guard.
+  def tick!(%__MODULE__{max_instructions: max, deadline: deadline} = state, instruction_count)
+      when instruction_count + 1 < max do
+    instruction_count = instruction_count + 1
+
+    if rem(instruction_count, @deadline_stride) == 0 and System.monotonic_time(:millisecond) >= deadline do
+      deadline_exceeded!(state, instruction_count)
+    end
+
+    instruction_count
+  end
 
   def tick!(%__MODULE__{call_stack: call_stack} = state, instruction_count) do
     instruction_count = instruction_count + 1
@@ -170,6 +211,13 @@ defmodule Lua.VM.State do
       value: "instruction budget exceeded",
       call_stack: call_stack,
       state: %{state | instruction_count: instruction_count}
+  end
+
+  defp deadline_exceeded!(state, instruction_count) do
+    raise RuntimeError,
+      value: "deadline exceeded",
+      call_stack: state.call_stack,
+      state: %{state | instruction_count: instruction_count, deadline: :passed}
   end
 
   @doc """
@@ -195,6 +243,9 @@ defmodule Lua.VM.State do
   against the one per-evaluation `:max_instructions` budget, so wrapping heavy work in
   `pcall` (or looping over `pcall`) cannot escape the cap.
 
+  A deadline the raise found passed (`deadline: :passed`) is kept the same way,
+  so a trapped `"deadline exceeded"` cannot be escaped either.
+
   Keeping `upvalue_cells` while restoring `open_upvalues` matches reference
   upvalue semantics: cells captured before the protected call keep their
   mutated values, while cells opened by the unwound frames become
@@ -217,9 +268,14 @@ defmodule Lua.VM.State do
         upvalue_cells: raised.upvalue_cells,
         private: raised.private,
         gc_remembered: raised.gc_remembered,
-        instruction_count: max(entry.instruction_count, raised.instruction_count)
+        instruction_count: max(entry.instruction_count, raised.instruction_count),
+        deadline: kept_deadline(entry.deadline, raised.deadline)
     }
   end
+
+  # A deadline the raise found passed stays passed: `pcall` cannot trap its way past it.
+  defp kept_deadline(_entry, :passed), do: :passed
+  defp kept_deadline(entry, _raised), do: entry
 
   @doc """
   Returns the `_G` table reference.
