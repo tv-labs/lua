@@ -43,6 +43,7 @@ defmodule Lua.VM.Dispatcher do
   # in range, saving one function call per integer-arithmetic opcode.
   @max_int 0x7FFFFFFFFFFFFFFF
   @min_int -0x8000000000000000
+  @deadline_stride State.deadline_stride()
 
   @op_load_constant 1
   @op_load_boolean 2
@@ -2419,7 +2420,13 @@ defmodule Lua.VM.Dispatcher do
     :maps.filter(fn reg, _cell -> reg < threshold end, open_upvalues)
   end
 
-  defp tick(%{max_instructions: :infinity}, instruction_count, _call_stack, _call_depth), do: instruction_count
+  defp tick(%{max_instructions: :infinity, deadline: :infinity}, instruction_count, _call_stack, _call_depth),
+    do: instruction_count
+
+  # A deadline with no budget reads the clock only every `@deadline_stride` ticks; the ticks
+  # between need no struct sync.
+  defp tick(%{max_instructions: :infinity, deadline: deadline}, instruction_count, _call_stack, _call_depth)
+       when is_integer(deadline) and rem(instruction_count + 1, @deadline_stride) != 0, do: instruction_count + 1
 
   defp tick(state, instruction_count, call_stack, call_depth) do
     State.tick!(sync(state, call_stack, call_depth), instruction_count)
